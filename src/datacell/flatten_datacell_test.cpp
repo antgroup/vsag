@@ -39,6 +39,7 @@
 #include "impl/allocator/safe_allocator.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index_common_param.h"
+#include "inner_string_params.h"
 #include "io/memory_io/memory_io_parameter.h"
 #include "quantization/fp32_quantizer.h"
 #include "quantization/rabitq_quantization/rabitq_quantizer.h"
@@ -139,6 +140,16 @@ TEST_CASE("FlattenDataCell rejects invalid distance reads", "[ut][Flatten][inval
     auto computer = cell.FactoryComputer(vector);
     InnerIdType ids[4] = {0, 0, 0, 1};
     float distances[4] = {};
+    SECTION("empty batch accepts null buffers without changing statistics") {
+        SearchStatistics stats;
+        QueryContext context{.stats = &stats};
+        stats.io_cnt.store(7, std::memory_order_relaxed);
+        stats.distance_evaluations.store(11, std::memory_order_relaxed);
+        cell.Query(nullptr, computer, nullptr, 0, &context);
+        CHECK(stats.io_cnt.load(std::memory_order_relaxed) == 7);
+        CHECK(stats.distance_evaluations.load(std::memory_order_relaxed) == 11);
+    }
+
     SECTION("reserved and sentinel IDs") {
         CHECK_THROWS_AS(cell.Query(distances, computer, ids + 3, 1), VsagException);
         CHECK_THROWS_AS(cell.Query(distances, computer, ids, 4), VsagException);
@@ -210,6 +221,98 @@ TEST_CASE("FlattenDataCell Basic Test", "[ut][FlattenDataCell] ") {
     }
 }
 
+TEST_CASE("FlattenDataCell scattered half input preserves stored rows",
+          "[ut][FlattenDataCell][half_input][scattered_ids]") {
+    const auto dtype = GENERATE(DataTypes::DATA_TYPE_FP16, DataTypes::DATA_TYPE_BF16);
+    constexpr uint64_t dim = 5;
+    constexpr InnerIdType count = 3;
+    const bool is_fp16 = dtype == DataTypes::DATA_TYPE_FP16;
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(JsonType::Parse(fmt::format(R"({{
+        "io_params": {{"type": "memory_io"}},
+        "quantization_params": {{"type": "{}"}}
+    }})",
+                                                is_fp16 ? "fp16" : "bf16")));
+    IndexCommonParam common;
+    common.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    common.dim_ = dim;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common.data_type_ = dtype;
+    auto cell = FlattenInterface::MakeInstance(param, common);
+    REQUIRE(cell->GetQuantizerCodeSize() == dim * sizeof(uint16_t));
+
+    // Exact encodings of 1, 2, and 4. Padding makes the old float-stride bug
+    // fail deterministically on row contents rather than reading out of bounds.
+    const std::array<uint16_t, count> values =
+        is_fp16 ? std::array<uint16_t, count>{0x3C00, 0x4000, 0x4400}
+                : std::array<uint16_t, count>{0x3F80, 0x4000, 0x4080};
+    std::array<uint16_t, 2 * count * dim> input{};
+    input.fill(is_fp16 ? 0x4800 : 0x4100);  // 8 in the selected format
+    for (InnerIdType row = 0; row < count; ++row) {
+        std::fill_n(input.data() + row * dim, dim, values[row]);
+    }
+    InnerIdType ids[count] = {7, 1, 4};
+    cell->Train(input.data(), count);
+    cell->BatchInsertVector(input.data(), count, ids);
+    REQUIRE(cell->TotalCount() == 8);
+    for (InnerIdType row = 0; row < count; ++row) {
+        std::array<uint8_t, dim * sizeof(uint16_t)> codes{};
+        REQUIRE(cell->GetCodesById(ids[row], codes.data()));
+        CHECK(std::memcmp(codes.data(), input.data() + row * dim, codes.size()) == 0);
+        // Decode follows the adapter input dtype despite its float* interface.
+        alignas(float) std::array<uint16_t, dim> decoded{};
+        REQUIRE(cell->Decode(codes.data(), reinterpret_cast<float*>(decoded.data())));
+        for (const auto value : decoded) {
+            CHECK(value == values[row]);
+        }
+    }
+}
+
+TEST_CASE("FlattenDataCell supports SAQ", "[ut][FlattenDataCell][SAQ]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 64;
+    constexpr InnerIdType count = 24;
+    auto vectors = fixtures::generate_vectors(count, dim, false, 2026);
+    auto query = fixtures::generate_vectors(1, dim, false, 83);
+
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(JsonType::Parse(R"({
+        "io_params": {"type": "memory_io"},
+        "quantization_params": {
+            "type": "saq",
+            "saq_avg_bits": 4,
+            "saq_segment_count": 0,
+            "saq_random_rotation": false
+        }
+    })"));
+
+    const std::vector<MetricType> metrics = {
+        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP, MetricType::METRIC_TYPE_COSINE};
+    for (const auto metric : metrics) {
+        IndexCommonParam common_param;
+        common_param.allocator_ = allocator;
+        common_param.dim_ = dim;
+        common_param.metric_ = metric;
+
+        auto flatten = FlattenInterface::MakeInstance(param, common_param);
+        REQUIRE(flatten != nullptr);
+        REQUIRE(flatten->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_SAQ);
+        REQUIRE_THROWS_AS(flatten->Train(vectors.data(), 1), VsagException);
+        flatten->Train(vectors.data(), count);
+        flatten->Resize(count);
+        flatten->BatchInsertVector(vectors.data(), count);
+
+        std::vector<InnerIdType> ids(count);
+        std::iota(ids.begin(), ids.end(), 0);
+        std::vector<float> distances(count);
+        auto computer = flatten->FactoryComputer(query.data());
+        flatten->Query(distances.data(), computer, ids.data(), count);
+        REQUIRE(std::all_of(distances.begin(), distances.end(), [](float distance) {
+            return std::isfinite(distance);
+        }));
+    }
+}
+
 TEST_CASE("FlattenDataCell supports concurrent contiguous batch insertion",
           "[ut][FlattenDataCell][pipnn]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
@@ -275,6 +378,37 @@ TEST_CASE("FlattenDataCell only reports a stride for contiguous raw data",
     uint64_t row_stride = 123;
     REQUIRE(flatten->TryGetContiguousRawFloatData(&row_stride) == nullptr);
     REQUIRE(row_stride == 0);
+}
+
+TEST_CASE("FP32 FlattenDataCell shrink truncates logical rows before subsequent add",
+          "[ut][FlattenDataCell][mci][force_remove]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    const auto io_type = GENERATE("memory_io", "block_memory_io");
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    auto json = JsonType::Parse(R"({
+        "io_params": {"type": "memory_io"},
+        "quantization_params": {"type": "fp32"}
+    })");
+    json["io_params"]["type"].SetString(io_type);
+    param->FromJson(json);
+    IndexCommonParam common;
+    common.allocator_ = allocator;
+    common.dim_ = 4;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto flatten = FlattenInterface::MakeInstance(param, common);
+    constexpr InnerIdType count = 32;
+    auto vectors = fixtures::generate_vectors(count, common.dim_);
+    flatten->Train(vectors.data(), count);
+    flatten->BatchInsertVector(vectors.data(), count);
+    flatten->Resize(count * 2);
+    flatten->ShrinkToFit(count);
+    REQUIRE(flatten->TotalCount() == count);
+    flatten->ShrinkToFit(count / 2);
+    REQUIRE(flatten->TotalCount() == count / 2);
+    flatten->ShrinkToFit(0);
+    REQUIRE(flatten->TotalCount() == 0);
+    flatten->InsertVector(vectors.data());
+    REQUIRE(flatten->TotalCount() == 1);
 }
 
 TEST_CASE("RaBitQSplitDataCell adapts prefetch bytes to split record sizes",
@@ -1780,6 +1914,9 @@ TEST_CASE("RaBitQSplitDataCell optimized scalar-code build",
     FlattenOptimizedBuildContext build_context{finalize_pool, 4};
     REQUIRE(optimized_build->BeginOptimizedBuild(build_context));
     REQUIRE(optimized_build->IsOptimizedBuildActive());
+    auto pairwise_interface = std::dynamic_pointer_cast<FlattenPairwiseDistanceInterface>(flatten);
+    REQUIRE(pairwise_interface != nullptr);
+    REQUIRE(pairwise_interface->FactoryPairwiseDistanceComputer() == nullptr);
     flatten->ShrinkToFit(0);
     REQUIRE_THROWS(flatten->InsertVector(vectors.data()));
     REQUIRE(flatten->TotalCount() == 0);
@@ -1835,6 +1972,7 @@ TEST_CASE("RaBitQSplitDataCell optimized scalar-code build",
 
     optimized_build->FinalizeOptimizedBuild();
     REQUIRE_FALSE(optimized_build->IsOptimizedBuildActive());
+    REQUIRE(pairwise_interface->FactoryPairwiseDistanceComputer() != nullptr);
     REQUIRE(std::abs(flatten->ComputePairVectors(0, 2) - build_pair_distance) <= 1e-5F);
     flatten->QueryById(id_dists.data(), 0, build_ids.data(), count, &ctx);
     statistics = JsonType::Parse(stats.Dump());

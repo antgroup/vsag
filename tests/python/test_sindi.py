@@ -113,3 +113,44 @@ def test_sindi_knn_search_with_statistics(index_name, use_reorder):
     assert statistics["complete"] is True
     np.testing.assert_array_equal(ids, [[-1, -1]])
     np.testing.assert_array_equal(distances, [[-1.0, -1.0]])
+
+
+def test_sindi_add_sparse_vectors():
+    """Sparse vectors can be added after the initial build."""
+    index = pyvsag.Index(
+        "sindi",
+        json.dumps(
+            {
+                "dim": 16,
+                "dtype": "sparse",
+                "metric_type": "ip",
+                "index_param": {
+                    "use_reorder": True,
+                    "doc_prune_ratio": 0.0,
+                    "window_size": 10000,
+                    "term_id_limit": 16,
+                },
+            }
+        ),
+    )
+    index.build(
+        np.array([0, 2], dtype=np.uint32),
+        np.array([0, 1], dtype=np.uint32),
+        np.array([1.0, 0.5], dtype=np.float32),
+        np.array([0], dtype=np.int64),
+    )
+    index.add(
+        np.array([0, 1], dtype=np.uint32),
+        np.array([5], dtype=np.uint32),
+        np.array([2.0], dtype=np.float32),
+        np.array([7], dtype=np.int64),
+    )
+    assert index.get_num_elements() == 2
+    ids, _ = index.knn_search(
+        np.array([0, 1], dtype=np.uint32),
+        np.array([5], dtype=np.uint32),
+        np.array([1.0], dtype=np.float32),
+        1,
+        json.dumps({"sindi": {"n_candidate": 10}}),
+    )
+    assert ids[0, 0] == 7

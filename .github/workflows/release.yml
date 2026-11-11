@@ -1,34 +1,76 @@
-name: Build and Publish Release
+name: Release
 
 on:
   workflow_dispatch:
     inputs:
       branch:
-        description: 'The branch, tag, or commit SHA to release from'
+        description: The branch, tag, or commit SHA to release from
         required: true
-        default: 'main'
+        default: main
         type: string
       tag_name:
-        description: 'The tag for the new release (e.g., v1.0.0)'
-        required: true
+        description: The tag for the new release (e.g., v1.0.0)
+        required: false
         type: string
       prerelease:
-        description: 'Mark this release as a prerelease'
+        description: Mark this release as a prerelease
         required: false
         default: false
         type: boolean
 
+      operation:
+        description: Release operation
+        type: choice
+        default: release
+        options:
+          - release
+          - wheels
+          - index
+      arch:
+        description: Architecture to build (x86_64 or aarch64). If empty, builds all.
+        required: false
+        type: string
+      version:
+        description: 'Enter the version tag number, eg: v0.14.2'
+        required: false
+        type: string
+        default: v0.14.0
+  release:
+    types:
+      - published
+  push:
+    tags:
+      - v*.*.*
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ inputs.tag_name }}
+  group: release-${{ inputs.operation || github.event_name }}-${{ inputs.tag_name || github.ref }}
   cancel-in-progress: false
 
 jobs:
+  resolve-source:
+    name: Pin release source
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          persist-credentials: false
+      - name: Resolve immutable release commit
+        id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.operation == 'release' }}
   build-and-release:
     name: Build, Test, and Publish Release
-    runs-on: ubuntu-22.04
+    needs:
+      - resolve-source
+      - toolchain-installed-client
+      - toolchain-source-baseline
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Free Disk Space (Ubuntu)
@@ -45,7 +87,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.branch }}
+          ref: ${{ needs.resolve-source.outputs.sha }}
           fetch-depth: 0
 
       - name: Validate release target
@@ -139,3 +181,229 @@ jobs:
           prerelease: ${{ inputs.prerelease }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.operation == 'release' }}
+  toolchain-installed-client:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler:
+          - gcc13
+          - clang20
+        abi: [0, 1]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/toolchain-compatibility-installed-client
+        id: execute
+        with:
+          matrix-compiler: ${{ matrix.compiler }}
+          matrix-abi: ${{ matrix.abi }}
+          target-ref: ${{ needs.resolve-source.outputs.sha || github.sha }}
+    needs:
+      - resolve-source
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.operation == 'release') && (true) }}
+    permissions:
+      contents: read
+  toolchain-source-baseline:
+    runs-on: ubuntu-24.04
+    container: ubuntu:22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler:
+          - gcc9
+          - clang13
+        abi: [0, 1]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/toolchain-compatibility-source-baseline
+        id: execute
+        with:
+          matrix-compiler: ${{ matrix.compiler }}
+          matrix-abi: ${{ matrix.abi }}
+          target-ref: ${{ needs.resolve-source.outputs.sha || github.sha }}
+    needs:
+      - resolve-source
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.operation == 'release') && (true) }}
+    permissions:
+      contents: read
+  wheels-build:
+    name: Build py3-none wheel on ${{ matrix.arch }}
+    if: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'wheels') }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {arch: x86_64, runner: ubuntu-latest}
+          - {arch: aarch64, runner: ubuntu-24.04-arm}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Prepare build environment
+        run: bash ./scripts/python/prepare_python_build.sh
+      - name: Build wheel
+        if: ${{ github.event_name == 'release' || inputs.arch == '' || inputs.arch == matrix.arch }}
+        uses: pypa/cibuildwheel@v3.3.1
+        with:
+          package-dir: python
+        env:
+          CIBW_ARCHS: ${{ matrix.arch }}
+          CIBW_ENVIRONMENT: ${{ matrix.arch == 'x86_64' && 'VSAG_OPENBLAS_TARGET=GENERIC' || '' }}
+          CIBW_TEST_COMMAND: pip install numpy pytest && python /project/tests/python/run_test.py
+      - uses: actions/upload-artifact@v5
+        if: ${{ github.event_name == 'release' || inputs.arch == '' || inputs.arch == matrix.arch }}
+        with:
+          name: wheels-${{ matrix.arch }}
+          path: ./wheelhouse/*.whl
+          if-no-files-found: error
+  wheels-publish:
+    name: Publish packages
+    needs:
+      - wheels-build
+    runs-on: ubuntu-latest
+    if: ${{ (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'wheels')) && (github.event_name == 'release' && github.event.action == 'published' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')) }}
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: dist
+          merge-multiple: true
+      - name: List distribution files
+        id: list_files
+        run: |
+          if [ -z "$(ls -A dist)" ]; then
+            echo "No build artifacts found. Skipping publish."
+            echo "should_publish=false" >> $GITHUB_OUTPUT
+          else
+            echo "Found artifacts to publish."
+            ls -la dist/
+            echo "should_publish=true" >> $GITHUB_OUTPUT
+          fi
+      - name: Publish to PyPI
+        if: steps.list_files.outputs.should_publish == 'true'
+        uses: pypa/gh-action-pypi-publish@v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          verbose: true
+      - name: Upload to GitHub Release
+        if: steps.list_files.outputs.should_publish == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.whl
+  index-generate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    container:
+      image: vsaglib/vsag:ci-main-openblas
+    steps:
+      - name: Get Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+      - name: Determine version to use
+        id: set-version
+        run: |
+          git config --global --add safe.directory /__w/vsag/vsag
+          if [ "${{ github.event_name }}" = "push" ]; then
+            VERSION=$(git for-each-ref --sort=-committerdate refs/tags --format='%(refname:short)' | head -n 1)
+          else
+            VERSION=${{ github.event.inputs.version }}
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          cd ${GITHUB_WORKSPACE}
+      - name: Install GitHub CLI
+        env:
+          GH_VERSION: 2.75.0
+        run: |
+          if command -v gh >/dev/null 2>&1; then
+            gh --version
+            exit 0
+          fi
+          wget --tries=3 --timeout=30 -q "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" -O /tmp/gh.tar.gz
+          tar xzf /tmp/gh.tar.gz -C /tmp
+          install -m 0755 /tmp/gh_${GH_VERSION}_linux_amd64/bin/gh /usr/local/bin/gh
+          rm -rf /tmp/gh.tar.gz /tmp/gh_${GH_VERSION}_linux_amd64
+          gh --version
+      - name: Download Test Dataset from Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download compatibility-indexes \
+            --repo antgroup/vsag \
+            --pattern "random_512d_10K.bin" \
+            || echo "Test dataset not found in release, will be generated"
+      - name: Fetch Tag Branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.set-version.outputs.version }}
+          path: vsag_tag
+          fetch-depth: '0'
+          fetch-tags: 'true'
+      - name: Prepare And Build
+        run: |
+          echo ${{ steps.set-version.outputs.version }}
+          cd vsag_tag
+          cp ../random_512d_10K.bin . || true
+          make release
+      - name: Generate Index
+        run: |
+          cd ${GITHUB_WORKSPACE}/vsag_tag
+          ./build-release/tools/create_old_version_index ${{ steps.set-version.outputs.version }}
+      - name: Upload to Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.set-version.outputs.version }}
+        run: |
+          cd ${GITHUB_WORKSPACE}/vsag_tag
+
+          files=()
+          for algo in hgraph; do
+            for ext in index build.json search.json; do
+              file="${VERSION}_${algo}_${ext}"
+              if [ -f "$file" ]; then
+                files+=("$file")
+              fi
+            done
+          done
+
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No index files found to upload"
+            exit 0
+          fi
+
+          echo "Files to upload: ${files[*]}"
+
+          release_error=$(gh release view compatibility-indexes --repo antgroup/vsag 2>&1)
+          if [ $? -eq 0 ]; then
+            echo "Uploading to existing release..."
+            if ! gh release upload compatibility-indexes "${files[@]}" --repo antgroup/vsag --clobber; then
+              echo "Error: Failed to upload files to release"
+              exit 1
+            fi
+          else
+            if echo "$release_error" | grep -qi "404\|not found\|notfound"; then
+              echo "Creating new release..."
+              if ! gh release create compatibility-indexes "${files[@]}" \
+                --repo antgroup/vsag \
+                --title "VSAG Compatibility Test Indexes" \
+                --notes "Index files for backward compatibility testing" \
+                --prerelease; then
+                echo "Error: Failed to create release"
+                exit 1
+              fi
+            else
+              echo "Error checking release existence: $release_error"
+              exit 1
+            fi
+          fi
+
+          echo "Successfully uploaded ${#files[@]} file(s)"
+    if: ${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'index')) && (true) }}

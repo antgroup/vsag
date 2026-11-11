@@ -15,6 +15,7 @@
 #include "hgraph_rabitq_searcher.h"
 
 #include <algorithm>
+#include <catch2/generators/catch_generators.hpp>
 #include <cstring>
 #include <limits>
 #include <vector>
@@ -26,7 +27,7 @@
 #include "impl/allocator/safe_allocator.h"
 #include "impl/filter/white_list_filter.h"
 #include "impl/heap/standard_heap.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "index_common_param.h"
 #include "io/memory_io/memory_io_parameter.h"
@@ -35,6 +36,7 @@
 namespace vsag {
 
 TEST_CASE("HGraph RaBitQ route honors one-bit search switch", "[ut][HGraphRaBitQSearcher][route]") {
+    const auto filter_bits = GENERATE(2, 3, 4);
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     constexpr uint64_t dim = 64;
     constexpr InnerIdType count = 64;
@@ -53,6 +55,7 @@ TEST_CASE("HGraph RaBitQ route honors one-bit search switch", "[ut][HGraphRaBitQ
             "use_fht": true
         }
     })");
+    param_json["quantization_params"]["rabitq_bits_per_dim_filter"].SetUint64(filter_bits);
     auto param = std::make_shared<FlattenDataCellParameter>();
     param->FromJson(param_json);
     IndexCommonParam common_param;
@@ -159,6 +162,34 @@ TEST_CASE("HGraph RaBitQ route honors one-bit search switch", "[ut][HGraphRaBitQ
                         coarse_worst_full_best.filter.data(),
                         coarse_worst_full_best.supplement.data());
     REQUIRE(searcher.Route(graph, graph, flatten, computer, 0, true) == 1);
+
+    SECTION("Fused route preserves neighbor order and invalid-metadata fallback") {
+        auto route_param = std::make_shared<GraphDataCellParameter>();
+        route_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+        route_param->max_degree_ = 8;
+        route_param->init_max_capacity_ = 8;
+        const float scores[8] = {1000.0F, -1000.0F, 3.0F, 4.0F, 5.0F, 6.0F, -1000.0F, 2.0F};
+        for (const bool invalid_first : {false, true}) {
+            auto route = std::make_shared<HGraphRaBitQFusedDataCell>(
+                route_param, split->OneBitCodeSize(), split->SupplementCodeSize(), common_param);
+            for (InnerIdType id = 0; id < 8; ++id) {
+                auto node = encoded[0];
+                set_coarse_score(node, scores[id]);
+                if (invalid_first and id == 1) {
+                    std::memcpy(node.filter.data() + traversal_query.one_bit_metadata_offset,
+                                &invalid_metadata,
+                                sizeof(invalid_metadata));
+                }
+                route->SetNodeCodes(
+                    id, id, node.cluster_id, node.filter.data(), node.supplement.data());
+                route->InsertNeighborsById(id, no_neighbors);
+            }
+            Vector<InnerIdType> route_neighbors({1, 2, 3, 4, 5, 6, 7}, allocator.get());
+            route->InsertNeighborsById(0, route_neighbors);
+            CHECK(searcher.Route(route, route, flatten, computer, 0, true) ==
+                  (invalid_first ? 6 : 1));
+        }
+    }
 
     const auto make_search_graph = [&](bool invalidate_filter_add) {
         auto search_graph_param = std::make_shared<GraphDataCellParameter>();

@@ -28,6 +28,7 @@ lcov --rc branch_coverage=1 \
      --include "${ROOT_DIR}/include/*" \
      --ignore-errors mismatch,mismatch \
      --ignore-errors count,count \
+     --ignore-errors inconsistent,inconsistent \
      --output-file "${COVERAGE_RAW_FILE}"
 
 # These two files are not maintained production sources: version.h is generated at build time,

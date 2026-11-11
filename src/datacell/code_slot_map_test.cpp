@@ -35,7 +35,7 @@ public:
     RecordingFlatten() {
         this->code_size_ = sizeof(uint32_t);
         this->max_capacity_ = 16;
-        this->total_count_ = 0;
+        this->total_count_.store(0, std::memory_order_release);
     }
 
     void
@@ -94,7 +94,9 @@ public:
     void
     InsertVector(const void* vector, vsag::InnerIdType idx) override {
         inserted_ids.push_back(idx);
-        this->total_count_ = std::max(this->total_count_, idx + 1);
+        this->total_count_.store(
+            std::max(this->total_count_.load(std::memory_order_relaxed), idx + 1),
+            std::memory_order_release);
     }
 
     bool
@@ -383,7 +385,7 @@ TEST_CASE("CodeSlotFlattenAdapter maps logical ids before calling flatten",
     float different_query = 2.0F;
     REQUIRE_FALSE(adapter->CompareRawVectorWithId(&different_query, 2));
 
-    physical_codes->total_count_ = 2;
+    physical_codes->total_count_.store(2, std::memory_order_release);
     physical_codes->max_capacity_ = 8;
     physical_codes->code_size_ = sizeof(uint32_t);
     std::stringstream stream;
@@ -391,14 +393,14 @@ TEST_CASE("CodeSlotFlattenAdapter maps logical ids before calling flatten",
     adapter->Serialize(writer);
 
     auto restored_physical_codes = std::make_shared<RecordingFlatten>();
-    restored_physical_codes->total_count_ = 0;
+    restored_physical_codes->total_count_.store(0, std::memory_order_release);
     restored_physical_codes->max_capacity_ = 0;
     restored_physical_codes->code_size_ = 0;
     auto restored_adapter = vsag::MakeCodeSlotFlattenAdapter(
         restored_physical_codes, mapping, allocator.get(), &logical_total_count);
     vsag::IOStreamReader reader(stream);
     restored_adapter->Deserialize(reader);
-    REQUIRE(restored_physical_codes->total_count_ == 2);
+    REQUIRE(restored_physical_codes->total_count_.load(std::memory_order_relaxed) == 2);
     REQUIRE(restored_physical_codes->max_capacity_ == 8);
     REQUIRE(restored_physical_codes->code_size_ == sizeof(uint32_t));
     REQUIRE(restored_adapter->TotalCount() == 4);

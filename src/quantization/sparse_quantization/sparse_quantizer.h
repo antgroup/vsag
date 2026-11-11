@@ -18,10 +18,12 @@
 #include <algorithm>
 
 #include "container_types.h"
+#include "data_type.h"
 #include "index_common_param.h"
 #include "inner_string_params.h"
 #include "quantization/quantizer.h"
 #include "quantization/quantizer_parameter.h"
+#include "simd/bf16_simd.h"
 #include "simd/fp16_simd.h"
 #include "sparse_quantizer_parameter.h"
 #include "vsag/dataset.h"
@@ -141,6 +143,7 @@ private:
 
 private:
     SparseQuantizerValueType value_type_{SparseQuantizerValueType::FP32};
+    DataTypes data_type_{DataTypes::DATA_TYPE_FLOAT};
 };
 template <MetricType metric>
 SparseQuantizer<metric>::SparseQuantizer(const QuantizerParamPtr& param,
@@ -154,6 +157,7 @@ SparseQuantizer<metric>::SparseQuantizer(const SparseQuantizerParamPtr& param,
     : SparseQuantizer<metric>(common_param.allocator_.get()) {
     CHECK_ARGUMENT(param != nullptr, "invalid sparse quantizer parameter");
     value_type_ = param->value_type;
+    this->data_type_ = common_param.data_type_;
     this->dim_ = common_param.dim_;
     this->code_size_ = common_param.dim_ * sizeof(float);
 }
@@ -348,10 +352,21 @@ SparseQuantizer<metric>::EncodeOneImpl(const float* data, uint8_t* codes) const 
     const uint64_t encoded_size =
         sizeof(uint32_t) + static_cast<uint64_t>(sv.len_) * (sizeof(uint32_t) + sizeof(uint16_t));
     std::fill(codes + encoded_size, codes + GetCodeSizeByLength(sv.len_), 0);
+    bool need_convert =
+        (data_type_ == DataTypes::DATA_TYPE_FP16 || data_type_ == DataTypes::DATA_TYPE_BF16);
     if (sv.len_ < 2 || std::is_sorted(sv.ids_, sv.ids_ + sv.len_)) {
         for (uint32_t i = 0; i < sv.len_; ++i) {
             ids[i] = sv.ids_[i];
-            values[i] = generic::FloatToFP16(sv.vals_[i]);
+            float val = sv.vals_[i];
+            if (need_convert) {
+                const auto* fp16_vals = reinterpret_cast<const uint16_t*>(sv.vals_);
+                if (data_type_ == DataTypes::DATA_TYPE_FP16) {
+                    val = generic::FP16ToFloat(fp16_vals[i]);
+                } else {
+                    val = generic::BF16ToFloat(fp16_vals[i]);
+                }
+            }
+            values[i] = generic::FloatToFP16(val);
         }
         return true;
     }
@@ -360,6 +375,14 @@ SparseQuantizer<metric>::EncodeOneImpl(const float* data, uint8_t* codes) const 
     for (uint32_t i = 0; i < sv.len_; ++i) {
         entries[i].id = sv.ids_[i];
         entries[i].val = sv.vals_[i];
+        if (need_convert) {
+            const auto* fp16_vals = reinterpret_cast<const uint16_t*>(sv.vals_);
+            if (data_type_ == DataTypes::DATA_TYPE_FP16) {
+                entries[i].val = generic::FP16ToFloat(fp16_vals[i]);
+            } else {
+                entries[i].val = generic::BF16ToFloat(fp16_vals[i]);
+            }
+        }
     }
     std::sort(entries.begin(), entries.end(), [](const BufferEntry& a, const BufferEntry& b) {
         return a.id < b.id;
@@ -376,9 +399,19 @@ void
 SparseQuantizer<metric>::EncodeFP32(const SparseVector& sparse_vector, uint8_t* codes) const {
     *reinterpret_cast<uint32_t*>(codes) = sparse_vector.len_;
     auto* entries = reinterpret_cast<BufferEntry*>(codes + sizeof(uint32_t));
+    bool need_convert =
+        (data_type_ == DataTypes::DATA_TYPE_FP16 || data_type_ == DataTypes::DATA_TYPE_BF16);
     for (uint32_t i = 0; i < sparse_vector.len_; ++i) {
         entries[i].id = sparse_vector.ids_[i];
         entries[i].val = sparse_vector.vals_[i];
+        if (need_convert) {
+            const auto* fp16_vals = reinterpret_cast<const uint16_t*>(sparse_vector.vals_);
+            if (data_type_ == DataTypes::DATA_TYPE_FP16) {
+                entries[i].val = generic::FP16ToFloat(fp16_vals[i]);
+            } else {
+                entries[i].val = generic::BF16ToFloat(fp16_vals[i]);
+            }
+        }
     }
     std::sort(entries,
               entries + sparse_vector.len_,

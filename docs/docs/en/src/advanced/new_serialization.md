@@ -204,15 +204,15 @@ SINDI writes these streaming blocks in order:
 | `sindi_rerank_index` | optional rerank flat index when rerank is enabled | conditional |
 | `sindi_term_id_mapper` | optional term-id remapping table | conditional |
 | `sindi_host_metadata` | optional host dictionary and one-or-more inner-ID ranges per host | conditional |
-| `sindi_date_metadata` | optional encoded date buckets and quarter/host interval directories | conditional |
+| `sindi_time_metadata` | optional per-document UTC days and time-partition/host directories | conditional |
 
 `DeserializeStreaming` restores the full in-memory SINDI index. `Index::Load` can create the SINDI
 index directly from streaming metadata and currently loads all emitted SINDI blocks into memory.
 Mutable and immutable SINDI runtimes both support this streaming path. Legacy serialization stores
-standalone host metadata, including its persisted string-to-ID dictionary, or date-routing metadata
-for mutable and immutable indexes. These
-top-level payloads are mutually exclusive; combined date-and-host routing stores its host directory
-inside the date payload. A restored mutable date-aware index rejects incremental `Add()`.
+standalone host metadata, including its persisted string-to-ID dictionary, or publish-time routing
+metadata for mutable and immutable indexes. These top-level payloads are mutually exclusive;
+combined time-and-host routing stores its host directory inside the time payload. A restored
+mutable time-aware index rejects incremental `Add()`.
 
 ## SINDI_V2 Blocks
 
@@ -226,14 +226,13 @@ SINDI_V2 writes these streaming blocks in order:
 | `extra_info` | optional per-document extra information | conditional |
 | `sindi_term_id_mapper` | optional term-id remapping table | conditional |
 | `sindi_host_metadata` | optional host dictionary and one-or-more inner-ID ranges per host | conditional |
-| `sindi_date_metadata` | optional encoded date buckets and quarter/host interval directories | conditional |
+| `sindi_time_metadata` | optional per-document UTC days and time-partition/host directories | conditional |
 
 `DeserializeStreaming` and `Index::Load` restore mutable or immutable SINDI_V2 runtimes from these
 blocks. Legacy serialization stores standalone host metadata, including its persisted string-to-ID
-dictionary, or date-routing metadata for mutable and immutable indexes. These top-level payloads are
-mutually exclusive; combined date-and-host routing stores its host dictionary and directory inside
-the date payload. A restored mutable date-aware index
-rejects incremental `Add()`.
+dictionary, or publish-time routing metadata for mutable and immutable indexes. These top-level
+payloads are mutually exclusive; combined time-and-host routing stores its host dictionary and
+directory inside the time payload. A restored mutable time-aware index rejects incremental `Add()`.
 
 ## Pyramid Blocks
 

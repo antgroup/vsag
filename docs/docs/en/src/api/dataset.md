@@ -171,13 +171,14 @@ destructor frees each `vectors_` separately.
 ## Named metadata
 
 `UInt32Metadata(name, values)` attaches one unsigned integer per dataset element, and
-`GetUInt32Metadata` returns the named array or `nullptr`. `StringMetadata(name, values)` and
-`GetStringMetadata(name)` provide the equivalent generic named string arrays. SINDI and SINDI_V2
-use string metadata named `host` for host filtering. Date filtering uses the existing named string-path API with
-`Paths("date", values)` and `GetPaths("date")`. A date range on a one-element query dataset uses
-the separate named paths `date_begin` and `date_end`; each points to one canonical `YYYY`,
-`YYYY/MM`, or `YYYY/MM/DD` string. These arrays follow the normal Dataset ownership, deep-copy, and
-append rules.
+`GetUInt32Metadata` returns the named array or `nullptr`. `Int64Metadata(name, values)` and
+`GetInt64Metadata(name)` provide named signed 64-bit integer arrays; `StringMetadata(name, values)`
+and `GetStringMetadata(name)` provide named string arrays. SINDI and SINDI_V2 use string metadata
+named `host` for host filtering and int64 metadata named `publish_time_stamp` for UTC-day time
+filtering. A time range on a one-element query dataset uses `publish_time_stamp_begin` and
+`publish_time_stamp_end`. For SINDI and SINDI_V2 base datasets, `publish_time_stamp == 0` is
+reserved for a missing timestamp and never matches a time selector. These arrays have one value
+per dataset element and follow the normal Dataset ownership, deep-copy, and append rules.
 
 ## See also
 
@@ -213,7 +214,5 @@ Legacy `dist_cmp` and `reorder_distance_count` remain available unchanged for co
 Python preserves `(ids, distances)` tuple unpacking. Opt in with
 `knn_search_with_statistics`: the dense overload returns one statistics JSON string, while the
 sparse CSR overload returns one string per query. `range_search_with_statistics` returns the range
-arrays plus one statistics JSON string. C preserves `SearchResult_t`; call
-`vsag_search_result_enable_statistics()` before a search and release returned statistics with
-`vsag_search_result_destroy_statistics()`. Legacy callers retain `other_result` ownership and
-incur no statistics allocation. Legacy HNSW and DiskANN are explicit non-goals.
+arrays plus one statistics JSON string. C returns the statistics JSON string of a `vsag_search_result_t` through
+`vsag_search_result_statistics()`. Legacy HNSW and DiskANN are explicit non-goals.

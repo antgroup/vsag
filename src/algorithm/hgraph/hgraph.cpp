@@ -17,6 +17,8 @@
 #include <datacell/compressed_graph_datacell_parameter.h>
 #include <fmt/format.h>
 
+#include <cstring>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -24,6 +26,7 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "analyzer/analyzer.h"
+#include "analyzer/hgraph_analyzer.h"
 #include "attr/argparse.h"
 #include "common.h"
 #include "datacell/flatten_interface.h"
@@ -36,11 +39,12 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/hgraph_rabitq_searcher.h"
 #include "index/index_impl.h"
 #include "io/reader_io/reader_io_parameter.h"
+#include "io/user_defined_io/user_defined_io_parameter.h"
 #include "typing.h"
 #include "utils/util_functions.h"
 #include "utils/visited_list.h"
@@ -58,15 +62,39 @@ HGraph::check_fused_mutation_supported(std::string_view operation) const {
     }
 }
 
+void
+HGraph::check_user_defined_precise_io_supported(std::string_view operation) const {
+    // Cloning or exporting a model re-creates datacells from the same IO parameters, which
+    // for user-defined IO re-binds this index's Reader/Writer pair into the copy: the copy
+    // would share (Clone) or resize (ExportModel + build) the source backing store. Reject
+    // until user-defined storage can supply independent bytes for lifecycle copies.
+    if (this->has_precise_reorder() and this->high_precise_codes_ != nullptr) {
+        const auto hgraph_param =
+            std::dynamic_pointer_cast<HGraphParameter>(this->create_param_ptr_);
+        if (hgraph_param != nullptr and hgraph_param->precise_codes_param != nullptr and
+            std::dynamic_pointer_cast<UserDefinedIOParameter>(
+                hgraph_param->precise_codes_param->io_parameter) != nullptr) {
+            throw VsagException(
+                ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                fmt::format(
+                    "user_defined_io precise codes do not support {}: the bound Reader/Writer "
+                    "pair would be shared with the copy",
+                    operation));
+        }
+    }
+}
+
 HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonParam& common_param)
     : InnerIndexInterface(hgraph_param, common_param),
       route_graphs_(common_param.allocator_.get()),
+      pending_code_writes_(common_param.allocator_.get()),
       cache_(std::make_unique<BuildCache>(common_param.allocator_.get())),
       use_elp_optimizer_(hgraph_param->use_elp_optimizer),
       ignore_reorder_(hgraph_param->ignore_reorder),
       build_by_base_(hgraph_param->build_by_base),
       reorder_by_base_(hgraph_param->reorder_source == HGRAPH_REORDER_SOURCE_BASE),
       ef_construct_(hgraph_param->ef_construction),
+      adaptive_pruning_(hgraph_param->adaptive_pruning),
       alpha_(hgraph_param->alpha),
       duplicate_distance_threshold_(hgraph_param->duplicate_distance_threshold),
       support_force_remove_(hgraph_param->support_force_remove),
@@ -77,6 +105,14 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       mci_parameters_(hgraph_param->mci_parameters),
       use_old_serial_format_(common_param.use_old_serial_format_),
       use_conjugate_graph_(hgraph_param->use_conjugate_graph) {
+    // No-op unless adaptive pruning is enabled.
+    adaptive_pruning_.Validate(alpha_);
+    if (adaptive_pruning_.enabled) {
+        CHECK_ARGUMENT(graph_type_ == GRAPH_TYPE_VALUE_NSW,
+                       "adaptive_pruning currently supports only nsw graph construction");
+        CHECK_ARGUMENT(common_param.metric_ == MetricType::METRIC_TYPE_L2SQR,
+                       "adaptive_pruning currently supports only L2 distance");
+    }
     this->support_duplicate_ = hgraph_param->support_duplicate;
     this->deduplicate_storage_ = hgraph_param->deduplicate_storage;
     const bool is_dense_vector = common_param.repr_ == RecordRepr::DENSE &&
@@ -86,15 +122,21 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
                             "HGraph deduplicate_storage only supports dense vectors");
     }
     if (this->graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
+        const bool valid_adaptive_metric = not this->pipnn_param_.adaptive_pruning or
+                                           common_param.metric_ == MetricType::METRIC_TYPE_L2SQR;
+        CHECK_ARGUMENT(valid_adaptive_metric, "PiPNN adaptive pruning only supports L2");
         if (common_param.repr_ != RecordRepr::DENSE or
-            common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
+            (common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT and
+             common_param.data_type_ != DataTypes::DATA_TYPE_FP16 and
+             common_param.data_type_ != DataTypes::DATA_TYPE_BF16)) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                "HGraph PiPNN only supports dense float32 indexes");
+                                "HGraph PiPNN only supports dense floating-point indexes");
         }
     }
-    if (this->deduplicate_storage_ && this->graph_type_ != GRAPH_TYPE_VALUE_NSW) {
+    if (this->deduplicate_storage_ && this->graph_type_ != GRAPH_TYPE_VALUE_NSW &&
+        this->graph_type_ != GRAPH_TYPE_VALUE_PIPNN) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            "HGraph deduplicate_storage only supports nsw graph");
+                            "HGraph deduplicate_storage only supports nsw or pipnn graph");
     }
     this->persist_source_id_ = hgraph_param->persist_source_id;
     if (this->using_dedup_storage()) {
@@ -148,7 +190,6 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     mult_ = 1 / log(1.0 * static_cast<double>(this->bottom_graph_->MaximumDegree()));
 
     this->resize_increase_count_bit_ = hgraph_param->resize_increase_count_bit;
-    init_resize_bit_and_reorder();
 
     this->parallel_searcher_ =
         std::make_shared<ParallelSearcher>(common_param, thread_pool_, neighbors_mutex_);
@@ -169,11 +210,18 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
             this->high_precise_codes_ = MakeCodeSlotFlattenAdapter(
                 this->high_precise_codes_, this->code_slot_map_, allocator_, &this->total_count_);
         }
+        if (this->raw_vector_ != nullptr and not this->create_new_raw_vector_) {
+            // Rebind an existing FP32 raw alias to the wrapped base/reorder codes.
+            // false refreshes the alias/flags without allocating another raw flatten.
+            this->check_and_init_raw_vector(hgraph_param->raw_vector_param, common_param, false);
+        }
         if (this->create_new_raw_vector_ && this->raw_vector_ != nullptr) {
             this->raw_vector_ = MakeCodeSlotFlattenAdapter(
                 this->raw_vector_, this->code_slot_map_, allocator_, &this->total_count_);
         }
     }
+    // Reorder retains its flatten pointer, so initialize it after slot wrapping.
+    init_resize_bit_and_reorder();
     resize(bottom_graph_->max_capacity_);
 }
 
@@ -220,8 +268,21 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
             FlattenInterface::MakeInstance(hgraph_parameter->precise_codes_param, common_param);
     }
     const auto current_count = total_count_.load(std::memory_order_acquire);
-    auto covers_active_ids = [current_count](const FlattenInterfacePtr& codes) {
-        return codes != nullptr and codes->TotalCount() >= current_count;
+    auto covers_active_ids = [this, current_count](const FlattenInterfacePtr& codes) {
+        if (codes == nullptr or codes->TotalCount() < current_count) {
+            return false;
+        }
+        if (this->using_dedup_storage()) {
+            // Each logical ID is bound exactly once, after all its physical codes are written.
+            return this->code_slot_map_->PublishedLogicalCount() == current_count;
+        }
+        const auto code = codes == basic_flatten_codes_  ? BASE_CODE
+                          : codes == high_precise_codes_ ? PRECISE_CODE
+                                                         : RAW_CODE;
+        std::shared_lock codes_lock(this->persistent_codes_mutex_);
+        return std::all_of(this->pending_code_writes_.begin(),
+                           this->pending_code_writes_.end(),
+                           [code](const auto& entry) { return (entry.second & code) == 0; });
     };
 
     // Check which codes need to be rebuilt.
@@ -245,6 +306,8 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
 
     FlattenInterfacePtr tune_source;
     if (is_tune_base_code or is_tune_precise_code or is_tune_raw_code) {
+        // Add can reserve IDs before an enqueue failure leaves their vectors unwritten.
+        // Every ID rebuilt below must be covered; allocated capacity is not valid data.
         if (covers_active_ids(raw_vector_)) {
             tune_source = raw_vector_;
         } else if (covers_active_ids(high_precise_codes_) and
@@ -268,10 +331,29 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     };
 
     auto train_count = std::min(this->train_sample_count_, this->GetNumElements());
-    Vector<float> train_data(train_count * dim_, 0, allocator_);
+    const auto element_size =
+        (data_type_ == DataTypes::DATA_TYPE_FP16 or data_type_ == DataTypes::DATA_TYPE_BF16)
+            ? sizeof(uint16_t)
+            : sizeof(float);
+    CHECK_ARGUMENT(dim_ > 0, "Tune training dimension must be positive");
+    CHECK_ARGUMENT(static_cast<uint64_t>(dim_) <= std::numeric_limits<size_t>::max() / element_size,
+                   "Tune training row size overflows");
+    const auto row_bytes = static_cast<size_t>(dim_) * element_size;
+    CHECK_ARGUMENT(static_cast<uint64_t>(train_count) <=
+                       (std::numeric_limits<size_t>::max() - (sizeof(float) - 1)) / row_bytes,
+                   "Tune training buffer size overflows");
+    const auto train_bytes = static_cast<size_t>(train_count) * row_bytes;
+    // Train consumes tightly packed native input, including FP16/BF16. Keep the
+    // allocation float-aligned, and decode through aligned scratch: odd half
+    // dimensions need not leave each packed row aligned for Decode's float* API.
+    Vector<float> train_data((train_bytes + sizeof(float) - 1) / sizeof(float), 0, allocator_);
     if (is_tune_base_code or is_tune_precise_code or is_tune_raw_code) {
+        Vector<float> decoded_row(dim_, 0, allocator_);
+        auto* packed_data = reinterpret_cast<uint8_t*>(train_data.data());
         for (InnerIdType i = 0; i < train_count; i++) {
-            decode_tune_source(i, train_data.data() + i * dim_);
+            decode_tune_source(i, decoded_row.data());
+            std::memcpy(
+                packed_data + static_cast<size_t>(i) * row_bytes, decoded_row.data(), row_bytes);
         }
     }
 
@@ -298,7 +380,7 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
             new_code->Train(train_data.data(), train_count);
 
             Vector<float> insert_buffer(dim_, 0, allocator_);
-            for (int64_t i = 0; i < total_count_; ++i) {
+            for (int64_t i = 0; i < current_count; ++i) {
                 decode_tune_source(i, insert_buffer.data());
                 new_code->InsertVector(static_cast<const void*>(insert_buffer.data()), i);
             }
@@ -310,10 +392,14 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
         tune_and_rebuild(is_tune_precise_code, high_precise_codes_, new_precise_code);
     auto new_raw = tune_and_rebuild(is_tune_raw_code, raw_vector_, new_raw_code);
 
+    const auto old_raw_code = raw_vector_ == basic_flatten_codes_  ? BASE_CODE
+                              : raw_vector_ == high_precise_codes_ ? PRECISE_CODE
+                                                                   : RAW_CODE;
+
     // Acquire exclusive global lock to atomically swap flatten codes,
     // preventing concurrent searches from accessing partially updated state.
     {
-        std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
+        std::scoped_lock locks(this->global_mutex_, this->persistent_codes_mutex_);
         auto param = std::dynamic_pointer_cast<HGraphParameter>(create_param_ptr_);
         basic_flatten_codes_ = new_basic;
         if (drop_precise_codes) {
@@ -342,6 +428,30 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
         } else {
             check_and_init_raw_vector(param->raw_vector_param, common_param, false);
         }
+        {
+            const uint8_t rebuilt = (is_tune_base_code ? BASE_CODE : 0) |
+                                    (is_tune_precise_code or drop_precise_codes ? PRECISE_CODE : 0);
+            // Raw may now alias rebuilt codes, or retain the old FP32 storage. Derive its
+            // coverage from that actual storage, before clearing the old base/precise bits.
+            const uint8_t raw_pending_code =
+                raw_vector_ == basic_flatten_codes_  ? (is_tune_base_code ? 0 : BASE_CODE)
+                : raw_vector_ == high_precise_codes_ ? (is_tune_precise_code ? 0 : PRECISE_CODE)
+                : is_tune_raw_code                   ? 0
+                                                     : old_raw_code;
+            for (auto it = pending_code_writes_.begin(); it != pending_code_writes_.end();) {
+                const bool raw_pending = (it->second & raw_pending_code) != 0;
+                it.value() &= ~(rebuilt | RAW_CODE);
+                if (raw_pending) {
+                    it.value() |= RAW_CODE;
+                }
+                if (it->second == 0) {
+                    it = pending_code_writes_.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
+
         init_resize_bit_and_reorder();
 
         // set status
@@ -472,9 +582,9 @@ HGraph::calc_native_distance_by_id(const void* native_query,
     }
     const bool reads_fused_codes =
         this->rabitq_fused_datacell_ != nullptr and flat == this->basic_flatten_codes_;
-    // FusedComputer dereferences the fused node slab through a raw RaBitQFusedCodeView. Keep the
-    // graph-wide read lock until distance evaluation completes so a concurrent Reallocate, which
-    // may move the slab, cannot invalidate the view.
+    // FusedComputer resolves raw code views through the fused block directory. Keep the
+    // graph-wide read lock until distance evaluation completes so concurrent growth cannot
+    // mutate that directory while code views are being acquired.
     if (lock.owns_lock() and not this->using_dedup_storage() and not reads_fused_codes) {
         lock.unlock();
     }
@@ -505,9 +615,9 @@ HGraph::CalcDistancesById(const float* query,
     }
     const bool reads_fused_codes =
         this->rabitq_fused_datacell_ != nullptr and flat == this->basic_flatten_codes_;
-    // FusedComputer dereferences the fused node slab through a raw RaBitQFusedCodeView. Keep the
-    // graph-wide read lock until distance evaluation completes so a concurrent Reallocate, which
-    // may move the slab, cannot invalidate the view.
+    // FusedComputer resolves raw code views through the fused block directory. Keep the
+    // graph-wide read lock until distance evaluation completes so concurrent growth cannot
+    // mutate that directory while code views are being acquired.
     if (lock.owns_lock() and not this->using_dedup_storage() and not reads_fused_codes) {
         lock.unlock();
     }
@@ -541,6 +651,7 @@ HGraph::GetMinAndMaxId() const {
 InnerIndexPtr
 HGraph::ExportModel(const IndexCommonParam& param) const {
     this->check_fused_mutation_supported("ExportModel");
+    this->check_user_defined_precise_io_supported("ExportModel");
     auto index = std::make_shared<HGraph>(this->create_param_ptr_, param);
     this->basic_flatten_codes_->ExportModel(index->basic_flatten_codes_);
     if (has_precise_reorder()) {
@@ -552,6 +663,7 @@ HGraph::ExportModel(const IndexCommonParam& param) const {
 InnerIndexPtr
 HGraph::Clone(const IndexCommonParam& param) {
     this->check_fused_mutation_supported("Clone");
+    this->check_user_defined_precise_io_supported("Clone");
     return InnerIndexInterface::Clone(param);
 }
 
@@ -582,6 +694,21 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
     this->check_fused_mutation_supported("Merge");
     CHECK_ARGUMENT(not this->using_dedup_storage(),
                    "HGraph deduplicate_storage does not support Merge");
+    // Validate every participant before resizing or copying any unit. Copying an unwritten
+    // slot is unsafe even if another code store could serve as a complete Tune source.
+    CHECK_ARGUMENT(this->pending_code_writes_.empty(),
+                   "HGraph Merge requires complete code writes in the destination");
+    for (const auto& unit : merge_units) {
+        const auto implementation = std::dynamic_pointer_cast<IndexImpl<HGraph>>(unit.index);
+        CHECK_ARGUMENT(implementation != nullptr, "HGraph Merge requires HGraph inputs");
+        const auto other = std::dynamic_pointer_cast<HGraph>(implementation->GetInnerIndex());
+        CHECK_ARGUMENT(other->pending_code_writes_.empty(),
+                       "HGraph Merge requires complete code writes in every input");
+        CHECK_ARGUMENT(this->support_duplicate_ == other->support_duplicate_,
+                       "cannot merge HGraph with different support_duplicate settings");
+        CHECK_ARGUMENT(not other->using_dedup_storage(),
+                       "HGraph deduplicate_storage does not support Merge");
+    }
     int64_t total_count = this->GetNumElements();
     for (const auto& unit : merge_units) {
         total_count += unit.index->GetNumElements();
@@ -592,11 +719,6 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
     for (const auto& merge_unit : merge_units) {
         const auto other_index = std::dynamic_pointer_cast<HGraph>(
             std::dynamic_pointer_cast<IndexImpl<HGraph>>(merge_unit.index)->GetInnerIndex());
-        CHECK_ARGUMENT(this->support_duplicate_ == other_index->support_duplicate_,
-                       "cannot merge HGraph with different support_duplicate settings");
-        CHECK_ARGUMENT(not other_index->using_dedup_storage(),
-                       "HGraph deduplicate_storage does not support Merge");
-
         auto logical_bias = this->total_count_.load(std::memory_order_acquire);
         if (total_count_ == 0) {
             this->entry_point_id_ = other_index->entry_point_id_;
@@ -615,6 +737,8 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
             route_graphs_[j]->MergeOther(other_index->route_graphs_[j], logical_bias);
         }
         this->total_count_ += other_index->GetNumElements();
+        // Merged ids are fully built before being handed over, so they are immediately visible.
+        this->PublishThroughTotalCount();
     }
     if (this->odescent_param_ == nullptr) {
         odescent_param_ = std::make_shared<ODescentParameter>();
@@ -691,7 +815,15 @@ void
 HGraph::SetIO(const std::shared_ptr<Reader> reader) {
     auto reader_param = std::make_shared<ReaderIOParameter>();
     reader_param->reader = reader;
-    if (has_precise_reorder()) {
+    const auto hgraph_param = std::dynamic_pointer_cast<HGraphParameter>(create_param_ptr_);
+    const bool user_defined_precise_io =
+        hgraph_param != nullptr and hgraph_param->precise_codes_param != nullptr and
+        std::dynamic_pointer_cast<UserDefinedIOParameter>(
+            hgraph_param->precise_codes_param->io_parameter) != nullptr;
+    // Deserialize has already written precise codes into the bound writable pair. Only
+    // reader_io datacells need to attach to the serialized input reader here; replacing
+    // the user-defined pair with a ReaderIOParameter would fail after loading the data.
+    if (has_precise_reorder() and not user_defined_precise_io) {
         high_precise_codes_->InitIO(reader_param);
     }
     basic_flatten_codes_->InitIO(reader_param);
@@ -708,14 +840,66 @@ HGraph::SetPreciseCodesIO(const std::shared_ptr<Reader>& reader) {
 const static uint64_t QUERY_SAMPLE_SIZE = 10;
 const static int64_t DEFAULT_TOPK = 100;
 
+AnalyzerBasePtr
+HGraph::CreateAnalyzer(const AnalyzerParam& param) const {
+    return std::make_shared<HGraphAnalyzer>(this, param);
+}
+
 std::string
 HGraph::GetStats() const {
+    auto populate_mci_stats = [this](JsonType& stats) {
+        if (this->mci_cliques_ != nullptr) {
+            const auto mci_stats = this->mci_cliques_->CollectStats(this->total_count_.load());
+            stats["mci_has_index"].SetBool(mci_stats.has_index);
+            stats["mci_total_nodes"].SetInt(static_cast<int64_t>(mci_stats.total_nodes));
+            stats["mci_covered_nodes"].SetInt(static_cast<int64_t>(mci_stats.covered_nodes));
+            stats["mci_covered_node_ratio"].SetFloat(
+                static_cast<float>(mci_stats.covered_node_ratio));
+            stats["mci_base_clique_count"].SetInt(
+                static_cast<int64_t>(mci_stats.base_clique_count));
+            stats["mci_delta_clique_count"].SetInt(
+                static_cast<int64_t>(mci_stats.delta_clique_count));
+            stats["mci_total_clique_count"].SetInt(
+                static_cast<int64_t>(mci_stats.total_clique_count));
+            stats["mci_retired_clique_count"].SetInt(
+                static_cast<int64_t>(mci_stats.retired_clique_count));
+            stats["mci_inactive_node_count"].SetInt(
+                static_cast<int64_t>(mci_stats.inactive_node_count));
+            stats["mci_base_membership_count"].SetInt(
+                static_cast<int64_t>(mci_stats.base_membership_count));
+            stats["mci_delta_extra_membership_count"].SetInt(
+                static_cast<int64_t>(mci_stats.delta_extra_membership_count));
+            stats["mci_delta_clique_membership_count"].SetInt(
+                static_cast<int64_t>(mci_stats.delta_clique_membership_count));
+            stats["mci_total_membership_count"].SetInt(
+                static_cast<int64_t>(mci_stats.total_membership_count));
+            stats["mci_avg_membership_per_node"].SetFloat(
+                static_cast<float>(mci_stats.avg_membership_per_node));
+            stats["mci_avg_clique_size"].SetFloat(static_cast<float>(mci_stats.avg_clique_size));
+            stats["mci_max_membership_per_node"].SetInt(
+                static_cast<int64_t>(mci_stats.max_membership_per_node));
+            stats["mci_max_clique_size"].SetInt(static_cast<int64_t>(mci_stats.max_clique_size));
+            stats["mci_memory_usage"].SetInt(
+                static_cast<int64_t>(this->mci_cliques_->GetMemoryUsage()));
+        }
+    };
+
+    if (GetNumElements() == 0) {
+        JsonType stats;
+        stats["total_count"].SetInt64(0);
+        stats["live_count"].SetInt64(0);
+        stats["deleted_count"].SetInt64(GetNumberRemoved());
+        stats["_analysis"]["skipped"]["structure"].SetString("index is empty");
+        populate_mci_stats(stats);
+        AddAnalysisMetadata(stats, GetName(), "stats", "partial");
+        return stats.Dump(4);
+    }
     AnalyzerParam analyzer_param(allocator_);
     analyzer_param.topk = DEFAULT_TOPK;
     analyzer_param.base_sample_size = std::min(QUERY_SAMPLE_SIZE, this->total_count_.load());
     analyzer_param.search_params =
         fmt::format(R"({{"hgraph": {{"ef_search": {}}}}})", ef_construct_);
-    auto analyzer = CreateAnalyzer(this, analyzer_param);
+    auto analyzer = CreateAnalyzer(analyzer_param);
     JsonType stats = analyzer->GetStats();
     // Build-time cache hit-rate is a transient property of the
     // build_with_cache() path (taken only after ImportCache()), so it lives on
@@ -729,32 +913,8 @@ HGraph::GetStats() const {
         stats["build_cache_hit_rate"]["skipped_reason"].SetString(
             "index was not built from an imported cache");
     }
-    if (this->mci_cliques_ != nullptr) {
-        const auto mci_stats = this->mci_cliques_->CollectStats(this->total_count_.load());
-        stats["mci_has_index"].SetBool(mci_stats.has_index);
-        stats["mci_total_nodes"].SetInt(static_cast<int64_t>(mci_stats.total_nodes));
-        stats["mci_covered_nodes"].SetInt(static_cast<int64_t>(mci_stats.covered_nodes));
-        stats["mci_covered_node_ratio"].SetFloat(static_cast<float>(mci_stats.covered_node_ratio));
-        stats["mci_base_clique_count"].SetInt(static_cast<int64_t>(mci_stats.base_clique_count));
-        stats["mci_delta_clique_count"].SetInt(static_cast<int64_t>(mci_stats.delta_clique_count));
-        stats["mci_total_clique_count"].SetInt(static_cast<int64_t>(mci_stats.total_clique_count));
-        stats["mci_base_membership_count"].SetInt(
-            static_cast<int64_t>(mci_stats.base_membership_count));
-        stats["mci_delta_extra_membership_count"].SetInt(
-            static_cast<int64_t>(mci_stats.delta_extra_membership_count));
-        stats["mci_delta_clique_membership_count"].SetInt(
-            static_cast<int64_t>(mci_stats.delta_clique_membership_count));
-        stats["mci_total_membership_count"].SetInt(
-            static_cast<int64_t>(mci_stats.total_membership_count));
-        stats["mci_avg_membership_per_node"].SetFloat(
-            static_cast<float>(mci_stats.avg_membership_per_node));
-        stats["mci_avg_clique_size"].SetFloat(static_cast<float>(mci_stats.avg_clique_size));
-        stats["mci_max_membership_per_node"].SetInt(
-            static_cast<int64_t>(mci_stats.max_membership_per_node));
-        stats["mci_max_clique_size"].SetInt(static_cast<int64_t>(mci_stats.max_clique_size));
-        stats["mci_memory_usage"].SetInt(
-            static_cast<int64_t>(this->mci_cliques_->GetMemoryUsage()));
-    }
+    populate_mci_stats(stats);
+    AddAnalysisMetadata(stats, GetName(), "stats", "complete");
     return stats.Dump(4);
 }
 
@@ -762,6 +922,11 @@ void
 HGraph::init_resize_bit_and_reorder() {
     if (use_reorder_) {
         auto reorder_codes = this->get_reorder_codes();
+        if (this->using_dedup_storage() and
+            GetCodeSlotPhysicalFlatten(reorder_codes) == reorder_codes) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "storage deduplication requires wrapped reorder codes");
+        }
         auto fused_graph =
             reorder_codes.get() == basic_flatten_codes_.get() ? rabitq_fused_datacell_ : nullptr;
         reorder_ = std::make_shared<FlattenReorder>(reorder_codes, allocator_, fused_graph);
@@ -847,13 +1012,13 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
             Vector<int8_t> base_data(data_size, allocator_);
             GetVectorByInnerId(inner_id, reinterpret_cast<float*>(base_data.data()));
             const float old_self_dist =
-                this->CalcDistanceById(reinterpret_cast<float*>(base_data.data()), id);
-            self_dist = this->CalcDistanceById(static_cast<float*>(new_base_vec), id);
+                this->calc_native_distance_by_id(base_data.data(), id, true);
+            self_dist = this->calc_native_distance_by_id(new_base_vec, id, true);
             if (std::abs(old_self_dist - self_dist) < 1e-3) {
                 return true;
             }
         } else {
-            self_dist = this->CalcDistanceById(static_cast<float*>(new_base_vec), id);
+            self_dist = this->calc_native_distance_by_id(new_base_vec, id, true);
         }
 
         // 2. check whether the neighborhood relationship is same
@@ -867,9 +1032,8 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
 
             float neighbor_dist = 0;
             try {
-                neighbor_dist =
-                    this->CalcDistanceById(static_cast<float*>(new_base_vec),
-                                           this->label_table_->GetLabelById(neighbor_inner_id));
+                neighbor_dist = this->calc_native_distance_by_id(
+                    new_base_vec, this->label_table_->GetLabelById(neighbor_inner_id), true);
             } catch (const std::runtime_error& e) {
                 // incase that neighbor has been deleted
                 continue;
@@ -918,10 +1082,25 @@ HGraph::UpdateExtraInfo(const DatasetPtr& new_base) {
 
 std::string
 HGraph::AnalyzeIndexBySearch(const SearchRequest& request) {
+    CHECK_ARGUMENT(request.query_ != nullptr, "analysis query cannot be null");
+    CHECK_ARGUMENT(request.topk_ > 0, "analysis topk must be greater than 0");
+    if (GetNumElements() == 0) {
+        JsonType stats;
+        stats["_analysis"]["skipped"]["search"].SetString("index is empty");
+        AddAnalysisMetadata(stats,
+                            GetName(),
+                            "search",
+                            "not_applicable",
+                            request.query_->GetNumElements(),
+                            request.topk_);
+        return stats.Dump(4);
+    }
     AnalyzerParam analyzer_param(allocator_);
     analyzer_param.topk = request.topk_;
-    auto analyzer = CreateAnalyzer(this, analyzer_param);
+    auto analyzer = CreateAnalyzer(analyzer_param);
     JsonType stats = analyzer->AnalyzeIndexBySearch(request);
+    AddAnalysisMetadata(
+        stats, GetName(), "search", "complete", request.query_->GetNumElements(), request.topk_);
     return stats.Dump(4);
 }
 
@@ -931,7 +1110,10 @@ HGraph::GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const
 }
 
 void
-HGraph::cal_memory_usage() {
+HGraph::cal_memory_usage() const {
+    // Read the version before walking the components, so a mutation that lands mid-walk stays
+    // unaccounted and simply forces one more recalculation on the next query.
+    const auto version = this->memory_usage_version_.load(std::memory_order_acquire);
     auto memory = sizeof(HGraph);
     memory += this->neighbors_mutex_->GetMemoryUsage();
     memory += this->pool_->GetMemoryUsage();
@@ -941,7 +1123,7 @@ HGraph::cal_memory_usage() {
         memory += this->code_slot_map_->GetMemoryUsage();
     }
     memory += this->bottom_graph_->GetMemoryUsage();
-    for (auto& graph : this->route_graphs_) {
+    for (const auto& graph : this->route_graphs_) {
         memory += graph->GetMemoryUsage();
     }
     if (has_precise_reorder()) {
@@ -958,13 +1140,62 @@ HGraph::cal_memory_usage() {
     if (this->mci_cliques_ != nullptr) {
         memory += this->mci_cliques_->GetMemoryUsage();
     }
+    // Keep the conjugate-graph lock until the publish below. Feedback() patches the cached counter
+    // with fetch_add instead of bumping the version (tests/test_hgraph.cpp pins that exact-delta
+    // contract), and it takes conjugate_graph_mutex_ and then memory_usage_mutex_ in this same
+    // order. Releasing the graph lock before the store would let its delta be overwritten by a
+    // total computed before the edge landed, with no later invalidation left to repair it.
+    std::shared_lock<std::shared_mutex> conjugate_lock(this->conjugate_graph_mutex_,
+                                                       std::defer_lock);
     if (this->conjugate_graph_ != nullptr) {
-        std::shared_lock graph_lock(this->conjugate_graph_mutex_);
+        conjugate_lock.lock();
         memory += this->conjugate_graph_->GetMemoryUsage();
     }
 
     std::unique_lock lock(this->memory_usage_mutex_);
+    // A concurrent walk that sampled a younger version may have published already; never
+    // downgrade the accounting to an older snapshot.
+    if (version < this->memory_usage_accounted_version_.load(std::memory_order_acquire)) {
+        return;
+    }
     this->current_memory_usage_.store(memory);
+    this->memory_usage_accounted_version_.store(version, std::memory_order_release);
+}
+
+void
+HGraph::mark_memory_usage_dirty() const {
+    this->memory_usage_version_.fetch_add(1, std::memory_order_release);
+}
+
+uint64_t
+HGraph::GetMemoryUsage() const {
+    const bool stale = this->memory_usage_accounted_version_.load(std::memory_order_acquire) !=
+                       this->memory_usage_version_.load(std::memory_order_acquire);
+    if (not stale) {
+        return InnerIndexInterface::GetMemoryUsage();
+    }
+    // The breakdown dereferences component containers that mutating paths replace or grow, so it
+    // has to exclude them. It never waits for them though: the locks are taken with try_lock and a
+    // busy mutation simply leaves the cached value in place, which keeps the getter free of any
+    // lock-ordering hazard (the mutating paths do not agree on one) and avoids stalling a caller
+    // that polls the counter. label_lookup_mutex_ is not needed: LabelTable::GetMemoryUsage()
+    // serialises its own storage against reallocation and remap mutations.
+    std::shared_lock<std::shared_mutex> force_remove_lock(this->force_remove_mutex_,
+                                                          std::defer_lock);
+    std::shared_lock<std::shared_mutex> global_lock(this->global_mutex_, std::defer_lock);
+    const bool force_remove_needed =
+        not this->immutable_.load(std::memory_order_acquire) and this->support_force_remove();
+    if ((not force_remove_needed or force_remove_lock.try_lock()) and global_lock.try_lock()) {
+        // Readiness is only meaningful under the structural lock: resize(), Merge() and
+        // SetImmutable() replace these pointers while holding global_mutex_ exclusively, so
+        // comparing them with nullptr outside it would itself be a data race.
+        if (this->neighbors_mutex_ != nullptr and this->pool_ != nullptr and
+            this->label_table_ != nullptr and this->basic_flatten_codes_ != nullptr and
+            this->bottom_graph_ != nullptr) {
+            this->cal_memory_usage();
+        }
+    }
+    return InnerIndexInterface::GetMemoryUsage();
 }
 
 }  // namespace vsag

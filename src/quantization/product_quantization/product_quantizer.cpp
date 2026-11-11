@@ -15,6 +15,8 @@
 
 #include "product_quantizer.h"
 
+#include <cstring>
+
 #include "impl/blas/blas_function.h"
 #include "impl/cluster/kmeans_cluster.h"
 #include "simd/fp32_simd.h"
@@ -76,15 +78,15 @@ ProductQuantizer<metric>::TrainImpl(const float* data, uint64_t count) {
 
     for (int64_t i = 0; i < pq_dim_; ++i) {
         for (int64_t j = 0; j < count; ++j) {
-            memcpy(slice.data() + j * subspace_dim_,
-                   train_data + j * this->dim_ + i * subspace_dim_,
-                   subspace_dim_ * sizeof(float));
+            std::memcpy(slice.data() + j * subspace_dim_,
+                        train_data + j * this->dim_ + i * subspace_dim_,
+                        subspace_dim_ * sizeof(float));
         }
         KMeansCluster cluster(subspace_dim_, this->allocator_);
         cluster.Run(CENTROIDS_PER_SUBSPACE, slice.data(), count);
-        memcpy(this->codebooks_.data() + i * CENTROIDS_PER_SUBSPACE * subspace_dim_,
-               cluster.k_centroids_,
-               CENTROIDS_PER_SUBSPACE * subspace_dim_ * sizeof(float));
+        std::memcpy(this->codebooks_.data() + i * CENTROIDS_PER_SUBSPACE * subspace_dim_,
+                    cluster.k_centroids_,
+                    CENTROIDS_PER_SUBSPACE * subspace_dim_ * sizeof(float));
     }
     this->transpose_codebooks();
 
@@ -125,9 +127,9 @@ bool
 ProductQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, float* data) {
     for (int i = 0; i < pq_dim_; ++i) {
         auto idx = codes[i];
-        memcpy(data + i * subspace_dim_,
-               this->get_codebook_data(i, idx),
-               subspace_dim_ * sizeof(float));
+        std::memcpy(data + i * subspace_dim_,
+                    this->get_codebook_data(i, idx),
+                    subspace_dim_ * sizeof(float));
     }
     return true;
 }
@@ -265,9 +267,36 @@ ProductQuantizer<metric>::SerializeImpl(StreamWriter& writer) {
 template <MetricType metric>
 void
 ProductQuantizer<metric>::DeserializeImpl(StreamReader& reader) {
-    StreamReader::ReadObj(reader, this->pq_dim_);
-    StreamReader::ReadObj(reader, this->subspace_dim_);
-    StreamReader::ReadVector(reader, this->codebooks_);
+    int64_t pq_dim = 0;
+    int64_t subspace_dim = 0;
+    uint64_t codebook_len = 0;
+    StreamReader::ReadObj(reader, pq_dim);
+    StreamReader::ReadObj(reader, subspace_dim);
+    StreamReader::ReadObj(reader, codebook_len);
+
+    // codebooks_/reverse_codebooks_ are allocated from the construction-time geometry
+    // (dim * CENTROIDS_PER_SUBSPACE). The base-class wrapper has already overwritten
+    // dim_ with the file value, so validate every deserialized field against the
+    // construction-time state before codebooks_ is resized or indexed with them.
+    if (pq_dim != this->pq_dim_ or subspace_dim != this->subspace_dim_ or
+        this->dim_ != static_cast<uint64_t>(this->pq_dim_ * this->subspace_dim_) or
+        codebook_len != this->reverse_codebooks_.size()) {
+        throw VsagException(
+            ErrorType::INVALID_BINARY,
+            fmt::format("product quantizer geometry mismatch: file pq_dim={}, subspace_dim={}, "
+                        "codebook_size={}, dim={}, expected pq_dim={}, subspace_dim={}, "
+                        "codebook_size={}",
+                        pq_dim,
+                        subspace_dim,
+                        codebook_len,
+                        this->dim_,
+                        this->pq_dim_,
+                        this->subspace_dim_,
+                        this->reverse_codebooks_.size()));
+    }
+
+    this->codebooks_.resize(codebook_len);
+    reader.Read(reinterpret_cast<char*>(this->codebooks_.data()), codebook_len * sizeof(float));
     this->transpose_codebooks();
 }
 
@@ -276,10 +305,10 @@ void
 ProductQuantizer<metric>::transpose_codebooks() {
     for (int64_t i = 0; i < this->pq_dim_; ++i) {
         for (int64_t j = 0; j < CENTROIDS_PER_SUBSPACE; ++j) {
-            memcpy(this->reverse_codebooks_.data() + j * this->dim_ + i * subspace_dim_,
-                   this->codebooks_.data() + i * CENTROIDS_PER_SUBSPACE * subspace_dim_ +
-                       j * subspace_dim_,
-                   subspace_dim_ * sizeof(float));
+            std::memcpy(this->reverse_codebooks_.data() + j * this->dim_ + i * subspace_dim_,
+                        this->codebooks_.data() + i * CENTROIDS_PER_SUBSPACE * subspace_dim_ +
+                            j * subspace_dim_,
+                        subspace_dim_ * sizeof(float));
         }
     }
 }

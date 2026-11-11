@@ -27,6 +27,7 @@ set (SIMD_SRCS
         sve.cpp
         simd.cpp
         simd_status.cpp
+        pipnn_half_simd.cpp
         basic_func.cpp
         bit_simd.cpp
         fp32_simd.cpp
@@ -35,6 +36,8 @@ set (SIMD_SRCS
         bf16_simd.cpp
         pqfs_simd.cpp
         sq8_simd.cpp
+        sq8_local_simd.cpp
+        sq4_local_simd.cpp
         sq4_simd.cpp
         sq4_uniform_simd.cpp
         sq8_uniform_simd.cpp
@@ -51,18 +54,23 @@ if (DIST_CONTAINS_AVX)
     set_source_files_properties (avx.cpp PROPERTIES COMPILE_FLAGS "-mavx -mf16c")
 endif ()
 if (DIST_CONTAINS_AVX2)
+    list (APPEND SIMD_SRCS pipnn_half_avx2.cpp)
+    check_cxx_compiler_flag ("-mf16c" PIPNN_COMPILER_F16C_SUPPORTED)
+    if (PIPNN_COMPILER_F16C_SUPPORTED)
+        list (APPEND SIMD_SRCS pipnn_half_f16c.cpp)
+    endif ()
     set_source_files_properties (avx2.cpp PROPERTIES COMPILE_FLAGS "-mavx2 -mfma -mf16c")
+    set_source_files_properties (pipnn_half_avx2.cpp PROPERTIES COMPILE_FLAGS "-mavx2")
+    # This kernel promises ordered, non-contracted FP32 accumulation. Cancel
+    # Release fast-math for this TU before setting contraction explicitly; Clang
+    # 20 (including clang-tidy on a GCC database) rejects the conflicting pair.
+    set_source_files_properties (pipnn_half_f16c.cpp PROPERTIES COMPILE_FLAGS
+            "-mavx2 -mf16c -mno-fma -fno-fast-math -ffp-contract=off")
 endif ()
 
 set(AVX512_FLAGS "-mavx512f -mavx512cd -mavx512vl -mavx512bw -mavx512dq -mavx512ifma -mavx512vbmi")
-check_cxx_compiler_flag("-mavx512pf" COMPILER_SUPPORTS_AVX512PF)
-check_cxx_compiler_flag("-mavx512er" COMPILER_SUPPORTS_AVX512ER)
-if (COMPILER_SUPPORTS_AVX512PF)
-    set(AVX512_FLAGS "${AVX512_FLAGS} -mavx512pf")
-endif ()
-if (COMPILER_SUPPORTS_AVX512ER)
-    set(AVX512_FLAGS "${AVX512_FLAGS} -mavx512er")
-endif ()
+# AVX512PF/ER are unused and unsupported by Clang 20. Keep GCC compilation
+# commands compatible with clang-tidy as well as the actual SIMD kernels.
 
 if (DIST_CONTAINS_AVX512)
     set_source_files_properties (
@@ -117,6 +125,9 @@ endfunction ()
 simd_add_definitions (DIST_CONTAINS_SSE -DENABLE_SSE=1)
 simd_add_definitions (DIST_CONTAINS_AVX -DENABLE_AVX=1)
 simd_add_definitions (DIST_CONTAINS_AVX2 -DENABLE_AVX2=1)
+if (DIST_CONTAINS_AVX2 AND PIPNN_COMPILER_F16C_SUPPORTED)
+    target_compile_definitions (simd PRIVATE ENABLE_PIPNN_F16C=1)
+endif ()
 simd_add_definitions (DIST_CONTAINS_AVX512 -DENABLE_AVX512=1)
 simd_add_definitions (DIST_CONTAINS_AVX512VPOPCNTDQ -DENABLE_AVX512VPOPCNTDQ=1)
 simd_add_definitions (DIST_CONTAINS_AMX -DENABLE_AMX=1)
@@ -143,6 +154,9 @@ if (ENABLE_TESTS)
     endif ()
     if (DIST_CONTAINS_AVX2)
         target_compile_definitions (simd_test PRIVATE ENABLE_AVX2=1)
+    endif ()
+    if (DIST_CONTAINS_AVX2 AND PIPNN_COMPILER_F16C_SUPPORTED)
+        target_compile_definitions (simd_test PRIVATE ENABLE_PIPNN_F16C=1)
     endif ()
     if (DIST_CONTAINS_AVX512)
         target_compile_definitions (simd_test PRIVATE ENABLE_AVX512=1)

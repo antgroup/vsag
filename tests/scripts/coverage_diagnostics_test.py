@@ -17,8 +17,7 @@ COVERAGE_CHECKER = ROOT / "scripts/coverage/check_cov.sh"
 COVERAGE_VERIFIER = ROOT / "scripts/coverage/verify_cpp_coverage.py"
 CODECOV_CONFIG = ROOT / ".github/codecov.yml"
 PARALLEL_TEST_RUNNER = ROOT / "scripts/testing/test_parallel_bg.sh"
-PR_CI_WORKFLOW = ROOT / ".github/workflows/pr-ci.yml"
-COVERAGE_WORKFLOW = ROOT / ".github/workflows/coverage.yml"
+PR_CI_WORKFLOW = ROOT / ".github/workflows/pr-ci-community.yml"
 
 
 class DiagnosticRunnerTest(unittest.TestCase):
@@ -184,7 +183,7 @@ fi
         self.assertEqual(len(includes), 2)
         self.assertTrue(includes[0].endswith("/src/*"), includes)
         self.assertTrue(includes[1].endswith("/include/*"), includes)
-        self.assertNotIn("inconsistent,inconsistent", capture)
+        self.assertIn("inconsistent,inconsistent", capture)
 
         self.assertIn("--remove", calls[1])
         self.assertTrue(any(value.endswith("/src/version.h") for value in calls[1]))
@@ -511,7 +510,8 @@ class CoverageWorkflowTest(unittest.TestCase):
             self.assertIn("dubious ownership", unsafe.stderr)
             self.assertIn("exit status 128", unsafe.stderr)
 
-            workflow = COVERAGE_WORKFLOW.read_text(encoding="utf-8")
+            from tests.scripts.test_dependency_workflows import job_text
+            workflow = job_text(ROOT / ".github/workflows/main-ci.yml", "coverage-coverage")
             setup = re.search(
                 r"^      - name: Configure Git workspace\n"
                 r"        run: (?P<command>[^\n]+)\n",

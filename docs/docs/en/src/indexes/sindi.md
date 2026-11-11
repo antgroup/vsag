@@ -79,6 +79,8 @@ and `metric_type` **must** be `"ip"`.
 | `term_id_limit` | int | `1000000` | Upper bound on term id values (≥ max term id + 1, up to 50 000 000). |
 | `window_size` | int | `50000` | Documents per window (range: 10 000 – 60 000). |
 | `doc_prune_ratio` | float | `0.0` | Fraction of lowest-weight terms dropped per doc at build time (`[0.0, 1.0)`). |
+| `term_prune_ratio` | float | `0.0` | Fraction of lowest-weight postings permanently removed per term per window during `Build`; `[0, 1)`, disabled by default. |
+| `term_retain_threshold` | integer | `0` | Build-time posting cap per term, divided across windows; `0` disables the cap. |
 | `use_quantization` | bool or string | `false` | `false` stores FP32 values, `true` stores SQ8 values, and `"fp16"` stores FP16 values. |
 | `use_reorder` | bool | `false` | Keep a forward store and rescore candidates after coarse SINDI scoring. |
 | `rerank_type` | string | `"fp32"` | Forward-store type used when `use_reorder` is enabled. `fp32` keeps exact values, `fp16` stores half-precision values while scoring in FP32, and `dmq8` stores compressed 8-bit DMQ codes. |
@@ -188,66 +190,64 @@ without base host metadata ignore query host metadata and retain their previous 
 numeric `host_id` input is rejected. Host filtering currently applies only to KNN; range search keeps
 its existing full-index behavior.
 
-### Date-bucket filtering
+### Publish-time filtering
 
-Mutable and immutable SINDI can filter KNN queries by hierarchical calendar buckets, with or
-without reranking. Attach one canonical string bucket to each base document:
+Mutable and immutable SINDI can filter KNN queries by a document publication timestamp, with or
+without reranking. Supply one Unix timestamp in seconds per base document through int64 metadata.
+`0` means that the document has no publication time:
 
 ```cpp
-std::string base_dates[] = {"", "2026/05", "2026/05/01"};
-base->Paths("date", base_dates);
+int64_t base_times[] = {0, 1777593600, 1777680000};
+base->Int64Metadata("publish_time_stamp", base_times);
 
-std::string query_date = "2026/05";
-query->Paths("date", &query_date)->Owner(false);
+int64_t query_time = 1777593600;
+query->Int64Metadata("publish_time_stamp", &query_time)->Owner(false);
 
-std::string date_begin = "2025/11/20";
-std::string date_end = "2026/02";
-query->Paths("date_begin", &date_begin)
-    ->Paths("date_end", &date_end)
+int64_t time_begin = 1777593600;
+int64_t time_end = 1777766399;
+query->Int64Metadata("publish_time_stamp_begin", &time_begin)
+    ->Int64Metadata("publish_time_stamp_end", &time_end)
     ->Owner(false);
 ```
 
-Accepted forms are `YYYY`, `YYYY/MM`, and `YYYY/MM/DD`, with valid calendar values and zero-padded
-months and days. Matching proceeds down the hierarchy: `2026` matches base buckets at year, month,
-or day granularity in 2026; `2026/05` matches `2026/05` and every day below it; `2026/05/01`
-matches only that exact day. A more precise query never matches a coarser base bucket.
+SINDI normalizes every positive timestamp to a UTC epoch day with `timestamp / 86400`. A single
+timestamp matches every document on the same UTC day. A range is inclusive after both endpoints
+are normalized to UTC days. The two range endpoints must be supplied together, must satisfy
+`begin <= end`, and cannot be combined with the single-value selector. Query values must be
+positive. Base values must be non-negative; negative values are rejected. Timestamps whose epoch
+day exceeds `INT32_MAX` are rejected.
 
-An empty base string means that the document has no date. Missing-date documents remain searchable
-when the query omits all date selectors, including host-only queries, but never match a `date` or
-date-range query. Every base document still needs one array entry, so use an empty string instead of
-omitting a row. Empty query date strings remain invalid; omit the selector to disable date filtering.
+Documents with base value `0` remain searchable when a query omits time selectors, including
+host-only queries, but never match a time query. Every base document still needs one array entry.
+An index built without `publish_time_stamp` rejects a query that supplies any time selector.
 
-For an inclusive range query, provide `date_begin` and `date_end` together. A year or month at the
-beginning expands to its first day, while a year or month at the end expands to its last day. For
-example, `2025/11/20` through `2026/02` means `2025/11/20` through `2026/02/28`, inclusive. A base
-bucket matches when its complete calendar period is contained in the query range. Consequently, a
-range ending at `2026/08/01` can match a base day bucket on August 1, but not the coarser
-`2026/08` bucket. The two range endpoints are required together, must be ordered after expansion,
-and cannot be combined with the single `date` selector.
+A time-aware build orders documents by publication timestamp, cuts the ordered sequence into
+logical partitions of `window_size` documents, and groups by host inside each partition. Missing
+times form one final partition. Search first selects partitions whose UTC-day range intersects the
+query, then applies exact per-document day and optional host checks before candidates enter the
+heap. Time, host, tombstone, and user `Filter` conditions use AND semantics. Failed or skipped
+documents can make adjacent logical partitions share a physical window; the exact day check keeps
+boundary results correct.
 
-The date-aware build places missing dates in a dedicated partition, orders dated documents by
-calendar quarter and, when `host` is present, by host inside each partition. For a mutable index,
-date metadata can be supplied by `Build()` or the first `Add()` while the index is empty. Once the
-index contains documents, date metadata cannot be introduced, and a date-aware mutable index
-rejects every later `Add()`. This build-once restriction
-avoids incrementally maintaining the quarter partitions. Mutable host-only indexes retain their
-existing incremental `Add()` support.
+Mutable time-aware indexes support incremental `Add()`. The initial `Build()` or first `Add()` on
+an empty index must supply one `publish_time_stamp` value per vector; every later `Add()` must
+also supply it and preserve whether host metadata is present. Each batch is sorted internally by
+time and appended as a contiguous ID segment. Dates may overlap across batches, so older dates
+can be backfilled. Missing-time documents remain at the end of each segment, and queries route
+through matching partitions in every segment. An existing index without time metadata cannot
+gain it through `Add()`. Publish-time filtering applies only to KNN and is preserved by standard
+and streaming serialization; a restored mutable index can continue to accept time-aware `Add()`.
+Immutable and DMQ8 rerank runtimes still reject incremental writes.
+Many small `Add()` batches create many segments, so time-filtered queries check more segment
+directories; batch inserts when practical.
+The new time metadata format is v2: current readers accept v1 snapshots, while older readers
+cannot load snapshots written in v2.
 
-Year-only base buckets are anchored in the first quarter of that year and stored only once. The
-physical fixed-size window layout is unchanged. A date query first selects the relevant quarter
-partitions, then applies exact hierarchical bucket or range matching before candidates enter the
-heap. Query strings are parsed once during routing; candidate checks use only the packed integer
-buckets. Date, host, tombstone, and user `Filter` conditions use AND semantics.
-
-Queries without `date`, `date_begin`, or `date_end` search every quarter. Host-only queries select
-that host from every quarter. All selected windows share one candidate heap and, when
-`use_reorder` is enabled, one rerank pass. Date filtering supports mutable and immutable indexes
-with either `use_reorder` setting, applies only to KNN search, and is preserved by both legacy and
-streaming serialization. A deserialized mutable date-aware index remains build-once and rejects
-`Add()`. Exact bucket and range filtering disable term-level posting pruning in each selected
-window, so date queries may scan more postings than host-only queries. Wider ranges also select
-more windows. A host-only query on a date-enabled index can require a full scan for windows that
-cross quarter or host boundaries.
+Queries without a time selector scan every time and missing-time partition. Host-only queries
+select that host from every partition. Exact time filtering disables term-level posting pruning in
+each selected window, so time queries may scan more postings than host-only queries; wider ranges
+also select more windows. A host-only query on a time-enabled index can require a full scan for
+windows that cross partition or host boundaries.
 
 ## Search parameters
 
@@ -256,10 +256,17 @@ Search-time parameters live under the `sindi` sub-object:
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `n_candidate` | int | `0` | Candidate heap size. When `0`, defaults to `SPARSE_AMPLIFICATION_FACTOR · topk` (500×). If set, must satisfy `1 ≤ n_candidate ≤ SPARSE_AMPLIFICATION_FACTOR · topk`. |
+| `window_parallelism` | int | `1` | Number of window-search workers (`1` to `16`). Workers run in a reusable thread pool and steal pending windows from one another. The merged heap keeps up to `n_candidate` candidates before reranking. When this is greater than `1`, KNN search ignores `timeout_ms`; window scanning for queries with a filter, active callback limit, or reasoning trace still uses one worker. |
+| `worker_n_candidate` | int | `n_candidate` | Requested per-worker candidate heap capacity; omit to inherit the effective final candidate count. The actual capacity is at least the query top-k, so one matching window can still supply top-k results. If set, it must be positive and `worker_n_candidate × window_parallelism ≥` the final candidate count. For example, `n_candidate=500`, `window_parallelism=2`, and `worker_n_candidate=300` are valid. Reducing this value can lower recall when top candidates are unevenly distributed across workers; the aggregate capacity bound does not guarantee retaining the global top candidates. |
+| `window_scheduler` | string | `"count_deque"` | Parallel KNN window scheduling: `count_deque` retains the count-based deque/try-lock implementation; `count_atomic` uses count-based contiguous ranges and shared atomic cursors; `cost_atomic` balances contiguous ranges by the sum of query-pruned, term-pruned posting scan counts, then uses atomic cursors. Each atomic worker drains its range and then visits other ranges in cyclic order. |
 | `filter_callback_limit` | uint64 | `0` | Maximum user `Filter::CheckValid` callback invocations for one filtered search request. A value of `0` disables the limit. Internal checks such as the deleted-ID filter do not count. Reaching a positive limit stops candidate and window scanning after processing the final callback result and returns the already filtered candidates, so the result may be partial. The limit applies to KNN and range search through both the regular APIs and `SearchWithRequest`. |
 | `query_prune_ratio` | float | `0.0` | Fraction of lowest-weight query terms skipped (`[0.0, 1.0)`). |
 | `term_prune_ratio` | float | `0.0` | Fraction of the lowest-value postings skipped from each term list (`[0.0, 1.0)`). |
 | `term_retain_threshold` | uint64 | `0` | Maximum postings for one term across all windows. A value of `0` disables this limit; positive values allow each non-empty window posting list to scan at most `max(1, floor(threshold / window_count))` postings. |
+
+FP32/FP16 sparse KNN reranking automatically uses count-based static batches with the same parallelism as `window_parallelism` (capped by the candidate count). The caller participates using the same query thread pool; each worker writes distances at independent candidate positions, and final top-k selection follows the original candidate order. A single worker processes one batch. Reasoning queries, DMQ8 and range search retain scalar reranking. Library distance counters and result statistics remain enabled.
+
+Parallel windows and reranking share one lazy index-owned query pool, capped at 16 threads and reported hardware concurrency (at least one). Query tasks are isolated from caller-supplied pools: those pools may contain writers waiting for the read lock held by the query. Parallel workers use thread-safe default scratch allocation for computers, score buffers, contexts and local heaps; request-allocator calls and final result allocation stay on the calling thread.
 
 After combining the ratio and threshold limits, SINDI scans at least one posting from every
 non-empty term list.
@@ -352,3 +359,9 @@ is not physically reclaimed.
 - [Creating an Index](../guide/create_index.md)
 - [Index Parameters](../resources/index_parameters.md)
 - [k-Nearest Neighbor Search](../guide/knn_search.md)
+
+### Build-time term pruning
+
+The index creation parameters also accept `term_prune_ratio` (float in `[0, 1)`, default `0`) and `term_retain_threshold` (non-negative integer, default `0`). Both default to disabled. During `Build`, each term's postings in each window are sorted by stored weight and permanently trimmed to the smaller of `floor(posting_count * (1 - term_prune_ratio))` and `floor(term_retain_threshold / window_count)`; a zero threshold imposes no cap, and non-empty lists retain at least one posting. Mutable and immutable builds support FP32, FP16 and SQ8. Rerank vectors and document labels are preserved. Search-time pruning operates on the retained postings; it cannot restore removed postings. Subsequent `Add` calls do not apply build-time pruning.
+
+For example, set `"term_prune_ratio": 0.2, "term_retain_threshold": 0` inside the index's build parameters to remove the lowest-weight 20% of each posting list per window.

@@ -29,12 +29,14 @@
 
 #include "algorithm/bruteforce/bruteforce.h"
 #include "algorithm/hgraph/hgraph.h"
+#include "analyzer/analyzer.h"
 #include "impl/filter/filter_headers.h"
 #include "impl/label_table/label_table.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index_common_param.h"
 #include "index_detail_data.h"
 #include "index_feature_list.h"
+#include "inner_string_params.h"
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
 #include "storage/tlv_section.h"
@@ -72,6 +74,8 @@ InnerIndexInterface::InnerIndexInterface(const InnerIndexParameterPtr& index_par
         std::make_shared<LabelTable>(allocator_, true, false, index_param->label_remap_type);
     this->index_feature_list_ = std::make_unique<IndexFeatureList>();
     this->index_feature_list_->SetFeature(SUPPORT_EXPORT_IDS);
+    this->index_feature_list_->SetFeature(SUPPORT_GET_STATS);
+    this->index_feature_list_->SetFeature(SUPPORT_ANALYZE_INDEX_BY_SEARCH);
     this->extra_info_size_ = common_param.extra_info_size_;
     if (this->extra_info_size_ > 0) {
         this->extra_infos_ =
@@ -92,6 +96,25 @@ InnerIndexInterface::InnerIndexInterface(const InnerIndexParameterPtr& index_par
 }
 
 InnerIndexInterface::~InnerIndexInterface() = default;
+
+AnalyzerBasePtr
+InnerIndexInterface::CreateAnalyzer(const AnalyzerParam& param) const {
+    return std::make_shared<BasicIndexAnalyzer>(this, param);
+}
+
+std::string
+InnerIndexInterface::GetStats() const {
+    AnalyzerParam param(allocator_);
+    return CreateAnalyzer(param)->GetStats().Dump(4);
+}
+
+std::string
+InnerIndexInterface::AnalyzeIndexBySearch(const SearchRequest& request) {
+    AnalyzerParam param(allocator_);
+    param.topk = request.topk_;
+    param.search_params = request.params_str_;
+    return CreateAnalyzer(param)->AnalyzeIndexBySearch(request).Dump(4);
+}
 
 std::vector<int64_t>
 InnerIndexInterface::Build(const DatasetPtr& base) {
@@ -785,10 +808,17 @@ InnerIndexInterface::ExportIDs() const {
     std::shared_lock lock(this->label_lookup_mutex_);
     DatasetPtr result = Dataset::Make();
     auto num_element = this->label_table_->GetTotalCount();
-    auto* labels = static_cast<LabelType*>(allocator_->Allocate(sizeof(LabelType) * num_element));
-    const auto* origin_label = this->label_table_->GetAllLabels();
-    memcpy(labels, origin_label, sizeof(LabelType) * num_element);
-    result->NumElements(num_element)->Ids(labels)->Dim(1)->Owner(true, allocator_);
+    auto release_labels = [this](LabelType* ptr) { allocator_->Deallocate(ptr); };
+    std::unique_ptr<LabelType, decltype(release_labels)> labels(
+        static_cast<LabelType*>(allocator_->Allocate(sizeof(LabelType) * num_element)),
+        release_labels);
+    this->label_table_->CopyAllLabels(labels.get(), num_element);
+    // Complete potentially throwing metadata setup before sharing ownership of the IDs.
+    result->NumElements(num_element)->Dim(1)->Owner(true, allocator_);
+    result->Ids(labels.get());
+    // Ownership has already been transferred to the dataset.
+    // NOLINTNEXTLINE(bugprone-unused-return-value)
+    static_cast<void>(labels.release());
     return result;
 }
 
@@ -829,14 +859,26 @@ InnerIndexInterface::get_data_by_ids_with_flag(const int64_t* ids,
             inner_ids.emplace_back(this->label_table_->GetIdByLabel(ids[i]));
         }
     }
-    auto thread_count = static_cast<int64_t>(this->build_thread_count_);
-    auto item_per_thread = (count + thread_count - 1) / thread_count;
+    if ((selected_data_flag & DATA_FLAG_FLOAT32_VECTOR) != 0U) {
+        CHECK_ARGUMENT(this->has_raw_vector_, "has_raw_vector_ is false");
+    }
+    if ((selected_data_flag & DATA_FLAG_ATTRIBUTE) != 0U) {
+        CHECK_ARGUMENT(this->has_attribute_, "has_attribute_ is false");
+    }
+    if ((selected_data_flag & DATA_FLAG_EXTRA_INFO) != 0U) {
+        CHECK_ARGUMENT(this->extra_info_size_ > 0, "extra_info_size_ is 0");
+    }
     auto dataset = Dataset::Make();
     dataset->NumElements(count)->Dim(dim_)->Owner(true, allocator_);
+    if (count == 0) {
+        return dataset;
+    }
+
+    const auto thread_count = static_cast<int64_t>(std::max<uint64_t>(
+        uint64_t{1}, std::min<uint64_t>(this->build_thread_count_, static_cast<uint64_t>(count))));
+    const auto item_per_thread =
+        count / thread_count + static_cast<int64_t>(count % thread_count != 0);
     if ((selected_data_flag & DATA_FLAG_FLOAT32_VECTOR) != 0U) {
-        if (not this->has_raw_vector_) {
-            throw VsagException(ErrorType::INVALID_ARGUMENT, "has_raw_vector_ is false");
-        }
         auto* fp32_data = reinterpret_cast<float*>(
             this->allocator_->Allocate(count * this->dim_ * sizeof(float)));
         dataset->Float32Vectors(fp32_data);
@@ -845,11 +887,12 @@ InnerIndexInterface::get_data_by_ids_with_flag(const int64_t* ids,
                 this->GetVectorByInnerId(inner_ids[i], fp32_data + i * this->dim_);
             }
         };
-        if (this->thread_pool_ != nullptr) {
+        if (this->thread_pool_ != nullptr and thread_count > 1) {
             std::vector<std::future<void>> futures;
+            futures.reserve(thread_count);
             for (int64_t i = 0; i < thread_count; ++i) {
-                int64_t begin = i * item_per_thread;
-                int64_t end = std::min(begin + item_per_thread, count);
+                const auto begin = i * item_per_thread;
+                const auto end = std::min(begin + item_per_thread, count);
                 futures.emplace_back(this->thread_pool_->GeneralEnqueue(get_vec_func, begin, end));
             }
             for (auto& future : futures) {
@@ -861,9 +904,6 @@ InnerIndexInterface::get_data_by_ids_with_flag(const int64_t* ids,
     }
 
     if ((selected_data_flag & DATA_FLAG_ATTRIBUTE) != 0U) {
-        if (not this->has_attribute_) {
-            throw VsagException(ErrorType::INVALID_ARGUMENT, "has_attribute_ is false");
-        }
         auto* attribute_data = new AttributeSet[count];
         dataset->AttributeSets(attribute_data);
         auto get_attr_func = [&](int64_t begin, int64_t end) {
@@ -871,11 +911,12 @@ InnerIndexInterface::get_data_by_ids_with_flag(const int64_t* ids,
                 this->GetAttributeSetByInnerId(inner_ids[i], attribute_data + i);
             }
         };
-        if (this->thread_pool_ != nullptr) {
+        if (this->thread_pool_ != nullptr and thread_count > 1) {
             std::vector<std::future<void>> futures;
+            futures.reserve(thread_count);
             for (int64_t i = 0; i < thread_count; ++i) {
-                int64_t begin = i * item_per_thread;
-                int64_t end = std::min(begin + item_per_thread, count);
+                const auto begin = i * item_per_thread;
+                const auto end = std::min(begin + item_per_thread, count);
                 futures.emplace_back(this->thread_pool_->GeneralEnqueue(get_attr_func, begin, end));
             }
             for (auto& future : futures) {
@@ -887,9 +928,6 @@ InnerIndexInterface::get_data_by_ids_with_flag(const int64_t* ids,
     }
 
     if ((selected_data_flag & DATA_FLAG_EXTRA_INFO) != 0U) {
-        if (extra_info_size_ == 0) {
-            throw VsagException(ErrorType::INVALID_ARGUMENT, "extra_info_size_ is 0");
-        }
         auto* extra_info =
             reinterpret_cast<char*>(this->allocator_->Allocate(count * extra_info_size_));
         dataset->ExtraInfos(extra_info)->ExtraInfoSize(static_cast<int64_t>(extra_info_size_));
@@ -899,11 +937,12 @@ InnerIndexInterface::get_data_by_ids_with_flag(const int64_t* ids,
                                                      extra_info + i * extra_info_size_);
             }
         };
-        if (this->thread_pool_ != nullptr) {
+        if (this->thread_pool_ != nullptr and thread_count > 1) {
             std::vector<std::future<void>> futures;
+            futures.reserve(thread_count);
             for (int64_t i = 0; i < thread_count; ++i) {
-                int64_t begin = i * item_per_thread;
-                int64_t end = std::min(begin + item_per_thread, count);
+                const auto begin = i * item_per_thread;
+                const auto end = std::min(begin + item_per_thread, count);
                 futures.emplace_back(
                     this->thread_pool_->GeneralEnqueue(get_extra_info_func, begin, end));
             }
@@ -982,41 +1021,55 @@ InnerIndexInterface::analyze_quantizer(JsonType& stats,
         logger::info("analyze_quantizer: sample_data_size = {}, topk = {}", sample_data_size, topk);
         float bias_ratio = 0.0F;
         float inversion_count_rate = 0.0F;
+        JsonType coarse_param;
+        if (not search_param.empty() && search_param != "default") {
+            coarse_param = JsonType::Parse(search_param);
+            CHECK_ARGUMENT(coarse_param.IsObject(), "search parameters must be a JSON object");
+        }
+        const auto index_name = this->GetName();
+        const bool has_valid_search_param =
+            not coarse_param.Contains(index_name) || coarse_param[index_name].IsObject();
+        CHECK_ARGUMENT(has_valid_search_param,
+                       fmt::format("search parameters for {} must be a JSON object", index_name));
+        coarse_param[index_name][SEARCH_PARAM_ENABLE_REORDER].SetBool(false);
+        const auto coarse_param_str = coarse_param.Dump();
         for (uint64_t i = 0; i < sample_data_size; ++i) {
             float tmp_bias_ratio = 0.0F;
             float tmp_inversion_count_rate = 0.0F;
-            this->use_reorder_ = false;
             const auto* query_data = data + i * dim_;
             auto query = Dataset::Make();
             FilterPtr filter = nullptr;
             query->Owner(false)->NumElements(1)->Float32Vectors(query_data)->Dim(dim_);
-            auto search_result = this->KnnSearch(query, topk, search_param, filter);
-            this->use_reorder_ = true;
+            auto search_result = this->KnnSearch(query, topk, coarse_param_str, filter);
             auto distance_result = this->CalcDistancesById(
                 query_data, search_result->GetIds(), search_result->GetDim());
             const auto* ground_distances = distance_result->GetDistances();
             const auto* approximate_distances = search_result->GetDistances();
-            for (int64_t j = 0; j < topk; ++j) {
+            const auto result_count = search_result->GetDim();
+            CHECK_ARGUMENT(result_count > 0,
+                           "analysis search returned no candidates for a non-empty index");
+            for (int64_t j = 0; j < result_count; ++j) {
                 if (ground_distances[j] > 0) {
                     tmp_bias_ratio += std::abs(approximate_distances[j] - ground_distances[j]) /
                                       ground_distances[j];
                 }
             }
-            tmp_bias_ratio /= static_cast<float>(topk);
+            tmp_bias_ratio /= static_cast<float>(result_count);
             bias_ratio += tmp_bias_ratio;
             // calculate inversion count rate
             int64_t inversion_count = 0;
-            for (int64_t j = 0; j < search_result->GetDim() - 1; ++j) {
-                for (int64_t k = j + 1; k < search_result->GetDim(); ++k) {
+            for (int64_t j = 0; j < result_count - 1; ++j) {
+                for (int64_t k = j + 1; k < result_count; ++k) {
                     if (ground_distances[j] > ground_distances[k]) {
                         inversion_count++;
                     }
                 }
             }
-            int64_t search_count = search_result->GetDim();
-            tmp_inversion_count_rate =
-                static_cast<float>(inversion_count) /
-                (static_cast<float>(search_count * (search_count - 1)) / 2.0F);
+            if (result_count > 1) {
+                tmp_inversion_count_rate =
+                    static_cast<float>(inversion_count) /
+                    (static_cast<float>(result_count * (result_count - 1)) / 2.0F);
+            }
             inversion_count_rate += tmp_inversion_count_rate;
         }
         stats["quantization_bias_ratio"].SetFloat(bias_ratio /
@@ -1278,6 +1331,34 @@ InnerIndexInterface::validate_range_args(const DatasetPtr& query,
     CHECK_ARGUMENT(radius >= 0.0F, fmt::format("radius({}) must be greater equal than 0", radius));
     CHECK_ARGUMENT(limited_size != 0,
                    fmt::format("limited_size({}) must not be equal to 0", limited_size));
+}
+
+const void*
+InnerIndexInterface::get_data(const DatasetPtr& dataset, int64_t index) const {
+    CHECK_ARGUMENT(index >= 0, "query index must be non-negative");
+    const bool is_sparse = data_type_ == DataTypes::DATA_TYPE_SPARSE;
+    // Guard the `index * dim_` offset before doing any pointer arithmetic.
+    const bool offset_in_range =
+        is_sparse || dim_ == 0 || (dim_ > 0 && index <= std::numeric_limits<int64_t>::max() / dim_);
+    CHECK_ARGUMENT(offset_in_range, "query offset exceeds int64_t range");
+
+    if (data_type_ == DataTypes::DATA_TYPE_FLOAT) {
+        const auto* ptr = dataset->GetFloat32Vectors();
+        return ptr != nullptr ? ptr + index * dim_ : nullptr;
+    }
+    if (data_type_ == DataTypes::DATA_TYPE_INT8) {
+        const auto* ptr = dataset->GetInt8Vectors();
+        return ptr != nullptr ? ptr + index * dim_ : nullptr;
+    }
+    if (data_type_ == DataTypes::DATA_TYPE_FP16 || data_type_ == DataTypes::DATA_TYPE_BF16) {
+        const auto* ptr = dataset->GetFloat16Vectors();
+        return ptr != nullptr ? ptr + index * dim_ : nullptr;
+    }
+    if (data_type_ == DataTypes::DATA_TYPE_SPARSE) {
+        const auto* ptr = dataset->GetSparseVectors();
+        return ptr != nullptr ? ptr + index : nullptr;
+    }
+    throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid data_type in get_data");
 }
 
 }  // namespace vsag

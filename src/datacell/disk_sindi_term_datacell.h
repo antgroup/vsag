@@ -15,10 +15,13 @@
 
 #pragma once
 
+#include <atomic>
 #include <cmath>
+#include <list>
 #include <mutex>
 #include <optional>
 #include <shared_mutex>
+#include <unordered_map>
 #include <vector>
 
 #include "container_types.h"
@@ -54,6 +57,30 @@ public:
     virtual void
     DeserializeTermLayout(StreamReader& reader, uint32_t window_count, uint64_t total_count) = 0;
 
+    void
+    SetCacheCapacity(uint64_t capacity) {
+        std::lock_guard lock(cache_mutex_);
+        cache_capacity_ = capacity;
+        ++cache_generation_;
+        cache_.clear();
+        cache_lru_.clear();
+        cache_bytes_ = 0;
+    }
+
+protected:
+    struct CacheEntry {
+        std::shared_ptr<const TermBuffer> buffer;
+        uint64_t bytes;
+        std::list<uint32_t>::iterator position;
+    };
+    mutable std::mutex cache_mutex_;
+    std::atomic<uint64_t> cache_capacity_{0};
+    std::atomic<uint64_t> cache_generation_{0};
+    mutable uint64_t cache_bytes_{0};
+    mutable std::list<uint32_t> cache_lru_;
+    mutable std::unordered_map<uint32_t, CacheEntry> cache_;
+
+public:
     virtual void
     SetIO(const std::shared_ptr<Reader>& reader) = 0;
 };
@@ -140,30 +167,30 @@ public:
 
 private:
     void
-    InitIO(const IOParamPtr& io_param);
+    init_io(const IOParamPtr& io_param);
 
     const TermBuffer*
-    GetTermBufferNoLock(uint32_t term_id, const QueryTermBuffers& query_term_buffers) const;
+    get_term_buffer_no_lock(uint32_t term_id, const QueryTermBuffers& query_term_buffers) const;
 
     bool
-    InsertHeapByWindowKnn(float* dists,
-                          uint32_t window_id,
-                          const SparseTermComputerPtr& computer,
-                          MaxHeap& heap,
-                          const InnerSearchParam& param,
-                          uint32_t offset_id,
-                          bool with_filter,
-                          const QueryTermBuffers& query_term_buffers,
-                          const uint64_t* filter_callback_remaining) const;
+    insert_heap_by_window_knn(float* dists,
+                              uint32_t window_id,
+                              const SparseTermComputerPtr& computer,
+                              MaxHeap& heap,
+                              const InnerSearchParam& param,
+                              uint32_t offset_id,
+                              bool with_filter,
+                              const QueryTermBuffers& query_term_buffers,
+                              const uint64_t* filter_callback_remaining) const;
 
     bool
-    InsertHeapByDistsKnn(float* dists,
-                         uint32_t dists_size,
-                         MaxHeap& heap,
-                         const InnerSearchParam& param,
-                         uint32_t offset_id,
-                         bool with_filter,
-                         const uint64_t* filter_callback_remaining) const;
+    insert_heap_by_dists_knn(float* dists,
+                             uint32_t dists_size,
+                             MaxHeap& heap,
+                             const InnerSearchParam& param,
+                             uint32_t offset_id,
+                             bool with_filter,
+                             const uint64_t* filter_callback_remaining) const;
 
     template <InnerSearchMode mode, InnerSearchType type>
     bool
@@ -196,7 +223,8 @@ private:
                                float radius,
                                const FilterPtr& filter,
                                const std::optional<float>& threshold,
-                               bool enable_reorder) const;
+                               bool enable_reorder,
+                               ReasoningContext* reasoning_ctx = nullptr) const;
 
     template <InnerSearchType type>
     bool
@@ -208,13 +236,14 @@ private:
                       uint32_t n_candidate,
                       const FilterPtr& filter,
                       const std::optional<float>& threshold,
-                      bool enable_reorder) const;
+                      bool enable_reorder,
+                      ReasoningContext* reasoning_ctx = nullptr) const;
 
     void
-    ValidateBoundLayout(uint64_t payload_size) const;
+    validate_bound_layout(uint64_t payload_size) const;
 
     void
-    ValidateBoundPayloads() const;
+    validate_bound_payloads() const;
 
 private:
     uint32_t term_id_limit_{0};

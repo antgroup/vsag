@@ -260,6 +260,9 @@ PyramidHierarchyParameters::CheckCompatibility(const PyramidHierarchyParameters&
 void
 PyramidParameters::FromJson(const JsonType& json) {
     InnerIndexParameter::FromJson(json);
+    // FromJson replaces the whole sub-struct; keep this ahead of any later field parsing on
+    // AdaptivePruningParameter. Pyramid alpha is validated per hierarchy after construction.
+    adaptive_pruning.FromJson(json);
     // init graph param
     const auto& graph_json = json[GRAPH_KEY];
 
@@ -269,7 +272,13 @@ PyramidParameters::FromJson(const JsonType& json) {
     this->alpha = graph_json[ALPHA_KEY].GetFloat();
     this->max_degree = graph_json[GRAPH_PARAM_MAX_DEGREE_KEY].GetInt();
 
+    this->pipnn_param = PiPNNGraphBuilderParameter{};
     this->graph_type = graph_json[GRAPH_TYPE_KEY].GetString();
+    if (graph_json.Contains(PIPNN_PARAMETER_ADAPTIVE_PRUNING) and
+        graph_json[PIPNN_PARAMETER_ADAPTIVE_PRUNING].GetBool()) {
+        CHECK_ARGUMENT(this->graph_type == GRAPH_TYPE_VALUE_PIPNN,
+                       "pipnn_adaptive_pruning requires graph_type=pipnn");
+    }
     CHECK_ARGUMENT(this->graph_type == GRAPH_TYPE_VALUE_NSW or
                        this->graph_type == GRAPH_TYPE_VALUE_ODESCENT or
                        this->graph_type == GRAPH_TYPE_VALUE_PIPNN,
@@ -374,6 +383,7 @@ JsonType
 PyramidParameters::ToJson() const {
     JsonType json = InnerIndexParameter::ToJson();
     json[NO_BUILD_LEVELS].SetVector(no_build_levels);
+    json.UpdateJson(adaptive_pruning.ToJson());
     json[BASE_CODES_KEY].SetJson(base_codes_param->ToJson());
 
     auto graph_json = graph_param->ToJson();
@@ -414,7 +424,21 @@ PyramidParameters::ToJson() const {
 bool
 PyramidParameters::CheckCompatibility(const ParamPtr& other) const {
     PARAM_CAST_OR_RETURN(PyramidParameters, p, other);
+    CHECK_FIELD_EQ(*this, *p, adaptive_pruning.enabled);
+    if (adaptive_pruning.enabled) {
+        CHECK_FIELD_NEAR(*this, *p, alpha, 1e-6F);
+        CHECK_FIELD_NEAR(*this, *p, adaptive_pruning.adjust_step, 1e-6F);
+        CHECK_FIELD_EQ(*this, *p, adaptive_pruning.apply_to_reverse);
+        CHECK_FIELD_EQ(*this, *p, adaptive_pruning.apply_to_upper);
+    }
+
     CHECK_SUB_PARAM(*this, *p, graph_param);
+    CHECK_FIELD_EQ(*this, *p, pipnn_param.adaptive_pruning);
+    if (pipnn_param.adaptive_pruning) {
+        CHECK_FIELD_EQ(*this, *p, graph_type);
+        CHECK_FIELD_EQ(*this, *p, alpha);
+        CHECK_FIELD_EQ(*this, *p, pipnn_param.adaptive_pruning_adjust_step);
+    }
     CHECK_SUB_PARAM(*this, *p, base_codes_param);
     if (this->has_hierarchies != p->has_hierarchies) {
         logger::error(

@@ -16,6 +16,7 @@
 - [Overview](indexes/README.md)
 - [Index Parameters](resources/index_parameters.md)
 - [HGraph](indexes/hgraph.md)
+  - [Adaptive neighbor pruning](indexes/adaptive_pruning.md)
 - [LazyHGraph](indexes/lazy_hgraph.md)
 - [IVF](indexes/ivf.md)
 - [SINDI](indexes/sindi.md)
@@ -34,12 +35,15 @@
 - [Product Quantization (PQ)](quantization/pq.md)
 - [PQ FastScan](quantization/pqfs.md)
 - [RaBitQ](quantization/rabitq.md)
+- [SAQ](quantization/saq.md)
 - [RaBitQ x+y Split](quantization/rabitq_split.md)
 - [Transform Quantizer (TQ)](advanced/quantization_transform.md)
 
 # Developer Guide
 
 - [Code Structure](development/code_structure.md)
+- [VSAG Lite](development/lite_first.md)
+- [Lite RaBitQ Design](development/lite_rabitq_design.md)
 - [C++ Coding Guide](development/coding_style.md)
 - [New Index Integration Checklist](development/new_index_checklist.md)
 - [Building](development/building.md)
@@ -49,6 +53,7 @@
 
 # Advanced Features
 
+- [Search Reasoning](advanced/search_reasoning.md)
 - [Build and Train](advanced/build_and_train.md)
 - [HGraph Build Cache](advanced/build_cache.md)
 - [Range Search](advanced/range_search.md)
@@ -64,10 +69,12 @@
 - [Per-Search Allocator](advanced/search_allocator.md)
 - [Index Introspection](advanced/introspection.md)
 - [Extensibility](advanced/extensibility.md)
+- [User-Defined IO](advanced/user_defined_io.md)
 - [Graph Enhancement](advanced/enhance_graph.md)
 - [Extra Info](advanced/extra_info.md)
 - [Index Lifecycle Management](advanced/index_lifecycle.md)
 - [HGraph MCI Companion](advanced/hgraph_mci_companion.md)
+- [Random Projection Tree Partitioning](advanced/rpt_partition.md)
 
 # API Reference
 

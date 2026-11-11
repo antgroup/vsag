@@ -34,7 +34,7 @@
 #include "dataset_impl.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/inner_search_param.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "impl/reorder/bucket_reorder.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "inner_string_params.h"
@@ -60,6 +60,7 @@ IVF::KnnSearch(const DatasetPtr& query,
     req.params_str_ = parameters;
     req.threshold_ = ParseSearchThreshold(parameters);
     if (filter != nullptr) {
+        req.enable_filter_ = true;
         req.filter_ = filter;
     }
     return this->SearchWithRequest(req);
@@ -78,6 +79,7 @@ IVF::RangeSearch(const DatasetPtr& query,
     req.limited_size_ = limited_size;
     req.params_str_ = parameters;
     if (filter != nullptr) {
+        req.enable_filter_ = true;
         req.filter_ = filter;
     }
     return this->SearchWithRequest(req);
@@ -214,7 +216,7 @@ IVF::search(const DatasetPtr& query,
         candidate_buckets = partition_strategy_->ClassifyDatasForSearch(query_data, 1, param, &ctx);
     }
     if (reasoning_ctx != nullptr) {
-        reasoning_ctx->RecordBucketSelection(candidate_buckets);
+        reasoning_ctx->RecordBucketSelection(candidate_buckets);  // [reasoning]
     }
     auto computer = bucket_->FactoryComputerForBuckets(
         query_data, candidate_buckets.data(), candidate_buckets.size());
@@ -381,7 +383,7 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
         candidate_buckets = partition_strategy_->ClassifyDatasForSearch(query_data, 1, param, &ctx);
     }
     if (reasoning_ctx != nullptr) {
-        reasoning_ctx->RecordBucketSelection(candidate_buckets);
+        reasoning_ctx->RecordBucketSelection(candidate_buckets);  // [reasoning]
     }
 
     int64_t topk = request.topk_;
@@ -392,19 +394,10 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
         topk *= buckets_per_data_;
     }
 
-    auto search_result = DistanceHeap::MakeInstanceBySize<true, false>(this->allocator_, topk);
     const auto& filter = param.is_inner_id_allowed;
-    Filter* attr_filter = nullptr;
-
-    Vector<InnerIdType> candidate_ids(this->allocator_);
-    Vector<int64_t> candidate_labels(this->allocator_);
-    Vector<float> scores(this->allocator_);
+    const auto topk_u = static_cast<uint64_t>(topk);
     const uint64_t batch_capacity = std::min<uint64_t>(
         request.distance_batch_size_, std::max<uint64_t>(1, this->GetNumElements()));
-    candidate_ids.reserve(batch_capacity);
-    candidate_labels.reserve(batch_capacity);
-    scores.resize(batch_capacity);
-
     auto is_timed_out = [&]() {
         if (param.time_cost == nullptr or not param.time_cost->CheckOvertime()) {
             return false;
@@ -414,88 +407,157 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
         }
         return true;
     };
-
-    auto submit_batch = [&]() {
-        if (candidate_ids.empty()) {
-            return true;
-        }
-        if (is_timed_out()) {
-            return false;
-        }
-        request.distance_batch_func_(
-            candidate_labels.data(), candidate_labels.size(), scores.data());
-        if (ctx.stats != nullptr) {
-            ctx.stats->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
-                                   DistanceEvaluationBackend::UNKNOWN,
-                                   candidate_ids.size());
-        }
-        for (uint64_t i = 0; i < candidate_ids.size(); ++i) {
-            CHECK_ARGUMENT(std::isfinite(scores[i]),
-                           "custom query distance callback must return finite scores");
-            const auto origin_id = candidate_ids[i] / buckets_per_data_;
-            if (filter != nullptr and not filter->CheckValid(origin_id)) {
+    const auto search_thread_count =
+        this->thread_pool_ == nullptr ? 1 : param.parallel_search_thread_count;
+    std::vector<DistHeapPtr> heaps(search_thread_count);
+    std::atomic<uint64_t> cur_bucket_num{0};
+    auto search_func = [&](int64_t thread_id) {
+        auto& search_result = heaps[thread_id];
+        search_result = DistanceHeap::MakeInstanceBySize<true, false>(this->allocator_, topk);
+        auto cur_heap_top = std::numeric_limits<float>::max();
+        Filter* attr_filter = nullptr;
+        Vector<InnerIdType> candidate_ids(this->allocator_);
+        Vector<int64_t> candidate_labels(this->allocator_);
+        Vector<float> scores(this->allocator_);
+        candidate_ids.reserve(batch_capacity);
+        candidate_labels.reserve(batch_capacity);
+        scores.resize(batch_capacity);
+        auto submit_batch = [&]() {
+            if (candidate_ids.empty()) {
+                return true;
+            }
+            if (is_timed_out()) {
+                return false;
+            }
+            request.distance_batch_func_(
+                candidate_labels.data(), candidate_labels.size(), scores.data());
+            if (ctx.stats != nullptr) {
+                ctx.stats->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
+                                       DistanceEvaluationBackend::UNKNOWN,
+                                       candidate_ids.size());
+            }
+            for (uint64_t i = 0; i < candidate_ids.size(); ++i) {
+                CHECK_ARGUMENT(std::isfinite(scores[i]),
+                               "custom query distance callback must return finite scores");
+                const auto origin_id = candidate_ids[i] / buckets_per_data_;
+                // Scored candidates were visited even when the heap gate skips the filter.
                 if (reasoning_ctx != nullptr) {
-                    reasoning_ctx->RecordFilterReject(origin_id);
+                    reasoning_ctx->RecordVisit(origin_id, scores[i], 0);
                 }
+                if (search_result->Size() == topk_u and scores[i] >= cur_heap_top) {
+                    continue;
+                }
+                if (filter != nullptr and not filter->CheckValid(origin_id)) {
+                    if (reasoning_ctx != nullptr) {
+                        reasoning_ctx->RecordFilterReject(origin_id);  // [reasoning]
+                    }
+                    continue;
+                }
+                search_result->Push(scores[i], candidate_ids[i]);
+                while (search_result->Size() > static_cast<uint64_t>(topk)) {
+                    if (reasoning_ctx != nullptr) {
+                        reasoning_ctx->RecordEviction(
+                            search_result->Top().second / buckets_per_data_, 0);
+                    }
+                    search_result->Pop();
+                }
+                if (search_result->Size() == topk_u) {
+                    cur_heap_top = search_result->Top().first;
+                }
+            }
+            candidate_ids.clear();
+            candidate_labels.clear();
+            return true;
+        };
+
+        bool timed_out = false;
+        for (auto cursor = cur_bucket_num.fetch_add(1); cursor < candidate_buckets.size();
+             cursor = cur_bucket_num.fetch_add(1)) {
+            const auto bucket_id = candidate_buckets[cursor];
+            if (is_timed_out()) {
+                timed_out = true;
+                break;
+            }
+            if (bucket_id == INVALID_BUCKET_ID) {
                 continue;
             }
-            if (reasoning_ctx != nullptr) {
-                reasoning_ctx->RecordVisit(origin_id, scores[i], 0);
+            if (not param.executors.empty()) {
+                param.executors[thread_id]->Clear();
+                attr_filter = param.executors[thread_id]->Run(bucket_id);
             }
-            search_result->Push(scores[i], candidate_ids[i]);
-            while (search_result->Size() > static_cast<uint64_t>(topk)) {
+            const auto bucket_size = bucket_->GetBucketSize(bucket_id);
+            const auto* ids = bucket_->GetInnerIds(bucket_id);
+            for (InnerIdType offset = 0; offset < bucket_size; ++offset) {
+                const auto inner_id = ids[offset];
+                if (inner_id == std::numeric_limits<InnerIdType>::max()) {
+                    continue;
+                }
+                const auto origin_id = inner_id / buckets_per_data_;
+                if (attr_filter != nullptr and not attr_filter->CheckValid(offset)) {
+                    if (reasoning_ctx != nullptr) {
+                        reasoning_ctx->RecordFilterReject(origin_id);  // [reasoning]
+                    }
+                    continue;
+                }
+                candidate_ids.push_back(inner_id);
+                candidate_labels.push_back(label_table_->GetLabelById(origin_id));
+                if (candidate_ids.size() == batch_capacity and not submit_batch()) {
+                    timed_out = true;
+                    break;
+                }
+            }
+            if (timed_out) {
+                break;
+            }
+        }
+        if (not timed_out) {
+            submit_batch();
+        }
+    };
+
+    if (search_thread_count == 1) {
+        search_func(0);
+    } else {
+        std::vector<std::future<void>> futures;
+        // Reserve before submitting: no allocation may lose a live task's future.
+        futures.reserve(search_thread_count);
+        std::exception_ptr error;
+        try {
+            for (int64_t thread_id = 0; thread_id < search_thread_count; ++thread_id) {
+                futures.emplace_back(this->thread_pool_->GeneralEnqueue(search_func, thread_id));
+            }
+        } catch (...) {
+            error = std::current_exception();
+        }
+        // Every submitted task captures this scope. Drain all of them before unwinding,
+        // including when submission or another worker has already failed.
+        for (auto& future : futures) {
+            try {
+                future.get();
+            } catch (...) {
+                if (error == nullptr) {
+                    error = std::current_exception();
+                }
+            }
+        }
+        if (error != nullptr) {
+            std::rethrow_exception(error);
+        }
+    }
+    auto search_result = heaps[0];
+    for (int64_t thread_id = 1; thread_id < search_thread_count; ++thread_id) {
+        const auto& heap = heaps[thread_id];
+        const auto* data = heap->GetData();
+        for (uint64_t i = 0; i < heap->Size(); ++i) {
+            search_result->Push(data[i]);
+            if (search_result->Size() > topk_u) {
                 if (reasoning_ctx != nullptr) {
                     reasoning_ctx->RecordEviction(search_result->Top().second / buckets_per_data_,
-                                                  0);
+                                                  1);
                 }
                 search_result->Pop();
             }
         }
-        candidate_ids.clear();
-        candidate_labels.clear();
-        return true;
-    };
-
-    bool timed_out = false;
-    for (const auto bucket_id : candidate_buckets) {
-        if (is_timed_out()) {
-            timed_out = true;
-            break;
-        }
-        if (bucket_id == INVALID_BUCKET_ID) {
-            continue;
-        }
-        if (not param.executors.empty()) {
-            param.executors[0]->Clear();
-            attr_filter = param.executors[0]->Run(bucket_id);
-        }
-        const auto bucket_size = bucket_->GetBucketSize(bucket_id);
-        const auto* ids = bucket_->GetInnerIds(bucket_id);
-        for (InnerIdType offset = 0; offset < bucket_size; ++offset) {
-            const auto inner_id = ids[offset];
-            if (inner_id == std::numeric_limits<InnerIdType>::max()) {
-                continue;
-            }
-            const auto origin_id = inner_id / buckets_per_data_;
-            if (attr_filter != nullptr and not attr_filter->CheckValid(offset)) {
-                if (reasoning_ctx != nullptr) {
-                    reasoning_ctx->RecordFilterReject(origin_id);
-                }
-                continue;
-            }
-            candidate_ids.push_back(inner_id);
-            candidate_labels.push_back(label_table_->GetLabelById(origin_id));
-            if (candidate_ids.size() == batch_capacity and not submit_batch()) {
-                timed_out = true;
-                break;
-            }
-        }
-        if (timed_out) {
-            break;
-        }
-    }
-    if (not timed_out) {
-        submit_batch();
     }
 
     if (buckets_per_data_ == 1) {
@@ -524,13 +586,22 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
 
 DatasetPtr
 IVF::SearchWithRequest(const SearchRequest& request) const {
-    ValidateSearchThreshold(request.threshold_);
     SearchStatistics stats;
+    auto result = this->search_with_request(request, stats);
+    // Only the public boundary serializes statistics, including all early-return paths.
+    result->Statistics(stats.Dump());
+    return result;
+}
+
+DatasetPtr
+IVF::search_with_request(const SearchRequest& request, SearchStatistics& stats) const {
+    ValidateSearchThreshold(request.threshold_);
     QueryContext ctx{.alloc = request.search_allocator_, .stats = &stats};
 
     bool is_range = (request.mode_ == SearchMode::RANGE_SEARCH);
 
-    auto param = this->create_search_param(request.params_str_, request.filter_);
+    const auto filter = request.enable_filter_ ? request.filter_ : nullptr;
+    auto param = this->create_search_param(request.params_str_, filter);
     const bool use_custom_distance = request.distance_batch_func_ != nullptr;
     if (use_custom_distance) {
         CHECK_ARGUMENT(request.distance_batch_size_ > 0,
@@ -539,8 +610,6 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
         CHECK_ARGUMENT(not param.disable_bucket_scan,
                        "IVF custom query distance does not support disable_bucket_scan");
         CHECK_ARGUMENT(request.topk_ > 0, "topk must be greater than 0");
-        CHECK_ARGUMENT(param.parallel_search_thread_count == 1,
-                       "IVF custom query distance does not support parallel search");
         param.enable_reorder = false;
     }
     param.query_context = &ctx;
@@ -603,7 +672,6 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
         CHECK_ARGUMENT(not request.threshold_.has_value(),
                        "threshold filtering is not supported with disable_bucket_scan");
         auto result = this->route_buckets_only(query, param, ctx);
-        result->Statistics(stats.Dump());
         return result;
     }
 
@@ -649,7 +717,59 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
                 json["ivf"]["parallelism"].SetInt64(1);
             }
             one_request.params_str_ = json.Dump();
-            auto one_result = this->SearchWithRequest(one_request);
+            // Keep each child isolated until its workers finish, then reduce without JSON.
+            SearchStatistics one_stats;
+            auto one_result = this->search_with_request(one_request, one_stats);
+            // Relaxed reads are safe after child workers finish; atomic destination updates
+            // allow sibling reductions to overlap. Preserve legacy wrapping and 64-bit saturation.
+            auto add_legacy_counter = [&](const std::atomic<uint32_t>& child_counter,
+                                          std::atomic<uint32_t>& counter) {
+                counter.fetch_add(child_counter.load(std::memory_order_relaxed),
+                                  std::memory_order_relaxed);
+            };
+            add_legacy_counter(one_stats.dist_cmp, stats.dist_cmp);
+            add_legacy_counter(one_stats.hops, stats.hops);
+            add_legacy_counter(one_stats.io_cnt, stats.io_cnt);
+            add_legacy_counter(one_stats.io_time_ms, stats.io_time_ms);
+            add_legacy_counter(one_stats.reorder_distance_count, stats.reorder_distance_count);
+            add_legacy_counter(one_stats.reorder_candidate_count, stats.reorder_candidate_count);
+            add_legacy_counter(one_stats.reorder_lower_bound_probe_count,
+                               stats.reorder_lower_bound_probe_count);
+            add_legacy_counter(one_stats.rabitq_filter_count, stats.rabitq_filter_count);
+            add_legacy_counter(one_stats.rabitq_full_count, stats.rabitq_full_count);
+            add_legacy_counter(one_stats.rabitq_filter_fallback_full_count,
+                               stats.rabitq_filter_fallback_full_count);
+            add_legacy_counter(one_stats.rabitq_reorder_hint_full_count,
+                               stats.rabitq_reorder_hint_full_count);
+            add_legacy_counter(one_stats.rabitq_reorder_fallback_full_count,
+                               stats.rabitq_reorder_fallback_full_count);
+            add_legacy_counter(one_stats.query_computer_count, stats.query_computer_count);
+            add_legacy_counter(one_stats.parallel_search_fallback_count,
+                               stats.parallel_search_fallback_count);
+
+            auto add_distance_counter = [&](std::atomic<uint64_t>& counter, uint64_t count) {
+                if (SearchStatistics::SaturatingAdd(counter, count)) {
+                    stats.complete.store(false, std::memory_order_relaxed);
+                }
+            };
+            add_distance_counter(stats.distance_evaluations,
+                                 one_stats.distance_evaluations.load(std::memory_order_relaxed));
+            for (uint64_t i = 0; i < stats.distance_evaluations_by_phase.size(); ++i) {
+                add_distance_counter(
+                    stats.distance_evaluations_by_phase[i],
+                    one_stats.distance_evaluations_by_phase[i].load(std::memory_order_relaxed));
+            }
+            for (uint64_t i = 0; i < stats.distance_evaluations_by_backend.size(); ++i) {
+                add_distance_counter(
+                    stats.distance_evaluations_by_backend[i],
+                    one_stats.distance_evaluations_by_backend[i].load(std::memory_order_relaxed));
+            }
+            if (one_stats.is_timeout.load(std::memory_order_relaxed)) {
+                stats.is_timeout.store(true, std::memory_order_relaxed);
+            }
+            if (not one_stats.complete.load(std::memory_order_relaxed)) {
+                stats.complete.store(false, std::memory_order_relaxed);
+            }
             const auto count = std::min(request.topk_, one_result->GetDim());
             if (count > 0) {
                 std::copy_n(one_result->GetIds(), count, ids + query_idx * request.topk_);
@@ -678,7 +798,6 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
                           ->Ids(ids)
                           ->Distances(distances)
                           ->Owner(true, alloc);
-        result->Statistics(stats.Dump());
         return result;
     }
 
@@ -697,12 +816,17 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     }
     std::shared_ptr<ReasoningContext> reasoning_ctx;
     if (not request.expected_labels_.empty()) {
-        reasoning_ctx = std::make_shared<ReasoningContext>(this->allocator_);
+        auto* reasoning_allocator = select_query_allocator(ctx.alloc, this->allocator_);
+        reasoning_ctx = std::make_shared<ReasoningContext>(reasoning_allocator);
         reasoning_ctx->SetSearchParams(
-            request.topk_, "IVF", use_reorder_, request.filter_ != nullptr);
+            request.mode_ == SearchMode::RANGE_SEARCH ? -1 : request.topk_,
+            "IVF",
+            use_reorder_,
+            filter != nullptr,
+            request.mode_ == SearchMode::RANGE_SEARCH);
 
-        UnorderedMap<int64_t, InnerIdType> label_to_inner_id(this->allocator_);
-        std::vector<std::tuple<InnerIdType, BucketIdType, InnerIdType>> locations;
+        UnorderedMap<int64_t, InnerIdType> label_to_inner_id(reasoning_allocator);
+        Vector<std::tuple<InnerIdType, BucketIdType, InnerIdType>> locations(reasoning_allocator);
         {
             std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
             locations.reserve(request.expected_labels_.size());
@@ -716,12 +840,13 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             }
         }
 
-        Vector<int64_t> expected_labels_vec(this->allocator_);
+        Vector<int64_t> expected_labels_vec(reasoning_allocator);
         expected_labels_vec.reserve(request.expected_labels_.size());
         for (const auto& label : request.expected_labels_) {
             expected_labels_vec.push_back(label);
         }
-        reasoning_ctx->InitializeExpectedTargets(expected_labels_vec, label_to_inner_id);
+        reasoning_ctx->InitializeExpectedTargets(expected_labels_vec,
+                                                 label_to_inner_id);  // [reasoning]
 
         const auto* query_data = query->GetFloat32Vectors();
         auto computer = this->bucket_->FactoryComputer(query_data);
@@ -731,7 +856,7 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
                 ctx.stats->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
                                        this->bucket_->backend_);
             }
-            reasoning_ctx->SetTrueDistance(inner_id, dist);
+            reasoning_ctx->SetTrueDistance(inner_id, dist);  // [reasoning]
         }
         ctx.reasoning_ctx = reasoning_ctx.get();
     }
@@ -746,12 +871,10 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
         if (search_result == nullptr || search_result->Empty()) {
             auto dataset_results = DatasetImpl::MakeEmptyDataset();
             this->AttachReasoningReport(dataset_results, reasoning_ctx.get());
-            dataset_results->Statistics(stats.Dump());
             return dataset_results;
         }
         auto dataset_results = this->pack_knn_result(search_result, ctx.alloc);
         this->AttachReasoningReport(dataset_results, reasoning_ctx.get());
-        dataset_results->Statistics(stats.Dump());
         return dataset_results;
     }
 
@@ -780,12 +903,10 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
                                   reasoning_ctx.get(),
                                   std::nullopt,
                                   bucket_computer);
-            result->Statistics(stats.Dump());
             this->AttachReasoningReport(result, reasoning_ctx.get());
             return result;
         }
         auto dataset_results = this->pack_knn_result(search_result, ctx.alloc);
-        dataset_results->Statistics(stats.Dump());
         this->AttachReasoningReport(dataset_results, reasoning_ctx.get());
         return dataset_results;
     }
@@ -820,7 +941,6 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
                               bucket_computer);
         result = FilterDatasetByThreshold(result, request.threshold_, ctx.alloc, request.topk_);
         AttachReasoningReport(result, reasoning_ctx.get());
-        result->Statistics(stats.Dump());
         return result;
     }
     filter_search_result_by_threshold(
@@ -828,12 +948,10 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     if (search_result == nullptr || search_result->Empty()) {
         auto dataset_results = DatasetImpl::MakeEmptyDataset();
         this->AttachReasoningReport(dataset_results, reasoning_ctx.get());
-        dataset_results->Statistics(stats.Dump());
         return dataset_results;
     }
 
     auto dataset_results = this->pack_knn_result(search_result, ctx.alloc);
-    dataset_results->Statistics(stats.Dump());
 
     this->AttachReasoningReport(dataset_results, reasoning_ctx.get());
 
@@ -848,7 +966,8 @@ IVF::AttachReasoningReport(const DatasetPtr& dataset_results,
     }
     auto count = dataset_results->GetDim();
     if (count > 0 and dataset_results->GetIds() != nullptr) {
-        Vector<InnerIdType> result_inner_ids(static_cast<uint64_t>(count), this->allocator_);
+        Vector<InnerIdType> result_inner_ids(static_cast<uint64_t>(count),
+                                             reasoning_ctx->GetAllocator());
         {
             std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
             for (int64_t i = 0; i < count; ++i) {
@@ -856,9 +975,9 @@ IVF::AttachReasoningReport(const DatasetPtr& dataset_results,
                     this->label_table_->GetIdByLabel(dataset_results->GetIds()[i]);
             }
         }
-        reasoning_ctx->MarkResult(result_inner_ids);
+        reasoning_ctx->MarkResult(result_inner_ids);  // [reasoning]
     }
-    reasoning_ctx->DiagnoseExpectedTargets();
-    dataset_results->Reasoning(reasoning_ctx->GenerateReport());
+    reasoning_ctx->DiagnoseExpectedTargets();                     // [reasoning]
+    dataset_results->Reasoning(reasoning_ctx->GenerateReport());  // [reasoning]
 }
 }  // namespace vsag

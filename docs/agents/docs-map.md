@@ -24,7 +24,7 @@ locate the right document below first.
 - `tests/`: functional tests
 - `examples/cpp/`, `examples/python/`, `examples/typescript/`: example programs
 - `python/`: `pyvsag` packaging and Python-side code
-- `python_bindings/`: pybind11 bindings
+- `python/`: pyvsag cffi layer and packaging
 - `docs/`: design and user-facing documentation (see below)
 - `tools/`: utility and analysis tools
 

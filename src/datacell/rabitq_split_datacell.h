@@ -31,6 +31,7 @@
 #include "common.h"
 #include "flatten_interface.h"
 #include "flatten_optimized_build_interface.h"
+#include "flatten_pairwise_distance_interface.h"
 #include "impl/cluster/kmeans_cluster.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "inner_string_params.h"
@@ -46,10 +47,13 @@
 #include "quantization/rabitq_quantization/rabitq_quantizer.h"
 #include "query_context.h"
 #include "rabitq_fused_code_storage.h"
+#include "simd/bf16_simd.h"
+#include "simd/fp16_simd.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "type_helpers.h"
 #include "utils/byte_buffer.h"
+#include "utils/half_input.h"
 #include "utils/timer.h"
 
 namespace vsag {
@@ -156,7 +160,7 @@ public:
     CopySplitCodes(InnerIdType id, uint8_t* one_bit_code, uint8_t* supplement_code) const = 0;
 
     virtual bool
-    DecodeFusedById(InnerIdType id, float* data) const = 0;
+    DecodeFusedById(InnerIdType id, float* data, bool apply_inverse_rotation = true) const = 0;
 
     virtual void
     QueryWithDistanceLowerBoundAndFilterIP(float* result_dists,
@@ -264,6 +268,7 @@ template <MetricType metric,
           typename QuantizerT = RaBitQuantizer<metric>>
 class RaBitQSplitDataCell : public FlattenInterface,
                             public FlattenOptimizedBuildInterface,
+                            public FlattenPairwiseDistanceInterface,
                             public RaBitQSplitResidualOriginalQueryInterface,
                             public RaBitQSplitDataCellInterface {
 public:
@@ -283,6 +288,68 @@ public:
         ByteBuffer scalar_code_;
         uint64_t code_sum_{0};
     };
+
+    class PairwiseDistanceComputer final : public FlattenPairwiseDistanceComputer {
+    public:
+        explicit PairwiseDistanceComputer(RaBitQSplitDataCell& source)
+            : source_(source),
+              codes_(source.allocator_),
+              packed_code_(source.code_size_, source.allocator_) {
+        }
+
+        float
+        Compute(InnerIdType id1, InnerIdType id2, QueryContext* ctx = nullptr) override {
+            // Keep both entries alive if fetching the second ID evicts the first one.
+            const auto left = acquire(id1);
+            const auto right = acquire(id2);
+            const float distance =
+                source_.bottom_quantizer().ComputeScalarCodesDistance(left->scalar_code_.data,
+                                                                      left->code_sum_,
+                                                                      right->scalar_code_.data,
+                                                                      right->code_sum_);
+            source_.add_distance_evaluations(ctx, 1);
+            return distance;
+        }
+
+    private:
+        std::shared_ptr<OptimizedBuildComputer>
+        acquire(InnerIdType id) {
+            const auto found = codes_.find(id);
+            if (found != codes_.end()) {
+                return found->second;
+            }
+            auto code = std::make_shared<OptimizedBuildComputer>(
+                source_.bottom_quantizer().GetScalarCodeSize(), source_.allocator_);
+            CHECK_ARGUMENT(source_.GetCodesById(id, packed_code_.data),
+                           "failed to read split RaBitQ pairwise code");
+            code->code_sum_ = source_.bottom_quantizer().UnpackScalarCode(packed_code_.data,
+                                                                          code->scalar_code_.data);
+            if (codes_.size() == CACHE_CAPACITY) {
+                codes_.erase(order_[next_]);
+            }
+            codes_.emplace(id, code);
+            order_[next_] = id;
+            next_ = (next_ + 1) % CACHE_CAPACITY;
+            return code;
+        }
+
+        // Bound auxiliary memory independently of the index size. FIFO eviction keeps the
+        // cache local to one search/connection, without retaining stale codes across Add calls.
+        static constexpr uint64_t CACHE_CAPACITY = 512;
+        RaBitQSplitDataCell& source_;
+        UnorderedMap<InnerIdType, std::shared_ptr<OptimizedBuildComputer>> codes_;
+        ByteBuffer packed_code_;
+        std::array<InnerIdType, CACHE_CAPACITY> order_{};
+        uint64_t next_{0};
+    };
+
+    std::unique_ptr<FlattenPairwiseDistanceComputer>
+    FactoryPairwiseDistanceComputer() override {
+        if (this->optimized_build_active_ or this->fused_code_storage_ != nullptr) {
+            return nullptr;
+        }
+        return std::make_unique<PairwiseDistanceComputer>(*this);
+    }
 
     class FusedComputer final : public ComputerInterface {
     public:
@@ -315,7 +382,9 @@ public:
                                  const IOParamPtr& supplement_io_param,
                                  const IndexCommonParam& common_param)
         : common_param_(common_param), allocator_(common_param.allocator_.get()) {
-        this->quantizer_ = std::make_shared<QuantizerT>(quantization_param, common_param);
+        auto quantizer_common = common_param;
+        quantizer_common.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+        this->quantizer_ = std::make_shared<QuantizerT>(quantization_param, quantizer_common);
         if (not this->bottom_quantizer().SupportSplitCodeStorage()) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
                                 "rabitq split data cell requires rabitq_version=split, "
@@ -590,13 +659,17 @@ public:
         {
             std::lock_guard lock(this->mutex_);
             if (idx == std::numeric_limits<InnerIdType>::max()) {
-                idx = this->total_count_;
+                idx = this->total_count_.load(std::memory_order_relaxed);
             }
-            this->total_count_ = std::max(this->total_count_, idx + 1);
+            this->total_count_.store(
+                std::max(this->total_count_.load(std::memory_order_relaxed), idx + 1),
+                std::memory_order_release);
         }
         ByteBuffer full_code(this->code_size_, this->allocator_);
         ByteBuffer supplement_code(this->supplement_code_size_, this->allocator_);
-        this->quantizer_->EncodeOne(static_cast<const float*>(vector), full_code.data);
+        Vector<float> input_scratch(this->allocator_);
+        const float* input = this->prepare_dense_input(vector, 1, input_scratch);
+        this->quantizer_->EncodeOne(input, full_code.data);
         this->bottom_quantizer().SplitCode(full_code.data, filter_code, supplement_code.data);
         this->supplement_layout_->Write(idx, supplement_code.data);
     }
@@ -612,13 +685,17 @@ public:
         {
             std::lock_guard lock(this->mutex_);
             if (idx == std::numeric_limits<InnerIdType>::max()) {
-                idx = this->total_count_;
+                idx = this->total_count_.load(std::memory_order_relaxed);
             }
-            this->total_count_ = std::max(this->total_count_, idx + 1);
+            this->total_count_.store(
+                std::max(this->total_count_.load(std::memory_order_relaxed), idx + 1),
+                std::memory_order_release);
         }
         ByteBuffer full_code(this->code_size_, this->allocator_);
         ByteBuffer supplement_code(this->supplement_code_size_, this->allocator_);
-        this->quantizer_->EncodeOne(static_cast<const float*>(vector), full_code.data);
+        Vector<float> input_scratch(this->allocator_);
+        const float* input = this->prepare_dense_input(vector, 1, input_scratch);
+        this->quantizer_->EncodeOne(input, full_code.data);
         this->bottom_quantizer().SplitCode(full_code.data, filter_code, supplement_code.data);
         *full_add = std::numeric_limits<float>::quiet_NaN();
         this->bottom_quantizer().ComputeResidualFullFactor(
@@ -844,7 +921,7 @@ public:
 
     [[nodiscard]] bool
     HasFilterCodes() const override {
-        if (this->total_count_ == 0) {
+        if (this->total_count_.load(std::memory_order_relaxed) == 0) {
             return false;
         }
         ByteBuffer filter_code(this->one_bit_code_size_, this->allocator_);
@@ -856,16 +933,17 @@ public:
         auto ptr = std::dynamic_pointer_cast<
             RaBitQSplitDataCell<metric, OneBitIOTmpl, SupplementIOTmpl, QuantizerT>>(other);
         CHECK_ARGUMENT(ptr != nullptr, "merge supplement codes datacell type mismatch");
-        const InnerIdType final_count = bias + ptr->total_count_;
-        const InnerIdType required_count = std::max(this->total_count_, final_count);
+        const InnerIdType final_count = bias + ptr->total_count_.load(std::memory_order_relaxed);
+        const InnerIdType required_count =
+            std::max(this->total_count_.load(std::memory_order_relaxed), final_count);
         this->supplement_layout_->Resize(required_count);
         ByteBuffer supplement_code(this->supplement_code_size_, this->allocator_);
-        for (InnerIdType id = 0; id < ptr->total_count_; ++id) {
+        for (InnerIdType id = 0; id < ptr->total_count_.load(std::memory_order_relaxed); ++id) {
             CHECK_ARGUMENT(ptr->supplement_layout_->Read(id, supplement_code.data),
                            "failed to read source supplement code");
             this->supplement_layout_->Write(bias + id, supplement_code.data);
         }
-        this->total_count_ = required_count;
+        this->total_count_.store(required_count, std::memory_order_release);
         this->max_capacity_ = std::max(this->max_capacity_, required_count);
     }
 
@@ -1397,7 +1475,8 @@ public:
             return this->FactoryFusedComputer(query);
         }
         auto computer = this->quantizer_->FactoryComputer();
-        computer->SetQuery(static_cast<const float*>(query));
+        Vector<float> input_scratch(this->allocator_);
+        computer->SetQuery(this->prepare_dense_input(query, 1, input_scratch));
         return computer;
     }
 
@@ -1467,7 +1546,8 @@ public:
     void
     Train(const void* data, uint64_t count) override {
         if (this->quantizer_) {
-            this->quantizer_->Train(static_cast<const float*>(data), count);
+            Vector<float> input_scratch(this->allocator_);
+            this->quantizer_->Train(this->prepare_dense_input(data, count, input_scratch), count);
         }
     }
 
@@ -1510,7 +1590,8 @@ public:
 
         // Finalize workers write disjoint IDs, but the backing IO must already be fully sized so
         // no worker enters a concurrent reallocation path.
-        const InnerIdType final_capacity = std::max(this->max_capacity_, this->total_count_);
+        const InnerIdType final_capacity =
+            std::max(this->max_capacity_, this->total_count_.load(std::memory_order_relaxed));
         if (not this->external_filter_code_storage_) {
             this->x_bit_layout_->Resize(final_capacity);
         }
@@ -1537,14 +1618,17 @@ public:
 
         const auto& thread_pool = this->optimized_build_context_.thread_pool;
         const uint64_t worker_count = std::min<uint64_t>(
-            this->optimized_build_context_.thread_count, static_cast<uint64_t>(this->total_count_));
+            this->optimized_build_context_.thread_count,
+            static_cast<uint64_t>(this->total_count_.load(std::memory_order_relaxed)));
         constexpr bool supports_parallel_finalize = not std::is_same_v<OneBitIOTmpl, MMapIO> and
                                                     not std::is_same_v<SupplementIOTmpl, MMapIO>;
         // MMapIO writes update shared logical size state even after Resize, so disjoint writes are
         // not thread-safe for that backend.
         if (thread_pool != nullptr and worker_count > 1 and supports_parallel_finalize) {
             const uint64_t block_size =
-                (static_cast<uint64_t>(this->total_count_) + worker_count - 1) / worker_count;
+                (static_cast<uint64_t>(this->total_count_.load(std::memory_order_relaxed)) +
+                 worker_count - 1) /
+                worker_count;
             std::vector<std::future<void>> futures;
             futures.reserve(worker_count);
             auto wait_futures = [&futures]() {
@@ -1566,8 +1650,10 @@ public:
                 }
             };
             try {
-                for (uint64_t begin = 0; begin < this->total_count_; begin += block_size) {
-                    const uint64_t end = std::min<uint64_t>(begin + block_size, this->total_count_);
+                for (uint64_t begin = 0; begin < this->total_count_.load(std::memory_order_relaxed);
+                     begin += block_size) {
+                    const uint64_t end = std::min<uint64_t>(
+                        begin + block_size, this->total_count_.load(std::memory_order_relaxed));
                     futures.emplace_back(
                         thread_pool->GeneralEnqueue(finalize_range,
                                                     static_cast<InnerIdType>(begin),
@@ -1583,7 +1669,7 @@ public:
             }
             wait_futures();
         } else {
-            finalize_range(0, this->total_count_);
+            finalize_range(0, this->total_count_.load(std::memory_order_relaxed));
         }
 
         this->optimized_build_active_ = false;
@@ -1612,56 +1698,156 @@ public:
     void
     InsertVector(const void* vector,
                  InnerIdType idx = std::numeric_limits<InnerIdType>::max()) override {
-        {
-            std::lock_guard lock(this->mutex_);
-            if (idx == std::numeric_limits<InnerIdType>::max()) {
-                idx = this->total_count_;
-            }
-            // Optimized-build workers write disjoint IDs without locking, so both temporary
-            // arrays must be fully sized before the workers start.
-            CHECK_ARGUMENT(
-                not this->optimized_build_active_ or
-                    static_cast<uint64_t>(idx) < this->optimized_build_code_sums_->size(),
-                "optimized RaBitQ build storage must be resized before inserting vectors");
-            this->total_count_ = std::max(this->total_count_, idx + 1);
-        }
-        if (this->fused_code_storage_ != nullptr and not this->optimized_build_active_) {
-            return;
-        }
-        this->write_encoded_vector(static_cast<const float*>(vector), idx);
+        Vector<float> input_scratch(this->allocator_);
+        this->insert_vector_with_scratch(vector, idx, input_scratch);
     }
 
     bool
     UpdateVector(const void* vector,
                  InnerIdType idx = std::numeric_limits<InnerIdType>::max()) override {
-        if (idx >= this->total_count_) {
+        if (idx >= this->total_count_.load(std::memory_order_acquire)) {
             return false;
         }
         if (this->fused_code_storage_ != nullptr) {
             return true;
         }
         std::lock_guard lock(this->mutex_);
-        this->write_encoded_vector(static_cast<const float*>(vector), idx);
+        Vector<float> input_scratch(this->allocator_);
+        this->write_encoded_vector(this->prepare_dense_input(vector, 1, input_scratch), idx);
         return true;
     }
 
     void
     BatchInsertVector(const void* vectors, InnerIdType count, InnerIdType* idx_vec) override {
-        auto dim = quantizer_->GetDim();
+        const auto stride =
+            static_cast<uint64_t>(this->common_param_.dim_) * this->dense_input_element_size();
+        // Reuse one decoded row, not a whole-batch FP32 expansion. FLOAT input leaves
+        // this vector empty and therefore adds no input-conversion allocation.
+        Vector<float> input_scratch(this->allocator_);
         for (InnerIdType i = 0; i < count; ++i) {
             auto idx = idx_vec == nullptr ? std::numeric_limits<InnerIdType>::max() : idx_vec[i];
-            this->InsertVector(static_cast<const float*>(vectors) + dim * i, idx);
+            this->insert_vector_with_scratch(
+                static_cast<const uint8_t*>(vectors) + stride * i, idx, input_scratch);
+        }
+    }
+
+    // Pair-distance residual codes share the rotated centers used by query scoring. Cache
+    // only per-center sums: a pair table would require quadratic space for large K.
+    void
+    refresh_fused_cluster_stats() {
+        const uint64_t cluster_count = FusedClusterCount();
+        const uint64_t dim = static_cast<uint64_t>(common_param_.dim_);
+        fused_centroid_sums_.assign(cluster_count, 0.0F);
+        for (uint64_t i = 0; i < cluster_count; ++i) {
+            const float* centroid_i = fused_rotated_centroids_.data() + i * dim;
+            float sum = 0.0F;
+            for (uint64_t d = 0; d < dim; ++d) {
+                sum += centroid_i[d];
+            }
+            fused_centroid_sums_[i] = sum;
+        }
+    }
+
+    // Code-domain pair distance for fused codes; false when the layout is not the
+    // HNSW-compatible 1 + 7 codec, in which case the reconstruction path is used.
+    bool
+    compute_fused_pair_distance(InnerIdType id1, InnerIdType id2, float* distance) const {
+        if constexpr (metric != MetricType::METRIC_TYPE_IP and
+                      metric != MetricType::METRIC_TYPE_L2SQR) {
+            return false;
+        }
+        const uint64_t dim = static_cast<uint64_t>(common_param_.dim_);
+        // The code-domain kernels unpack whole 64-lane blocks; other dimensions (and other
+        // codec layouts) keep using the float reconstruction path.
+        if (fused_code_storage_ == nullptr or FusedClusterCount() == 0 or
+            fused_centroid_sums_.size() != FusedClusterCount() or
+            fused_rotated_centroids_.size() != uint64_t{FusedClusterCount()} * dim or
+            (dim & 63U) != 0U or bottom_quantizer().FilterBits() != 1 or
+            bottom_quantizer().ReorderBits() != 7) {
+            return false;
+        }
+        RaBitQFusedCodeView view1;
+        RaBitQFusedCodeView view2;
+        if (not fused_code_storage_->GetFusedCodeView(id1, view1) or
+            not fused_code_storage_->GetFusedCodeView(id2, view2) or
+            view1.cluster_id >= FusedClusterCount() or view2.cluster_id >= FusedClusterCount()) {
+            return false;
+        }
+        if constexpr (metric == MetricType::METRIC_TYPE_IP) {
+            const float centroid_ip = FP32ComputeIP(
+                fused_rotated_centroids_.data() + static_cast<uint64_t>(view1.cluster_id) * dim,
+                fused_rotated_centroids_.data() + static_cast<uint64_t>(view2.cluster_id) * dim,
+                dim);
+            return bottom_quantizer().ComputeFusedPairIP(
+                view1.one_bit_code,
+                view1.supplement_code,
+                fused_rotated_centroids_.data() + static_cast<uint64_t>(view1.cluster_id) * dim,
+                fused_centroid_sums_[view1.cluster_id],
+                view2.one_bit_code,
+                view2.supplement_code,
+                fused_rotated_centroids_.data() + static_cast<uint64_t>(view2.cluster_id) * dim,
+                fused_centroid_sums_[view2.cluster_id],
+                centroid_ip,
+                distance);
+        } else {
+            const bool same_cluster = view1.cluster_id == view2.cluster_id;
+            // c1 - c2 is derived here rather than tabulated for every cluster pair: that table
+            // would cost cluster_count^2 * dim floats (hundreds of MB for a few hundred clusters
+            // at dim 1024), while one subtraction pass over dim per cross-cluster pair is small
+            // next to the pair distance itself.
+            const float* centroid_diff = nullptr;
+            float centroid_diff_sq = 0.0F;
+            if (not same_cluster) {
+                // Per-thread scratch does not mutate this datacell. Retain the largest dimension
+                // seen by this thread to avoid per-pair allocation; release it at thread exit.
+                thread_local std::vector<float> diff_scratch;
+                if (diff_scratch.size() < dim) {
+                    diff_scratch.resize(dim);
+                }
+                const float* centroid1 =
+                    fused_rotated_centroids_.data() + static_cast<uint64_t>(view1.cluster_id) * dim;
+                const float* centroid2 =
+                    fused_rotated_centroids_.data() + static_cast<uint64_t>(view2.cluster_id) * dim;
+                float sq = 0.0F;
+                for (uint64_t d = 0; d < dim; ++d) {
+                    const float delta = centroid1[d] - centroid2[d];
+                    diff_scratch[d] = delta;
+                    sq += delta * delta;
+                }
+                centroid_diff = diff_scratch.data();
+                centroid_diff_sq = sq;
+            }
+            const float centroid_diff_sum =
+                fused_centroid_sums_[view1.cluster_id] - fused_centroid_sums_[view2.cluster_id];
+            return bottom_quantizer().ComputeFusedPairL2Difference(view1.one_bit_code,
+                                                                   view1.supplement_code,
+                                                                   view2.one_bit_code,
+                                                                   view2.supplement_code,
+                                                                   centroid_diff_sq,
+                                                                   centroid_diff_sum,
+                                                                   centroid_diff,
+                                                                   distance);
         }
     }
 
     float
     ComputePairVectors(InnerIdType id1, InnerIdType id2) override {
         if (this->fused_code_storage_ != nullptr and not this->optimized_build_active_) {
+            // Cheapest path first: the HNSW-compatible 1 + 7 codec can be compared directly in
+            // the code domain, without reconstructing either float vector.
+            float code_domain_distance = 0.0F;
+            if (this->compute_fused_pair_distance(id1, id2, &code_domain_distance)) {
+                return code_domain_distance;
+            }
+            // Pairwise distances only ever compare one distance against another, and the inverse
+            // rotation is a conformal map. Reconstructing the rotated-domain vectors and skipping
+            // the rotation therefore preserves every pruning decision while removing the
+            // transform from the hottest path of construction.
             Vector<float> vector1(this->common_param_.dim_, 0.0F, this->allocator_);
             Vector<float> vector2(this->common_param_.dim_, 0.0F, this->allocator_);
-            CHECK_ARGUMENT(this->DecodeFusedById(id1, vector1.data()),
+            CHECK_ARGUMENT(this->DecodeFusedById(id1, vector1.data(), false),
                            "failed to decode the first fused RaBitQ vector");
-            CHECK_ARGUMENT(this->DecodeFusedById(id2, vector2.data()),
+            CHECK_ARGUMENT(this->DecodeFusedById(id2, vector2.data(), false),
                            "failed to decode the second fused RaBitQ vector");
             const auto dim = static_cast<uint64_t>(this->common_param_.dim_);
             if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
@@ -1887,7 +2073,7 @@ public:
     }
 
     bool
-    DecodeFusedById(InnerIdType id, float* data) const override {
+    DecodeFusedById(InnerIdType id, float* data, bool apply_inverse_rotation) const override {
         if (data == nullptr or fused_code_storage_ == nullptr or id >= this->TotalCount() or
             fused_centroids_.empty()) {
             return false;
@@ -1898,8 +2084,11 @@ public:
             return false;
         }
         return this->FusedQuantizer(view.cluster_id)
-            .DecodeFusedSplitCode(
-                view.one_bit_code, view.supplement_code, IsLegacyHnswFusedCodec(), data);
+            .DecodeFusedSplitCode(view.one_bit_code,
+                                  view.supplement_code,
+                                  IsLegacyHnswFusedCodec(),
+                                  data,
+                                  apply_inverse_rotation);
     }
 
     bool
@@ -2028,10 +2217,16 @@ public:
             return result;
         }
         result->transformed_query_.resize(this->bottom_quantizer().GetDim());
-        this->bottom_quantizer().TransformFusedQuery(static_cast<const float*>(query),
-                                                     result->transformed_query_,
-                                                     result->query_raw_norm_,
-                                                     result->mrq_norm_sqr_);
+        Vector<float> input_scratch(this->allocator_);
+        const float* input = this->prepare_dense_input(query, 1, input_scratch);
+        for (uint64_t i = 0; i < static_cast<uint64_t>(common_param_.dim_); ++i) {
+            if (not std::isfinite(input[i])) {
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    "RaBitQ query must contain only finite values");
+            }
+        }
+        this->bottom_quantizer().TransformFusedQuery(
+            input, result->transformed_query_, result->query_raw_norm_, result->mrq_norm_sqr_);
         if (bottom_quantizer().FilterBits() == 1) {
             this->bottom_quantizer().PrepareHnswFourBitQuery(result->transformed_query_.data(),
                                                              result->hnsw_query_planes_,
@@ -2289,6 +2484,7 @@ public:
         fused_centroids_ = std::move(centers);
         fused_rotated_centroids_ = std::move(rotated);
         fused_centroid_norms_ = std::move(norms);
+        refresh_fused_cluster_stats();
     }
 
     bool
@@ -2303,19 +2499,19 @@ public:
 
     bool
     CompareRawVectorWithId(const void* vector, InnerIdType id) override {
-        if (this->fused_code_storage_ == nullptr) {
-            return FlattenInterface::CompareRawVectorWithId(vector, id);
-        }
         if (vector == nullptr) {
             return false;
+        }
+        Vector<float> input_scratch(this->allocator_);
+        const float* input = this->prepare_dense_input(vector, 1, input_scratch);
+        if (this->fused_code_storage_ == nullptr) {
+            // Encode is an FP32 internal API, including in the base implementation.
+            return FlattenInterface::CompareRawVectorWithId(input, id);
         }
         ByteBuffer one_bit_code(one_bit_code_size_, allocator_);
         ByteBuffer supplement_code(supplement_code_size_, allocator_);
         uint32_t cluster_id = 0;
-        if (not this->EncodeFused(static_cast<const float*>(vector),
-                                  one_bit_code.data,
-                                  supplement_code.data,
-                                  &cluster_id)) {
+        if (not this->EncodeFused(input, one_bit_code.data, supplement_code.data, &cluster_id)) {
             return false;
         }
         RaBitQFusedCodeView stored;
@@ -2485,7 +2681,7 @@ public:
                                 "Merge rabitq split datacell failed: not match type");
         }
 
-        for (InnerIdType i = 0; i < ptr->total_count_; ++i) {
+        for (InnerIdType i = 0; i < ptr->total_count_.load(std::memory_order_relaxed); ++i) {
             ByteBuffer one_bit(one_bit_code_size_, allocator_);
             ByteBuffer supplement(supplement_code_size_, allocator_);
             ptr->x_bit_layout_->Read(i, one_bit.data);
@@ -2494,7 +2690,13 @@ public:
             this->x_bit_layout_->Write(target_id, one_bit.data);
             this->supplement_layout_->Write(target_id, supplement.data);
         }
-        this->total_count_ = std::max(this->total_count_, bias + ptr->total_count_);
+        auto target =
+            static_cast<InnerIdType>(bias + ptr->total_count_.load(std::memory_order_relaxed));
+        auto prev = this->total_count_.load(std::memory_order_relaxed);
+        while (target > prev &&
+               !this->total_count_.compare_exchange_weak(
+                   prev, target, std::memory_order_release, std::memory_order_relaxed)) {
+        }
     }
 
     void
@@ -2550,6 +2752,7 @@ public:
         memory += fused_centroids_.capacity() * sizeof(float);
         memory += fused_rotated_centroids_.capacity() * sizeof(float);
         memory += fused_centroid_norms_.capacity() * sizeof(double);
+        memory += fused_centroid_sums_.capacity() * sizeof(float);
         return memory;
     }
 
@@ -2559,6 +2762,7 @@ public:
     std::vector<float> fused_centroids_;
     std::vector<float> fused_rotated_centroids_;
     std::vector<double> fused_centroid_norms_;
+    std::vector<float> fused_centroid_sums_;
     std::shared_ptr<FixedLayout<OneBitIOTmpl>> x_bit_layout_{nullptr};
     std::shared_ptr<FixedLayout<SupplementIOTmpl>> supplement_layout_{nullptr};
     std::shared_ptr<FixedLayout<MemoryIO>> optimized_build_scalar_layout_{nullptr};
@@ -2615,6 +2819,66 @@ private:
             }
             fused_centroid_norms_[id] = norm;
         }
+        refresh_fused_cluster_stats();
+    }
+
+    void
+    insert_vector_with_scratch(const void* vector, InnerIdType idx, Vector<float>& input_scratch) {
+        {
+            std::lock_guard lock(this->mutex_);
+            if (idx == std::numeric_limits<InnerIdType>::max()) {
+                idx = this->total_count_.load(std::memory_order_relaxed);
+            }
+            // Optimized-build workers write disjoint IDs without locking, so both temporary
+            // arrays must be fully sized before the workers start.
+            CHECK_ARGUMENT(
+                not this->optimized_build_active_ or
+                    static_cast<uint64_t>(idx) < this->optimized_build_code_sums_->size(),
+                "optimized RaBitQ build storage must be resized before inserting vectors");
+            this->total_count_.store(
+                std::max(this->total_count_.load(std::memory_order_relaxed), idx + 1),
+                std::memory_order_release);
+        }
+        if (this->fused_code_storage_ != nullptr and not this->optimized_build_active_) {
+            return;
+        }
+        this->write_encoded_vector(this->prepare_dense_input(vector, 1, input_scratch), idx);
+    }
+
+    // Only raw-input entry points call this helper. Encode/TrainFusedCodec and
+    // transformed-query APIs already receive FP32 and must not convert again.
+    [[nodiscard]] uint64_t
+    dense_input_element_size() const {
+        const auto type = this->common_param_.data_type_;
+        return (type == DataTypes::DATA_TYPE_FP16 or type == DataTypes::DATA_TYPE_BF16)
+                   ? sizeof(uint16_t)
+                   : sizeof(float);
+    }
+
+    const float*
+    prepare_dense_input(const void* data, uint64_t count, Vector<float>& scratch) const {
+        if (this->dense_input_element_size() == sizeof(float) or count == 0) {
+            return static_cast<const float*>(data);
+        }
+        CHECK_ARGUMENT(data != nullptr, "RaBitQ half input must not be null");
+        const auto dim = static_cast<uint64_t>(this->common_param_.dim_);
+        if (dim != 0 and count > std::numeric_limits<uint64_t>::max() / dim) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "RaBitQ input element count overflows");
+        }
+        const auto size = count * dim;
+        CHECK_ARGUMENT(size <= std::numeric_limits<size_t>::max() / sizeof(float),
+                       "RaBitQ converted input size overflows");
+        scratch.resize(size);
+        const auto* bytes = static_cast<const uint8_t*>(data);
+        for (uint64_t i = 0; i < size; ++i) {
+            uint16_t value;
+            std::memcpy(&value, bytes + i * sizeof(value), sizeof(value));
+            scratch[i] = this->common_param_.data_type_ == DataTypes::DATA_TYPE_FP16
+                             ? half_input::FP16ToFloat(value)
+                             : generic::BF16ToFloat(value);
+        }
+        return scratch.data();
     }
 
     static constexpr uint64_t SUPPLEMENT_STORAGE_MAGIC = 0x3150505553514252ULL;

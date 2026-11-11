@@ -72,7 +72,22 @@ request.distance_batch_func_ = [query](const int64_t* ids, uint64_t count, float
 `ivf` 支持带回调的 KNN，但必须提供一个非空的单查询向量。IVF 先以配置的内置 metric 选出
 `scan_buckets_count` 个桶，再对这些桶中的候选调用回调。回调决定候选排序，但无法召回未被选中的
 桶内向量；增大 `scan_buckets_count` 可提高 recall。回调 IVF 不支持范围搜索、`disable_bucket_scan`、
-bucket graph 或并行搜索，这些配置会被拒绝。回调模式会自动关闭精排。其他索引不支持该回调。
+bucket graph，这些配置会被拒绝。回调模式会自动关闭精排。其他索引不支持该回调。
+
+IVF 回调搜索在线程池可用时支持按搜索参数 `parallelism` 执行桶间并行，否则回退到串行。
+例如设置 `{"ivf":{"scan_buckets_count":8,"parallelism":4}}`。
+每个 worker 独立持有属性 Executor、批缓冲和结果堆，处理顺序为
+**属性过滤 → 距离回调 → 局部 top-k 分数门槛判断 → 普通 filter → 入堆**。
+只有局部堆未满或分数有机会改善结果时，才调用可能非常昂贵的普通 filter。
+只有通过该 filter 的候选才能入堆并收紧门槛；合并 worker 结果堆时不会再次调用 filter。
+
+启用并行搜索时，回调与普通 filter（包括共享或捕获的状态）都必须支持并发调用。
+filter 判定在一次请求内必须稳定，不能依赖调用顺序或其他 ID 是否已被检查。
+批组成和调用顺序可能变化，每个 ID 的分数不能依赖它们。`distance_batch_size_` 仍是单次调用的
+最大批宽，不是并发度上限。同分结果的 ID 可能随执行顺序变化。局部门槛可能比串行门槛宽松，
+因此并行搜索可能执行更多次 filter；分数剪枝节省的是 filter 与堆操作，不减少已提交给回调的距离计算。
+reasoning 中，已经评分的候选即使被分数门槛跳过也会记录为已访问；只有实际执行 filter 并被拒绝
+才记录过滤拒绝。诊断不会为了给分数剪枝候选分类而额外调用昂贵 filter。
 
 ### IVF 桶路由
 

@@ -37,7 +37,7 @@ template <typename T>
 class Computer : public ComputerInterface {
 public:
     explicit Computer(const T* quantizer, Allocator* allocator)
-        : quantizer_(quantizer), allocator_(allocator), raw_query_(allocator){};
+        : quantizer_(quantizer), allocator_(allocator), raw_query_(allocator) {};
 
     ~Computer() override {
         if (quantizer_) {
@@ -94,7 +94,10 @@ public:
 public:
     Allocator* const allocator_{nullptr};
     const T* quantizer_{nullptr};
+    // Query storage owned by allocator_; never stores a heap-allocated Computer.
     uint8_t* buf_{nullptr};
+    // Adapter-only nested computer with its own quantizer-specific destruction.
+    std::unique_ptr<ComputerInterface> inner_computer_;
     Vector<float> raw_query_;
 };
 

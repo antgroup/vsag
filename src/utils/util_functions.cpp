@@ -15,6 +15,7 @@
 
 #include "util_functions.h"
 
+#include <cstring>
 #include <iomanip>
 #include <limits>
 #include <random>
@@ -195,19 +196,29 @@ get_vectors(DataTypes type,
             const vsag::DatasetPtr& base,
             void** vectors_ptr,
             uint64_t* data_size_ptr) {
-    if (type == DataTypes::DATA_TYPE_FLOAT) {
-        *vectors_ptr = (void*)base->GetFloat32Vectors();
-        *data_size_ptr = dim * sizeof(float);
-    } else if (type == DataTypes::DATA_TYPE_INT8) {
-        *vectors_ptr = (void*)base->GetInt8Vectors();
-        *data_size_ptr = dim * sizeof(int8_t);
-    } else if (type == DataTypes::DATA_TYPE_FP16 || type == DataTypes::DATA_TYPE_BF16) {
-        *vectors_ptr = (void*)base->GetFloat16Vectors();
-        *data_size_ptr = dim * sizeof(uint16_t);
-    } else {
-        throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            fmt::format("no support for this type: {}", (int)type));
+    CHECK_ARGUMENT(dim > 0, "vector dimension must be positive");
+    uint64_t element_bytes;
+    switch (type) {
+        case DataTypes::DATA_TYPE_FLOAT:
+            element_bytes = sizeof(float);
+            *vectors_ptr = const_cast<float*>(base->GetFloat32Vectors());
+            break;
+        case DataTypes::DATA_TYPE_INT8:
+            element_bytes = sizeof(int8_t);
+            *vectors_ptr = const_cast<int8_t*>(base->GetInt8Vectors());
+            break;
+        case DataTypes::DATA_TYPE_FP16:
+        case DataTypes::DATA_TYPE_BF16:
+            element_bytes = sizeof(uint16_t);
+            *vectors_ptr = const_cast<uint16_t*>(base->GetFloat16Vectors());
+            break;
+        default:
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                fmt::format("no support for this type: {}", (int)type));
     }
+    CHECK_ARGUMENT(static_cast<uint64_t>(dim) <= std::numeric_limits<size_t>::max() / element_bytes,
+                   "vector row size overflows");
+    *data_size_ptr = static_cast<uint64_t>(dim) * element_bytes;
 }
 
 void
@@ -215,7 +226,7 @@ set_dataset(DataTypes type,
             int64_t dim,
             const DatasetPtr& base,
             const void* vectors_ptr,
-            uint32_t num_element) {
+            int64_t num_element) {
     if (type == DataTypes::DATA_TYPE_FLOAT) {
         base->Float32Vectors((float*)vectors_ptr)->Dim(dim)->Owner(false)->NumElements(num_element);
     } else if (type == DataTypes::DATA_TYPE_INT8) {
@@ -237,7 +248,8 @@ sample_train_data(const vsag::DatasetPtr& data,
                   int64_t dim,
                   int64_t train_sample_count,
                   Allocator* allocator,
-                  std::optional<uint64_t> random_seed) {
+                  std::optional<uint64_t> random_seed,
+                  DataTypes data_type) {
     const int64_t min_train_size = 512;
 
     int64_t sample_count = std::min(total_elements, std::max(min_train_size, train_sample_count));
@@ -257,8 +269,24 @@ sample_train_data(const vsag::DatasetPtr& data,
         safe_allocator = owned_allocator.get();
     }
 
-    vsag::Vector<float> sampled_data_buffer(safe_allocator);
-    vsag::Vector<int64_t> sampled_ids(safe_allocator);
+    void* original_data = nullptr;
+    uint64_t row_bytes = 0;
+    get_vectors(data_type, dim, data, &original_data, &row_bytes);
+    CHECK_ARGUMENT(original_data != nullptr, "training vectors must not be null");
+    CHECK_ARGUMENT(
+        static_cast<uint64_t>(total_elements) <= std::numeric_limits<size_t>::max() / row_bytes,
+        "training input size overflows");
+    CHECK_ARGUMENT(
+        static_cast<uint64_t>(sample_count) <= std::numeric_limits<size_t>::max() / row_bytes,
+        "training sample size overflows");
+    CHECK_ARGUMENT(
+        static_cast<uint64_t>(sample_count) <= std::numeric_limits<size_t>::max() / sizeof(int64_t),
+        "training sample index size overflows");
+    if (data->GetIds() != nullptr and static_cast<uint64_t>(total_elements) >
+                                          std::numeric_limits<size_t>::max() / sizeof(int64_t)) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "training input ID size overflows");
+    }
+    const auto sample_bytes = static_cast<uint64_t>(sample_count) * row_bytes;
     vsag::Vector<int64_t> sampled_indices(safe_allocator);
     sampled_indices.reserve(sample_count);
 
@@ -274,34 +302,38 @@ sample_train_data(const vsag::DatasetPtr& data,
             sampled_indices[j] = i;
         }
     }
-    sampled_data_buffer.resize(sample_count * dim);
-    const auto* original_data = data->GetFloat32Vectors();
+    // DatasetImpl stores only a raw allocator pointer. Retain a default allocator
+    // until after the sampled dataset has released its owned buffers.
+    auto sampled_dataset = std::shared_ptr<DatasetImpl>(
+        new DatasetImpl(), [owned_allocator](DatasetImpl* dataset) { delete dataset; });
+    // Metadata setters may allocate after registering the row pointer. Until
+    // publication succeeds, only data_guard may release that storage.
+    sampled_dataset->Owner(false, nullptr);
+    auto release_buffer = [safe_allocator](void* buffer) { safe_allocator->Deallocate(buffer); };
+    std::unique_ptr<void, decltype(release_buffer)> data_guard(
+        safe_allocator->Allocate(sample_bytes), release_buffer);
+    CHECK_ARGUMENT(data_guard != nullptr, "training sample allocation failed");
+    auto* new_data_buffer = static_cast<uint8_t*>(data_guard.get());
+    const auto* source = static_cast<const uint8_t*>(original_data);
     for (int64_t i = 0; i < sample_count; ++i) {
-        std::copy(original_data + sampled_indices[i] * dim,
-                  original_data + (sampled_indices[i] + 1) * dim,
-                  sampled_data_buffer.data() + i * dim);
+        std::memcpy(
+            new_data_buffer + i * row_bytes, source + sampled_indices[i] * row_bytes, row_bytes);
     }
-    auto* new_data_buffer =
-        static_cast<float*>(safe_allocator->Allocate(sample_count * dim * sizeof(float)));
-    std::copy(sampled_data_buffer.begin(), sampled_data_buffer.end(), new_data_buffer);
-
-    auto sampled_dataset = std::make_shared<DatasetImpl>();
-    sampled_dataset->NumElements(sample_count)
-        ->Dim(dim)
-        ->Float32Vectors(new_data_buffer)
-        ->Owner(true, safe_allocator);
+    set_dataset(data_type, dim, sampled_dataset, new_data_buffer, sample_count);
+    sampled_dataset->Owner(true, safe_allocator);
+    [[maybe_unused]] auto* released_data = data_guard.release();
     if (data->GetIds() != nullptr) {
-        sampled_ids.reserve(sample_count);
+        std::unique_ptr<void, decltype(release_buffer)> ids_guard(
+            safe_allocator->Allocate(static_cast<uint64_t>(sample_count) * sizeof(int64_t)),
+            release_buffer);
+        CHECK_ARGUMENT(ids_guard != nullptr, "training sample ID allocation failed");
+        auto* new_ids_buffer = static_cast<int64_t*>(ids_guard.get());
         const auto* original_ids = data->GetIds();
         for (int64_t i = 0; i < sample_count; ++i) {
-            sampled_ids.push_back(original_ids[sampled_indices[i]]);
+            new_ids_buffer[i] = original_ids[sampled_indices[i]];
         }
-
-        auto* new_ids_buffer =
-            static_cast<int64_t*>(safe_allocator->Allocate(sample_count * sizeof(int64_t)));
-        std::copy(sampled_ids.begin(), sampled_ids.end(), new_ids_buffer);
-
-        sampled_dataset->Ids(new_ids_buffer)->Owner(true, safe_allocator);
+        sampled_dataset->Ids(new_ids_buffer);
+        [[maybe_unused]] auto* released_ids = ids_guard.release();
     }
     return sampled_dataset;
 }

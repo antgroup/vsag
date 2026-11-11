@@ -15,6 +15,8 @@
 
 #include "iterator_filter.h"
 
+#include <cstring>
+
 #include "impl/logger/logger.h"
 #include "utils/util_functions.h"
 
@@ -41,7 +43,7 @@ IteratorFilterContext::init(InnerIdType max_size, int64_t ef_search, Allocator* 
         discard_ = std::make_unique<MaxHeap>(allocator);
         uint64_t byte_len = align_up(max_size, BITS_PER_BYTE) / BITS_PER_BYTE;
         list_ = reinterpret_cast<uint8_t*>(allocator_->Allocate(byte_len));
-        memset(list_, 0, byte_len);
+        std::memset(list_, 0, byte_len);
     } catch (const std::bad_alloc& e) {
         LOG_ERROR_AND_RETURNS(ErrorType::NO_ENOUGH_MEMORY,
                               "failed to init iterator filter(not enough memory): ",

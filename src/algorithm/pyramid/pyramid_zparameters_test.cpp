@@ -18,6 +18,7 @@
 #include <fmt/ranges.h>
 
 #include <cmath>
+#include <limits>
 #include <nlohmann/json.hpp>
 
 #include "impl/allocator/safe_allocator.h"
@@ -924,4 +925,175 @@ TEST_CASE("Pyramid validates explicit factor", "[ut][PyramidParameters]") {
         vsag::PyramidSearchParameters::FromJson(R"({"pyramid":{"ef_search":20,"factor":-1}})"));
     REQUIRE_THROWS(
         vsag::PyramidSearchParameters::FromJson(R"({"pyramid":{"ef_search":20,"factor":1e100}})"));
+}
+
+TEST_CASE("Pyramid adaptive pruning legacy parameters and compatibility",
+          "[ut][PyramidParameters][adaptive_pruning]") {
+    auto legacy = vsag::JsonType::Parse(generate_pyramid(PyramidDefaultParam{}));
+    auto source = std::make_shared<vsag::PyramidParameters>();
+    source->FromJson(legacy);
+    CHECK_FALSE(source->adaptive_pruning.enabled);
+    auto restored = std::make_shared<vsag::PyramidParameters>();
+    restored->FromJson(source->ToJson());
+    CHECK(source->CheckCompatibility(restored));
+    restored->alpha = 1.5F;
+    restored->adaptive_pruning.adjust_step = 0.03F;
+    CHECK(source->CheckCompatibility(restored));
+    restored->adaptive_pruning.enabled = true;
+    CHECK_FALSE(source->CheckCompatibility(restored));
+
+    legacy["adaptive_pruning"].SetBool(true);
+    legacy["adaptive_pruning_adjust_step"].SetFloat(0.06F);
+    legacy["adaptive_pruning_apply_to_reverse"].SetBool(true);
+    source->FromJson(legacy);
+    vsag::ParameterTest::TestToJson(source);
+    CHECK(source->ToJson()["adaptive_pruning"].GetBool());
+    CHECK(source->ToJson()["adaptive_pruning_apply_to_reverse"].GetBool());
+    CHECK_FALSE(source->ToJson().Contains("fill_rejected"));
+    restored->FromJson(source->ToJson());
+    REQUIRE(source->CheckCompatibility(restored));
+    const auto field = GENERATE(std::string("alpha"),
+                                std::string("adjust_step"),
+                                std::string("apply_to_reverse"),
+                                std::string("apply_to_upper"));
+    CAPTURE(field);
+    if (field == "alpha") {
+        restored->alpha += 0.06F;
+    } else if (field == "adjust_step") {
+        restored->adaptive_pruning.adjust_step = 0.03F;
+    } else if (field == "apply_to_reverse") {
+        restored->adaptive_pruning.apply_to_reverse = false;
+    } else {
+        restored->adaptive_pruning.apply_to_upper = true;
+    }
+    CHECK_FALSE(source->CheckCompatibility(restored));
+    CHECK_FALSE(restored->CheckCompatibility(source));
+    legacy.Erase("adaptive_pruning");
+    source->FromJson(legacy);
+    CHECK_FALSE(source->adaptive_pruning.enabled);
+}
+
+TEST_CASE("Pyramid adaptive pruning validates graph metric and hierarchy alpha",
+          "[ut][PyramidParameters][adaptive_pruning]") {
+    vsag::IndexCommonParam common;
+    common.dim_ = 4;
+    common.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto external = vsag::JsonType::Parse(R"({
+        "base_quantization_type":"fp32", "graph_type":"nsw", "alpha":1.06,
+        "adaptive_pruning":true,"adaptive_pruning_adjust_step":0.06,
+        "hierarchies":[{"name":"a","alpha":1.2},{"name":"b","alpha":1.06}]
+    })");
+    auto make_index = [&]() {
+        auto param = vsag::Pyramid::CheckAndMappingExternalParam(external, common);
+        return std::make_shared<vsag::Pyramid>(param, common);
+    };
+    REQUIRE_NOTHROW(make_index());
+    SECTION("obsolete nested policy") {
+        external["adaptive_pruning"].SetJson(vsag::JsonType::Parse(R"({"enabled":true})"));
+    }
+    SECTION("removed fill option") {
+        const auto* key = GENERATE("fill_rejected", "adaptive_pruning_fill_rejected");
+        external[key].SetBool(false);
+    }
+    SECTION("unsupported graph") {
+        external["graph_type"].SetString("odescent");
+    }
+    SECTION("unsupported metric") {
+        common.metric_ =
+            GENERATE(vsag::MetricType::METRIC_TYPE_IP, vsag::MetricType::METRIC_TYPE_COSINE);
+    }
+    SECTION("unsupported routing scope") {
+        external["adaptive_pruning_apply_to_upper"].SetBool(true);
+    }
+    SECTION("invalid step") {
+        external["adaptive_pruning_adjust_step"].SetFloat(0.6F);
+    }
+    SECTION("invalid hierarchy alpha") {
+        (*external["hierarchies"].GetInnerJson())[1]["alpha"] = 0.1F;
+    }
+    REQUIRE_THROWS(make_index());
+}
+
+TEST_CASE("Pyramid PiPNN adaptive policy maps validates and restores",
+          "[ut][PyramidParameters][pipnn][pyramid_pipnn_adaptive]") {
+    vsag::IndexCommonParam common;
+    common.dim_ = 32;
+    common.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto config = vsag::JsonType::Parse(R"({
+        "base_quantization_type":"fp32", "graph_type":"pipnn", "max_degree":32,
+        "alpha":1.2, "pipnn_adaptive_pruning":true,
+        "pipnn_adaptive_pruning_adjust_step":0.06
+    })");
+    const auto parse = [&](const vsag::JsonType& external) {
+        return std::dynamic_pointer_cast<vsag::PyramidParameters>(
+            vsag::Pyramid::CheckAndMappingExternalParam(external, common));
+    };
+    const auto source = parse(config);
+    REQUIRE(source->pipnn_param.adaptive_pruning);
+    REQUIRE(source->pipnn_param.adaptive_pruning_adjust_step == 0.06F);
+    auto restored = std::make_shared<vsag::PyramidParameters>();
+    restored->FromJson(source->ToJson());
+    REQUIRE(source->CheckCompatibility(restored));
+    REQUIRE(restored->CheckCompatibility(source));
+
+    SECTION("enabled policy must match on restore") {
+        const auto* field =
+            GENERATE("pipnn_adaptive_pruning", "pipnn_adaptive_pruning_adjust_step", "alpha");
+        if (std::string(field) == "pipnn_adaptive_pruning") {
+            config[field].SetBool(false);
+        } else {
+            config[field].SetFloat(std::string(field) == "alpha" ? 1.3F : 0.05F);
+        }
+        auto other = parse(config);
+        REQUIRE_FALSE(source->CheckCompatibility(other));
+        REQUIRE_FALSE(other->CheckCompatibility(source));
+    }
+    SECTION("legacy fields and reused parameter objects reset to disabled") {
+        auto legacy = source->ToJson();
+        legacy[vsag::GRAPH_KEY].Erase("pipnn_adaptive_pruning");
+        legacy[vsag::GRAPH_KEY].Erase("pipnn_adaptive_pruning_adjust_step");
+        restored->FromJson(legacy);
+        REQUIRE_FALSE(restored->pipnn_param.adaptive_pruning);
+        REQUIRE(restored->pipnn_param.adaptive_pruning_adjust_step == 0.06F);
+        auto nsw = source->ToJson();
+        nsw[vsag::GRAPH_KEY][vsag::GRAPH_TYPE_KEY].SetString("nsw");
+        nsw[vsag::GRAPH_KEY].Erase("pipnn_adaptive_pruning");
+        restored->FromJson(nsw);
+        REQUIRE_FALSE(restored->pipnn_param.adaptive_pruning);
+    }
+    SECTION("disabled policy ignores unused step on restore") {
+        config["pipnn_adaptive_pruning"].SetBool(false);
+        auto disabled = parse(config);
+        config["pipnn_adaptive_pruning_adjust_step"].SetFloat(0.03F);
+        REQUIRE(disabled->CheckCompatibility(parse(config)));
+    }
+    SECTION("invalid steps use the shared PiPNN validation") {
+        const float step = GENERATE(-0.01F,
+                                    0.6F,
+                                    std::numeric_limits<float>::infinity(),
+                                    std::numeric_limits<float>::quiet_NaN());
+        config["pipnn_adaptive_pruning_adjust_step"].SetFloat(step);
+        REQUIRE_THROWS(parse(config));
+    }
+    SECTION("non-PiPNN graphs reject an enabled PiPNN policy") {
+        config["graph_type"].SetString(GENERATE("nsw", "odescent"));
+        REQUIRE_THROWS(parse(config));
+    }
+    SECTION("non-L2 metrics fail at index creation") {
+        common.metric_ =
+            GENERATE(vsag::MetricType::METRIC_TYPE_IP, vsag::MetricType::METRIC_TYPE_COSINE);
+        REQUIRE_THROWS(std::make_shared<vsag::Pyramid>(source, common));
+        config["pipnn_adaptive_pruning"].SetBool(false);
+        REQUIRE_NOTHROW(std::make_shared<vsag::Pyramid>(parse(config), common));
+    }
+    SECTION("each hierarchy validates its own alpha") {
+        *config["hierarchies"].GetInnerJson() =
+            nlohmann::json::array({{{"name", "site"}, {"alpha", 1.0}}});
+        config["pipnn_adaptive_pruning_adjust_step"].SetFloat(0.51F);
+        REQUIRE_THROWS(parse(config));
+    }
 }

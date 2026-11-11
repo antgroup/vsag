@@ -6,7 +6,7 @@ one, read it top-to-bottom, then adapt it to your data.
 
 ## Prerequisites
 
-- A C++17 (or newer) compiler (`clang-format` / `clang-tidy` 15 are
+- A C++17 (or newer) compiler (`clang-format` / `clang-tidy` 20 are
   required only for development, not for running these examples).
 - CMake 3.18+.
 - The build prerequisites listed in
@@ -109,6 +109,7 @@ together when the directory is listed:
 | [`402_persistent_streaming.cpp`](402_persistent_streaming.cpp) | Streaming serialization for large indexes. |
 | [`403_persistent_streaming_load.cpp`](403_persistent_streaming_load.cpp) | Static `Index::Load` from streaming serialization across index types. |
 | [`404_persistent_streaming_load_hybrid.cpp`](404_persistent_streaming_load_hybrid.cpp) | Static `Index::Load` for a hybrid HGraph index with memory and disk-backed RaBitQ split codes. |
+| [`406_feature_read_cache.cpp`](406_feature_read_cache.cpp) | Build HGraph with in-memory SQ8 codes, then restore and query disk-backed FP32 codes with a one-page read cache. See the [HGraph guide](../../docs/docs/en/src/indexes/hgraph.md#disk-read-cache-example). |
 | [`408_feature_reader_prefetch.cpp`](408_feature_reader_prefetch.cpp) | Optional `ReaderPrefetcher` implementation, public load parameter activation, and observable search-time hints. |
 
 ### Quantization (`5xx`)
@@ -116,6 +117,13 @@ together when the directory is listed:
 | File | What it shows |
 | --- | --- |
 | [`501_quantization_transform.cpp`](501_quantization_transform.cpp) | Transform Quantizer (TQ) recipe. |
+| [`502_quantization_saq.cpp`](502_quantization_saq.cpp) | Build and query HGraph with SAQ base codes and FP32 reordering. |
+
+### Utilities (`6xx`)
+
+| File | What it shows |
+| --- | --- |
+| [`601_utils_rpt_partition.cpp`](601_utils_rpt_partition.cpp) | Random projection tree (RPT) partitioning: split vectors into near-uniform buckets with `vsag::rpt_partition`. |
 
 ## Where to go next
 

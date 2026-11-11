@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <mutex>
 #include <optional>
 #include <string>
 
@@ -24,11 +25,13 @@
 #include "datacell/flatten_interface.h"
 #include "datacell/immutable_sindi_term_datacell.h"
 #include "datacell/mutable_sindi_term_datacell.h"
+#include "impl/searcher/sindi_search_options.h"
 #include "vsag/allocator.h"
 
 namespace vsag {
 
 class ReasoningContext;
+struct SindiWindowSearchProfile;
 
 /**
  * @brief SINDI: Sparse INverted Index with windowed term lists.
@@ -59,7 +62,7 @@ public:
     explicit SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_param);
 
     SINDI(const ParamPtr& param, const IndexCommonParam& common_param)
-        : SINDI(std::dynamic_pointer_cast<SINDIParameter>(param), common_param){};
+        : SINDI(std::dynamic_pointer_cast<SINDIParameter>(param), common_param) {};
 
     ~SINDI() override = default;
 
@@ -76,6 +79,9 @@ public:
 
     std::string
     GetStats() const override;
+
+    [[nodiscard]] AnalyzerBasePtr
+    CreateAnalyzer(const AnalyzerParam& param) const override;
 
     std::string
     AnalyzeIndexBySearch(const SearchRequest& request) override;
@@ -194,7 +200,10 @@ private:
                 ReasoningContext* reasoning_ctx = nullptr,
                 SearchStatistics* statistics = nullptr,
                 const uint64_t* filter_callback_remaining = nullptr,
-                const SindiMetadataSearchRoute& metadata_route = {}) const;
+                const SindiMetadataSearchRoute& metadata_route = {},
+                uint64_t worker_n_candidate = 0,
+                const SindiSearchOptions& window_options = {},
+                SindiWindowSearchProfile* window_profile = nullptr) const;
 
     bool
     UseTermListsHeapInsert(const SINDISearchParameter& search_param,
@@ -210,6 +219,9 @@ private:
      */
     std::pair<int64_t, int64_t>
     get_min_max_window_id(const FilterPtr& filter) const;
+
+    mutable std::once_flag search_thread_pool_once_;
+    mutable SafeThreadPoolPtr search_thread_pool_{nullptr};
 
     MetadataPtr
     collect_streaming_header() const override;
@@ -299,6 +311,9 @@ private:
     std::atomic<int64_t> delete_count_{0};       // soft-deleted vectors
 
     bool use_reorder_{false};  // enable reranking stage
+
+    float build_term_prune_ratio_{0};
+    uint64_t build_term_retain_threshold_{0};
 
     float doc_prune_ratio_{0};  // ratio of docs pruned during build
 

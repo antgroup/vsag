@@ -16,6 +16,7 @@
 
 #include <array>
 
+#include "data_type.h"
 #include "hash_types.h"
 #include "quantization/quantizer.h"
 #include "vsag/dataset.h"
@@ -47,7 +48,8 @@ public:
 
     SparseDmqQuantizer(uint32_t term_id_limit,
                        Allocator* allocator,
-                       uint32_t shared_codebook_threshold = DEFAULT_SHARED_CODEBOOK_THRESHOLD);
+                       uint32_t shared_codebook_threshold = DEFAULT_SHARED_CODEBOOK_THRESHOLD,
+                       DataTypes data_type = DataTypes::DATA_TYPE_FLOAT);
 
     bool
     TrainImpl(const float* data, uint64_t count);
@@ -146,6 +148,7 @@ private:
     Vector<uint32_t> compact_id_lookup_;
     uint32_t id_bits_{32};
     uint32_t shared_codebook_threshold_{DEFAULT_SHARED_CODEBOOK_THRESHOLD};
+    DataTypes data_type_{DataTypes::DATA_TYPE_FLOAT};
 };
 
 }  // namespace vsag

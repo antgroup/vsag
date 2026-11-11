@@ -34,8 +34,8 @@ namespace vsag {
 template <typename QuantT>
 class Quantizer {
 public:
-    explicit Quantizer<QuantT>(int dim, Allocator* allocator)
-        : dim_(dim), code_size_(dim * sizeof(float)), allocator_(allocator){};
+    explicit Quantizer(int dim, Allocator* allocator)
+        : dim_(dim), code_size_(dim * sizeof(float)), allocator_(allocator) {};
 
     virtual ~Quantizer() = default;
 
@@ -235,6 +235,28 @@ public:
         return cast().ScanBatchDistImpl(computer, count, codes, dists);
     }
 
+    /**
+     * @brief Evaluate contiguous ordinary row codes, never a quantizer-specific packed layout.
+     * Writes exactly count distances without reading padding past the last row.
+     */
+    inline void
+    ScanRowBatchDists(Computer<QuantT>& computer,
+                      uint64_t count,
+                      const uint8_t* codes,
+                      float* dists) const {
+        return cast().ScanRowBatchDistImpl(computer, count, codes, dists);
+    }
+
+    inline void
+    ScanRowBatchDistImpl(Computer<QuantT>& computer,
+                         uint64_t count,
+                         const uint8_t* codes,
+                         float* dists) const {
+        for (uint64_t i = 0; i < count; ++i) {
+            cast().ComputeDistImpl(computer, codes + i * code_size_, dists + i);
+        }
+    }
+
     inline void
     ScanBatchDistsWithThreshold(Computer<QuantT>& computer,
                                 uint64_t count,
@@ -354,6 +376,9 @@ private:
     }
 
     friend QuantT;
+
+    template <typename, typename>
+    friend class QuantizerAdapter;
 
 private:
     uint64_t dim_{0};

@@ -119,7 +119,7 @@ string_view_split(std::string_view str, char delim) {
     result.emplace_back(str.substr(start));
     return result;
 }
-FCExpressionVisitor::FCExpressionVisitor(const AttrTypeSchema* schema) : schema_(schema){};
+FCExpressionVisitor::FCExpressionVisitor(const AttrTypeSchema* schema) : schema_(schema) {};
 
 std::any
 FCExpressionVisitor::visitFilter_condition(FCParser::Filter_conditionContext* ctx) {
@@ -376,7 +376,7 @@ FCExpressionVisitor::visitInt_pipe_list(FCParser::Int_pipe_listContext* ctx) {
         str = str.substr(1, str.size() - 2);
         const auto& result_view = string_view_split(str, '|');
         for (const auto& s : result_view) {
-            auto numeric_value = visit_int_token(s.data());
+            auto numeric_value = visit_int_token(std::string(s));
             if (std::holds_alternative<int64_t>(numeric_value)) {
                 signed_cnt++;
             }

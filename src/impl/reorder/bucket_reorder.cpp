@@ -19,7 +19,7 @@
 #include <cmath>
 
 #include "impl/heap/standard_heap.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "query_context.h"
 #include "vsag_exception.h"
 
@@ -52,6 +52,8 @@ BucketReorder::Reorder(const DistHeapPtr& input,
     }
 
     if (ctx.stats != nullptr) {
+        ctx.stats->reorder_candidate_count.fetch_add(static_cast<uint32_t>(candidate_count),
+                                                     std::memory_order_relaxed);
         ctx.stats->reorder_distance_count.fetch_add(static_cast<uint32_t>(candidate_count),
                                                     std::memory_order_relaxed);
     }
@@ -66,17 +68,21 @@ BucketReorder::Reorder(const DistHeapPtr& input,
         bucket_ids[i] = bucket_id;
         offset_ids[i] = offset_id;
     }
-    bucket_->Query(precise_distances.data(),
-                   computer,
-                   bucket_ids.data(),
-                   offset_ids.data(),
-                   static_cast<InnerIdType>(candidate_count),
-                   &ctx);
+    {
+        ScopedDistancePhase scoped_phase(ctx, DistanceEvaluationPhase::RERANK);
+        bucket_->Query(precise_distances.data(),
+                       computer,
+                       bucket_ids.data(),
+                       offset_ids.data(),
+                       static_cast<InnerIdType>(candidate_count),
+                       &ctx);
+    }
     for (uint64_t i = 0; i < candidate_count; ++i) {
         const auto [coarse_distance, inner_id] = candidates[i];
         const auto precise_distance = precise_distances[i];
         if (ctx.reasoning_ctx != nullptr) {
-            ctx.reasoning_ctx->RecordReorder(inner_id, coarse_distance, precise_distance);
+            ctx.reasoning_ctx->RecordReorder(
+                inner_id, coarse_distance, precise_distance);  // [reasoning]
         }
         if (distance_threshold.has_value() and (not std::isfinite(precise_distance) or
                                                 precise_distance > distance_threshold.value())) {
@@ -86,7 +92,8 @@ BucketReorder::Reorder(const DistHeapPtr& input,
             reorder_heap->Push(precise_distance, inner_id);
             if (reorder_heap->Size() > topk) {
                 if (ctx.reasoning_ctx != nullptr) {
-                    ctx.reasoning_ctx->RecordReorderEviction(reorder_heap->Top().second, 0);
+                    ctx.reasoning_ctx->RecordReorderEviction(reorder_heap->Top().second,
+                                                             0);  // [reasoning]
                 }
                 reorder_heap->Pop();
             }

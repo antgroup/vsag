@@ -41,6 +41,7 @@
 #include "utils/pointer_define.h"
 #include "vsag/dataset.h"
 #include "vsag/index.h"
+#include "vsag/search_session.h"
 #include "vsag/serialize_writer.h"
 
 namespace vsag {
@@ -61,8 +62,10 @@ DEFINE_POINTER2(InnerIndex, InnerIndexInterface);
 DEFINE_POINTER(LabelTable);
 DEFINE_POINTER(IndexFeatureList);
 DEFINE_POINTER(SafeThreadPool);
+DEFINE_POINTER(AnalyzerBase);
 
 class IndexCommonParam;
+struct AnalyzerParam;
 
 class InnerIndexInterface {
 public:
@@ -82,10 +85,10 @@ public:
     Add(const DatasetPtr& base) = 0;
 
     virtual std::string
-    AnalyzeIndexBySearch(const SearchRequest& request) {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "Index doesn't support analyze index by search");
-    }
+    AnalyzeIndexBySearch(const SearchRequest& request);
+
+    [[nodiscard]] virtual AnalyzerBasePtr
+    CreateAnalyzer(const AnalyzerParam& param) const;
 
     virtual std::vector<int64_t>
     Build(const DatasetPtr& base);
@@ -334,6 +337,13 @@ public:
     [[nodiscard]] virtual int64_t
     GetNumElements() const = 0;
 
+    /// Diagnostic: a content fingerprint of the built graph, for tests that need to tell a
+    /// changed graph apart from changed search behaviour. Zero means "not implemented".
+    [[nodiscard]] virtual uint64_t
+    GraphChecksum() const {
+        return 0;
+    }
+
     [[nodiscard]] virtual int64_t
     GetNumberRemoved() const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
@@ -341,10 +351,7 @@ public:
     }
 
     [[nodiscard]] virtual std::string
-    GetStats() const {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "Index doesn't support GetStats");
-    }
+    GetStats() const;
 
     virtual void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const {
@@ -365,6 +372,17 @@ public:
 
     virtual void
     InitFeatures() = 0;
+
+    virtual std::unique_ptr<SearchSession>
+    OpenSearchSession(const DatasetPtr& query,
+                      int64_t k_per_call,
+                      const std::string& parameters,
+                      const FilterPtr& filter,
+                      Allocator* allocator,
+                      std::shared_ptr<const InnerIndexInterface> owner) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index does not support SearchSession");
+    }
 
     [[nodiscard]] virtual DatasetPtr
     KnnSearch(const DatasetPtr& query,
@@ -535,7 +553,7 @@ public:
     }
 
     virtual void
-    Train(const DatasetPtr& base){};
+    Train(const DatasetPtr& base) {};
 
     virtual void
     UpdateAttribute(int64_t id, const AttributeSet& new_attrs) {
@@ -690,6 +708,18 @@ protected:
     void
     validate_range_args(const DatasetPtr& query, float radius, int64_t limited_size) const;
 
+    /**
+     * @brief Extract a pointer to the data vector at the given index.
+     *
+     * Dispatches on data_type_ to the correct typed getter on the dataset and
+     * offsets by `index * dim_`. Returns nullptr if the underlying pointer is
+     * absent. The returned pointer keeps the representation implied by
+     * data_type_: float32 vectors stay float32, int8 vectors stay int8, and
+     * fp16/bf16 inputs are exposed as their raw 16-bit halves.
+     */
+    [[nodiscard]] const void*
+    get_data(const DatasetPtr& dataset, int64_t index = 0) const;
+
     static void
     filter_search_result_by_threshold(DistHeapPtr& result,
                                       const std::optional<float>& threshold,
@@ -715,7 +745,8 @@ public:
 protected:
     std::atomic<uint64_t> total_count_{0};
 
-    std::atomic<uint64_t> current_memory_usage_{0};
+    // Mutable so a `const` query path can refresh the cache on demand.
+    mutable std::atomic<uint64_t> current_memory_usage_{0};
     mutable std::shared_mutex memory_usage_mutex_{};
 
     bool has_raw_vector_{false};

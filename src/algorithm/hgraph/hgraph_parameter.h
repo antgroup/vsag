@@ -15,11 +15,13 @@
 
 #pragma once
 
+#include <algorithm>
 #include <limits>
 
 #include "../index_search_parameter.h"
 #include "../inner_index_parameter.h"
 #include "data_type.h"
+#include "impl/adaptive_pruning.h"
 #include "impl/pipnn/pipnn_graph_builder.h"
 #include "utils/filter_search_skip_strategy.h"
 #include "utils/pointer_define.h"
@@ -37,6 +39,7 @@ DEFINE_POINTER(HGraphParameter);
 struct HGraphMCIParameters {
     bool enabled{false};
     uint64_t mcs{200};
+    bool clique_activation_order{false};
     // Minimum size of a maximal clique the full build must keep; the clique itself is stored in
     // full, so this is a lower bound and not a cap.
     uint64_t clique_max{50};
@@ -44,8 +47,23 @@ struct HGraphMCIParameters {
     std::string knng_source{HGRAPH_MCI_KNNG_SOURCE_HGRAPH};
     std::string knng_path{};
     float incremental_join_ratio_threshold{0.6F};
-    uint64_t incremental_added_mct{3};
+    uint64_t incremental_degree_min{50};
+    uint64_t incremental_degree_n_divisor{10000};
+    uint64_t incremental_degree_mcs_divisor{2};
     uint64_t incremental_clique_max{50};
+    uint64_t delete_clique_size_threshold{30};
+    uint64_t delete_node_mct_threshold{3};
+
+    [[nodiscard]] uint64_t
+    IncrementalDegreeTarget(uint64_t live_total) const {
+        if (live_total <= 1) {
+            return 0;
+        }
+        return std::min(live_total - 1,
+                        std::max<uint64_t>(incremental_degree_min,
+                                           std::min(live_total / incremental_degree_n_divisor,
+                                                    mcs / incremental_degree_mcs_divisor)));
+    }
 };
 class HGraphParameter : public InnerIndexParameter {
 public:
@@ -82,6 +100,7 @@ public:
     uint64_t ef_construction{400};
     uint64_t resize_increase_count_bit{DEFAULT_RESIZE_INCREASE_COUNT_BIT};
     float alpha{1.0F};
+    AdaptivePruningParameter adaptive_pruning;
 
     bool support_duplicate{false};
     bool deduplicate_storage{false};
@@ -103,6 +122,10 @@ public:
     static HGraphSearchParameters
     FromJson(const std::string& json_string);
 
+    // Reuse an already parsed document without changing string-call overload resolution.
+    static HGraphSearchParameters
+    FromParsedJson(const JsonType& params);
+
 public:
     int64_t ef_search{30};
     uint32_t hops_limit{std::numeric_limits<uint32_t>::max()};
@@ -120,6 +143,13 @@ public:
     // expressed in units of O_dist.
     double hybrid_filter_cost_ratio{1.0};
     bool use_conjugate_graph_search{true};
+    // Static-query optimizations. A positive activation cap changes the search graph.
+    bool search_no_lock{false};
+    bool mci_packed_filter{true};
+    bool mci_batch_distance{true};
+    uint32_t mci_activation_cap{0};
+    uint32_t mci_hops_limit{std::numeric_limits<uint32_t>::max()};
+    uint64_t mci_expansion_idle_window{0};
     float mci_seed_ratio{0.1F};
     // Seed budget is `max(ceil(sqrt(N) * mci_seed_ratio), ceil(mci_seed_coverage * valid))`
     // whenever the coverage part fits into `mci_seed_max_count` (0 = unlimited) and does not

@@ -15,6 +15,12 @@ CAMEL_CASE = re.compile(r"^[A-Z][A-Za-z0-9]*$")
 EXCLUDED_PREFIXES = ("extern/", "vendor/", "third_party/", "build/", "build-")
 EXCLUDED_PARTS = {"generated", "hnsw", "diskann"}
 EXCLUDED_FILES = {"include/vsag/expected.hpp"}
+# These opaque tags are part of the public C API, not C++ implementation names.
+C_ABI_FILES = {"include/vsag/vsag_c_api.h", "src/vsag_c_api.cpp"}
+C_ABI_TAGS = {
+    "vsag_error", "vsag_dataset", "vsag_engine", "vsag_engine_options",
+    "vsag_filter", "vsag_index", "vsag_search_result",
+}
 TOKEN = re.compile(
     r"""(?P<space>\s+)|(?P<line_comment>//[^\n]*)|(?P<block_comment>/\*.*?\*/)|
         (?P<raw_string>R\"(?P<delimiter>[^ ()\\\t\r\n]{0,16})\(.*?\)(?P=delimiter)\")|
@@ -129,13 +135,17 @@ def main() -> int:
         path = Path(filename)
         if not path.is_absolute():
             path = root / path
+        path = path.resolve()
+        relative = path.relative_to(root).as_posix()
         for name, line in struct_definitions(path.read_text(errors="surrogateescape")):
+            if relative in C_ABI_FILES and name in C_ABI_TAGS:
+                continue
             if not CAMEL_CASE.fullmatch(name):
-                failures.append(f"{path.relative_to(root)}:{line}: struct '{name}' is not CamelCase")
+                failures.append(f"{relative}:{line}: struct '{name}' is not CamelCase")
     if failures:
         print("\n".join(failures))
         return 1
-    print(f"Checked {len(files)} C/C++ files: all named struct definitions use CamelCase.")
+    print(f"Checked {len(files)} C/C++ files: struct naming policy passed (including explicit C ABI handle tags).")
     return 0
 
 

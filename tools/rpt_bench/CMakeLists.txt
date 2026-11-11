@@ -1,0 +1,43 @@
+
+# Copyright 2024-present the vsag project
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+add_executable (rpt_bench
+    main.cpp
+    metrics.cpp
+    partitioners.cpp)
+target_include_directories (rpt_bench PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/tools/eval)
+target_link_libraries (rpt_bench PRIVATE
+    eval_obj
+    simd
+    vsag
+    vsag_eval_common
+    ${HDF5_CPP_STATIC_LIBRARY}
+    ${HDF5_C_STATIC_LIBRARY}
+    z dl)
+add_dependencies (rpt_bench hdf5)
+
+if (ENABLE_TESTS)
+    add_executable (rpt_bench_partitioners_test
+        partitioners_test.cpp
+        partitioners.cpp)
+    target_link_libraries (rpt_bench_partitioners_test PRIVATE
+        Catch2::Catch2WithMain
+        simd
+        vsag)
+    add_dependencies (rpt_bench_partitioners_test Catch2)
+endif ()

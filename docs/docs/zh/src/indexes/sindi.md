@@ -73,6 +73,8 @@ auto result = index->KnnSearch(
 | `term_id_limit` | int | `1000000` | 词项 ID 的上界（应 ≥ 最大词项 ID + 1，最高 50 000 000） |
 | `window_size` | int | `50000` | 每个窗口容纳的文档数（取值范围 10 000 – 60 000） |
 | `doc_prune_ratio` | float | `0.0` | 构建阶段按文档丢弃权重最低词项的比例，取值范围为 `[0.0, 1.0)` |
+| `term_prune_ratio` | float | `0.0` | `Build` 时每个窗口内各 term 永久裁剪的低权重 postings 比例，范围 `[0, 1)`，默认关闭。 |
+| `term_retain_threshold` | integer | `0` | 构建时每个 term 的 postings 数量上限，平均分配到各窗口；`0` 表示不限制。 |
 | `use_quantization` | bool 或 string | `false` | `false` 存 FP32，`true` 存 SQ8，`"fp16"` 存 FP16 |
 | `use_reorder` | bool | `false` | 是否保留一份正排存储，在 SINDI 粗排后对候选做精排 |
 | `rerank_type` | string | `"fp32"` | `use_reorder` 开启时使用的正排存储类型。`fp32` 保留精确值；`fp16` 以半精度保存、以 FP32 打分；`dmq8` 使用压缩的 8-bit DMQ 编码 |
@@ -174,58 +176,52 @@ host-unaware 文档后不能再引入 host metadata。空字符串查询只检�
 忽略查询 host metadata，行为保持不变。旧的数值 `host_id` 输入会被拒绝。host 过滤当前仅适用于
 KNN；范围搜索仍使用原有全索引路径。
 
-### 日期 bucket 过滤
+### 发布时间过滤
 
-mutable 和 immutable SINDI 无论是否开启 rerank，都可以按日历层级 bucket 过滤 KNN 查询。
-构建时为每篇文档附加一个规范字符串 bucket：
+mutable 和 immutable SINDI 无论是否开启 rerank，都可以按文档发布时间过滤 KNN 查询。构建时通过
+int64 metadata 为每篇文档附加一个 Unix 秒时间戳；`0` 表示该文档没有发布时间：
 
 ```cpp
-std::string base_dates[] = {"", "2026/05", "2026/05/01"};
-base->Paths("date", base_dates);
+int64_t base_times[] = {0, 1777593600, 1777680000};
+base->Int64Metadata("publish_time_stamp", base_times);
 
-std::string query_date = "2026/05";
-query->Paths("date", &query_date)->Owner(false);
+int64_t query_time = 1777593600;
+query->Int64Metadata("publish_time_stamp", &query_time)->Owner(false);
 
-std::string date_begin = "2025/11/20";
-std::string date_end = "2026/02";
-query->Paths("date_begin", &date_begin)
-    ->Paths("date_end", &date_end)
+int64_t time_begin = 1777593600;
+int64_t time_end = 1777766399;
+query->Int64Metadata("publish_time_stamp_begin", &time_begin)
+    ->Int64Metadata("publish_time_stamp_end", &time_end)
     ->Owner(false);
 ```
 
-接受 `YYYY`、`YYYY/MM` 和 `YYYY/MM/DD` 三种格式；月份和日期必须补齐两位并符合实际日历。
-匹配只向下进行：`2026` 匹配 2026 年的年、月、日 base bucket；`2026/05` 匹配
-`2026/05` 及其下所有日；`2026/05/01` 只匹配该日。更精确的查询不会匹配更粗粒度的 base bucket。
+SINDI 使用 `timestamp / 86400` 把每个正时间戳归一化为 UTC epoch day。单值查询匹配同一 UTC 日的
+所有文档；范围查询把两个端点归一化后按闭区间匹配。两个范围端点必须同时提供、满足
+`begin <= end`，并且不能与单值 selector 同时使用。query 值必须大于 `0`；base 值必须非负，
+负数会被拒绝。换算后的 epoch day 超过 `INT32_MAX` 时同样报错。
 
-base 空字符串表示该文档没有日期。查询不提供任何日期 selector 时仍会检索缺失日期文档，
-仅按 host 查询时同样包含其中 host 匹配的缺失日期文档；`date` 或日期范围查询永远不会命中它们。
-每篇 base 文档仍须在数组中占一项，因此应传入空字符串，而不是省略对应行。query 日期不接受
-空字符串；需要关闭日期过滤时应省略该 selector。
+base 值为 `0` 的文档在不提供时间 selector 时仍可检索，仅按 host 查询时也会包含 host 匹配的
+无时间文档；任何时间查询都不会命中这些文档。每篇 base 文档仍须在数组中占一项。没有使用
+`publish_time_stamp` 构建的索引收到任一时间 selector 时会报错。
 
-闭区间查询必须同时提供 `date_begin` 和 `date_end`。开始端的年或月扩展到该周期第一天，结束端
-的年或月扩展到该周期最后一天。例如 `2025/11/20` 到 `2026/02` 表示包含首尾的
-`2025/11/20` 至 `2026/02/28`。只有完整日历周期都落在查询范围内的 base bucket 才会命中；
-因此结束于 `2026/08/01` 的范围可以命中 8 月 1 日的日 bucket，但不能命中较粗的
-`2026/08` bucket。两个端点缺一不可，扩展后必须保持正序，并且不能与单值 `date` 同时使用。
+时间构建先按发布时间排序，再按 `window_size` 个文档切分逻辑分区，并在每个分区内按 host 分组；
+无时间文档合并为末尾的单独分区。查询先选择 UTC day 范围相交的分区，再在候选进入 heap 前执行
+精确的逐文档 day 与可选 host 检查。时间、host、删除标记和用户 `Filter` 使用 AND 语义。插入失败
+或跳过的文档可能让相邻逻辑分区共享同一个物理 window，精确 day 检查会保证边界结果正确。
 
-日期构建把缺失日期放入独立分区，并将其余文档按自然季度排序；同时提供 `host` 时，再在每个分区内
-按 host 排序。mutable 索引只能在索引为空时通过 `Build()` 或第一次 `Add()` 提供日期 metadata。
-索引已有文档后不能再引入日期 metadata，已经包含日期 metadata 的 mutable 索引会拒绝之后的所有
-`Add()`，从而避免增量维护季度
-分区。仅使用 host 的 mutable 索引仍保留原有的增量 `Add()` 能力。
+mutable 时间索引支持增量 `Add()`。初次 `Build()` 或空索引上的第一次 `Add()` 必须提供每个向量的
+`publish_time_stamp`；后续每批 `Add()` 也必须提供，并保持是否提供 host metadata 的模式一致。
+每批数据各自按时间排序并追加为一个连续 ID 段；不同批次的日期可以重叠，因此可以补录旧日期。
+每个段内的无时间文档位于末尾，查询会逐段选择匹配分区。没有时间 metadata 的已有索引不能通过
+`Add()` 转为时间索引。发布时间过滤仅作用于 KNN，由普通与 streaming 序列化共同保存；恢复后的
+mutable 时间索引仍可继续 `Add()`。immutable 和 DMQ8 重排运行态仍不支持增量写入。
+大量小批次 `Add()` 会形成较多时间段，时间查询需检查更多段目录；可行时宜批量写入。
+新的时间元数据使用 v2 格式：当前版本可读取 v1 快照，旧版本不能读取新写出的 v2 快照。
 
-仅包含年份的 base bucket 锚定到该年第一季度并且只存储一次。原有固定大小 window 布局保持不变。
-日期查询先选择相关季度分区，再在候选进入 heap 前执行精确层级 bucket 或范围判断。查询字符串只在
-路由阶段解析一次，候选判断仅比较压缩后的整数 bucket。日期、host、删除标记和用户 `Filter` 使用
-AND 语义。
-
-不提供 `date`、`date_begin` 或 `date_end` 时搜索全部季度；仅提供 host 时会从每个季度选择该 host。
-所有选中 window 共用一个候选堆，并在开启 `use_reorder` 时共用一次 rerank。日期过滤支持 mutable
-和 immutable 索引以及 `use_reorder` 的任意设置，仅作用于 KNN，并由旧版与 streaming 序列化共同
-保存。反序列化恢复的 mutable 日期索引仍保持 build-once，并拒绝 `Add()`。为了执行精确 bucket 或
-范围过滤，每个选中 window 都会关闭 term 级 posting 剪枝，因此日期查询可能比仅 host 查询扫描更多
-posting，较宽的范围也会选择更多 window。在启用日期的索引上，仅 host 查询遇到跨季度或 host 边界
-的 window 时也可能需要完整扫描。
+不提供时间 selector 时会扫描全部时间分区与无时间分区；仅提供 host 时会从每个分区选择该 host。
+精确时间过滤会关闭所选 window 的 term 级 posting 剪枝，因此时间查询可能比仅 host 查询扫描更多
+posting，较宽的范围也会选择更多 window。在启用时间的索引上，仅 host 查询遇到跨分区或 host
+边界的 window 时也可能需要完整扫描。
 
 ## 检索参数
 
@@ -234,10 +230,17 @@ posting，较宽的范围也会选择更多 window。在启用日期的索引上
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `n_candidate` | int | `0` | 候选堆大小。为 `0` 时自动取 `SPARSE_AMPLIFICATION_FACTOR · topk`（500 倍）；若显式设置，须满足 `1 ≤ n_candidate ≤ SPARSE_AMPLIFICATION_FACTOR · topk` |
+| `window_parallelism` | int | `1` | window 搜索线程数，取值为 `1` 至 `16`。worker 复用线程池，并在本地任务完成后窃取其他 worker 尚未处理的 window。合并后的堆在重排前最多保留 `n_candidate` 个候选。此值大于 `1` 时，KNN 搜索忽略 `timeout_ms`；带过滤器、生效的回调次数限制或推理追踪的查询，其 window 扫描仍使用单线程。 |
+| `worker_n_candidate` | int | `n_candidate` | 每线程请求的候选堆容量；省略时继承最终有效候选数。实际容量至少为查询的 top-k，保证只有一个 window 匹配时也能保留 top-k 个结果。显式设置时须为正数，并满足 `worker_n_candidate × window_parallelism ≥` 最终候选数。例如 `n_candidate=500`、`window_parallelism=2`、`worker_n_candidate=300` 合法。减少此值时，如果高分候选集中在部分 worker，召回率可能下降；总容量满足约束也不保证保留全局排名靠前的所有候选。 |
+| `window_scheduler` | string | `"count_deque"` | 并行 KNN 的 window 调度方式：`count_deque` 保留按数量分区的 deque/try-lock 实现；`count_atomic` 使用按数量划分的连续区间和共享原子游标；`cost_atomic` 按查询剪枝、词项剪枝后实际扫描的 posting 数之和均衡连续区间，再使用原子游标。原子方案中，每个 worker 先处理自己的区间，再按循环顺序领取其他区间的剩余任务。 |
 | `filter_callback_limit` | uint64 | `0` | 单次带过滤检索最多调用用户 `Filter::CheckValid` 回调的次数；`0` 表示不限制。删除 ID 过滤器等内部检查不计数。达到正数上限时，在正常处理最后一次回调结果后停止候选及后续窗口扫描，并返回已经通过过滤的候选，因此结果可能不完整。该限制同时适用于 KNN、范围检索以及常规 API 和 `SearchWithRequest` |
 | `query_prune_ratio` | float | `0.0` | 查询时丢弃权重最低查询项的比例，取值范围为 `[0.0, 1.0)` |
 | `term_prune_ratio` | float | `0.0` | 每条倒排链中按 value 丢弃低权 posting 的比例，取值范围为 `[0.0, 1.0)` |
 | `term_retain_threshold` | uint64 | `0` | 单个 term 在所有 window 中最多扫描的 posting 总数；`0` 表示关闭此限制，正数使每个 window 的非空 posting list 最多扫描 `max(1, floor(threshold / window_count))` 个 |
+
+FP32/FP16 稀疏 KNN 重排自动按候选数量静态分批，并行度跟随 `window_parallelism`，最多不超过候选数。调用线程也参与计算，并复用同一查询线程池；各 worker 将距离写入独立候选位置，等待完成后按原候选顺序选择全局 top-k。单 worker 使用一次批量调用。推理查询、DMQ8 和范围搜索保持逐候选重排。库内距离计数与结果统计始终开启。
+
+窗口并行扫描和重排共用一个延迟创建的索引专用查询池，最多 16 个线程，并以报告的硬件并发数为上限，至少 1 个线程。查询任务与用户提供的线程池隔离，因为用户池可能包含等待查询所持读锁的写入任务。并行 worker 的 computer、距离缓冲、上下文和本地堆使用默认线程安全分配器；请求分配器的调用及最终结果分配留在调用线程。
 
 合并 ratio 与 threshold 限制后，每条非空倒排链至少扫描一个 posting。
 
@@ -314,3 +317,9 @@ SINDI 支持 `RemoveMode::MARK_REMOVE`。调用 `Remove(ids)`（默认模式）�
 - [创建索引](../guide/create_index.md)
 - [索引参数](../resources/index_parameters.md)
 - [k-近邻搜索](../guide/knn_search.md)
+
+### 构建时 term 裁剪
+
+索引创建参数也支持 `term_prune_ratio`（浮点数，范围 `[0, 1)`，默认 `0`）和 `term_retain_threshold`（非负整数，默认 `0`），默认均不开启。`Build` 时，每个窗口内各 term 的倒排列表按存储权重降序排列，永久保留 `floor(posting_count * (1 - term_prune_ratio))` 与 `floor(term_retain_threshold / window_count)` 中较小数量的 postings；阈值为 0 表示不限制数量，非空列表至少保留一条。可变、不可变构建均支持 FP32、FP16 和 SQ8。重排向量及文档标签保持完整。搜索时裁剪作用于构建后保留的 postings，无法恢复已删除的 postings。后续 `Add` 不执行构建时裁剪。
+
+例如，在索引构建参数中设置 `"term_prune_ratio": 0.2, "term_retain_threshold": 0`，可删除每个窗口内各倒排列表中权重最低的 20% postings。

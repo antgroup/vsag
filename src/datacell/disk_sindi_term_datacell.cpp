@@ -17,6 +17,7 @@
 
 #include <fmt/format.h>
 
+#include <cstring>
 #include <limits>
 #include <type_traits>
 
@@ -159,24 +160,25 @@ DiskSindiTermDataCell<IOTmpl>::DeserializeTermLayout(StreamReader& reader,
                                                      uint32_t window_count,
                                                      uint64_t total_count) {
     std::unique_lock lock(term_layout_mutex_);
+    this->SetCacheCapacity(cache_capacity_);
     window_count_ = window_count;
     total_count_ = total_count;
     term_dict_ = sindi_datacell_utils::DeserializeTermDictionary(reader, term_id_limit_);
-    this->InitIO(io_param_);
+    this->init_io(io_param_);
     CHECK_ARGUMENT(payload_layout_.IsBound(), "SINDIV2 term data cell has no IO");
     payload_layout_.Deserialize(reader);
     payload_size_ = payload_layout_.GetByteSize();
-    this->ValidateBoundLayout(payload_size_);
+    this->validate_bound_layout(payload_size_);
     payloads_validated_ = false;
     if constexpr (not std::is_same_v<IOTmpl, ReaderIO>) {
-        this->ValidateBoundPayloads();
+        this->validate_bound_payloads();
         payloads_validated_ = true;
     }
 }
 
 template <typename IOTmpl>
 void
-DiskSindiTermDataCell<IOTmpl>::InitIO(const IOParamPtr& io_param) {
+DiskSindiTermDataCell<IOTmpl>::init_io(const IOParamPtr& io_param) {
     if (io_param != nullptr) {
         io_param_ = io_param;
     }
@@ -209,6 +211,7 @@ void
 DiskSindiTermDataCell<IOTmpl>::SetIO(const std::shared_ptr<Reader>& reader) {
     if constexpr (std::is_same_v<IOTmpl, ReaderIO>) {
         std::unique_lock lock(term_layout_mutex_);
+        this->SetCacheCapacity(cache_capacity_);
         auto reader_param = std::make_shared<ReaderIOParameter>();
         reader_param->reader = reader;
         io_param_ = reader_param;
@@ -220,21 +223,21 @@ DiskSindiTermDataCell<IOTmpl>::SetIO(const std::shared_ptr<Reader>& reader) {
             payload_layout_.InitIO(reader_param);
         }
         payload_size_ = payload_layout_.GetByteSize();
-        this->ValidateBoundLayout(payload_size_);
-        this->ValidateBoundPayloads();
+        this->validate_bound_layout(payload_size_);
+        this->validate_bound_payloads();
         payloads_validated_ = true;
     }
 }
 
 template <typename IOTmpl>
 void
-DiskSindiTermDataCell<IOTmpl>::ValidateBoundLayout(uint64_t payload_size) const {
+DiskSindiTermDataCell<IOTmpl>::validate_bound_layout(uint64_t payload_size) const {
     sindi_datacell_utils::ValidateTermDict(term_dict_, payload_size);
 }
 
 template <typename IOTmpl>
 void
-DiskSindiTermDataCell<IOTmpl>::ValidateBoundPayloads() const {
+DiskSindiTermDataCell<IOTmpl>::validate_bound_payloads() const {
     CHECK_ARGUMENT(payload_layout_.IsBound(), "SINDI_V2 term payload IO is not bound");
     const auto value_code_size = sindi_datacell_utils::GetValueCodeSize(sparse_value_quant_type_);
     Vector<uint8_t> payload(allocator_);
@@ -280,6 +283,13 @@ DiskSindiTermDataCell<IOTmpl>::LoadQueryTermBuffers(const Vector<uint32_t>& quer
                                                     Allocator* query_allocator) const {
     auto* allocator = query_allocator == nullptr ? allocator_ : query_allocator;
     QueryTermBuffers query_term_buffers(allocator);
+    uint64_t cache_capacity = cache_capacity_.load();
+    uint64_t cache_generation = 0;
+    if (cache_capacity != 0) {
+        std::lock_guard cache_lock(cache_mutex_);
+        cache_capacity = cache_capacity_.load();
+        cache_generation = cache_generation_.load();
+    }
     if (not payload_layout_.IsBound()) {
         return query_term_buffers;
     }
@@ -317,6 +327,21 @@ DiskSindiTermDataCell<IOTmpl>::LoadQueryTermBuffers(const Vector<uint32_t>& quer
                 continue;
             }
             planned_terms.insert(term_id);
+            if (cache_capacity != 0) {
+                std::lock_guard cache_lock(cache_mutex_);
+                auto hit = cache_.find(term_id);
+                if (hit != cache_.end()) {
+                    cache_lru_.splice(cache_lru_.begin(), cache_lru_, hit->second.position);
+                    TermBuffer view(allocator);
+                    view.owner = hit->second.buffer;
+                    view.window_offsets = view.owner->window_offsets;
+                    view.external_ids = view.owner->IdsData();
+                    view.external_values = view.owner->ValuesData();
+                    view.external_values_size = view.owner->ValuesSize();
+                    query_term_buffers.emplace(term_id, std::move(view));
+                    continue;
+                }
+            }
             read_plans.push_back({term_id, entry});
         }
     }
@@ -372,7 +397,42 @@ DiskSindiTermDataCell<IOTmpl>::LoadQueryTermBuffers(const Vector<uint32_t>& quer
                     window_size,
                     total_count,
                     value_code_size,
-                    allocator);
+                    cache_capacity == 0 ? allocator : allocator_);
+                if (cache_capacity != 0) {
+                    // Cached allocations belong to the index, never to a query arena.
+                    auto cached = std::make_shared<TermBuffer>(std::move(term_buffer));
+                    const uint64_t bytes = sizeof(CacheEntry) + sizeof(TermBuffer) +
+                                           cached->window_offsets.capacity() * sizeof(uint32_t) +
+                                           cached->ids.capacity() * sizeof(uint16_t) +
+                                           cached->values.capacity();
+                    if (bytes <= cache_capacity) {
+                        std::lock_guard cache_lock(cache_mutex_);
+                        if (cache_generation == cache_generation_.load() &&
+                            cache_.find(plan.term_id) == cache_.end()) {
+                            while (cache_bytes_ > cache_capacity - bytes) {
+                                auto victim = cache_.find(cache_lru_.back());
+                                cache_bytes_ -= victim->second.bytes;
+                                cache_.erase(victim);
+                                cache_lru_.pop_back();
+                            }
+                            cache_lru_.push_front(plan.term_id);
+                            try {
+                                cache_.emplace(plan.term_id,
+                                               CacheEntry{cached, bytes, cache_lru_.begin()});
+                            } catch (...) {
+                                cache_lru_.pop_front();
+                                throw;
+                            }
+                            cache_bytes_ += bytes;
+                        }
+                    }
+                    term_buffer = TermBuffer(allocator);
+                    term_buffer.owner = cached;
+                    term_buffer.window_offsets = cached->window_offsets;
+                    term_buffer.external_ids = cached->IdsData();
+                    term_buffer.external_values = cached->ValuesData();
+                    term_buffer.external_values_size = cached->ValuesSize();
+                }
                 query_term_buffers.emplace(plan.term_id, std::move(term_buffer));
             }
         }
@@ -403,7 +463,7 @@ DiskSindiTermDataCell<IOTmpl>::LoadQueryTermBuffers(const Vector<uint32_t>& quer
 
 template <typename IOTmpl>
 bool
-DiskSindiTermDataCell<IOTmpl>::InsertHeapByWindowKnn(
+DiskSindiTermDataCell<IOTmpl>::insert_heap_by_window_knn(
     float* dists,
     uint32_t window_id,
     const SparseTermComputerPtr& computer,
@@ -436,7 +496,7 @@ DiskSindiTermDataCell<IOTmpl>::InsertHeapByWindowKnn(
 
 template <typename IOTmpl>
 bool
-DiskSindiTermDataCell<IOTmpl>::InsertHeapByDistsKnn(
+DiskSindiTermDataCell<IOTmpl>::insert_heap_by_dists_knn(
     float* dists,
     uint32_t dists_size,
     MaxHeap& heap,
@@ -472,15 +532,15 @@ DiskSindiTermDataCell<IOTmpl>::InsertHeapByWindow(float* dists,
                                                   const uint64_t* filter_callback_remaining) const {
     const auto& query_term_buffers = query_context.query_term_buffers;
     if (mode == InnerSearchMode::KNN_SEARCH) {
-        return this->InsertHeapByWindowKnn(dists,
-                                           window_id,
-                                           computer,
-                                           heap,
-                                           param,
-                                           offset_id,
-                                           with_filter,
-                                           query_term_buffers,
-                                           filter_callback_remaining);
+        return this->insert_heap_by_window_knn(dists,
+                                               window_id,
+                                               computer,
+                                               heap,
+                                               param,
+                                               offset_id,
+                                               with_filter,
+                                               query_term_buffers,
+                                               filter_callback_remaining);
     }
     if (with_filter) {
         if (filter_callback_remaining != nullptr) {
@@ -514,7 +574,7 @@ DiskSindiTermDataCell<IOTmpl>::InsertHeapByDists(float* dists,
                                                  bool with_filter,
                                                  const uint64_t* filter_callback_remaining) const {
     if (mode == InnerSearchMode::KNN_SEARCH) {
-        return this->InsertHeapByDistsKnn(
+        return this->insert_heap_by_dists_knn(
             dists, dists_size, heap, param, offset_id, with_filter, filter_callback_remaining);
     }
     if (with_filter) {
@@ -533,7 +593,7 @@ DiskSindiTermDataCell<IOTmpl>::InsertHeapByDists(float* dists,
 
 template <typename IOTmpl>
 const TermBuffer*
-DiskSindiTermDataCell<IOTmpl>::GetTermBufferNoLock(
+DiskSindiTermDataCell<IOTmpl>::get_term_buffer_no_lock(
     uint32_t term_id, const QueryTermBuffers& query_term_buffers) const {
     auto query_it = query_term_buffers.find(term_id);
     if (query_it != query_term_buffers.end()) {
@@ -548,6 +608,8 @@ DiskSindiTermDataCell<IOTmpl>::GetMemoryUsage() const {
     uint64_t memory = sizeof(DiskSindiTermDataCell<IOTmpl>);
     std::shared_lock lock(term_layout_mutex_);
     memory += term_dict_.size() * sizeof(DiskTermEntry);
+    std::lock_guard cache_lock(cache_mutex_);
+    memory += cache_bytes_;
     return memory;
 }
 
@@ -564,7 +626,7 @@ DiskSindiTermDataCell<IOTmpl>::QueryWindow(float* dists,
     while (computer->HasNextTerm()) {
         auto it = computer->NextTermIter();
         auto term = computer->GetTerm(it);
-        auto* tb = this->GetTermBufferNoLock(term, query_term_buffers);
+        auto* tb = this->get_term_buffer_no_lock(term, query_term_buffers);
         if (tb == nullptr) {
             continue;
         }
@@ -656,8 +718,8 @@ DiskSindiTermDataCell<IOTmpl>::GetSparseVector(uint32_t inner_id,
     }
     data->ids_ = static_cast<uint32_t*>(allocator->Allocate(sizeof(uint32_t) * data->len_));
     data->vals_ = static_cast<float*>(allocator->Allocate(sizeof(float) * data->len_));
-    memcpy(data->ids_, ids.data(), data->len_ * sizeof(uint32_t));
-    memcpy(data->vals_, vals.data(), data->len_ * sizeof(float));
+    std::memcpy(data->ids_, ids.data(), data->len_ * sizeof(uint32_t));
+    std::memcpy(data->vals_, vals.data(), data->len_ * sizeof(float));
 }
 
 template <typename IOTmpl>
@@ -671,7 +733,7 @@ DiskSindiTermDataCell<IOTmpl>::CalcDistanceByInnerId(
     while (computer->HasNextTerm()) {
         auto it = computer->NextTermIter();
         auto term = computer->GetTerm(it);
-        auto* tb = this->GetTermBufferNoLock(term, query_term_buffers);
+        auto* tb = this->get_term_buffer_no_lock(term, query_term_buffers);
         if (tb == nullptr) {
             continue;
         }

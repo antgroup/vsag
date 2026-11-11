@@ -70,7 +70,7 @@ public:
         g.build_csr();
     }
 
-    ccrmce_runner(){};
+    ccrmce_runner() {};
     node_type
     run(std::vector<edge_type>& edge,
         std::vector<std::vector<node_type>>& max_cliques,

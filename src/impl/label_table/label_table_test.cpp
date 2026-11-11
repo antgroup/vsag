@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <future>
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -27,6 +28,67 @@
 #include "unittest.h"
 
 using namespace vsag;
+
+TEST_CASE("LabelTable deletion snapshot uses the requested allocator", "[ut][LabelTable]") {
+    DefaultAllocator table_allocator;
+    DefaultAllocator snapshot_allocator;
+    LabelTable table(&table_allocator);
+    const auto& const_table = table;
+    auto empty = const_table.GetAllDeletedIds(&snapshot_allocator);
+    REQUIRE(empty.empty());
+    REQUIRE(empty.get_allocator() == AllocatorWrapper<InnerIdType>(&snapshot_allocator));
+
+    table.Insert(0, 100);
+    table.Insert(1, 101);
+    table.Insert(2, 102);
+    REQUIRE(table.MarkRemove(std::vector<LabelType>{100, 102}) == 2);
+    auto snapshot = const_table.GetAllDeletedIds(&snapshot_allocator);
+    REQUIRE(snapshot.get_allocator() == AllocatorWrapper<InnerIdType>(&snapshot_allocator));
+    std::sort(snapshot.begin(), snapshot.end());
+    auto legacy_snapshot = table.GetAllDeletedIds();
+    std::sort(legacy_snapshot.begin(), legacy_snapshot.end());
+    REQUIRE(legacy_snapshot == std::vector<InnerIdType>{0, 2});
+    REQUIRE(std::equal(
+        snapshot.begin(), snapshot.end(), legacy_snapshot.begin(), legacy_snapshot.end()));
+
+    // The snapshot owns its data and does not keep the deletion read lock alive.
+    REQUIRE(table.MarkRemove(101) == 1);
+    table.EraseFromDeletedIds(0);
+    REQUIRE(snapshot.size() == 2);
+    REQUIRE(snapshot[0] == 0);
+    REQUIRE(snapshot[1] == 2);
+    auto updated = const_table.GetAllDeletedIds(&snapshot_allocator);
+    std::sort(updated.begin(), updated.end());
+    REQUIRE(updated.size() == 2);
+    REQUIRE(updated[0] == 1);
+    REQUIRE(updated[1] == 2);
+}
+
+TEST_CASE("LabelTable deletion read view pins mutations once per query", "[ut][LabelTable]") {
+    DefaultAllocator allocator;
+    LabelTable table(&allocator);
+    table.Insert(0, 100);
+    table.Insert(1, 101);
+    REQUIRE(table.GetDeletedIdsReadView() == nullptr);
+    table.MarkRemove(100);
+    auto view = table.GetDeletedIdsReadView();
+    REQUIRE(view != nullptr);
+    REQUIRE_FALSE(view->CheckValid(int64_t{0}));
+    REQUIRE(view->CheckValid(1));
+    std::atomic<bool> started{false};
+    auto remove = std::async(std::launch::async, [&]() {
+        started.store(true);
+        return table.MarkRemove(101);
+    });
+    while (not started.load()) {
+        std::this_thread::yield();
+    }
+    const auto status = remove.wait_for(std::chrono::milliseconds(20));
+    view.reset();
+    REQUIRE(remove.get() == 1);
+    REQUIRE(status == std::future_status::timeout);
+    REQUIRE_FALSE(table.GetDeletedIdsReadView()->CheckValid(1));
+}
 
 namespace {
 
@@ -382,17 +444,51 @@ TEST_CASE("LabelTable deserializes legacy duplicate payload", "[ut][LabelTable]"
 TEST_CASE("LabelTable Move", "[ut][LabelTable]") {
     auto allocator = std::make_shared<DefaultAllocator>();
 
+    SECTION("Moving a tombstone preserves a readded label") {
+        LabelTable table(allocator.get());
+        table.Insert(0, 100);
+        table.Insert(1, 200);
+        table.MarkRemove(100);
+        table.Insert(2, 100);
+        table.Move(0, 1);
+        REQUIRE(table.IsRemoved(1));
+        REQUIRE_FALSE(table.IsRemoved(2));
+        REQUIRE(table.GetIdByLabel(100) == 2);
+        REQUIRE_FALSE(table.TryGetIdByLabel(200).first);
+    }
+
+    SECTION("Restore tombstones ignores spare label rows and prefers the live incarnation") {
+        LabelTable table(allocator.get());
+        table.Resize(64);
+        table.Insert(0, 0);
+        table.Insert(1, 100);
+        table.Insert(2, 100);
+        Vector<InnerIdType> removed({2}, allocator.get());
+        table.RestoreDeletedIds(removed, 3);
+        REQUIRE(table.GetIdByLabel(0) == 0);
+        REQUIRE(table.GetIdByLabel(100) == 1);
+        REQUIRE(table.IsRemoved(2));
+        REQUIRE(table.GetTotalCount() == 3);
+        removed.push_back(3);
+        REQUIRE_THROWS(table.RestoreDeletedIds(removed, 3));
+        REQUIRE(table.GetIdByLabel(100) == 1);
+    }
+
     SECTION("Move with reverse map") {
         LabelTable label_table(allocator.get(), true);
         label_table.Resize(5);
         label_table.Insert(0, 100);
         label_table.Insert(1, 200);
         label_table.Insert(2, 300);
+        label_table.InsertSourceId(0, "source-100");
 
         label_table.Move(0, 3);
 
         REQUIRE(label_table.GetLabelById(3) == 100);
         REQUIRE(label_table.GetIdByLabel(100) == 3);
+        REQUIRE(label_table.GetSourceId(3) == "source-100");
+        label_table.ShrinkToFit(3);
+        REQUIRE(label_table.GetSourceId(3).empty());
     }
 
     SECTION("Move without reverse map") {
@@ -525,6 +621,7 @@ TEST_CASE("LabelTable Concurrent MarkRemove", "[ut][LabelTable]") {
         threads.reserve(num_threads);
 
         std::vector<LabelType> all_labels;
+        all_labels.reserve(num_labels);
         for (int i = 0; i < num_labels; ++i) {
             all_labels.push_back(static_cast<LabelType>(i));
         }
@@ -561,6 +658,27 @@ TEST_CASE("LabelTable Concurrent MarkRemove", "[ut][LabelTable]") {
     }
 }
 
+TEST_CASE("LabelTable restores live padding labels together with tombstones", "[ut][LabelTable]") {
+    DefaultAllocator allocator;
+    LabelTable labels(&allocator);
+    labels.Resize(64);
+    labels.Insert(0, -1);
+    labels.Insert(1, 100);
+    REQUIRE(labels.HasActivePaddingLabel());
+    const Vector<InnerIdType> removed(std::initializer_list<InnerIdType>{0}, &allocator);
+    labels.RestoreDeletedIds(removed, 2);
+    REQUIRE_FALSE(labels.HasActivePaddingLabel());
+    labels.RestoreDeletedIds(Vector<InnerIdType>(&allocator), 2);
+    REQUIRE(labels.HasActivePaddingLabel());
+    // A live re-add remains active even if an older slot with the same label is marked.
+    labels.Insert(2, -1);
+    labels.RestoreDeletedIds(removed, 3);
+    REQUIRE(labels.HasActivePaddingLabel());
+    REQUIRE(labels.GetIdByLabel(-1) == 2);
+    labels.RestoreDeletedIds(Vector<InnerIdType>({0, 2}, &allocator), 3);
+    REQUIRE_FALSE(labels.HasActivePaddingLabel());
+}
+
 TEST_CASE("LabelTable padding restore ignores unused capacity", "[ut][LabelTable]") {
     auto allocator = std::make_shared<DefaultAllocator>();
     LabelTable labels(allocator.get());
@@ -584,6 +702,56 @@ TEST_CASE("LabelTable padding restore ignores unused capacity", "[ut][LabelTable
     labels.EraseFromDeletedIds(2);
     REQUIRE_FALSE(labels.IsRemoved(2));
     REQUIRE_FALSE(labels.HasActivePaddingLabel());
+}
+
+TEST_CASE("LabelTable lookups under pinned deletion view", "[ut][LabelTable]") {
+    DefaultAllocator allocator;
+    const bool use_reverse_map = GENERATE(false, true);
+    LabelTable table(&allocator, use_reverse_map);
+    table.Insert(0, 100);
+    table.Insert(1, 101);
+    REQUIRE(table.MarkRemove(101) == 1);
+    auto view = table.GetDeletedIdsReadView();
+    REQUIRE(view != nullptr);
+    // A user callback during MCI traversal holds this non-recursive deletion read view.
+    // Test both absent and present lookups, including a tombstone, on the SAME thread.
+    REQUIRE_FALSE(table.CheckLabel(999));
+    REQUIRE(table.CheckLabel(100));
+    REQUIRE_FALSE(table.CheckLabel(101));
+    REQUIRE_FALSE(table.TryGetIdByLabel(999).first);
+    REQUIRE(table.TryGetIdByLabel(100).second == 0);
+    REQUIRE_FALSE(table.TryGetIdByLabel(101).first);
+    REQUIRE_FALSE(view->CheckValid(1));
+    view.reset();
+    REQUIRE(table.CheckLabel(100));
+    REQUIRE_FALSE(table.CheckLabel(101));
+    REQUIRE_FALSE(table.CheckLabel(999));
+    table.Resize(4);
+    table.Insert(2, 999);
+    REQUIRE(table.CheckLabel(999));
+}
+
+TEST_CASE("LabelTable relabel under pinned deletion view", "[ut][LabelTable]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+    LabelTable labels(allocator.get());
+    labels.Insert(0, 10);
+    labels.Insert(1, 20);
+    REQUIRE(labels.MarkRemove(20) == 1);
+    auto deletion_view = labels.GetDeletedIdsReadView();
+    REQUIRE(deletion_view != nullptr);
+    REQUIRE_FALSE(deletion_view->CheckValid(1));
+    // A user callback during MCI traversal retains this read view. Ordinary relabeling
+    // must not acquire the same deletion mutex exclusively on this thread.
+    labels.UpdateLabel(10, 30);
+    REQUIRE(labels.GetLabelById(0) == 30);
+    REQUIRE(labels.TryGetIdByLabel(30).first);
+    REQUIRE_FALSE(deletion_view->CheckValid(1));
+    // The destination is present in the reverse map but belongs to the removed row.
+    // A pinned view must not make this ordinary relabel acquire a deletion writer lock.
+    labels.UpdateLabel(30, 20);
+    REQUIRE(labels.GetLabelById(0) == 20);
+    REQUIRE(labels.TryGetIdByLabel(20).second == 0);
+    REQUIRE_FALSE(deletion_view->CheckValid(1));
 }
 
 TEST_CASE("LabelTable reports identity label mappings", "[ut][LabelTable]") {
@@ -646,4 +814,92 @@ TEST_CASE("LabelTable reports identity label mappings", "[ut][LabelTable]") {
         target.Deserialize(reader);
         REQUIRE(target.IsIdentityMapping());
     }
+}
+
+TEST_CASE("LabelTable concurrent Insert and Resize are mutually exclusive", "[ut][LabelTable]") {
+    // A Resize that reallocates label_table_'s storage must not race with
+    // an Insert that writes into that same storage.  With the barrier both
+    // operations start as close together as possible; TSan / ASan will flag
+    // any data race on label_table_ or label_remap_.
+    constexpr int64_t k_iter = 20000;
+
+    auto allocator = std::make_shared<DefaultAllocator>();
+    LabelTable label_table(allocator.get());
+
+    // Pre-load slot 0 so the inserter starts at id 1.
+    label_table.Insert(0, 0);
+
+    std::atomic<bool> go{false};
+    std::atomic<int> ready{0};
+    std::atomic<bool> resized{false};
+
+    std::thread inserter([&]() {
+        ready.fetch_add(1, std::memory_order_release);
+        while (not go.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        // The resizer must actually grow storage, not merely observe that Insert
+        // has already made every small Resize request a no-op.
+        while (not resized.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        for (int64_t i = 0; i < k_iter; ++i) {
+            auto inner_id = static_cast<InnerIdType>(i + 1);
+            label_table.Insert(inner_id, static_cast<LabelType>(i));
+        }
+    });
+
+    std::thread resizer([&]() {
+        ready.fetch_add(1, std::memory_order_release);
+        while (not go.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        label_table.Resize(128);
+        resized.store(true, std::memory_order_release);
+        for (int64_t s = 129; s < (k_iter + 16); s += 64) {
+            label_table.Resize(static_cast<uint64_t>(s));
+        }
+    });
+
+    // Release both threads once they are ready.
+    while (ready.load(std::memory_order_acquire) < 2) {
+        std::this_thread::yield();
+    }
+    go.store(true, std::memory_order_release);
+
+    inserter.join();
+    resizer.join();
+
+    REQUIRE(resized.load(std::memory_order_acquire));
+    REQUIRE(label_table.GetTotalCount() == k_iter + 1);
+    for (int64_t i = 0; i < k_iter; ++i) {
+        REQUIRE(label_table.GetLabelById(static_cast<InnerIdType>(i + 1)) ==
+                static_cast<LabelType>(i));
+    }
+}
+
+TEST_CASE("LabelTable MergeOther rejects truncated source storage", "[ut][LabelTable]") {
+    DefaultAllocator allocator;
+    auto source = std::make_shared<LabelTable>(&allocator);
+    auto destination = std::make_shared<LabelTable>(&allocator);
+    source->Insert(0, 100);
+    source->Insert(1, 101);
+    source->ShrinkToFit(1);  // Truncation does not decrease GetTotalCount().
+    REQUIRE(source->GetTotalCount() == 2);
+    auto id_map = [](LabelType label) { return std::make_tuple(true, label); };
+    REQUIRE_THROWS_AS(destination->MergeOther(source, id_map), VsagException);
+    REQUIRE(destination->GetTotalCount() == 0);
+}
+
+TEST_CASE("LabelTable CopyAllLabels rejects truncated logical count", "[ut][LabelTable]") {
+    DefaultAllocator allocator;
+    LabelTable table(&allocator);
+    table.Insert(0, 100);
+    table.Insert(1, 101);
+    table.ShrinkToFit(1);
+    REQUIRE(table.GetTotalCount() == 2);
+    LabelType labels[2] = {-2, -2};
+    REQUIRE_THROWS_AS(table.CopyAllLabels(labels, table.GetTotalCount()), VsagException);
+    REQUIRE(labels[0] == -2);
+    REQUIRE(labels[1] == -2);
 }

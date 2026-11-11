@@ -30,7 +30,10 @@ avx_reduce_add_ps(__m256 a) {
 #include <cmath>
 #include <cstdint>
 
+#include "kernels/local_sq_compute.h"
 #include "simd.h"
+#include "sq4_local_simd.h"
+#include "sq8_local_simd.h"
 
 namespace vsag::avx {
 
@@ -92,7 +95,8 @@ Prefetch(const void* data) {
 }
 
 #if defined(ENABLE_AVX)
-__inline __m256i __attribute__((__always_inline__)) load_8_char_and_convert(const uint8_t* data) {
+__inline __m256i __attribute__((__always_inline__))
+load_8_char_and_convert(const uint8_t* data) {
     __m128i first_8 =
         _mm_set_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, data[3], data[2], data[1], data[0]);
     __m128i second_8 =
@@ -257,7 +261,8 @@ FP32ReduceAdd(const float* x, uint64_t dim) {
 }
 
 #if defined(ENABLE_AVX)
-__inline __m256i __attribute__((__always_inline__)) load_8_short(const uint16_t* data) {
+__inline __m256i __attribute__((__always_inline__))
+load_8_short(const uint16_t* data) {
     return _mm256_set_epi16(data[7],
                             0,
                             data[6],
@@ -451,18 +456,20 @@ SQ8SparseAccumulate(float* RESTRICT dists,
 }
 
 #if defined(ENABLE_AVX)
-__inline __m128i __attribute__((__always_inline__)) load_4_char(const uint8_t* data) {
+__inline __m128i __attribute__((__always_inline__))
+load_4_char(const uint8_t* data) {
     return _mm_set_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, data[3], data[2], data[1], data[0]);
 }
 #endif
 
 #if defined(ENABLE_AVX)
-__inline void __attribute__((__always_inline__)) SQ4Decode16Values(const uint8_t* codes,
-                                                                   uint64_t offset,
-                                                                   __m256& values01,
-                                                                   __m256& values23,
-                                                                   const float* lower_bound,
-                                                                   const float* diff) {
+__inline void __attribute__((__always_inline__))
+SQ4Decode16Values(const uint8_t* codes,
+                  uint64_t offset,
+                  __m256& values01,
+                  __m256& values23,
+                  const float* lower_bound,
+                  const float* diff) {
     // Load 8 bytes (16 4-bit values)
     __m128i code_vec = load_4_char(codes + (offset >> 1));
     __m128i code_vec2 = load_4_char(codes + (offset >> 1) + 4);
@@ -857,4 +864,82 @@ InverseNormalizeWithCentroid(
 #endif
 }
 
+}  // namespace vsag::avx
+
+namespace vsag::avx {
+float
+SQ8LocalComputeL2Sqr(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_AVX)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::AvxSQ8Tag>, true, 8, false>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ8LocalComputeL2Sqr(query, codes, dim);
+#endif
+}
+float
+SQ8LocalComputeCodesL2Sqr(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_AVX)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::AvxSQ8Tag>, false, 8, false>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ8LocalComputeCodesL2Sqr(a, b, dim);
+#endif
+}
+
+float
+SQ8LocalComputeIP(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_AVX)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::AvxSQ8Tag>, true, 8, true>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ8LocalComputeIP(query, codes, dim);
+#endif
+}
+float
+SQ8LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_AVX)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::AvxSQ8Tag>, false, 8, true>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ8LocalComputeCodesIP(a, b, dim);
+#endif
+}
+
+float
+SQ4LocalComputeL2Sqr(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_AVX)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::AvxSQ8Tag>, true, 4, false>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ4LocalComputeL2Sqr(query, codes, dim);
+#endif
+}
+float
+SQ4LocalComputeCodesL2Sqr(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_AVX)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::AvxSQ8Tag>, false, 4, false>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ4LocalComputeCodesL2Sqr(a, b, dim);
+#endif
+}
+
+float
+SQ4LocalComputeIP(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_AVX)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::AvxSQ8Tag>, true, 4, true>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ4LocalComputeIP(query, codes, dim);
+#endif
+}
+float
+SQ4LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_AVX)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::AvxSQ8Tag>, false, 4, true>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ4LocalComputeCodesIP(a, b, dim);
+#endif
+}
 }  // namespace vsag::avx

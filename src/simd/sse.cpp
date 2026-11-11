@@ -26,7 +26,10 @@
 
 #include <cmath>
 
+#include "kernels/local_sq_compute.h"
 #include "simd.h"
+#include "sq4_local_simd.h"
+#include "sq8_local_simd.h"
 
 namespace vsag::sse {
 
@@ -83,13 +86,15 @@ PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* r
 }
 
 #if defined(ENABLE_SSE)
-__inline __m128i __attribute__((__always_inline__)) load_4_char(const uint8_t* data) {
+__inline __m128i __attribute__((__always_inline__))
+load_4_char(const uint8_t* data) {
     return _mm_set_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, data[3], data[2], data[1], data[0]);
 }
 #endif
 
 #if defined(ENABLE_SSE)
-__inline __m128i __attribute__((__always_inline__)) load_4_short(const uint16_t* data) {
+__inline __m128i __attribute__((__always_inline__))
+load_4_short(const uint16_t* data) {
     return _mm_set_epi16(data[3], 0, data[2], 0, data[1], 0, data[0], 0);
 }
 #endif
@@ -785,4 +790,82 @@ InverseNormalizeWithCentroid(
 #endif
 }
 
+}  // namespace vsag::sse
+
+namespace vsag::sse {
+float
+SQ8LocalComputeL2Sqr(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::SseSQ8Tag>, true, 8, false>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ8LocalComputeL2Sqr(query, codes, dim);
+#endif
+}
+float
+SQ8LocalComputeCodesL2Sqr(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::SseSQ8Tag>, false, 8, false>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ8LocalComputeCodesL2Sqr(a, b, dim);
+#endif
+}
+
+float
+SQ8LocalComputeIP(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::SseSQ8Tag>, true, 8, true>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ8LocalComputeIP(query, codes, dim);
+#endif
+}
+float
+SQ8LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::SseSQ8Tag>, false, 8, true>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ8LocalComputeCodesIP(a, b, dim);
+#endif
+}
+
+float
+SQ4LocalComputeL2Sqr(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::SseSQ8Tag>, true, 4, false>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ4LocalComputeL2Sqr(query, codes, dim);
+#endif
+}
+float
+SQ4LocalComputeCodesL2Sqr(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::SseSQ8Tag>, false, 4, false>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ4LocalComputeCodesL2Sqr(a, b, dim);
+#endif
+}
+
+float
+SQ4LocalComputeIP(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::SseSQ8Tag>, true, 4, true>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ4LocalComputeIP(query, codes, dim);
+#endif
+}
+float
+SQ4LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::SseSQ8Tag>, false, 4, true>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ4LocalComputeCodesIP(a, b, dim);
+#endif
+}
 }  // namespace vsag::sse

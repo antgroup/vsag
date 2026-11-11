@@ -16,6 +16,7 @@
 #include "pruning_strategy.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <memory>
 #include <vector>
@@ -70,6 +71,19 @@ TEST_CASE("Pruning Strategy Select Edges With Heuristic", "[ut][pruning_strategy
     const float d02 = 34.0F;
     const float d03 = 29.0F;
     const float d04 = 26.0F;
+
+    SECTION("Vector overload preserves fixed-alpha geometry") {
+        const float alpha = GENERATE(1.0F, 2.0F);
+        Vector<InnerIdType> neighbors(allocator.get());
+        neighbors = {2, 4, 1, 3};
+        select_edges_by_heuristic(neighbors, 0, 2, flatten, allocator.get(), alpha);
+        std::sort(neighbors.begin(), neighbors.end());
+        REQUIRE(neighbors.size() == (alpha == 1.0F ? 1 : 2));
+        CHECK(neighbors[0] == 1);
+        if (alpha == 2.0F) {
+            CHECK(neighbors[1] == 4);
+        }
+    }
 
     SECTION("Alpha=1.0 baseline behavior") {
         // Initial candidates in heap (distance from base: ID1 < ID4 < ID3 < ID2)
@@ -172,6 +186,60 @@ TEST_CASE("Pruning Strategy Select Edges With Heuristic", "[ut][pruning_strategy
         REQUIRE(kept == std::vector<InnerIdType>{1, 2, 4});
     }
 
+    SECTION("Disabled adaptive policy preserves legacy forward and reverse edges") {
+        auto graph_param = std::make_shared<GraphDataCellParameter>();
+        graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+        graph_param->max_degree_ = 3;
+        auto legacy = GraphInterface::MakeInstance(graph_param, common_param);
+        auto disabled = GraphInterface::MakeInstance(graph_param, common_param);
+        AdaptivePruningParameter policy;
+        policy.adjust_step = 99;  // Inactive tuning must not affect the legacy path.
+        auto mutexes = std::make_shared<EmptyMutex>();
+        auto connect = [&](const GraphInterfacePtr& graph, const AdaptivePruningParameter* p) {
+            for (InnerIdType node = 0; node < 5; ++node) {
+                auto heap = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
+                for (InnerIdType other = 0; other < node; ++other) {
+                    heap->Push(FlattenDistanceProvider(flatten, nullptr)
+                                   .PairwiseDistance(node, other, nullptr),
+                               other);
+                }
+                mutually_connect_new_element(
+                    node, heap, graph, flatten, mutexes, allocator.get(), 1.5F, p);
+            }
+        };
+        connect(legacy, nullptr);
+        connect(disabled, &policy);
+        for (InnerIdType node = 0; node < 5; ++node) {
+            Vector<InnerIdType> old_neighbors(allocator.get()), new_neighbors(allocator.get());
+            legacy->GetNeighbors(node, old_neighbors);
+            disabled->GetNeighbors(node, new_neighbors);
+            CHECK(old_neighbors == new_neighbors);
+        }
+    }
+
+    SECTION("Adaptive forward pruning handles short lists and removes self edges") {
+        auto graph_param = std::make_shared<GraphDataCellParameter>();
+        graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+        graph_param->max_degree_ = 4;
+        auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+        auto heap = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
+        heap->Push(0, 0);
+        heap->Push(d01, 1);
+        heap->Push(d02, 2);
+        AdaptivePruningParameter policy;
+        policy.enabled = true;
+        auto mutexes = std::make_shared<EmptyMutex>();
+        CHECK(mutually_connect_new_element(
+                  0, heap, graph, flatten, mutexes, allocator.get(), 1.06F, &policy) == 1);
+        Vector<InnerIdType> neighbors(allocator.get());
+        graph->GetNeighbors(0, neighbors);
+        REQUIRE(neighbors.size() == 1);
+        CHECK(neighbors.front() == 1);
+        graph->GetNeighbors(1, neighbors);
+        REQUIRE(neighbors.size() == 1);
+        CHECK(neighbors.front() == 0);
+    }
+
     SECTION("Mutual connection returns farthest candidate") {
         auto graph_param = std::make_shared<GraphDataCellParameter>();
         graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
@@ -194,6 +262,206 @@ TEST_CASE("Pruning Strategy Select Edges With Heuristic", "[ut][pruning_strategy
         Vector<InnerIdType> neighbors_0(allocator.get());
         graph->GetNeighbors(0, neighbors_0);
         REQUIRE(neighbors_0.size() == 1);
+    }
+}
+
+TEST_CASE("Reverse edge linking applies edges and respects the degree bound",
+          "[ut][pruning_strategy]") {
+    auto allocator = Engine::CreateDefaultAllocator();
+
+    auto flatten_param = std::make_shared<FlattenDataCellParameter>();
+    flatten_param->quantizer_parameter = std::make_shared<FP32QuantizerParameter>();
+    flatten_param->io_parameter = std::make_shared<MemoryIOParameter>();
+
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common_param.dim_ = 128;
+
+    auto flatten = FlattenInterface::MakeInstance(flatten_param, common_param);
+    REQUIRE(flatten != nullptr);
+
+    // Points live far apart on distinct coordinates so pruning decisions are unambiguous.
+    std::vector<std::array<float, 128>> vectors(8);
+    for (auto& v : vectors) {
+        v.fill(0.0F);
+    }
+    for (size_t i = 0; i < vectors.size(); ++i) {
+        vectors[i][i] = static_cast<float>(i + 1);
+    }
+    std::vector<const float*> vector_ptrs;
+    for (const auto& v : vectors) {
+        vector_ptrs.push_back(v.data());
+    }
+    flatten->Train(vector_ptrs[0], 1);
+    for (size_t i = 0; i < vectors.size(); ++i) {
+        flatten->InsertVector(vectors[i].data(), static_cast<InnerIdType>(i));
+    }
+
+    SECTION("cheap append path adds the reverse edge") {
+        auto graph_param = std::make_shared<GraphDataCellParameter>();
+        graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+        graph_param->max_degree_ = 4;
+        auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+
+        auto mutexes = std::make_shared<PointsMutex>(8, allocator.get());
+        Vector<InnerIdType> forward(allocator.get());
+        forward.emplace_back(1);
+        forward.emplace_back(2);
+        graph->InsertNeighborsById(0, forward);
+
+        // Link 0 back from 2 and 3; both target lists have room, so this takes the cheap
+        // append branch in both the locked and the optimistic implementation.
+        Vector<InnerIdType> targets(allocator.get());
+        targets.emplace_back(2);
+        targets.emplace_back(3);
+        const FlattenDistanceProvider provider(flatten, nullptr);
+        link_back_edges(0, targets, graph, provider, mutexes, allocator.get(), 1.0F);
+
+        Vector<InnerIdType> neighbors_2(allocator.get());
+        Vector<InnerIdType> neighbors_3(allocator.get());
+        graph->GetNeighbors(2, neighbors_2);
+        graph->GetNeighbors(3, neighbors_3);
+        REQUIRE(neighbors_2.size() == 1);
+        REQUIRE(neighbors_2[0] == 0);
+        REQUIRE(neighbors_3.size() == 1);
+        REQUIRE(neighbors_3[0] == 0);
+
+        // A node that was not a target must be untouched.
+        Vector<InnerIdType> neighbors_4(allocator.get());
+        graph->GetNeighbors(4, neighbors_4);
+        REQUIRE(neighbors_4.empty());
+    }
+
+    SECTION("a full neighbour list is pruned to the degree bound") {
+        auto graph_param = std::make_shared<GraphDataCellParameter>();
+        graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+        graph_param->max_degree_ = 2;
+        auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+
+        auto mutexes = std::make_shared<PointsMutex>(8, allocator.get());
+
+        // Node 1 is already full, so linking 0 -> 1 must take the expensive pruning branch
+        // and still leave the list within the bound.
+        Vector<InnerIdType> full(allocator.get());
+        full.emplace_back(2);
+        full.emplace_back(3);
+        graph->InsertNeighborsById(1, full);
+
+        Vector<InnerIdType> forward(allocator.get());
+        forward.emplace_back(1);
+        graph->InsertNeighborsById(0, forward);
+
+        Vector<InnerIdType> targets(allocator.get());
+        targets.emplace_back(1);
+        const FlattenDistanceProvider provider(flatten, nullptr);
+        link_back_edges(0, targets, graph, provider, mutexes, allocator.get(), 1.0F);
+
+        Vector<InnerIdType> neighbors_1(allocator.get());
+        graph->GetNeighbors(1, neighbors_1);
+        REQUIRE(neighbors_1.size() <= 2);
+        // The newly linked node must have been considered, i.e. the list is still valid and
+        // non-empty after pruning.
+        REQUIRE(not neighbors_1.empty());
+    }
+}
+
+}  // namespace vsag
+
+namespace vsag {
+
+TEST_CASE("Adaptive reverse pruning relaxes around the existing neighbor",
+          "[ut][pruning_strategy][adaptive_pruning][reverse]") {
+    auto allocator = Engine::CreateDefaultAllocator();
+    IndexCommonParam common;
+    common.allocator_ = allocator;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common.dim_ = 1;
+    auto flatten_param = std::make_shared<FlattenDataCellParameter>();
+    flatten_param->quantizer_parameter = std::make_shared<FP32QuantizerParameter>();
+    flatten_param->io_parameter = std::make_shared<MemoryIOParameter>();
+    auto flatten = FlattenInterface::MakeInstance(flatten_param, common);
+    // Center 0 has a close neighbor at 1 and a distant neighbor at 20/21.
+    // Baseline 1.06 rejects both distant candidates; relaxation to 1.18 admits the nearer one.
+    const bool incoming_is_nearer = GENERATE(false, true);
+    float vectors[] = {
+        0, 1, incoming_is_nearer ? 21.0F : 20.0F, incoming_is_nearer ? 20.0F : 21.0F};
+    flatten->Train(vectors, 4);
+    flatten->BatchInsertVector(vectors, 4);
+    auto graph_param = std::make_shared<GraphDataCellParameter>();
+    graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+    graph_param->max_degree_ = 2;
+    auto graph = GraphInterface::MakeInstance(graph_param, common);
+    Vector<InnerIdType> old_neighbors(allocator.get());
+    old_neighbors = {1, 2};
+    graph->InsertNeighborsById(0, old_neighbors);
+    auto candidates = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
+    candidates->Push(vectors[3] * vectors[3], 0);
+    AdaptivePruningParameter policy;
+    policy.enabled = GENERATE(false, true);
+    policy.apply_to_reverse = GENERATE(false, true);
+    auto mutexes = std::make_shared<EmptyMutex>();
+    CHECK(mutually_connect_new_element(
+              3, candidates, graph, flatten, mutexes, allocator.get(), 1.06F, &policy) == 0);
+    Vector<InnerIdType> actual(allocator.get());
+    graph->GetNeighbors(0, actual);
+    std::sort(actual.begin(), actual.end());
+    if (policy.enabled && policy.apply_to_reverse) {
+        REQUIRE(actual.size() == 2);
+        CHECK(actual[0] == 1);
+        CHECK(actual[1] == (incoming_is_nearer ? 3 : 2));
+    } else {
+        REQUIRE(actual.size() == 1);
+        CHECK(actual.front() == 1);
+    }
+    graph->GetNeighbors(3, actual);
+    REQUIRE(actual.size() == 1);
+    CHECK(actual.front() == 0);
+}
+
+TEST_CASE("Adaptive reverse pruning preserves append and prunes full lists",
+          "[ut][pruning_strategy][adaptive_pruning][reverse]") {
+    auto allocator = Engine::CreateDefaultAllocator();
+    IndexCommonParam common;
+    common.allocator_ = allocator;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common.dim_ = 1;
+    auto flatten_param = std::make_shared<FlattenDataCellParameter>();
+    flatten_param->quantizer_parameter = std::make_shared<FP32QuantizerParameter>();
+    flatten_param->io_parameter = std::make_shared<MemoryIOParameter>();
+    auto flatten = FlattenInterface::MakeInstance(flatten_param, common);
+    float vectors[] = {0, 1, 2, 3};
+    flatten->Train(vectors, 4);
+    flatten->BatchInsertVector(vectors, 4);
+    auto graph_param = std::make_shared<GraphDataCellParameter>();
+    graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+    graph_param->max_degree_ = 2;
+    auto graph = GraphInterface::MakeInstance(graph_param, common);
+    const bool full = GENERATE(false, true);
+    AdaptivePruningParameter policy;
+    policy.enabled = true;
+    policy.apply_to_reverse = true;
+    Vector<InnerIdType> neighbors(allocator.get());
+    neighbors.push_back(1);
+    if (full) {
+        neighbors.push_back(2);
+    }
+    graph->InsertNeighborsById(0, neighbors);
+    auto candidates = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
+    candidates->Push(9, 0);
+    auto mutexes = std::make_shared<EmptyMutex>();
+    mutually_connect_new_element(
+        3, candidates, graph, flatten, mutexes, allocator.get(), 1.06F, &policy);
+    graph->GetNeighbors(0, neighbors);
+    std::sort(neighbors.begin(), neighbors.end());
+    if (not full) {
+        // Running the selector here would incorrectly drop the new edge.
+        REQUIRE(neighbors.size() == 2);
+        CHECK(neighbors[0] == 1);
+        CHECK(neighbors[1] == 3);
+    } else {
+        REQUIRE(neighbors.size() == 1);
+        CHECK(neighbors[0] == 1);
     }
 }
 

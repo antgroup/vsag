@@ -15,6 +15,8 @@
 
 #include "lock_strategy.h"
 
+#include "utils/search_lock.h"
+
 namespace vsag {
 
 PointsMutex::PointsMutex(uint32_t element_num, Allocator* allocator)
@@ -29,12 +31,16 @@ PointsMutex::MutexBlockDeleter::operator()(MutexBlock* block) const {
 
 void
 PointsMutex::SharedLock(uint32_t i) {
-    GetMutex(i).lock_shared();
+    if (not SearchLockScope::IsNoLock()) {
+        GetMutex(i).lock_shared();
+    }
 }
 
 void
 PointsMutex::SharedUnlock(uint32_t i) {
-    GetMutex(i).unlock_shared();
+    if (not SearchLockScope::IsNoLock()) {
+        GetMutex(i).unlock_shared();
+    }
 }
 
 void

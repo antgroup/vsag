@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cmath>
+#include <cstring>
 #include <optional>
 #include <string>
 
@@ -107,7 +108,7 @@ template <typename T>
 void
 base64_decode_obj(const std::string& in, T& obj) {
     std::string to_string = base64_decode(in);
-    memcpy(&obj, to_string.c_str(), sizeof(obj));
+    std::memcpy(&obj, to_string.c_str(), sizeof(obj));
 }
 
 void
@@ -122,7 +123,7 @@ set_dataset(DataTypes type,
             int64_t dim,
             const DatasetPtr& base,
             const void* vectors_ptr,
-            uint32_t num_element);
+            int64_t num_element);
 
 DatasetPtr
 sample_train_data(const DatasetPtr& data,
@@ -130,6 +131,7 @@ sample_train_data(const DatasetPtr& data,
                   int64_t dim,
                   int64_t train_sample_count,
                   Allocator* allocator = nullptr,
-                  std::optional<uint64_t> random_seed = std::nullopt);
+                  std::optional<uint64_t> random_seed = std::nullopt,
+                  DataTypes data_type = DataTypes::DATA_TYPE_FLOAT);
 
 }  // namespace vsag

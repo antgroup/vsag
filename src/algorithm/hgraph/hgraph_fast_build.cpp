@@ -114,7 +114,8 @@ HGraphBuildTaskGuard::HGraphBuildTaskGuard(std::vector<std::future<void>>& futur
 HGraphBuildTaskGuard::~HGraphBuildTaskGuard() {
     try {
         wait_all_futures(futures_);
-    } catch (...) {
+    } catch (...) {  // NOLINT(bugprone-empty-catch)
+        // Cleanup must preserve the primary result or exception.
     }
 }
 
@@ -149,7 +150,8 @@ bool
 HGraph::need_temporary_sq8_build_data_for_add() const {
     return this->rabitq_fused_datacell_ == nullptr and this->optimized_build_codes_ == nullptr and
            not this->has_precise_reorder() and
-           this->basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_RABITQ;
+           GetBaseQuantizerName(this->basic_flatten_codes_->GetQuantizerName()) ==
+               QUANTIZATION_TYPE_VALUE_RABITQ;
 }
 
 void
@@ -158,7 +160,7 @@ HGraph::prepare_build_codes(const DatasetPtr& data, const Vector<AddRow>& rows) 
         return;
     }
 
-    if (this->thread_pool_ == nullptr) {
+    if (this->thread_pool_ == nullptr or this->thread_pool_->IsCurrentThread()) {
         for (const auto& row : rows) {
             if (this->rabitq_fused_datacell_ != nullptr) {
                 this->insert_fused_optimized_build_codes(get_data(data, row.input_idx),
@@ -194,7 +196,8 @@ HGraph::prepare_build_codes(const DatasetPtr& data, const Vector<AddRow>& rows) 
         // wrapper task complete. Drain the pool before optimized-build state can be released.
         try {
             this->thread_pool_->WaitUntilEmpty();
-        } catch (...) {
+        } catch (...) {  // NOLINT(bugprone-empty-catch)
+            // Cleanup must preserve the primary result or exception.
         }
         std::rethrow_exception(enqueue_exception);
     }

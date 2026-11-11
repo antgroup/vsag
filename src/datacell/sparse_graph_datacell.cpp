@@ -17,6 +17,7 @@
 
 #include "index_common_param.h"
 #include "sparse_graph_datacell_parameter.h"
+#include "utils/search_lock.h"
 #include "vsag_exception.h"
 
 namespace vsag {
@@ -109,7 +110,7 @@ SparseGraphDataCell::InsertNeighborsById(InnerIdType id, const Vector<InnerIdTyp
 
 uint32_t
 SparseGraphDataCell::GetNeighborSize(InnerIdType id) const {
-    std::shared_lock<std::shared_mutex> rlock(this->neighbors_map_mutex_);
+    auto rlock = make_search_read_lock(this->neighbors_map_mutex_);
     auto iter = this->neighbors_.find(id);
     if (iter != this->neighbors_.end()) {
         return iter->second->size();
@@ -118,7 +119,7 @@ SparseGraphDataCell::GetNeighborSize(InnerIdType id) const {
 }
 void
 SparseGraphDataCell::GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbor_ids) const {
-    std::shared_lock<std::shared_mutex> rlock(this->neighbors_map_mutex_);
+    auto rlock = make_search_read_lock(this->neighbors_map_mutex_);
     auto iter = this->neighbors_.find(id);
     if (iter != this->neighbors_.end()) {
         const auto& ngbrs = iter->second;
@@ -178,14 +179,32 @@ SparseGraphDataCell::Deserialize(StreamReader& reader) {
             this->node_version_[key] = value;
         }
     }
+    if (reverse_edges_) {
+        // Sparse upper-level IDs are not a dense [0, total_count_) range. Reconstruct
+        // incoming edges from the loaded rows using decoded, version-valid neighbors.
+        // GetNeighbors releases its map lock before AddReverseEdge takes the new object's lock;
+        // loading is exclusive to the caller and no graph/reverse-edge lock is nested here.
+        // Its uncontended shared lock preserves the usual decoding/version checks on this
+        // cold path without adding a separate unlocked neighbor API.
+        auto restored = std::make_unique<ReverseEdge>(allocator_);
+        Vector<InnerIdType> neighbors(allocator_);
+        for (const auto& row : neighbors_) {
+            neighbors.clear();
+            this->GetNeighbors(row.first, neighbors);
+            for (auto neighbor : neighbors) {
+                restored->AddReverseEdge(row.first, neighbor);
+            }
+        }
+        reverse_edges_.swap(restored);
+    }
 }
 
 void
-SparseGraphDataCell::Resize(InnerIdType new_size){};
+SparseGraphDataCell::Resize(InnerIdType new_size) {};
 
 bool
 SparseGraphDataCell::CheckIdExists(InnerIdType id) const {
-    std::shared_lock<std::shared_mutex> rlock(this->neighbors_map_mutex_);
+    auto rlock = make_search_read_lock(this->neighbors_map_mutex_);
     return this->neighbors_.find(id) != this->neighbors_.end();
 }
 
@@ -269,6 +288,7 @@ SparseGraphDataCell::GetIds() const {
 
 uint64_t
 SparseGraphDataCell::GetMemoryUsage() const {
+    std::shared_lock rlock(neighbors_map_mutex_);
     auto memory = sizeof(SparseGraphDataCell);
     memory += neighbors_.size() * (sizeof(InnerIdType) + maximum_degree_ * sizeof(InnerIdType) +
                                    sizeof(std::nullptr_t));
@@ -295,7 +315,7 @@ SparseGraphDataCell::Move(InnerIdType from, InnerIdType to) {
     }
 
     {
-        std::shared_lock<std::shared_mutex> rlock(this->neighbors_map_mutex_);
+        auto rlock = make_search_read_lock(this->neighbors_map_mutex_);
         if (neighbors_.count(from) == 0) {
             return;
         }

@@ -85,9 +85,10 @@ public:
 
     void
     ShrinkToFit(InnerIdType capacity) override {
+        // Caller has compacted survivors. Keep the logical tail retired even if allocation fails.
+        this->total_count_ = std::min(this->total_count_, capacity);
         this->layout_->Shrink(capacity);
         this->max_capacity_ = capacity;
-        this->total_count_ = std::min(this->total_count_, capacity);
     }
 
     inline void

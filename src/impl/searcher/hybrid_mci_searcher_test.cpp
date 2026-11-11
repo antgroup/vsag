@@ -199,6 +199,78 @@ TEST_CASE(
     REQUIRE(stats.mci_members_considered < 3);
 }
 
+TEST_CASE("HybridMCISearcher applies the boundary within one expansion",
+          "[ut][HybridMCISearcher][budget]") {
+    auto fixture = MakeFixture();
+    const auto query = std::vector<float>{0.0F, 0.0F};
+    auto filter = std::make_shared<SelectiveFilter>(std::vector<int64_t>{1, 3, 4, 5}, 0.66F);
+    const double vob = GENERATE(-1.0, 0.0, 2.0, 2.5);
+    auto param = MakeParam(/*topk=*/3, /*ef=*/10, vob);
+    // Hold the expansion path fixed: only entry 0's sparse edge and clique are visited.
+    param.hops_limit = 1;
+    HybridSearchStats stats;
+    auto result = HybridMCISearcher(fixture.common)
+                      .Search(fixture.graph,
+                              fixture.cliques,
+                              fixture.flatten,
+                              query.data(),
+                              filter,
+                              param,
+                              nullptr,
+                              &stats);
+    REQUIRE(stats.expanded_nodes == 1);
+    REQUIRE(stats.sparse_neighbors_visited == 1);
+    REQUIRE(stats.mci_cliques_expanded == 1);
+    // Each valid member costs 2.0. Equality stops before member 4, whereas 2.5
+    // admits it; non-positive boundaries disable the check altogether.
+    const bool stops = vob == 2.0;
+    REQUIRE(stats.mci_stopped_early == stops);
+    REQUIRE(stats.mci_members_considered == (stops ? 1 : 2));
+    REQUIRE(stats.mci_members_satisfied == stats.mci_members_considered);
+    REQUIRE(ResultIds(result) ==
+            (stops ? std::vector<InnerIdType>{1, 3} : std::vector<InnerIdType>{1, 3, 4}));
+}
+
+TEST_CASE("HybridMCISearcher MCI work can decrease when the boundary is disabled",
+          "[ut][HybridMCISearcher][budget]") {
+    auto fixture = MakeFixture();
+    // The relaxed traversal discovers 4 from c0, then reaches 2 and 5 via sparse
+    // edges. The tight traversal skips 4 and considers 2 and 5 through c1 instead.
+    fixture.graph = std::make_shared<MockGraphDataCell>(
+        std::vector<std::vector<InnerIdType>>{{1}, {}, {}, {}, {2, 5}, {}});
+    auto* allocator = fixture.common.allocator_.get();
+    Vector<InnerIdType> offsets({0, 3, 6}, allocator);
+    Vector<InnerIdType> members({0, 3, 4, 1, 2, 5}, allocator);
+    Vector<InnerIdType> node_offsets({0, 1, 2, 3, 4, 5, 6}, allocator);
+    Vector<InnerIdType> node_cliques({0, 1, 1, 0, 0, 1}, allocator);
+    fixture.cliques->Assign(std::move(offsets),
+                            std::move(members),
+                            std::move(node_offsets),
+                            std::move(node_cliques),
+                            fixture.ids.size());
+    const auto query = std::vector<float>{5.0F, 0.0F};
+    auto filter = std::make_shared<SelectiveFilter>(std::vector<int64_t>{1, 3, 4, 5}, 0.66F);
+    const double vob = GENERATE(2.0, 0.0);
+    HybridSearchStats stats;
+    auto result = HybridMCISearcher(fixture.common)
+                      .Search(fixture.graph,
+                              fixture.cliques,
+                              fixture.flatten,
+                              query.data(),
+                              filter,
+                              MakeParam(/*topk=*/3, /*ef=*/10, vob),
+                              nullptr,
+                              &stats);
+    const bool tight = vob == 2.0;
+    REQUIRE(stats.mci_stopped_early == tight);
+    REQUIRE(stats.mci_cliques_expanded == 2);
+    REQUIRE(stats.mci_members_considered == (tight ? 3 : 2));
+    REQUIRE(stats.mci_members_satisfied == 2);
+    REQUIRE(stats.sparse_neighbors_visited == (tight ? 1 : 3));
+    REQUIRE(ResultIds(result) ==
+            (tight ? std::vector<InnerIdType>{1, 3, 5} : std::vector<InnerIdType>{3, 4, 5}));
+}
+
 TEST_CASE("HybridMCISearcher degrades to the sparse graph without an MCI companion",
           "[ut][HybridMCISearcher][sparse-only]") {
     auto fixture = MakeFixture();

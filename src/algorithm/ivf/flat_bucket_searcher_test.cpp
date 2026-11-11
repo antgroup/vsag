@@ -24,7 +24,7 @@
 #include <vector>
 
 #include "impl/allocator/safe_allocator.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "rabitq_split_bucket_searcher.h"
 #include "unittest.h"
 #include "vsag/filter.h"

@@ -76,8 +76,29 @@ are rejected rather than silently changing search semantics.
 metric to select `scan_buckets_count` buckets, then applies the callback to candidates in those
 buckets. The callback controls candidate ranking but cannot recover vectors outside the selected
 buckets; increase `scan_buckets_count` to improve recall. Callback IVF does not support range search,
-`disable_bucket_scan`, bucket-graph search, or parallel search. Those configurations are rejected.
+`disable_bucket_scan`, or bucket-graph search. Those configurations are rejected.
 Reordering is automatically disabled in callback mode. Other indexes do not support the callback.
+
+IVF callback search supports bucket-parallel execution using `parallelism` in the IVF search
+parameters (for example, `{"ivf":{"scan_buckets_count":8,"parallelism":4}}`)
+when a thread pool is available; otherwise it executes serially. Each worker owns its attribute
+Executor, batch buffers, and result heap. The processing order is **attribute filter → distance
+callback → local top-k score check → request filter → heap insertion**. The potentially expensive
+request filter is called only if the worker heap is not full or the score can improve it. Only
+candidates passing that filter enter the heap and tighten its threshold. Merging worker heaps does
+not call the filter again.
+
+Both the callback and request filter, including their shared/captured state, must support concurrent
+calls when parallel search is enabled. Filter decisions must remain stable during a request and
+must not depend on invocation order or whether other IDs have been checked.
+Batch composition and invocation order can vary; per-ID
+scores must not depend on either. `distance_batch_size_` remains the maximum width of each call,
+not a concurrency limit. Equal-score result IDs may differ with execution order. Worker-local
+thresholds can be looser than a serial threshold, so parallel search may perform more filter calls;
+score pruning reduces filter and heap work, not distance evaluations already submitted to the callback.
+In reasoning output, scored candidates are recorded as visited even if the score gate skips them.
+A filter rejection is recorded only when that filter actually runs and rejects the candidate;
+diagnostics never invoke the expensive filter solely to classify a score-pruned candidate.
 
 ### IVF bucket routing
 

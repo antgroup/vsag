@@ -28,8 +28,9 @@
 #include "datacell/hgraph_rabitq_fused_datacell.h"
 #include "datacell/rabitq_split_datacell.h"
 #include "dataset_impl.h"
-#include "hgraph.h"  // IWYU pragma: keep
+#include "hgraph.h"
 #include "hgraph_fast_build.h"
+#include "hgraph_mci_add.h"  // IWYU pragma: keep
 #include "impl/heap/standard_heap.h"
 #include "impl/logger/logger.h"
 #include "impl/odescent/odescent_graph_builder.h"
@@ -37,9 +38,13 @@
 #include "impl/pruning_strategy.h"
 #include "impl/searcher/basic_searcher.h"
 #include "io/memory_io/memory_io_parameter.h"
+#include "io/user_defined_io/user_defined_io_parameter.h"
+#include "pipnn_storage_build.h"
 #include "quantization/scalar_quantization/scalar_quantizer_parameter.h"
+#include "simd/bf16_simd.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
+#include "utils/half_input.h"
 #include "utils/util_functions.h"
 #include "vsag/options.h"
 
@@ -92,8 +97,8 @@ make_temporary_flatten_like(const FlattenInterfaceParamPtr& source_param,
 static bool
 need_temporary_sq8_build_data(const FlattenInterfacePtr& basic_flatten_codes,
                               bool has_precise_reorder) {
-    return not has_precise_reorder and
-           basic_flatten_codes->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_RABITQ;
+    const auto name = basic_flatten_codes->GetQuantizerName();
+    return not has_precise_reorder and GetBaseQuantizerName(name) == QUANTIZATION_TYPE_VALUE_RABITQ;
 }
 
 static void
@@ -116,6 +121,31 @@ wait_all_futures(std::vector<std::future<void>>& futures) {
     }
 }
 
+const float*
+HGraph::fused_float_input(const void* data, uint64_t count, Vector<float>& scratch) const {
+    if (data_type_ != DataTypes::DATA_TYPE_FP16 and data_type_ != DataTypes::DATA_TYPE_BF16) {
+        return static_cast<const float*>(data);
+    }
+    CHECK_ARGUMENT(dim_ > 0, "fused HGraph input dimension must be positive");
+    if (data == nullptr and count != 0) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "fused HGraph half input must not be null");
+    }
+    const auto dim = static_cast<uint64_t>(dim_);
+    CHECK_ARGUMENT(count <= std::numeric_limits<uint64_t>::max() / dim,
+                   "fused HGraph input element count overflows");
+    const auto size = count * dim;
+    CHECK_ARGUMENT(size <= std::numeric_limits<size_t>::max() / sizeof(float),
+                   "fused HGraph converted input size overflows");
+    scratch.resize(size);
+    const auto* half = static_cast<const uint16_t*>(data);
+    for (uint64_t i = 0; i < size; ++i) {
+        scratch[i] = data_type_ == DataTypes::DATA_TYPE_FP16 ? half_input::FP16ToFloat(half[i])
+                                                             : generic::BF16ToFloat(half[i]);
+    }
+    return scratch.data();
+}
+
 void
 HGraph::Train(const DatasetPtr& base) {
     this->check_fused_mutation_supported("Train");
@@ -128,9 +158,10 @@ HGraph::sample_train_dataset(const DatasetPtr& base) const {
     int64_t dim = base->GetDim();
     if (rabitq_fused_datacell_ != nullptr) {
         return vsag::sample_train_data(
-            base, total_elements, dim, train_sample_count_, allocator_, 0x52425131U);
+            base, total_elements, dim, train_sample_count_, allocator_, 0x52425131U, data_type_);
     }
-    return vsag::sample_train_data(base, total_elements, dim, train_sample_count_, allocator_);
+    return vsag::sample_train_data(
+        base, total_elements, dim, train_sample_count_, allocator_, std::nullopt, data_type_);
 }
 
 void
@@ -165,10 +196,12 @@ HGraph::train_fused_codec(const DatasetPtr& full_data) {
     }
     // Use all input vectors for KMeans, independently of quantizer sampling.
     // Preparing the centers reuses the already-trained base quantizer's transform.
-    rabitq_split_codes_->TrainFusedCodec(static_cast<const float*>(get_data(full_data)),
-                                         full_data->GetNumElements(),
-                                         rabitq_centroid_count_,
-                                         kmeans_iterations_);
+    Vector<float> train_scratch(allocator_);
+    rabitq_split_codes_->TrainFusedCodec(
+        fused_float_input(get_data(full_data), full_data->GetNumElements(), train_scratch),
+        full_data->GetNumElements(),
+        rabitq_centroid_count_,
+        kmeans_iterations_);
     rabitq_fused_datacell_->SetCodecModel(rabitq_split_codes_->ExportFusedCodec());
 }
 
@@ -197,6 +230,10 @@ HGraph::Build(const DatasetPtr& data) {
                             "HGraph PiPNN does not support build_with_cache");
     }
     if (using_build_cache) {
+        CHECK_ARGUMENT(
+            not adaptive_pruning_.enabled,
+            "adaptive_pruning does not yet support building from imported cache; disable "
+            "adaptive_pruning or build without importing a cache");
         this->check_fused_mutation_supported("Build with imported cache");
         if (this->using_dedup_storage()) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
@@ -244,6 +281,12 @@ HGraph::build_by_pipnn(const DatasetPtr& data) {
                        "extra_infos size mismatch");
     }
     return this->build_by_batch_graph(data, true);
+}
+
+RaBitQFusedCodeView
+HGraph::FusedBatchCodes::View(uint64_t input_idx) const {
+    const auto* one_bit_code = codes.data() + input_idx * stride;
+    return {one_bit_code, one_bit_code + one_bit_size, clusters[input_idx]};
 }
 
 std::vector<int64_t>
@@ -330,8 +373,8 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         }
         this->train_fused_codec(data);
     }
-    auto fused_codes = this->prepare_fused_encoding_data(static_cast<const float*>(vectors),
-                                                         static_cast<uint64_t>(total));
+    // Validate every encoding before publishing IDs, and retain it for the actual code write.
+    auto fused_codes = this->prepare_fused_codes(data);
     this->resize(current_count + new_ids_count, this->rabitq_fused_datacell_ != nullptr);
     this->total_count_ += new_ids_count;
     const bool all_rows_are_valid =
@@ -356,6 +399,14 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
             batch_insert_flatten_codes(this->raw_vector_);
         }
     };
+    auto insert_persistent_row = [&](int64_t input_idx, InnerIdType inner_id) {
+        if (fused_codes != nullptr) {
+            const auto view = fused_codes->View(static_cast<uint64_t>(input_idx));
+            this->insert_persistent_codes(get_data(data, input_idx), inner_id, &view);
+        } else {
+            this->insert_persistent_codes(get_data(data, input_idx), inner_id);
+        }
+    };
     bool persistent_codes_batched = false;
     if (not defer_persistent_codes and all_rows_are_valid) {
         batch_insert_persistent_codes();
@@ -366,8 +417,11 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         batch_insert_flatten_codes(temporary_sq8_build_data);
         temporary_codes_batched = true;
     }
+    if (not this->using_dedup_storage()) {
+        this->PublishThroughTotalCount();
+    }
     Vector<std::pair<InnerIdType, int64_t>> deferred_code_ids(allocator_);
-    Vector<const float*> pipnn_vectors(allocator_);
+    Vector<const void*> pipnn_vectors(allocator_);
     if (use_pipnn) {
         pipnn_vectors.reserve(valid_indices.size());
     }
@@ -383,10 +437,8 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         }
         if (defer_persistent_codes) {
             deferred_code_ids.emplace_back(inner_id, i);
-        } else if (not persistent_codes_batched) {
-            const auto code = fused_codes != nullptr ? fused_codes->Get(i) : RaBitQFusedCodeView{};
-            this->insert_persistent_codes(
-                get_data(data, i), inner_id, fused_codes != nullptr ? &code : nullptr);
+        } else if (not persistent_codes_batched and not this->using_dedup_storage()) {
+            insert_persistent_row(i, inner_id);
         }
         if (temporary_sq8_build_data != nullptr and not temporary_codes_batched) {
             temporary_sq8_build_data->InsertVector(get_data(data, i), inner_id);
@@ -400,7 +452,7 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         }
         if (use_pipnn) {
             pipnn_vectors.emplace_back(
-                static_cast<const float*>(get_data(data, static_cast<uint32_t>(i))));
+                static_cast<const void*>(get_data(data, static_cast<uint32_t>(i))));
         }
         auto level = this->get_random_level() - 1;
         if (level >= 0) {
@@ -415,48 +467,93 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
             }
         }
     }
-    const auto* fused_batch = fused_codes.get();
 
-    if (this->rabitq_fused_datacell_ != nullptr and all_rows_are_valid) {
-        constexpr InnerIdType batch_size = 4096;
-        const auto batch_count = (static_cast<InnerIdType>(total) + batch_size - 1) / batch_size;
+    if (this->rabitq_fused_datacell_ != nullptr and all_rows_are_valid and not inner_ids.empty()) {
+        const bool use_parallel = this->thread_pool_ != nullptr and
+                                  this->build_thread_count_ > 1 and
+                                  not this->thread_pool_->IsCurrentThread();
+        const auto worker_count =
+            use_parallel ? std::min<uint64_t>(this->build_thread_count_, inner_ids.size()) : 1;
+        const auto batch_size = (inner_ids.size() + worker_count - 1) / worker_count;
         std::vector<std::future<void>> futures;
-        HGraphBuildTaskGuard future_guard(futures, static_cast<uint64_t>(batch_count));
-        for (InnerIdType begin = 0; begin < total; begin += batch_size) {
-            const auto end = std::min<InnerIdType>(begin + batch_size, total);
-            auto publish_batch = [this, data, &inner_ids, fused_batch, begin, end]() {
-                for (InnerIdType i = begin; i < end; ++i) {
-                    if (fused_batch != nullptr) {
-                        const auto code = fused_batch->Get(i);
-                        this->sync_fused_node_codes(inner_ids[i], get_data(data, i), &code);
+        HGraphBuildTaskGuard future_guard(futures, use_parallel ? worker_count : 0);
+        for (uint64_t begin = 0; begin < inner_ids.size(); begin += batch_size) {
+            const auto end = std::min<uint64_t>(begin + batch_size, inner_ids.size());
+            auto publish_batch = [this, data, &inner_ids, &fused_codes, begin, end]() {
+                for (uint64_t i = begin; i < end; ++i) {
+                    if (fused_codes != nullptr) {
+                        const auto view = fused_codes->View(i);
+                        this->rabitq_fused_datacell_->SetNodeCodes(
+                            inner_ids[i],
+                            label_table_->GetLabelById(inner_ids[i]),
+                            view.cluster_id,
+                            view.one_bit_code,
+                            view.supplement_code);
                     } else {
-                        this->sync_fused_node_codes(inner_ids[i], get_data(data, i));
+                        this->sync_fused_node_codes(inner_ids[i],
+                                                    get_data(data, static_cast<int64_t>(i)));
                     }
                 }
             };
-            if (this->thread_pool_ != nullptr and this->build_thread_count_ > 1) {
+            if (use_parallel) {
                 futures.emplace_back(this->thread_pool_->GeneralEnqueue(std::move(publish_batch)));
             } else {
                 publish_batch();
             }
         }
         wait_all_futures(futures);
+        // The common case no longer needs a second full code buffer while PiPNN builds its graph.
+        fused_codes.reset();
     }
 
     if (not defer_persistent_codes) {
         fused_codes.reset();
     }
-    // Deferred fused records are inserted after ODescent; retain their prevalidated codes.
-    // Non-fused builds never allocate this batch (prepare_fused_encoding_data returns null).
-
+    auto materialize_storage = [this, data, &inner_ids, &valid_indices]() {
+        materialize_pipnn_storage(
+            inner_ids,
+            valid_indices,
+            bottom_graph_,
+            *code_slot_map_,
+            allocator_,
+            thread_pool_.get(),
+            build_thread_count_,
+            [this](CodeSlotIdType capacity) { this->ensure_physical_code_capacity(capacity); },
+            [this, data](int64_t row, CodeSlotIdType slot) {
+                this->insert_persistent_codes_to_slot(get_data(data, row), slot);
+            });
+    };
     if (use_pipnn) {
+        const bool half_input = this->data_type_ == DataTypes::DATA_TYPE_FP16 ||
+                                this->data_type_ == DataTypes::DATA_TYPE_BF16;
+        // Keep borrowed half rows in their native format throughout graph building.
+        Vector<const float*> pipnn_f32_vectors(allocator_);
+        Vector<const uint16_t*> pipnn_half_vectors(allocator_);
+        if (half_input) {
+            pipnn_half_vectors.reserve(pipnn_vectors.size());
+            for (const auto* vec : pipnn_vectors) {
+                pipnn_half_vectors.emplace_back(static_cast<const uint16_t*>(vec));
+            }
+        } else {
+            pipnn_f32_vectors.reserve(pipnn_vectors.size());
+            for (const auto* vec : pipnn_vectors) {
+                pipnn_f32_vectors.emplace_back(static_cast<const float*>(vec));
+            }
+        }
         PiPNNGraphBuilder pipnn_builder(pipnn_parameter,
                                         static_cast<uint64_t>(this->dim_),
                                         this->metric_,
                                         this->allocator_,
                                         this->thread_pool_.get(),
                                         this->build_thread_count_);
-        pipnn_builder.Build(bottom_graph_, inner_ids, pipnn_vectors);
+        if (half_input) {
+            pipnn_builder.Build(bottom_graph_, inner_ids, pipnn_half_vectors, data_type_);
+        } else {
+            pipnn_builder.Build(bottom_graph_, inner_ids, pipnn_f32_vectors);
+        }
+        if (this->using_dedup_storage() and not defer_persistent_codes) {
+            materialize_storage();
+        }
         if (this->support_duplicate_) {
             entry_point_id_ = bottom_graph_->GetGroupId(entry_point_id_);
             for (auto& route_graph_id : route_graph_ids) {
@@ -499,7 +596,11 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         sparse_odescent_builder.SaveGraph(graph);
         this->route_graphs_.emplace_back(graph);
     }
-    if (use_pipnn and entry_point_id_ == INVALID_ENTRY_POINT and not inner_ids.empty()) {
+    // The level walk above is the only place that selects an entry point, and a fixed-seed
+    // sampler can draw level zero for every node (the standard library maps the draws to
+    // uniforms). Fall back to the first inserted id, a node of the bottom graph just saved.
+    // The guard preserves a higher-level entry point and keeps front() safe for an empty batch.
+    if (entry_point_id_ == INVALID_ENTRY_POINT and not inner_ids.empty()) {
         entry_point_id_ = inner_ids.front();
     }
 
@@ -509,16 +610,19 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         if (this->rabitq_fused_datacell_ == nullptr) {
             this->train_codes_with_dataset(this->sample_train_dataset(data));
         }
-        if (all_rows_are_valid) {
+        if (this->using_dedup_storage()) {
+            materialize_storage();
+        } else if (all_rows_are_valid) {
             batch_insert_persistent_codes();
         } else {
             for (const auto& [inner_id, local_idx] : deferred_code_ids) {
-                const auto code =
-                    fused_codes != nullptr ? fused_codes->Get(local_idx) : RaBitQFusedCodeView{};
-                this->insert_persistent_codes(
-                    get_data(data, local_idx), inner_id, fused_codes != nullptr ? &code : nullptr);
+                insert_persistent_row(local_idx, inner_id);
             }
         }
+    }
+    if (this->using_dedup_storage()) {
+        // All logical IDs now have complete codes and a published slot mapping.
+        this->PublishThroughTotalCount();
     }
     return failed_ids;
 }
@@ -536,9 +640,11 @@ HGraph::Add(const DatasetPtr& data) {
 
 std::vector<int64_t>
 HGraph::add_impl(const DatasetPtr& data) {
-    std::unique_lock<std::mutex> mci_add_lock(this->mci_add_mutex_, std::defer_lock);
+    // Match FORCE_REMOVE: acquire mutation serialization before pinning vector IDs.
+    // Reversing these locks could block a remover that needs to reacquire its write lock.
+    std::unique_lock<std::mutex> mci_mutation_lock(this->mci_mutation_mutex_, std::defer_lock);
     if (this->mci_parameters_.enabled) {
-        mci_add_lock.lock();
+        mci_mutation_lock.lock();
     }
     const auto mci_start_total = this->total_count_.load();
     const bool had_mci_clique_index = this->mci_parameters_.enabled and
@@ -551,53 +657,56 @@ HGraph::add_impl(const DatasetPtr& data) {
 
     this->validate_add_data(data);
     auto context = this->prepare_add_context(data);
-    auto fused_codes = this->prepare_fused_encoding_data(
-        static_cast<const float*>(get_data(data)), static_cast<uint64_t>(data->GetNumElements()));
+    context.fused_codes = this->prepare_fused_codes(data);
     this->prepare_graph_read_codes(data, context);
     auto batch = this->prepare_add_batch(data);
-    if (fused_codes != nullptr) {
-        for (const auto& row : batch.rows) {
-            // Codes are indexed by original input row, not the filtered batch position.
-            const auto code = fused_codes->Get(row.input_idx);
-            this->insert_persistent_codes(get_data(data, row.input_idx), row.inner_id, &code);
-        }
-        context.persistent_codes_prepared = true;
-        fused_codes.reset();
-    }
     this->prepare_temporary_graph_read_codes(data, context, batch);
     if (had_mci_clique_index) {
         this->mci_cliques_->MarkUnavailable();
     }
     this->insert_add_batch(data, context, batch);
     if (this->mci_parameters_.enabled) {
+        // MCI candidate generation enters public search, which pins the force-remove lock.
+        // The mutation lock still excludes MCI physical deletion; avoid recursive read locking.
+        if (force_remove_rlock.owns_lock()) {
+            force_remove_rlock.unlock();
+        }
         if (had_mci_clique_index) {
-            logger::info("hgraph mci incremental add started, added={}", batch.rows.size());
-            for (const auto& row : batch.rows) {
-                this->incremental_update_mci_clique(row.inner_id, get_data(data, row.input_idx));
-            }
+            MciIncrementalAddExecutor(*this).Run(batch, data);
             this->mci_cliques_->MarkAvailable(this->total_count_.load());
-            logger::info("hgraph mci incremental add finished, total={}",
-                         this->total_count_.load());
         } else {
             const void* vectors = nullptr;
             if (mci_start_total == 0 and batch.failed_ids.empty()) {
                 vectors = this->get_data(data);
             }
             this->build_mci_clique_index(vectors);
+            if (this->support_force_remove()) {
+                const auto removed = this->label_table_->GetAllDeletedIds(this->allocator_);
+                this->remove_from_mci(removed);
+                this->mci_cliques_->MarkAvailable(this->total_count_.load());
+            }
         }
-        this->cal_memory_usage();
+        // A per-element Add must not pay the O(total) breakdown; GetMemoryUsage() recalculates.
+        this->mark_memory_usage_dirty();
     }
     return batch.failed_ids;
 }
 
 void
-HGraph::validate_fused_vector_data(const float* data, uint64_t count) const {
+HGraph::validate_fused_vector_data(const void* input, uint64_t count) const {
     if (this->rabitq_fused_datacell_ == nullptr) {
         return;
     }
-    CHECK_ARGUMENT(data != nullptr, "fused RaBitQ base vectors must not be null");
+    CHECK_ARGUMENT(input != nullptr, "fused RaBitQ base vectors must not be null");
+    Vector<float> scratch(allocator_);
     const auto dim = static_cast<uint64_t>(this->dim_);
+    const auto bytes =
+        (data_type_ == DataTypes::DATA_TYPE_FP16 or data_type_ == DataTypes::DATA_TYPE_BF16)
+            ? sizeof(uint16_t)
+            : sizeof(float);
     for (uint64_t row = 0; row < count; ++row) {
+        const auto* data =
+            fused_float_input(static_cast<const uint8_t*>(input) + row * dim * bytes, 1, scratch);
         for (uint64_t d = 0; d < dim; ++d, ++data) {
             if (not IsFiniteRaBitQValue(*data)) {
                 throw VsagException(ErrorType::INVALID_ARGUMENT,
@@ -607,42 +716,78 @@ HGraph::validate_fused_vector_data(const float* data, uint64_t count) const {
     }
 }
 
-RaBitQFusedCodeView
-HGraph::FusedEncodingBatch::Get(uint64_t row) const {
-    const auto* record = codes.data() + row * (sizeof(uint32_t) + one_bit_size + supplement_size);
-    RaBitQFusedCodeView view;
-    std::memcpy(&view.cluster_id, record, sizeof(view.cluster_id));
-    view.one_bit_code = record + sizeof(view.cluster_id);
-    view.supplement_code = view.one_bit_code + one_bit_size;
-    return view;
-}
-
-std::unique_ptr<HGraph::FusedEncodingBatch>
-HGraph::prepare_fused_encoding_data(const float* data, uint64_t count) const {
+std::unique_ptr<HGraph::FusedBatchCodes>
+HGraph::prepare_fused_codes(const DatasetPtr& data) const {
     if (this->rabitq_fused_datacell_ == nullptr or this->optimized_build_codes_ != nullptr) {
         return nullptr;
     }
     CHECK_ARGUMENT(rabitq_split_codes_ != nullptr, "fused HGraph lost its RaBitQ split codes");
-    auto batch = std::make_unique<FusedEncodingBatch>(allocator_);
-    batch->one_bit_size = rabitq_split_codes_->OneBitCodeSize();
-    batch->supplement_size = rabitq_split_codes_->SupplementCodeSize();
-    const uint64_t stride = sizeof(uint32_t) + batch->one_bit_size + batch->supplement_size;
-    CHECK_ARGUMENT(count <= std::numeric_limits<uint64_t>::max() / stride,
-                   "fused encoding batch size overflow");
-    batch->codes.resize(count * stride);
+    auto encoded = std::make_unique<FusedBatchCodes>(this->allocator_);
+    const auto count = static_cast<uint64_t>(data->GetNumElements());
     const auto dim = static_cast<uint64_t>(this->dim_);
-    for (uint64_t row = 0; row < count; ++row) {
-        auto* record = batch->codes.data() + row * stride;
-        uint32_t cluster_id = 0;
-        CHECK_ARGUMENT(
-            rabitq_split_codes_->EncodeFused(data + row * dim,
-                                             record + sizeof(cluster_id),
-                                             record + sizeof(cluster_id) + batch->one_bit_size,
-                                             &cluster_id),
-            "failed to encode fused RaBitQ node codes");
-        std::memcpy(record, &cluster_id, sizeof(cluster_id));
+    encoded->one_bit_size = rabitq_split_codes_->OneBitCodeSize();
+    encoded->stride = encoded->one_bit_size + rabitq_split_codes_->SupplementCodeSize();
+    if (encoded->stride == 0 or count > std::numeric_limits<uint64_t>::max() / encoded->stride) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "fused batch code buffer size overflow");
     }
-    return batch;
+    encoded->codes.resize(count * encoded->stride);
+    encoded->clusters.resize(count);
+    const auto* vectors = static_cast<const uint8_t*>(get_data(data));
+    const auto element_bytes =
+        (data_type_ == DataTypes::DATA_TYPE_FP16 or data_type_ == DataTypes::DATA_TYPE_BF16)
+            ? sizeof(uint16_t)
+            : sizeof(float);
+    auto encode_range = [&](uint64_t begin, uint64_t end) {
+        Vector<float> scratch(allocator_);
+        for (uint64_t row = begin; row < end; ++row) {
+            auto* code = encoded->codes.data() + row * encoded->stride;
+            CHECK_ARGUMENT(rabitq_split_codes_->EncodeFused(
+                               fused_float_input(vectors + row * dim * element_bytes, 1, scratch),
+                               code,
+                               code + encoded->one_bit_size,
+                               &encoded->clusters[row]),
+                           "failed to encode fused RaBitQ node codes");
+        }
+    };
+    // Do not reserve IDs or publish labels until the complete batch is encodable.
+    // One task per range avoids a future/allocation for every input vector.
+    const auto workers = std::min<uint64_t>(this->build_thread_count_, count);
+    if (this->thread_pool_ != nullptr and workers > 1 and
+        not this->thread_pool_->IsCurrentThread()) {
+        const uint64_t block = (count + workers - 1) / workers;
+        std::vector<std::future<void>> futures;
+        HGraphBuildTaskGuard guard(futures, workers);
+        try {
+            for (uint64_t begin = 0; begin < count; begin += block) {
+                futures.emplace_back(this->thread_pool_->GeneralEnqueue(
+                    encode_range, begin, std::min(count, begin + block)));
+            }
+        } catch (...) {
+            const auto enqueue_exception = std::current_exception();
+            // A packaged-task future can become ready before its pool wrapper returns.
+            try {
+                this->thread_pool_->WaitUntilEmpty();
+            } catch (const std::exception& e) {
+                logger::error("fused preencoding pool failed while draining: {}", e.what());
+            } catch (...) {
+                logger::error("fused preencoding pool failed with an unknown exception");
+            }
+            // Drain every accepted task before releasing the batch buffers. Keep the enqueue
+            // error primary, but report any secondary worker/pool failure instead of hiding it.
+            try {
+                wait_all_futures(futures);
+            } catch (const std::exception& e) {
+                logger::error("fused preencoding worker failed while draining: {}", e.what());
+            } catch (...) {
+                logger::error("fused preencoding worker failed with an unknown exception");
+            }
+            std::rethrow_exception(enqueue_exception);
+        }
+        wait_all_futures(futures);
+    } else {
+        encode_range(0, count);
+    }
+    return encoded;
 }
 
 void
@@ -692,6 +837,17 @@ HGraph::prepare_add_context(const DatasetPtr& data) {
     return context;
 }
 
+void
+HGraph::assign_batch_levels(Vector<AddRow>& rows) {
+    if (rows.empty()) {
+        return;
+    }
+    std::scoped_lock lock(this->add_mutex_);
+    for (auto& row : rows) {
+        row.level = this->get_random_level() - 1;
+    }
+}
+
 HGraph::AddBatch
 HGraph::prepare_add_batch(const DatasetPtr& data) {
     AddBatch batch(this->allocator_);
@@ -715,7 +871,19 @@ HGraph::prepare_add_batch(const DatasetPtr& data) {
             inner_id = this->get_unique_inner_ids(1).at(0);
             if (inner_id >= total_count_) {
                 this->resize(total_count_.load() + 1, this->rabitq_fused_datacell_ != nullptr);
+            }
+            // Fused storage rejects Tune and its optimized writer bypasses normal insertion.
+            if (not this->using_dedup_storage() and this->rabitq_fused_datacell_ == nullptr) {
+                std::unique_lock codes_lock(this->persistent_codes_mutex_);
+                this->pending_code_writes_[inner_id] = BASE_CODE |
+                                                       (has_precise_reorder() ? PRECISE_CODE : 0) |
+                                                       (raw_vector_ != nullptr ? RAW_CODE : 0);
+            }
+            if (inner_id >= total_count_) {
                 ++total_count_;
+                // Deliberately NOT published here: this only reserves the id. The node
+                // becomes visible when insert_one_logical_point has written both its codes
+                // and its link lists.
             }
         }
 
@@ -729,10 +897,15 @@ HGraph::prepare_add_batch(const DatasetPtr& data) {
             if (source_id != nullptr && not source_id[j].empty()) {
                 this->label_table_->InsertSourceId(inner_id, source_id[j]);
             }
-            row.level = this->get_random_level() - 1;
+            // Level is assigned in a separate, deterministic pass (see
+            // assign_batch_levels) so that it cannot depend on thread scheduling.
             batch.rows.emplace_back(row);
         }
     }
+
+    // Assign all levels up front, in input order, so the value is a pure function of
+    // the batch contents rather than of the order workers reach the insert path.
+    this->assign_batch_levels(batch.rows);
 
     return batch;
 }
@@ -787,9 +960,13 @@ HGraph::prepare_temporary_graph_read_codes(const DatasetPtr& data,
 
 void
 HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, const AddBatch& batch) {
+    // A worker must not submit and join nested tasks on the same pool.
+    const bool effective_parallel =
+        context.use_parallel_add and not this->thread_pool_->IsCurrentThread();
     std::vector<std::future<void>> futures;
     HGraphBuildTaskGuard future_guard(
-        futures, context.use_parallel_add ? static_cast<uint64_t>(batch.rows.size()) : 0);
+        futures, effective_parallel ? static_cast<uint64_t>(batch.rows.size()) : 0);
+
     this->prepare_build_codes(data, batch.rows);
 
     const auto* extra_infos = data->GetExtraInfos();
@@ -815,7 +992,7 @@ HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, cons
         if (attr_sets != nullptr) {
             cur_attr_set = attr_sets + row.input_idx;
         }
-        if (context.use_parallel_add) {
+        if (effective_parallel) {
             auto future = this->thread_pool_->GeneralEnqueue(
                 add_func, get_data(data, row.input_idx), row, extra_info, cur_attr_set);
             futures.emplace_back(std::move(future));
@@ -823,7 +1000,7 @@ HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, cons
             add_func(get_data(data, row.input_idx), row, extra_info, cur_attr_set);
         }
     }
-    if (context.use_parallel_add) {
+    if (effective_parallel) {
         wait_all_futures(futures);
     }
 }
@@ -839,26 +1016,51 @@ HGraph::graph_read_codes_is_temporary(const AddContext& context) const {
 void
 HGraph::insert_persistent_codes(const void* data,
                                 InnerIdType inner_id,
-                                const RaBitQFusedCodeView* fused_code) {
+                                const RaBitQFusedCodeView* preencoded) {
     std::shared_lock<std::shared_mutex> add_lock;
     if (not this->support_force_remove()) {
         add_lock = std::shared_lock<std::shared_mutex>(this->add_mutex_);
     }
     std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
-    this->insert_persistent_codes_unlocked(data, inner_id, fused_code);
+    this->insert_persistent_codes_unlocked(data, inner_id, preencoded);
+}
+
+void
+HGraph::finish_code_write(InnerIdType inner_id, uint8_t code) {
+    auto it = this->pending_code_writes_.find(inner_id);
+    if (it != this->pending_code_writes_.end()) {
+        it.value() &= ~code;
+        if (it->second == 0) {
+            this->pending_code_writes_.erase(it);
+        }
+    }
 }
 
 void
 HGraph::insert_persistent_codes_unlocked(const void* data,
                                          InnerIdType inner_id,
-                                         const RaBitQFusedCodeView* fused_code) {
+                                         const RaBitQFusedCodeView* preencoded) {
     this->basic_flatten_codes_->InsertVector(data, inner_id);
-    this->sync_fused_node_codes(inner_id, data, fused_code);
+    this->finish_code_write(inner_id,
+                            BASE_CODE | (raw_vector_ == basic_flatten_codes_ ? RAW_CODE : 0));
+    if (preencoded != nullptr) {
+        // InsertVector above advances the flatten count; fused storage owns the actual bytes.
+        this->rabitq_fused_datacell_->SetNodeCodes(inner_id,
+                                                   label_table_->GetLabelById(inner_id),
+                                                   preencoded->cluster_id,
+                                                   preencoded->one_bit_code,
+                                                   preencoded->supplement_code);
+    } else {
+        this->sync_fused_node_codes(inner_id, data);
+    }
     if (has_precise_reorder()) {
         this->high_precise_codes_->InsertVector(data, inner_id);
+        this->finish_code_write(inner_id,
+                                PRECISE_CODE | (raw_vector_ == high_precise_codes_ ? RAW_CODE : 0));
     }
     if (create_new_raw_vector_) {
         raw_vector_->InsertVector(data, inner_id);
+        this->finish_code_write(inner_id, RAW_CODE);
     }
 }
 void
@@ -902,9 +1104,11 @@ HGraph::sync_fused_node_codes(InnerIdType inner_id,
     ByteBuffer one_bit(rabitq_split_codes_->OneBitCodeSize(), allocator_);
     ByteBuffer supplement(rabitq_split_codes_->SupplementCodeSize(), allocator_);
     uint32_t cluster_id = 0;
-    CHECK_ARGUMENT(rabitq_split_codes_->EncodeFused(
-                       static_cast<const float*>(data), one_bit.data, supplement.data, &cluster_id),
-                   "failed to encode fused RaBitQ node codes");
+    Vector<float> scratch(allocator_);
+    CHECK_ARGUMENT(
+        rabitq_split_codes_->EncodeFused(
+            fused_float_input(data, 1, scratch), one_bit.data, supplement.data, &cluster_id),
+        "failed to encode fused RaBitQ node codes");
     rabitq_fused_datacell_->SetNodeCodes(
         inner_id, label, cluster_id, one_bit.data, supplement.data);
 }
@@ -927,7 +1131,7 @@ bool
 HGraph::insert_one_logical_point(const void* data, const AddRow& row, const AddContext& context) {
     const auto inner_id = row.inner_id;
     const auto level = row.level;
-    this->prepare_codes_before_probe_if_needed(data, inner_id, context);
+    this->prepare_codes_before_probe_if_needed(data, row, context);
 
     auto make_search_param = [&]() {
         InnerSearchParam param;
@@ -949,28 +1153,41 @@ HGraph::insert_one_logical_point(const void* data, const AddRow& row, const AddC
     auto param = make_search_param();
     auto probe = this->probe_graph_for_add(data, level, inner_id, param, context.graph_read_codes);
     if (this->publish_duplicate_if_found(probe, inner_id, context)) {
+        // The duplicate still consumed an inner id and was fully ingested (its storage was
+        // published above), so it must count as visible; otherwise the visibility mark lags
+        // the reserved range and GetNumElements() under-reports.
+        this->PublishNode(inner_id);
         return false;
     }
 
     if (this->unique_add_needs_structure_update(level)) {
         rlock.unlock();
-        std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
-        this->publish_unique_under_unique_global_lock(data, level, inner_id, param, probe, context);
+        {
+            std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
+            this->publish_unique_under_unique_global_lock(
+                data, level, inner_id, param, probe, context);
+        }
+        this->PublishNode(inner_id);
         return true;
     }
 
     this->publish_unique_under_shared_global_lock(
         data, level, inner_id, param, probe, context, rlock);
+    this->PublishNode(inner_id);
     return true;
 }
 
 void
 HGraph::prepare_codes_before_probe_if_needed(const void* data,
-                                             InnerIdType inner_id,
+                                             const AddRow& row,
                                              const AddContext& context) {
-    if (not context.persistent_codes_prepared and
-        this->should_insert_codes_before_probe(context.use_dedup_storage)) {
-        this->insert_persistent_codes(data, inner_id);
+    if (this->should_insert_codes_before_probe(context.use_dedup_storage)) {
+        if (context.fused_codes != nullptr) {
+            const auto view = context.fused_codes->View(static_cast<uint64_t>(row.input_idx));
+            this->insert_persistent_codes(data, row.inner_id, &view);
+        } else {
+            this->insert_persistent_codes(data, row.inner_id);
+        }
     }
 }
 
@@ -1066,6 +1283,9 @@ HGraph::publish_unique_under_unique_global_lock(const void* data,
     this->publish_unique_storage_if_needed(data, inner_id, context);
     this->publish_unique_to_graphs(data, level, inner_id, param, probe, context);
     if (should_update_entry_point) {
+        // Only move the entry point once the node's codes and links are published: publishing
+        // no longer takes the node's own lock, so nothing may reach it before its link lists
+        // are written.
         this->entry_point_id_ = inner_id;
     }
 }
@@ -1132,7 +1352,10 @@ void
 HGraph::publish_unique_to_bottom_graph(InnerIdType inner_id,
                                        const DistHeapPtr& neighbors,
                                        const FlattenInterfacePtr& flatten_codes) {
-    LockGuard cur_lock(neighbors_mutex_, inner_id);
+    // No lock on inner_id: it has not been published to the graph yet, so no other thread
+    // can reach it (entry_point_id_ is updated only after this returns). Only its own
+    // slots are written here; the neighbour locks taken inside mutually_connect_new_element
+    // protect the existing nodes it links back from.
     if (neighbors != nullptr and not neighbors->Empty()) {
         mutually_connect_new_element(inner_id,
                                      neighbors,
@@ -1140,7 +1363,8 @@ HGraph::publish_unique_to_bottom_graph(InnerIdType inner_id,
                                      flatten_codes,
                                      neighbors_mutex_,
                                      allocator_,
-                                     alpha_);
+                                     alpha_,
+                                     &adaptive_pruning_);
         return;
     }
     bottom_graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
@@ -1167,7 +1391,6 @@ HGraph::publish_unique_to_route_graphs(const void* data,
                     filtered_result->Push(dist, id);
                 }
             }
-            LockGuard cur_lock(neighbors_mutex_, inner_id);
             if (not filtered_result->Empty()) {
                 mutually_connect_new_element(inner_id,
                                              filtered_result,
@@ -1180,7 +1403,6 @@ HGraph::publish_unique_to_route_graphs(const void* data,
                 route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
             }
         } else {
-            LockGuard cur_lock(neighbors_mutex_, inner_id);
             route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
         }
     }
@@ -1267,6 +1489,9 @@ HGraph::resize(uint64_t new_size, bool geometric_growth) {
             this->code_slot_map_->ReserveLogicalSize(static_cast<InnerIdType>(new_size_power_2));
         }
         if (not this->using_dedup_storage()) {
+            // Serialise with insert_persistent_codes so resize cannot reallocate the
+            // flatten storage while a concurrent InsertVector is writing into it.
+            std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
             this->basic_flatten_codes_->Resize(new_size_power_2);
             if (has_precise_reorder()) {
                 this->high_precise_codes_->Resize(new_size_power_2);
@@ -1301,6 +1526,8 @@ HGraph::InitFeatures() {
         IndexFeature::SUPPORT_KNN_SEARCH,
         IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
         IndexFeature::SUPPORT_KNN_ITERATOR_FILTER_SEARCH,
+        IndexFeature::SUPPORT_BATCH_SEARCH,
+        IndexFeature::SUPPORT_CONTINUE_SEARCH_SESSION,
     });
     // update
     if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
@@ -1332,8 +1559,15 @@ HGraph::InitFeatures() {
     // About Train
     auto name = this->basic_flatten_codes_->GetQuantizerName();
 
-    if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16 and
-        name != QUANTIZATION_TYPE_VALUE_FP16) {
+    // Adapter names are accepted only by this no-train/range classification.
+    // Preserve name unchanged for independent raw-get and other feature gates.
+    const auto terminal_name = GetBaseQuantizerName(name);
+    const bool no_train_terminal = terminal_name == QUANTIZATION_TYPE_VALUE_FP32 or
+                                   terminal_name == QUANTIZATION_TYPE_VALUE_BF16 or
+                                   terminal_name == QUANTIZATION_TYPE_VALUE_FP16 or
+                                   terminal_name == QUANTIZATION_TYPE_VALUE_SQ8_LOCAL or
+                                   terminal_name == QUANTIZATION_TYPE_VALUE_SQ4_LOCAL;
+    if (not no_train_terminal) {
         this->index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN);
     } else {
         this->index_feature_list_->SetFeatures({
@@ -1390,6 +1624,20 @@ HGraph::InitFeatures() {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_SEARCH_CONCURRENT, false);
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_SEARCH_DELETE_CONCURRENT,
                                               false);
+    }
+
+    // Lifecycle copies (Clone / ExportModel) re-create datacells through the same IO
+    // parameters. For user-defined IO this re-binds the *source* Reader/Writer pair: the copy
+    // would either share one backing store (Clone) or resize that store through the shared
+    // Writer during later builds (ExportModel). Both silently corrupt the original index, so
+    // reject the operations until the pair can supply independent storage for copies.
+    const auto hgraph_param = std::dynamic_pointer_cast<HGraphParameter>(this->create_param_ptr_);
+    if (this->has_precise_reorder() and this->high_precise_codes_ != nullptr and
+        hgraph_param != nullptr and hgraph_param->precise_codes_param != nullptr and
+        std::dynamic_pointer_cast<UserDefinedIOParameter>(
+            hgraph_param->precise_codes_param->io_parameter) != nullptr) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CLONE, false);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_EXPORT_MODEL, false);
     }
 }
 
@@ -1910,6 +2158,7 @@ HGraph::cache_collect_valid_indices(const DatasetPtr& data, BuildCachePlan& plan
     }
     this->resize(current_count + new_ids_count);
     this->total_count_ += new_ids_count;
+    this->PublishThroughTotalCount();
     plan.inserted_inner_ids.reserve(static_cast<uint64_t>(plan.valid_indices.size()));
     plan.inner_id_to_input_idx.reserve(static_cast<uint64_t>(plan.valid_indices.size()));
     plan.source_id_to_new_inner.reserve(static_cast<uint64_t>(plan.valid_indices.size()));

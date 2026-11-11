@@ -12,7 +12,7 @@ This page gives a quick tour of the VSAG repository layout.
 | `examples/cpp/` | C++ end-to-end examples |
 | `examples/python/` | Python examples |
 | `python/` | `pyvsag` packaging |
-| `python_bindings/` | pybind11 bindings |
+| `python/` | pyvsag packaging and cffi layer |
 | `typescript/` | Node.js / TypeScript bindings (npm package `vsag`) |
 | `tools/` | Utilities such as `eval_performance`, `analyze_index`, `check_compatibility` |
 | `extern/` | Third-party dependencies (do not modify unless necessary) |

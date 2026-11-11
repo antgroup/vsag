@@ -41,6 +41,7 @@
 #include "vsag/readerset.h"
 #include "vsag/search_param.h"
 #include "vsag/search_request.h"
+#include "vsag/search_session.h"
 #include "vsag/serialize_writer.h"
 
 namespace vsag {
@@ -333,6 +334,30 @@ public:
         return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                     "Index does not support KnnSearch with FilterPtr"));
     }
+
+    /**
+     * @brief Open an owning, fixed-query continuation session.
+     * The index must not be mutated while the session is open. A caller-supplied
+     * allocator must outlive the session; returned datasets own independent buffers.
+     * Supply filter/search parameters to each Next. The defaults in both overloads
+     * resolve to @c {"hgraph":{"ef_search":100}}, which is the only supported
+     * backend currently. Future backends must accept or replace that JSON; callers
+     * should not rely on it remaining backend-neutral.
+     */
+    [[nodiscard]] tl::expected<std::unique_ptr<SearchSession>, Error>
+    OpenSearchSession(const DatasetPtr& query, Allocator* allocator = nullptr) const {
+        // Intentionally share the options default: these two convenience paths must agree.
+        return OpenSearchSession(
+            query, 1, SearchSessionNextOptions{}.search_parameters, nullptr, allocator);
+    }
+
+    // Nonvirtual entry point preserves the public Index vtable relative to the base revision.
+    [[nodiscard]] tl::expected<std::unique_ptr<SearchSession>, Error>
+    OpenSearchSession(const DatasetPtr& query,
+                      int64_t k_per_call,
+                      const std::string& parameters,
+                      const FilterPtr& filter = nullptr,
+                      Allocator* allocator = nullptr) const;
 
     /**
       * @brief Performing search with request on index
@@ -805,6 +830,11 @@ public:
      * Processes MergeUnit entries to incorporate sub-indexes into this index. For each element:
      * - id_map_func determines which IDs from the sub-index are retained
      * - Specifies the ID remapping into the destination index space
+     *
+     * Merge requires exclusive ownership of the destination index: do not call Add,
+     * Remove, or another Merge concurrently with this operation. A mapping callback
+     * can inspect destination labels before each row is published, and other index
+     * components besides the label table are also updated during the merge.
      *
      * @param merge_units Vector containing:
      *   - index: Source sub-index to merge from

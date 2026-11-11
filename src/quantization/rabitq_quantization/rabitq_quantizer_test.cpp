@@ -277,6 +277,69 @@ TEST_CASE("RaBitQ Basic Test", "[ut][RaBitQuantizer]") {
     }
 }
 
+TEMPLATE_TEST_CASE_SIG("RaBitQ encoding rejects missing buffers",
+                       "[ut][RaBitQuantizer][rabitq_encode_buffers]",
+                       ((MetricType metric), metric),
+                       MetricType::METRIC_TYPE_L2SQR,
+                       MetricType::METRIC_TYPE_IP,
+                       MetricType::METRIC_TYPE_COSINE) {
+    constexpr uint64_t dim = 16;
+    constexpr uint64_t count = 8;
+    const uint64_t base_bits = GENERATE(1, 2, 4, 8);
+    CAPTURE(metric, base_bits);
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto vectors = fixtures::generate_vectors(count, dim);
+    RaBitQuantizer<metric> quantizer(dim,
+                                     dim,
+                                     32,
+                                     base_bits,
+                                     false,
+                                     false,
+                                     allocator.get(),
+                                     RaBitQuantizerParameter::RABITQ_VERSION_SPLIT,
+                                     RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE,
+                                     1,
+                                     true);
+    REQUIRE(quantizer.TrainImpl(vectors.data(), count));
+    std::vector<uint8_t> code(quantizer.GetCodeSize(), 0xA5);
+    const auto original_code = code;
+    REQUIRE_FALSE(quantizer.EncodeOne(vectors.data(), nullptr));
+    REQUIRE_FALSE(quantizer.EncodeOne(nullptr, code.data()));
+    REQUIRE_FALSE(quantizer.EncodeOne(nullptr, nullptr));
+    REQUIRE_FALSE(quantizer.EncodeBatch(vectors.data(), nullptr, count));
+    REQUIRE_FALSE(quantizer.EncodeBatch(nullptr, code.data(), count));
+    REQUIRE_FALSE(quantizer.EncodeBatch(nullptr, nullptr, count));
+    REQUIRE(quantizer.EncodeBatch(nullptr, nullptr, 0));
+    REQUIRE(code == original_code);
+
+    uint64_t code_sum = 123;
+    REQUIRE_FALSE(quantizer.EncodeOneToScalarCode(vectors.data(), nullptr, code_sum));
+    REQUIRE(code_sum == 123);
+
+    std::vector<uint8_t> batch(count * quantizer.GetCodeSize());
+    REQUIRE(quantizer.EncodeBatch(vectors.data(), batch.data(), count));
+    for (uint64_t i = 0; i < count; ++i) {
+        REQUIRE(quantizer.EncodeOne(vectors.data() + i * dim, code.data()));
+        REQUIRE(std::equal(code.begin(), code.end(), batch.data() + i * code.size()));
+    }
+
+    if (quantizer.SupportScalarCodeBuild()) {
+        std::vector<uint8_t> scalar_code(quantizer.GetScalarCodeSize(), 0xA5);
+        const auto original_scalar_code = scalar_code;
+        REQUIRE_FALSE(quantizer.EncodeOneToScalarCode(nullptr, scalar_code.data(), code_sum));
+        REQUIRE(scalar_code == original_scalar_code);
+        REQUIRE(code_sum == 123);
+        REQUIRE(quantizer.EncodeOneToScalarCode(vectors.data(), scalar_code.data(), code_sum));
+        quantizer.PackScalarCode(scalar_code.data(), code.data());
+        REQUIRE(std::equal(code.begin(), code.end(), batch.begin()));
+        REQUIRE(code_sum ==
+                std::accumulate(scalar_code.begin(), scalar_code.begin() + dim, uint64_t{0}));
+    } else {
+        REQUIRE_FALSE(quantizer.EncodeOneToScalarCode(vectors.data(), code.data(), code_sum));
+        REQUIRE(code_sum == 123);
+    }
+}
+
 TEST_CASE("Extend RaBitQ Basic Test", "[ut][RaBitQuantizer]") {
     auto count = 1000;
     auto dim = 32;
@@ -950,6 +1013,84 @@ TEST_CASE("RaBitQ Split Code Storage", "[ut][RaBitQuantizer]") {
                 REQUIRE(std::abs(batch_dists[i] - single_dists[i]) <= 1e-5F);
                 REQUIRE(std::abs(batch_lower_bounds[i] - single_lower_bounds[i]) <= 1e-5F);
             }
+        }
+    }
+}
+
+template <MetricType metric>
+void
+TestScalarUnpackRoundTrip() {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    for (const uint64_t dim : {1, 7, 8, 9, 63, 64, 65, 768, 1024}) {
+        for (uint32_t bits = 1; bits <= 8; ++bits) {
+            for (uint32_t filter = 1; filter <= bits; ++filter) {
+                CAPTURE(dim, bits, filter);
+                RaBitQuantizer<metric> quantizer(dim,
+                                                 0,
+                                                 32,
+                                                 bits,
+                                                 false,
+                                                 false,
+                                                 allocator.get(),
+                                                 RaBitQuantizerParameter::RABITQ_VERSION_SPLIT,
+                                                 RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE,
+                                                 filter);
+                std::vector<uint8_t> expected(quantizer.GetScalarCodeSize(), 0);
+                uint64_t expected_sum = 0;
+                for (uint64_t d = 0; d < dim; ++d) {
+                    expected[d] = static_cast<uint8_t>((37 * d + 19 * filter) & ((1U << bits) - 1));
+                    expected_sum += expected[d];
+                }
+                for (uint64_t i = quantizer.ScalarCodeMetaOffset(); i < expected.size(); ++i) {
+                    expected[i] = static_cast<uint8_t>(29 * i + 11 * filter);
+                }
+                std::vector<uint8_t> packed(quantizer.GetCodeSize());
+                std::vector<uint8_t> actual(expected.size() + 2, 0xA5);
+                quantizer.PackScalarCode(expected.data(), packed.data());
+                REQUIRE(quantizer.UnpackScalarCode(packed.data(), actual.data() + 1) ==
+                        expected_sum);
+                REQUIRE(std::equal(expected.begin(), expected.end(), actual.begin() + 1));
+                REQUIRE(actual.front() == 0xA5);
+                REQUIRE(actual.back() == 0xA5);
+            }
+        }
+    }
+}
+
+TEST_CASE("RaBitQ scalar unpack preserves tails and metadata",
+          "[ut][RaBitQuantizer][scalar_unpack]") {
+    TestScalarUnpackRoundTrip<MetricType::METRIC_TYPE_L2SQR>();
+    TestScalarUnpackRoundTrip<MetricType::METRIC_TYPE_IP>();
+    TestScalarUnpackRoundTrip<MetricType::METRIC_TYPE_COSINE>();
+}
+
+TEST_CASE("RaBitQ scalar unpack handles every plane byte", "[ut][RaBitQuantizer][scalar_unpack]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    RaBitQuantizer<MetricType::METRIC_TYPE_IP> quantizer(
+        8,
+        0,
+        32,
+        8,
+        false,
+        false,
+        allocator.get(),
+        RaBitQuantizerParameter::RABITQ_VERSION_SPLIT,
+        RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE,
+        3);
+    for (uint32_t bit = 0; bit < 8; ++bit) {
+        for (uint32_t pattern = 0; pattern < 256; ++pattern) {
+            CAPTURE(bit, pattern);
+            std::vector<uint8_t> expected(quantizer.GetScalarCodeSize(), 0);
+            uint64_t expected_sum = 0;
+            for (uint64_t lane = 0; lane < 8; ++lane) {
+                expected[lane] = static_cast<uint8_t>(((pattern >> lane) & 1U) << bit);
+                expected_sum += expected[lane];
+            }
+            std::vector<uint8_t> packed(quantizer.GetCodeSize());
+            std::vector<uint8_t> actual(expected.size(), 0xFF);
+            quantizer.PackScalarCode(expected.data(), packed.data());
+            REQUIRE(quantizer.UnpackScalarCode(packed.data(), actual.data()) == expected_sum);
+            REQUIRE(actual == expected);
         }
     }
 }
@@ -1678,6 +1819,46 @@ TEST_CASE("RaBitQ Encode and Decode", "[ut][RaBitQuantizer]") {
                 quantizer_cos, dim, count);
         }
     }
+}
+
+template <MetricType metric>
+void
+CheckRaBitQBatch4(uint64_t base_bits) {
+    constexpr uint64_t dim = 64;
+    constexpr uint64_t count = 100;
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto vectors = fixtures::generate_vectors(count, dim);
+    RaBitQuantizer<metric> quantizer(dim, dim, 32, base_bits, true, false, allocator.get());
+    REQUIRE(quantizer.TrainImpl(vectors.data(), count));
+
+    auto computer = quantizer.FactoryComputer();
+    computer->SetQuery(vectors.data() + 4 * dim);
+    const uint64_t code_size = quantizer.GetCodeSize();
+    std::vector<uint8_t> codes(4 * code_size);
+    for (uint64_t i = 0; i < 4; ++i) {
+        REQUIRE(quantizer.EncodeOne(vectors.data() + i * dim, codes.data() + i * code_size));
+    }
+
+    float actual[4]{};
+    computer->ComputeDistsBatch4(codes.data(),
+                                 codes.data() + code_size,
+                                 codes.data() + 2 * code_size,
+                                 codes.data() + 3 * code_size,
+                                 actual[0],
+                                 actual[1],
+                                 actual[2],
+                                 actual[3]);
+    for (uint64_t i = 0; i < 4; ++i) {
+        const float expected = quantizer.ComputeDist(*computer, codes.data() + i * code_size);
+        REQUIRE(fixtures::dist_t(actual[i]) == fixtures::dist_t(expected));
+    }
+}
+
+TEST_CASE("RaBitQ Batch4 matches single distances", "[ut][RaBitQuantizer][batch4]") {
+    CheckRaBitQBatch4<MetricType::METRIC_TYPE_L2SQR>(1);
+    CheckRaBitQBatch4<MetricType::METRIC_TYPE_COSINE>(1);
+    CheckRaBitQBatch4<MetricType::METRIC_TYPE_IP>(1);
+    CheckRaBitQBatch4<MetricType::METRIC_TYPE_L2SQR>(2);
 }
 
 TEST_CASE("RaBitQ Compute", "[ut][RaBitQuantizer]") {

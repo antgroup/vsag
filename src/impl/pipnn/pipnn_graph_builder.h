@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "data_type.h"
 #include "json_wrapper.h"
 #include "metric_type.h"
 #include "typing.h"
@@ -38,6 +39,8 @@ struct PiPNNGraphBuilderParameter {
     uint64_t hash_plane_count{12};
     uint64_t reservoir_size{64};
     float alpha{1.0F};
+    bool adaptive_pruning{false};
+    float adaptive_pruning_adjust_step{0.06F};
 
     void
     FromJson(const JsonType& json);
@@ -55,7 +58,7 @@ struct PiPNNGraphBuilderParameter {
  * Implements the construction approach described in "PiPNN: Ultra-Scalable Graph-Based Nearest
  * Neighbor Indexing" (arXiv:2602.21247).
  *
- * The builder consumes normalized internal IDs and dense, in-memory FP32 codes. It owns only
+ * The builder consumes normalized internal IDs and dense, in-memory FP32, FP16, or BF16 codes. It owns only
  * graph construction; labels, source IDs, metadata, route layers, and serialization stay in the
  * index layer.
  */
@@ -73,7 +76,21 @@ public:
           const Vector<InnerIdType>& ids_sequence,
           const Vector<const float*>& rows) const;
 
+    /** Native half rows are borrowed, subset-aligned with ids_sequence, and never indexed by ID. */
+    void
+    Build(const GraphInterfacePtr& graph,
+          const Vector<InnerIdType>& ids_sequence,
+          const Vector<const uint16_t*>& rows,
+          DataTypes data_type) const;
+
 private:
+    template <typename ElementType>
+    void
+    build_typed(const GraphInterfacePtr& graph,
+                const Vector<InnerIdType>& ids_sequence,
+                const Vector<const ElementType*>& rows,
+                DataTypes data_type) const;
+
     PiPNNGraphBuilderParameter parameter_;
     uint64_t dimensions_;
     MetricType metric_;

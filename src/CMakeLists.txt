@@ -69,6 +69,7 @@ endif ()
 # and after `make install` from a downstream find_package() consumer
 # (INSTALL_INTERFACE).
 foreach (_lib vsag vsag_static)
+    target_compile_features (${_lib} INTERFACE cxx_std_17)
     target_include_directories (${_lib}
         PUBLIC
             $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
@@ -101,6 +102,8 @@ if (TARGET vsag_openmp)
     vsag_link_openmp_private (vsag)
     vsag_link_openmp_private (vsag_static)
 endif ()
+
+include (${PROJECT_SOURCE_DIR}/cmake/VSAGPythonBindings.cmake)  # Optional pyvsag C library.
 
 maybe_add_dependencies (vsag antlr4 roaring)
 maybe_add_dependencies (vsag_static antlr4 roaring)

@@ -23,6 +23,7 @@
 #include "datacell/graph_interface_parameter.h"
 #include "datacell/sparse_graph_datacell_parameter.h"
 #include "datacell/sparse_vector_datacell_parameter.h"
+#include "impl/logger/logger.h"
 #include "impl/odescent/odescent_graph_parameter.h"
 #include "inner_string_params.h"
 #include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
@@ -147,6 +148,9 @@ HGraphParameter::FromJson(const JsonType& json) {
         CHECK_ARGUMENT(this->ef_construction > 0, "ef_construction must be positive");
     }
 
+    // FromJson replaces the whole sub-struct, so it must run before any field that lives on
+    // AdaptivePruningParameter is parsed. alpha stays on HGraphParameter and is unaffected.
+    adaptive_pruning.FromJson(json);
     if (json.Contains(ALPHA_KEY)) {
         this->alpha = json[ALPHA_KEY].GetFloat();
     }
@@ -170,6 +174,12 @@ HGraphParameter::FromJson(const JsonType& json) {
             pipnn_param.alpha = this->alpha;
             pipnn_param.Validate(this->bottom_graph_param->max_degree_);
         }
+    }
+
+    if (graph_json.Contains(PIPNN_PARAMETER_ADAPTIVE_PRUNING) and
+        graph_json[PIPNN_PARAMETER_ADAPTIVE_PRUNING].GetBool()) {
+        CHECK_ARGUMENT(graph_type == GRAPH_TYPE_VALUE_PIPNN,
+                       "pipnn_adaptive_pruning requires graph_type=pipnn");
     }
 
     if (json.Contains(SUPPORT_DUPLICATE)) {
@@ -204,12 +214,23 @@ HGraphParameter::FromJson(const JsonType& json) {
         this->use_conjugate_graph = json[PARAMETER_USE_CONJUGATE_GRAPH].GetBool();
     }
     const bool has_mci_parameter =
-        json.Contains(HGRAPH_MCI_MCS) or json.Contains(HGRAPH_MCI_CLIQUE_MAX) or
-        json.Contains(HGRAPH_MCI_ALPHA) or json.Contains(HGRAPH_MCI_KNNG_SOURCE) or
-        json.Contains(HGRAPH_MCI_KNNG_PATH_KEY);
+        json.Contains("mci_clique_activation_order") or json.Contains(HGRAPH_MCI_MCS) or
+        json.Contains(HGRAPH_MCI_CLIQUE_MAX) or json.Contains(HGRAPH_MCI_ALPHA) or
+        json.Contains(HGRAPH_MCI_KNNG_SOURCE) or json.Contains(HGRAPH_MCI_KNNG_PATH_KEY) or
+        json.Contains(HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY) or
+        json.Contains(HGRAPH_MCI_INCREMENTAL_DEGREE_MIN_KEY) or
+        json.Contains(HGRAPH_MCI_INCREMENTAL_DEGREE_N_DIVISOR_KEY) or
+        json.Contains(HGRAPH_MCI_INCREMENTAL_DEGREE_MCS_DIVISOR_KEY) or
+        json.Contains(HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY) or
+        json.Contains(HGRAPH_MCI_DELETE_CLIQUE_SIZE_THRESHOLD_KEY) or
+        json.Contains(HGRAPH_MCI_DELETE_NODE_MCT_THRESHOLD_KEY);
     this->mci_parameters.enabled =
         has_mci_parameter or (json.Contains(HGRAPH_USE_MCI) and json[HGRAPH_USE_MCI].GetBool());
     if (this->mci_parameters.enabled) {
+        if (json.Contains("mci_clique_activation_order")) {
+            this->mci_parameters.clique_activation_order =
+                json["mci_clique_activation_order"].GetBool();
+        }
         if (json.Contains(HGRAPH_MCI_MCS)) {
             const auto mci_mcs = json[HGRAPH_MCI_MCS].GetInt();
             CHECK_ARGUMENT(mci_mcs > 0, "hgraph mci_mcs must be positive");
@@ -233,12 +254,21 @@ HGraphParameter::FromJson(const JsonType& json) {
             this->mci_parameters.incremental_join_ratio_threshold =
                 json[HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY].GetFloat();
         }
-        if (json.Contains(HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY)) {
-            const auto incremental_added_mct = json[HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY].GetInt();
-            CHECK_ARGUMENT(incremental_added_mct > 0,
-                           "hgraph mci_incremental_added_mct must be positive");
-            this->mci_parameters.incremental_added_mct =
-                static_cast<uint64_t>(incremental_added_mct);
+        if (json.Contains(HGRAPH_MCI_INCREMENTAL_DEGREE_MIN_KEY)) {
+            const auto minimum = json[HGRAPH_MCI_INCREMENTAL_DEGREE_MIN_KEY].GetInt();
+            CHECK_ARGUMENT(minimum > 0, "hgraph mci_incremental_degree_min must be positive");
+            this->mci_parameters.incremental_degree_min = static_cast<uint64_t>(minimum);
+        }
+        if (json.Contains(HGRAPH_MCI_INCREMENTAL_DEGREE_N_DIVISOR_KEY)) {
+            const auto divisor = json[HGRAPH_MCI_INCREMENTAL_DEGREE_N_DIVISOR_KEY].GetInt();
+            CHECK_ARGUMENT(divisor > 0, "hgraph mci_incremental_degree_n_divisor must be positive");
+            this->mci_parameters.incremental_degree_n_divisor = static_cast<uint64_t>(divisor);
+        }
+        if (json.Contains(HGRAPH_MCI_INCREMENTAL_DEGREE_MCS_DIVISOR_KEY)) {
+            const auto divisor = json[HGRAPH_MCI_INCREMENTAL_DEGREE_MCS_DIVISOR_KEY].GetInt();
+            CHECK_ARGUMENT(divisor > 0,
+                           "hgraph mci_incremental_degree_mcs_divisor must be positive");
+            this->mci_parameters.incremental_degree_mcs_divisor = static_cast<uint64_t>(divisor);
         }
         if (json.Contains(HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY)) {
             const auto incremental_clique_max =
@@ -247,6 +277,17 @@ HGraphParameter::FromJson(const JsonType& json) {
                            "hgraph mci_incremental_clique_max must be >= 2");
             this->mci_parameters.incremental_clique_max =
                 static_cast<uint64_t>(incremental_clique_max);
+        }
+        if (json.Contains(HGRAPH_MCI_DELETE_CLIQUE_SIZE_THRESHOLD_KEY)) {
+            const auto threshold = json[HGRAPH_MCI_DELETE_CLIQUE_SIZE_THRESHOLD_KEY].GetInt();
+            CHECK_ARGUMENT(threshold > 0,
+                           "hgraph mci_delete_clique_size_threshold must be positive");
+            this->mci_parameters.delete_clique_size_threshold = static_cast<uint64_t>(threshold);
+        }
+        if (json.Contains(HGRAPH_MCI_DELETE_NODE_MCT_THRESHOLD_KEY)) {
+            const auto threshold = json[HGRAPH_MCI_DELETE_NODE_MCT_THRESHOLD_KEY].GetInt();
+            CHECK_ARGUMENT(threshold > 0, "hgraph mci_delete_node_mct_threshold must be positive");
+            this->mci_parameters.delete_node_mct_threshold = static_cast<uint64_t>(threshold);
         }
         CHECK_ARGUMENT(this->mci_parameters.mcs > 0, "hgraph mci_mcs must be positive");
         CHECK_ARGUMENT(this->mci_parameters.clique_max > 0,
@@ -261,14 +302,33 @@ HGraphParameter::FromJson(const JsonType& json) {
             (this->mci_parameters.incremental_join_ratio_threshold >= 0.0F) and
                 (this->mci_parameters.incremental_join_ratio_threshold <= 1.0F),
             "hgraph mci_incremental_join_ratio_threshold must be in range [0, 1]");
-        CHECK_ARGUMENT(this->mci_parameters.incremental_added_mct > 0,
-                       "hgraph mci_incremental_added_mct must be positive");
+        CHECK_ARGUMENT(this->mci_parameters.incremental_degree_min > 0,
+                       "hgraph mci_incremental_degree_min must be positive");
+        CHECK_ARGUMENT(this->mci_parameters.incremental_degree_n_divisor > 0,
+                       "hgraph mci_incremental_degree_n_divisor must be positive");
+        CHECK_ARGUMENT(this->mci_parameters.incremental_degree_mcs_divisor > 0,
+                       "hgraph mci_incremental_degree_mcs_divisor must be positive");
         CHECK_ARGUMENT(this->mci_parameters.incremental_clique_max >= 2,
                        "hgraph mci_incremental_clique_max must be >= 2");
+        CHECK_ARGUMENT(this->mci_parameters.delete_clique_size_threshold > 0,
+                       "hgraph mci_delete_clique_size_threshold must be positive");
+        CHECK_ARGUMENT(this->mci_parameters.delete_node_mct_threshold > 0,
+                       "hgraph mci_delete_node_mct_threshold must be positive");
     }
-    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
-        not(this->mci_parameters.enabled and this->support_force_remove),
-        "hgraph mci does not support force remove");
+    if (this->mci_parameters.enabled and this->support_force_remove) {
+        CHECK_ARGUMENT(not this->use_attribute_filter,
+                       "MCI force remove does not support attribute storage remapping");
+        CHECK_ARGUMENT(not this->support_duplicate,
+                       "MCI force remove does not support duplicate groups");
+        auto graph_param = std::dynamic_pointer_cast<GraphDataCellParameter>(bottom_graph_param);
+        CHECK_ARGUMENT(graph_param != nullptr, "MCI force remove requires a flat graph");
+        if (not graph_param->use_reverse_edges_ or
+            not hierarchical_graph_param->use_reverse_edges_) {
+            logger::warn("MCI force remove enables reverse edges for safe physical ID compaction");
+        }
+        graph_param->use_reverse_edges_ = true;
+        hierarchical_graph_param->use_reverse_edges_ = true;
+    }
     if (this->rabitq_fused_datacell) {
         CHECK_ARGUMENT(not this->mci_parameters.enabled,
                        "rabitq_fused_datacell does not support MCI");
@@ -326,6 +386,7 @@ HGraphParameter::ToJson() const {
     json[EF_CONSTRUCTION_KEY].SetUint64(this->ef_construction);
     json[RESIZE_INCREASE_COUNT_BIT].SetUint64(this->resize_increase_count_bit);
     json[ALPHA_KEY].SetFloat(this->alpha);
+    json.UpdateJson(adaptive_pruning.ToJson());
     json[SUPPORT_DUPLICATE].SetBool(this->support_duplicate);
     json[DEDUPLICATE_STORAGE].SetBool(this->deduplicate_storage);
     json[DUPLICATE_DISTANCE_THRESHOLD].SetFloat(this->duplicate_distance_threshold);
@@ -333,6 +394,7 @@ HGraphParameter::ToJson() const {
     json[HGRAPH_PERSIST_SOURCE_ID_KEY].SetBool(this->persist_source_id);
     json[PARAMETER_USE_CONJUGATE_GRAPH].SetBool(this->use_conjugate_graph);
     if (this->mci_parameters.enabled) {
+        json["mci_clique_activation_order"].SetBool(this->mci_parameters.clique_activation_order);
         json[HGRAPH_USE_MCI].SetBool(true);
         json[HGRAPH_MCI_MCS].SetInt(static_cast<int64_t>(this->mci_parameters.mcs));
         json[HGRAPH_MCI_CLIQUE_MAX].SetInt(static_cast<int64_t>(this->mci_parameters.clique_max));
@@ -340,10 +402,18 @@ HGraphParameter::ToJson() const {
         json[HGRAPH_MCI_KNNG_SOURCE].SetString(this->mci_parameters.knng_source);
         json[HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY].SetFloat(
             this->mci_parameters.incremental_join_ratio_threshold);
-        json[HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY].SetInt(
-            static_cast<int64_t>(this->mci_parameters.incremental_added_mct));
+        json[HGRAPH_MCI_INCREMENTAL_DEGREE_MIN_KEY].SetInt(
+            static_cast<int64_t>(this->mci_parameters.incremental_degree_min));
+        json[HGRAPH_MCI_INCREMENTAL_DEGREE_N_DIVISOR_KEY].SetInt(
+            static_cast<int64_t>(this->mci_parameters.incremental_degree_n_divisor));
+        json[HGRAPH_MCI_INCREMENTAL_DEGREE_MCS_DIVISOR_KEY].SetInt(
+            static_cast<int64_t>(this->mci_parameters.incremental_degree_mcs_divisor));
         json[HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY].SetInt(
             static_cast<int64_t>(this->mci_parameters.incremental_clique_max));
+        json[HGRAPH_MCI_DELETE_CLIQUE_SIZE_THRESHOLD_KEY].SetInt(
+            static_cast<int64_t>(this->mci_parameters.delete_clique_size_threshold));
+        json[HGRAPH_MCI_DELETE_NODE_MCT_THRESHOLD_KEY].SetInt(
+            static_cast<int64_t>(this->mci_parameters.delete_node_mct_threshold));
         if (not this->mci_parameters.knng_path.empty()) {
             json[HGRAPH_MCI_KNNG_PATH_KEY].SetString(this->mci_parameters.knng_path);
         }
@@ -355,6 +425,13 @@ HGraphParameter::ToJson() const {
 bool
 HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
     PARAM_CAST_OR_RETURN(HGraphParameter, p, other);
+    CHECK_FIELD_EQ(*this, *p, adaptive_pruning.enabled);
+    if (adaptive_pruning.enabled) {
+        CHECK_FIELD_NEAR(*this, *p, alpha, 1e-6F);
+        CHECK_FIELD_NEAR(*this, *p, adaptive_pruning.adjust_step, 1e-6F);
+        CHECK_FIELD_EQ(*this, *p, adaptive_pruning.apply_to_reverse);
+        CHECK_FIELD_EQ(*this, *p, adaptive_pruning.apply_to_upper);
+    }
     auto have_reorder = this->use_reorder && not this->ignore_reorder;
     auto have_reorder_other = p->use_reorder && not p->ignore_reorder;
     if (have_reorder != have_reorder_other) {
@@ -386,6 +463,12 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
         // kmeans_iterations only controls training; loading the stored model does not rerun
         // KMeans, so a different iteration budget is intentionally compatible.
     }
+    CHECK_FIELD_EQ(*this, *p, pipnn_param.adaptive_pruning);
+    if (this->pipnn_param.adaptive_pruning) {
+        CHECK_FIELD_EQ(*this, *p, graph_type);
+        CHECK_FIELD_EQ(*this, *p, alpha);
+        CHECK_FIELD_EQ(*this, *p, pipnn_param.adaptive_pruning_adjust_step);
+    }
     // A conjugate-enabled reader can load an older index without the optional graph and start
     // with an empty one. The reverse direction would discard serialized enhancement data.
     if (not this->use_conjugate_graph and p->use_conjugate_graph) {
@@ -394,27 +477,37 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
         return false;
     }
     CHECK_FIELD_EQ(*this, *p, mci_parameters.enabled);
+    CHECK_FIELD_EQ(*this, *p, mci_parameters.clique_activation_order);
     CHECK_FIELD_EQ(*this, *p, mci_parameters.mcs);
     CHECK_FIELD_EQ(*this, *p, mci_parameters.clique_max);
     CHECK_FIELD_EQ(*this, *p, mci_parameters.alpha);
     CHECK_FIELD_EQ(*this, *p, mci_parameters.knng_source);
     CHECK_FIELD_EQ(*this, *p, mci_parameters.knng_path);
     CHECK_FIELD_EQ(*this, *p, mci_parameters.incremental_join_ratio_threshold);
-    CHECK_FIELD_EQ(*this, *p, mci_parameters.incremental_added_mct);
+    CHECK_FIELD_EQ(*this, *p, mci_parameters.incremental_degree_min);
+    CHECK_FIELD_EQ(*this, *p, mci_parameters.incremental_degree_n_divisor);
+    CHECK_FIELD_EQ(*this, *p, mci_parameters.incremental_degree_mcs_divisor);
     CHECK_FIELD_EQ(*this, *p, mci_parameters.incremental_clique_max);
+    CHECK_FIELD_EQ(*this, *p, mci_parameters.delete_clique_size_threshold);
+    CHECK_FIELD_EQ(*this, *p, mci_parameters.delete_node_mct_threshold);
     return true;
 }
 
 HGraphSearchParameters
 HGraphSearchParameters::FromJson(const std::string& json_string) {
-    auto params = JsonType::Parse(json_string);
+    return FromParsedJson(JsonType::Parse(json_string));
+}
 
+HGraphSearchParameters
+HGraphSearchParameters::FromParsedJson(const JsonType& params) {
     HGraphSearchParameters obj;
 
-    // set obj.ef_search
+    // Validate structure before indexing: malformed requests remain recoverable.
+    CHECK_ARGUMENT(params.IsObject(), "search parameters must be an object");
     CHECK_ARGUMENT(params.Contains(INDEX_TYPE_HGRAPH),
                    fmt::format("parameters must contains {}", INDEX_TYPE_HGRAPH));
 
+    CHECK_ARGUMENT(params[INDEX_TYPE_HGRAPH].IsObject(), "hgraph parameters must be an object");
     obj.IndexSearchParameter::FromJson(params[INDEX_TYPE_HGRAPH]);
 
     CHECK_ARGUMENT(
@@ -445,6 +538,41 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
     }
     if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_USE_HYBRID_TRAVERSAL)) {
         obj.use_hybrid_traversal = params[INDEX_TYPE_HGRAPH][HGRAPH_USE_HYBRID_TRAVERSAL].GetBool();
+    }
+    const auto& hgraph = params[INDEX_TYPE_HGRAPH];
+    auto parse_bool = [&](const char* key, bool& value) {
+        if (hgraph.Contains(key)) {
+            CHECK_ARGUMENT(hgraph[key].IsBool(), fmt::format("{} must be boolean", key));
+            value = hgraph[key].GetBool();
+        }
+    };
+    auto parse_uint = [&](const char* key, uint32_t& value) {
+        if (hgraph.Contains(key)) {
+            CHECK_ARGUMENT(hgraph[key].IsNumberInteger(), fmt::format("{} must be integer", key));
+            if (hgraph[key].IsNumberUnsigned()) {
+                CHECK_ARGUMENT(hgraph[key].GetUint64() <= UINT32_MAX,
+                               fmt::format("{} exceeds uint32 range", key));
+                value = static_cast<uint32_t>(hgraph[key].GetUint64());
+            } else {
+                const auto parsed = hgraph[key].GetInt();
+                const bool valid_budget =
+                    parsed >= 0 and static_cast<uint64_t>(parsed) <= UINT32_MAX;
+                CHECK_ARGUMENT(valid_budget, fmt::format("{} exceeds uint32 range", key));
+                value = static_cast<uint32_t>(parsed);
+            }
+        }
+    };
+    parse_bool("search_no_lock", obj.search_no_lock);
+    parse_bool("mci_packed_filter", obj.mci_packed_filter);
+    parse_bool("mci_batch_distance", obj.mci_batch_distance);
+    parse_uint("mci_activation_cap", obj.mci_activation_cap);
+    parse_uint("mci_hops_limit", obj.mci_hops_limit);
+    uint32_t idle = 0;
+    parse_uint("mci_expansion_idle_window", idle);
+    obj.mci_expansion_idle_window = idle;
+    if (obj.search_no_lock) {
+        CHECK_ARGUMENT(obj.parallel_search_thread_count == 1,
+                       "search_no_lock requires parallelism=1 (concurrent queries are supported)");
     }
     auto parse_hybrid_cost = [&](const char* key, double& target, const char* name) {
         if (not params[INDEX_TYPE_HGRAPH].Contains(key)) {

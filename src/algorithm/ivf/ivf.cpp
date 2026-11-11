@@ -27,13 +27,14 @@
 #include <unordered_map>
 
 #include "algorithm/inner_index_interface.h"
+#include "analyzer/analyzer.h"
 #include "datacell/bucket_datacell_parameter.h"
 #include "datacell/flatten_datacell_parameter.h"
 #include "datacell/flatten_interface.h"
 #include "flat_bucket_searcher.h"
 #include "gno_imi_partition.h"
 #include "graph_bucket_searcher.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "impl/reorder/bucket_reorder.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "index/index_impl.h"
@@ -50,6 +51,19 @@
 namespace vsag {
 
 namespace {
+
+void
+check_ivf_data_type(DataTypes data_type) {
+    if (data_type == DataTypes::DATA_TYPE_INT8) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("IVF not support {} datatype", DATATYPE_INT8));
+    }
+    if (data_type != DataTypes::DATA_TYPE_FLOAT) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("IVF only supports float32 datatype, got {}", ToString(data_type)));
+    }
+}
 
 BucketDataCellParamPtr
 make_precise_bucket_param(const IVFParameterPtr& param) {
@@ -111,6 +125,8 @@ public:
             }
         }
         if (ctx.stats != nullptr) {
+            ctx.stats->reorder_candidate_count.fetch_add(static_cast<uint32_t>(candidate_count),
+                                                         std::memory_order_relaxed);
             ctx.stats->reorder_distance_count.fetch_add(static_cast<uint32_t>(candidate_count),
                                                         std::memory_order_relaxed);
         }
@@ -218,10 +234,7 @@ build_default_ivf_param(const JsonType& external_param) {
 ParamPtr
 IVF::CheckAndMappingExternalParam(const JsonType& external_param,
                                   const IndexCommonParam& common_param) {
-    if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
-        throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            fmt::format("IVF not support {} datatype", DATATYPE_INT8));
-    }
+    check_ivf_data_type(common_param.data_type_);
 
     auto inner_json = build_default_ivf_param(external_param);
     for (const auto& [key, ignored] : external_param.GetInnerJson()->items()) {
@@ -254,6 +267,17 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
                 value);
         } else if (key == IVF_USE_ROUTE_GRAPH) {
             inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_USE_ROUTE_GRAPH_KEY].SetJson(value);
+        } else if (key == IVF_ENABLE_GPU_BUILD) {
+            inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_ENABLE_GPU_BUILD_KEY].SetJson(value);
+        } else if (key == IVF_GPU_DEVICE_ID) {
+            inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_GPU_DEVICE_ID_KEY].SetJson(value);
+        } else if (key == IVF_GPU_MEMORY_BUDGET) {
+            inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_GPU_MEMORY_BUDGET_KEY].SetJson(value);
+        } else if (key == IVF_GPU_MIN_WORK_THRESHOLD) {
+            inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_GPU_MIN_WORK_THRESHOLD_KEY].SetJson(
+                value);
+        } else if (key == IVF_KMEANS_ITER_COUNT) {
+            inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_KMEANS_ITER_COUNT_KEY].SetJson(value);
         } else if (key == GNO_IMI_FIRST_ORDER_BUCKETS_COUNT) {
             inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_PARTITION_STRATEGY_TYPE_GNO_IMI]
                       [GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY]
@@ -313,6 +337,14 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
                 .SetJson(value);
             inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][FAST_ENCODE_RABITQ_ROUNDS_KEY]
                 .SetJson(value);
+        } else if (key == SAQ_AVG_BITS) {
+            inner_json[BUCKET_PARAMS_KEY][QUANTIZATION_PARAMS_KEY][SAQ_AVG_BITS_KEY].SetJson(value);
+        } else if (key == SAQ_SEGMENT_COUNT) {
+            inner_json[BUCKET_PARAMS_KEY][QUANTIZATION_PARAMS_KEY][SAQ_SEGMENT_COUNT_KEY].SetJson(
+                value);
+        } else if (key == SAQ_RANDOM_ROTATION) {
+            inner_json[BUCKET_PARAMS_KEY][QUANTIZATION_PARAMS_KEY][SAQ_RANDOM_ROTATION_KEY].SetJson(
+                value);
         } else if (key == IVF_THREAD_COUNT) {
             inner_json[BUILD_THREAD_COUNT_KEY].SetJson(value);
         } else if (key == TRAIN_SAMPLE_COUNT_KEY) {
@@ -398,6 +430,7 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
       location_map_(common_param.allocator_.get()),
       bucket_graphs_(common_param.allocator_.get()),
       common_param_(common_param) {
+    check_ivf_data_type(common_param.data_type_);
     this->bucket_ = BucketInterface::MakeInstance(param->bucket_param, common_param);
     if (this->bucket_ == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "bucket init error");
@@ -811,21 +844,56 @@ IVF::GetStats() const {
         bucket_radius.push_back(max_distance);
     }
     // bucket_count_std
-    stats["bucket_num"].SetJson(get_data_stats(bucket_counts));
+    if (not bucket_counts.empty()) {
+        stats["bucket_num"].SetJson(get_data_stats(bucket_counts));
+    } else {
+        stats["_analysis"]["skipped"]["bucket_num"].SetString("index has no buckets");
+    }
     // bucket_radius
-    stats["bucket_radius"].SetJson(get_data_stats(bucket_radius));
+    if (not bucket_radius.empty()) {
+        stats["bucket_radius"].SetJson(get_data_stats(bucket_radius));
+    } else {
+        stats["_analysis"]["skipped"]["bucket_radius"].SetString("index has no non-empty buckets");
+    }
+    AddAnalysisMetadata(stats, GetName(), "stats", bucket_radius.empty() ? "partial" : "complete");
     return stats.Dump(4);
 }
 
 std::string
 IVF::AnalyzeIndexBySearch(const SearchRequest& request) {
+    CHECK_ARGUMENT(request.query_ != nullptr, "analysis query cannot be null");
+    CHECK_ARGUMENT(request.topk_ > 0, "analysis topk must be greater than 0");
     JsonType stats;
     auto querys = request.query_;
+    CHECK_ARGUMENT(querys->GetNumElements() > 0, "analysis query must contain at least one vector");
+    CHECK_ARGUMENT(querys->GetFloat32Vectors() != nullptr,
+                   "IVF analysis requires float32 query vectors");
+    CHECK_ARGUMENT(querys->GetDim() == dim_, "analysis query dimension mismatch");
     auto topk = std::min(request.topk_, GetNumElements());
     auto num_elements = querys->GetNumElements();
     auto param_str = request.params_str_;
+    if (param_str.empty() || param_str == "default") {
+        JsonType default_param;
+        default_param[GetName()][IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT].SetInt(
+            IVFSearchParameters::DEFAULT_SCAN_BUCKETS_COUNT);
+        param_str = default_param.Dump();
+    }
     // quantization error
+    if (GetNumElements() == 0) {
+        stats["quantization_bias_ratio"]["skipped_reason"].SetString("index is empty");
+        stats["quantization_inversion_count_rate"]["skipped_reason"].SetString("index is empty");
+        AddAnalysisMetadata(
+            stats, GetName(), "search", "not_applicable", num_elements, request.topk_);
+        return stats.Dump(4);
+    }
     this->analyze_quantizer(stats, querys->GetFloat32Vectors(), num_elements, topk, param_str);
+    const auto* const status = use_reorder_ ? "complete" : "partial";
+    if (not use_reorder_) {
+        stats["quantization_bias_ratio"]["skipped_reason"].SetString("reorder is disabled");
+        stats["quantization_inversion_count_rate"]["skipped_reason"].SetString(
+            "reorder is disabled");
+    }
+    AddAnalysisMetadata(stats, GetName(), "search", status, num_elements, request.topk_);
     return stats.Dump(4);
 }
 

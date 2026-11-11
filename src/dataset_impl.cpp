@@ -48,6 +48,24 @@ Dataset::Paths(const std::string& hierarchy_name, std::vector<std::vector<std::s
     return dataset->Paths(hierarchy_name, std::move(paths));
 }
 
+DatasetPtr
+Dataset::Int64Metadata(const std::string& name, const int64_t* values) {
+    auto* dataset = dynamic_cast<DatasetImpl*>(this);
+    if (dataset == nullptr) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "This Dataset implementation does not support int64 metadata");
+    }
+    return dataset->Int64Metadata(name, values);
+}
+
+const int64_t*
+Dataset::GetInt64Metadata(const std::string& name) const {
+    if (const auto* dataset = dynamic_cast<const DatasetImpl*>(this)) {
+        return dataset->GetInt64Metadata(name);
+    }
+    return nullptr;
+}
+
 bool
 Dataset::GetPaths(const std::string& hierarchy_name,
                   std::vector<std::vector<std::string>>& paths) const {
@@ -459,8 +477,34 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
         }
     };
 
+    auto release_int64_metadata = [this](const int64_t* ids, auto release) {
+        for (auto iter = this->data_.cbegin(); iter != this->data_.cend(); ++iter) {
+            if (not IsInt64MetadataKey(iter->first)) {
+                continue;
+            }
+            const auto* stored_values = std::get_if<const int64_t*>(&iter->second);
+            if (stored_values == nullptr) {
+                continue;
+            }
+            const auto* values = *stored_values;
+            bool already_released = values == nullptr or values == ids;
+            for (auto previous = this->data_.cbegin(); not already_released and previous != iter;
+                 ++previous) {
+                const auto* previous_values = std::get_if<const int64_t*>(&previous->second);
+                already_released = IsInt64MetadataKey(previous->first) and
+                                   previous_values != nullptr and *previous_values == values;
+            }
+            if (not already_released) {
+                release(values);
+            }
+        }
+    };
+
     if (allocator_ != nullptr) {
-        allocator_->Deallocate(void_ptr(DatasetImpl::GetIds()));
+        const auto* ids = DatasetImpl::GetIds();
+        allocator_->Deallocate(void_ptr(ids));
+        release_int64_metadata(
+            ids, [this](const int64_t* values) { allocator_->Deallocate(void_ptr(values)); });
         allocator_->Deallocate(void_ptr(DatasetImpl::GetDistances()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetInt8Vectors()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetFloat16Vectors()));
@@ -497,7 +541,9 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
         }
 
     } else {
-        delete[] DatasetImpl::GetIds();
+        const auto* ids = DatasetImpl::GetIds();
+        delete[] ids;
+        release_int64_metadata(ids, [](const int64_t* values) { delete[] values; });
         delete[] DatasetImpl::GetDistances();
         delete[] DatasetImpl::GetInt8Vectors();
         delete[] DatasetImpl::GetFloat16Vectors();
@@ -633,6 +679,13 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
         }
     }
     for (const auto& [key, value] : this->data_) {
+        const auto* values = std::get_if<const int64_t*>(&value);
+        if (IsInt64MetadataKey(key) and values != nullptr and *values != nullptr) {
+            copy_dataset->Int64Metadata(Int64MetadataNameFromKey(key),
+                                        allocate_and_copy(*values, num_elements, allocator_ref));
+        }
+    }
+    for (const auto& [key, value] : this->data_) {
         const auto* values = std::get_if<const std::string*>(&value);
         if (IsStringMetadataKey(key) and values != nullptr and *values != nullptr) {
             copy_dataset->StringMetadata(
@@ -672,10 +725,10 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
         }                                                                                        \
         auto ptr = const_cast<TYPE>(std::get<const TYPE>(iter->second));                         \
         this->SETTER_FUNC(allocate_and_copy(other->Get##SETTER_FUNC(),                           \
-                                            new_num_elements*(MULTIPLIER),                       \
+                                            new_num_elements * (MULTIPLIER),                     \
                                             this->allocator_,                                    \
                                             ptr,                                                 \
-                                            old_num_elements*(MULTIPLIER)));                     \
+                                            old_num_elements * (MULTIPLIER)));                   \
     }
 
 DatasetPtr
@@ -787,6 +840,32 @@ DatasetImpl::Append(const DatasetPtr& other) {
         }
         uint32_metadata_keys.push_back(key);
     }
+
+    std::vector<std::string> int64_metadata_keys;
+    for (const auto& [key, value] : this->data_) {
+        if (not IsInt64MetadataKey(key) || std::get<const int64_t*>(value) == nullptr) {
+            continue;
+        }
+        const auto name = Int64MetadataNameFromKey(key);
+        if (other->GetInt64Metadata(name) == nullptr) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "Cannot append dataset without int64 metadata " + name);
+        }
+        int64_metadata_keys.push_back(key);
+    }
+    if (other_impl != nullptr) {
+        for (const auto& [key, value] : other_impl->data_) {
+            if (not IsInt64MetadataKey(key) || std::get<const int64_t*>(value) == nullptr) {
+                continue;
+            }
+            const auto name = Int64MetadataNameFromKey(key);
+            if (this->GetInt64Metadata(name) == nullptr) {
+                throw VsagException(
+                    ErrorType::INVALID_ARGUMENT,
+                    "Cannot append dataset with int64 metadata " + name + " to dataset without it");
+            }
+        }
+    }
     if (other_impl != nullptr) {
         for (const auto& [key, value] : other_impl->data_) {
             if (not IsUInt32MetadataKey(key) || std::get<const uint32_t*>(value) == nullptr) {
@@ -850,6 +929,17 @@ DatasetImpl::Append(const DatasetPtr& other) {
         }
     }
 
+    std::unordered_set<const int64_t*> seen_int64_metadata;
+    const auto* ids = this->GetIds();
+    for (const auto& key : int64_metadata_keys) {
+        auto iter = this->data_.find(key);
+        const auto* values = std::get<const int64_t*>(iter->second);
+        const bool aliases_metadata = not seen_int64_metadata.insert(values).second;
+        if (values == ids or aliases_metadata) {
+            iter->second = allocate_and_copy(values, old_num_elements, this->allocator_);
+        }
+    }
+
     // append contiguous arrays via realloc-and-copy
     APPEND_DATA(IDS, int64_t*, Ids, 1);
     APPEND_DATA(DISTS, float*, Distances, dim);
@@ -867,6 +957,17 @@ DatasetImpl::Append(const DatasetPtr& other) {
                                                this->allocator_,
                                                values,
                                                old_num_elements));
+    }
+    for (const auto& key : int64_metadata_keys) {
+        auto iter = this->data_.find(key);
+        auto* values = const_cast<int64_t*>(std::get<const int64_t*>(iter->second));
+        const auto name = Int64MetadataNameFromKey(key);
+        this->Int64Metadata(name,
+                            allocate_and_copy(other->GetInt64Metadata(name),
+                                              new_num_elements,
+                                              this->allocator_,
+                                              values,
+                                              old_num_elements));
     }
     if (this->GetExtraInfoSize() != 0) {
         APPEND_DATA(EXTRA_INFOS, char*, ExtraInfos, this->GetExtraInfoSize());
@@ -984,6 +1085,8 @@ DatasetImpl::Append(const DatasetPtr& other) {
                                             return replaced_strings.count(paths) != 0;
                                         }),
                          retired_paths_.end());
+    // Only deallocation happens here; pointer iteration order does not affect results.
+    // NOLINTNEXTLINE(bugprone-nondeterministic-pointer-iteration-order)
     for (const auto* values : replaced_strings) {
         delete[] values;
     }

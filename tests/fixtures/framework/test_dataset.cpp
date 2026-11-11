@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cstring>
 #include <functional>
+#include <stdexcept>
 
 #include "functest.h"
 #include "simd/fp32_simd.h"
@@ -362,7 +363,11 @@ TestDataset::CreateTestDataset(uint64_t dim,
                                uint64_t extra_info_size,
                                bool has_duplicate,
                                int64_t id_shift,
-                               bool use_fixed_seed) {
+                               bool use_fixed_seed,
+                               uint64_t query_count) {
+    if (query_count == 0) {
+        throw std::invalid_argument("test dataset query_count must be positive");
+    }
     constexpr int fixed_seed = 47;
     int seed = use_fixed_seed ? fixed_seed : fixtures::RandomValue(0, 564);
 
@@ -379,7 +384,6 @@ TestDataset::CreateTestDataset(uint64_t dim,
                                            has_duplicate,
                                            dataset->id_shift,
                                            seed);
-    constexpr uint64_t query_count = 100;
     dataset->query_ = GenerateRandomDataset(dim,
                                             query_count,
                                             metric_str,
