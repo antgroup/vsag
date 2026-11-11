@@ -117,8 +117,17 @@ higher, as measured by the `make cov` flow and the CI coverage job.
 
 ```bash
 make pyvsag
+python -m venv .venv-test && . .venv-test/bin/activate
+pip install wheelhouse/pyvsag-*.whl pytest
 cd tests/python && pytest -q
 ```
+
+Test the built wheel, not the source tree. `make pyvsag` itself runs only part of `tests/python`
+inside the build container (with Docker), or installs the wheel into the active environment and
+runs the suite there (without Docker). To run the full suite against the built wheel without
+depending on the state of your current environment, install it into a clean virtual environment as
+above before running pytest. To run against an in-tree build instead, see [pyvsag](../guide/pyvsag.md#build-from-source). `test_openmp_coexistence.py`
+needs `torch` and `scikit-learn` and is skipped when they are missing.
 
 ## Report Testcase Budgets and Time
 

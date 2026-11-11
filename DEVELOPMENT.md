@@ -34,7 +34,7 @@ docker pull vsaglib/vsag:ubuntu
   - clang-tidy version 20 EXACTLY (not higher, not lower - required for consistent lint diagnostics)
   - clang-format version 20 EXACTLY (not higher, not lower - required for consistent formatting)
 - Additional Dependencies:
-  - Linux: gfortran, python 3.6+, OpenMP, libaio, curl
+  - Linux: gfortran, python 3.10+, OpenMP, libaio, curl
   - macOS: Xcode Command Line Tools, Homebrew
 
 ```bash
@@ -82,8 +82,7 @@ run-dist-tests:          ## Run distribution tests.
 dist-pre-cxx11-abi:      ## Build vsag with distribution options (pre C++11 ABI).
 dist-cxx11-abi:          ## Build vsag with distribution options (C++11 ABI).
 dist-libcxx:             ## Build vsag using libc++.
-pyvsag:                  ## Build a specific Python version wheel. Usage: make pyvsag PY_VERSION=3.10
-pyvsag-all:              ## Build wheels for all supported versions.
+pyvsag:                  ## Build the pyvsag wheel (one py3-none wheel per architecture) into wheelhouse/.
 clean-release:           ## Clear build-release/ directory.
 clean-release-perf:      ## Clear build-release-perf/ directory.
 install:                 ## Build and install the release version of vsag.
@@ -91,8 +90,8 @@ install:                 ## Build and install the release version of vsag.
 
 Build target behavior:
 
-- `make debug` builds the default minimal configuration. It does not enable tests, examples, tools, or Python bindings unless they are explicitly turned on.
-- `make dev` builds the full developer configuration with tests, examples, tools, and Python bindings enabled.
+- `make debug` builds the default minimal configuration. It does not enable tests, examples, tools, or the pyvsag library (`libvsag_c`) unless they are explicitly turned on.
+- `make dev` builds the full developer configuration with tests, examples, tools, and the pyvsag library (`libvsag_c`) enabled.
 - `make test`, `make asan`, `make tsan`, and the related parallel test targets automatically enable tests.
 - `make test-module MODULE=<name>` builds and runs one unit-test subsystem without building the other unit-test modules. `CASE=<filter>` applies the usual Catch2 runtime filter; run `make test` for full validation.
 - `make release` is the reproducible release/package path. It uses the minimal configuration, Release optimization semantics, and disables ccache by default. Enable optional components explicitly when needed, for example `make release VSAG_ENABLE_TOOLS=ON`.
@@ -192,7 +191,7 @@ source of truth for the exact upstream URL and expected checksum.
   - Build tools under `tools/`
 
 - **`ENABLE_PYBINDS`** (default: `OFF`)
-  - Build the `_pyvsag` Python extension module
+  - Build `libvsag_c`, the C ABI library that `pyvsag` loads through cffi
 
 - **`ENABLE_CUDA`** (default: `OFF`)
   - Build the optional CUDA backend. Requires CUDA 11.8 or later, with `nvcc` on
@@ -215,8 +214,7 @@ For a complete list of build options, see the `option()` directives in `cmake/VS
 - `examples/`: cpp and python example codes
 - `extern/`: third-party libraries
 - `include/`: export header files
-- `python/`: the pyvsag package and setup tools
-- `python_bindings/`: the python bindings
+- `python/`: the pyvsag package (pure-Python cffi layer) and wheel packaging
 - `scripts/`: useful scripts
 - `src/`: the source codes and unit tests
 - `tests/`: the functional tests

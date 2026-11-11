@@ -114,8 +114,15 @@ python3 scripts/coverage/compare_simd_coverage.py --root . \
 
 ```bash
 make pyvsag
+python -m venv .venv-test && . .venv-test/bin/activate
+pip install wheelhouse/pyvsag-*.whl pytest
 cd tests/python && pytest -q
 ```
+
+请测试构建出的 wheel，而不是源码树。`make pyvsag` 本身只在构建容器内运行 `tests/python` 的一部分用例（有 Docker 时），
+或者把 wheel 安装到当前环境后在其中运行（没有 Docker 时）。要在不依赖当前环境状态的情况下对构建出的 wheel 运行完整用例，
+请像上面那样先把它装进干净的虚拟环境，再运行 pytest。如果想针对源码树中的构建结果运行，见 [pyvsag](../guide/pyvsag.md#从源码构建)。`test_openmp_coexistence.py`
+需要 `torch` 和 `scikit-learn`，缺少时会自动跳过。
 
 ## 统计 testcase 预算与耗时
 

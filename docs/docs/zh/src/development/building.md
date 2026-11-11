@@ -52,7 +52,7 @@ release:                 ## Build vsag with release options.
 dist-pre-cxx11-abi:      ## Build vsag with distribution options.
 dist-cxx11-abi:          ## Build vsag with distribution options.
 dist-libcxx:             ## Build vsag using libc++.
-pyvsag:                  ## Build the pyvsag wheel (one py3-none wheel per architecture).
+pyvsag:                  ## Build the pyvsag wheel (one py3-none wheel per architecture) into wheelhouse/.
 clean-release:           ## Clear build-release/ directory.
 install:                 ## Build and install the release version of vsag.
 ```
@@ -182,11 +182,22 @@ make release
 
 pyvsag 是 VSAG 的 Python 版本。通过 `pip install pyvsag` 下载安装的 wheel 包就是通过 `make pyvsag` 命令构建出来的。
 
-wheel 为 `py3-none` 平台包，不区分 Python 版本，每个架构只需构建一次：
+wheel 为 `py3-none` 平台包，不区分 Python 版本，每个架构只需构建一次，即可适用于所有受支持的 CPython（3.10+）：
 
 ```bash
 make pyvsag
+pip install wheelhouse/pyvsag-*.whl
 ```
+
+`make pyvsag` 在仓库根目录运行 `scripts/python/local_build_wheel.sh`，并把 wheel 写入 `wheelhouse/`。
+有 Docker 时通过 cibuildwheel 在 `manylinux_2_28` 镜像中构建，并在镜像内运行 `tests/python` 的一部分用例，
+不会改动宿主机环境。没有 Docker 时退回普通的 `python -m build`，把 wheel 安装到当前虚拟环境，并针对它运行
+`tests/python`；这样得到的 wheel 带 `linux_<arch>` 标签，而不是 `manylinux_2_28`。如果当前不在虚拟环境中，
+脚本会在仓库内创建 `.venv/`。
+
+wheel 中包含 `libvsag_c`，使用 `ENABLE_PYBINDS=ON` 和 `ENABLE_LIBAIO=OFF` 构建。不使用 Docker 的构建可以用
+`VSAG_ENABLE_LIBAIO=ON` 覆盖（例如 `VSAG_ENABLE_LIBAIO=ON python -m build --wheel python`）；该变量不会被转发到
+Docker 构建中。安装 wheel、使用源码树中的构建结果以及运行时行为，见 [pyvsag](../guide/pyvsag.md)。
 
 ## 环境变量
 

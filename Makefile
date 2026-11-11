@@ -241,7 +241,7 @@ dist-libcxx:             ## Build vsag using libc++.
 
 .PHONY: pyvsag
 
-pyvsag:                  ## Build the pyvsag wheel (one py3-none wheel per architecture).
+pyvsag:                  ## Build the pyvsag wheel (one py3-none wheel per architecture) into wheelhouse/.
 	bash ./scripts/python/local_build_wheel.sh
 
 .PHONY: clean-release

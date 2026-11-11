@@ -54,6 +54,9 @@ See [Building](../development/building.md) for details.
 pip install pyvsag
 ```
 
+The wheel is `py3-none-manylinux_2_28`: Linux `x86_64` or `aarch64` with glibc 2.28 or later, and
+CPython 3.10 or later. See [pyvsag](pyvsag.md) for requirements, building from source, and usage.
+
 ## Node.js / TypeScript
 
 ```bash
