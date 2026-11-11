@@ -21,6 +21,7 @@
 #include <string>
 #include <utility>
 
+#include "io/memory_block_io/memory_block_io.h"
 #include "io/memory_io/memory_io.h"
 #include "serialization.h"
 #include "serialization_tags.h"
@@ -637,4 +638,119 @@ TEST_CASE("Forward vector respects metadata limits even when bytes fit",
             [&](vsag::StreamReader& block) { vsag::StreamReader::ReadVector(block, values, 16); }),
         vsag::VsagException);
     REQUIRE(allocator.largest_request == 0);
+}
+
+namespace {
+
+// Bound aggregate requests too: a block backend can make many small allocations.
+class TruncatedSourceAllocator : public vsag::test::GuardedAllocator {
+public:
+    void*
+    Allocate(uint64_t size) override {
+        CheckBudget(size);
+        return GuardedAllocator::Allocate(size);
+    }
+
+    void*
+    Reallocate(void* pointer, uint64_t size) override {
+        CheckBudget(size);
+        return GuardedAllocator::Reallocate(pointer, size);
+    }
+
+    void
+    CheckBudget(uint64_t size) {
+        if (size > BUDGET - requested) {
+            throw std::bad_alloc();
+        }
+        requested += size;
+    }
+
+    uint64_t requested{0};
+    static constexpr uint64_t BUDGET = uint64_t{5} * 1024 * 1024;
+};
+
+}  // namespace
+
+TEST_CASE("Forward IO grows only from successfully consumed payload bytes",
+          "[ut][streaming_serialization][truncated_io_source]") {
+    const bool block_storage = GENERATE(false, true);
+    constexpr uint64_t chunk_size = uint64_t{2} * 1024 * 1024;
+    const uint64_t available = GENERATE(uint64_t{0}, uint64_t{23}, chunk_size + 23);
+    const uint64_t consumed = available >= chunk_size ? chunk_size : 0;
+    // The declared extent is modest; the allocator rejects it before touching memory.
+    constexpr uint64_t declared = uint64_t{8} * 1024 * 1024;
+    std::string payload(sizeof(declared) + available, 'x');
+    std::memcpy(payload.data(), &declared, sizeof(declared));
+    std::istringstream input(payload);
+    vsag::ForwardStreamReader source(input);
+    vsag::StreamBlockHeader header;
+    header.value_len = sizeof(declared) + declared;
+    TruncatedSourceAllocator allocator;
+    allocator.limit = uint64_t{2} * 1024 * 1024;
+    auto verify = [&](auto& io) {
+        const auto initial_requests = allocator.requested;
+        REQUIRE_THROWS_AS(
+            vsag::ReadForwardBlockPayload(
+                source, header, [&](vsag::StreamReader& block) { io.Deserialize(block); }),
+            vsag::VsagException);
+        REQUIRE(io.Size() == consumed);
+        REQUIRE(allocator.requested - initial_requests >= chunk_size);
+        REQUIRE(allocator.requested - initial_requests <= chunk_size + consumed + 4096);
+        REQUIRE(source.GetCursor() == sizeof(declared) + consumed);
+    };
+    if (block_storage) {
+        vsag::MemoryBlockIO io(4096, &allocator);
+        verify(io);
+    } else {
+        vsag::MemoryIO io(&allocator);
+        verify(io);
+    }
+}
+
+TEST_CASE("Forward IO replaces storage across buffer boundaries and verifies checksum",
+          "[ut][streaming_serialization][truncated_io_source]") {
+    const bool block_storage = GENERATE(false, true);
+    const uint64_t size = GENERATE(uint64_t{0}, uint64_t{23}, uint64_t{2 * 1024 * 1024 + 17});
+    const bool corrupt_checksum = GENERATE(false, true);
+    const std::string data(size, 'v');
+    std::string payload(sizeof(size), '\0');
+    std::memcpy(payload.data(), &size, sizeof(size));
+    payload += data;
+    std::istringstream input(payload + "next");
+    vsag::ForwardStreamReader source(input);
+    vsag::StreamBlockHeader header;
+    header.value_len = payload.size();
+    header.payload_checksum = vsag::StreamHeader::CalculateChecksum(payload);
+    if (corrupt_checksum) {
+        header.payload_checksum ^= 1;
+    }
+    vsag::test::GuardedAllocator allocator;
+    allocator.limit = uint64_t{4} * 1024 * 1024;
+    auto verify = [&](auto& io) {
+        // Reload into an existing, larger logical extent, including the empty case.
+        io.Resize(size + 32);
+        auto load = [&] {
+            vsag::ReadForwardBlockPayload(
+                source, header, [&](vsag::StreamReader& block) { io.Deserialize(block); });
+        };
+        if (corrupt_checksum) {
+            REQUIRE_THROWS_AS(load(), vsag::VsagException);
+        } else {
+            REQUIRE_NOTHROW(load());
+        }
+        REQUIRE(io.Size() == size);
+        std::string actual(size, '\0');
+        REQUIRE(io.ReadAt(0, size, reinterpret_cast<uint8_t*>(actual.data())));
+        REQUIRE(actual == data);
+        char next[4];
+        source.Read(next, sizeof(next));
+        REQUIRE(std::string(next, sizeof(next)) == "next");
+    };
+    if (block_storage) {
+        vsag::MemoryBlockIO io(4096, &allocator);
+        verify(io);
+    } else {
+        vsag::MemoryIO io(&allocator);
+        verify(io);
+    }
 }

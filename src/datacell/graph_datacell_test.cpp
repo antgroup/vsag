@@ -17,6 +17,7 @@
 
 #include <catch2/matchers/catch_matchers_predicate.hpp>
 #include <cstring>
+#include <limits>
 #include <sstream>
 
 #include "graph_datacell_parameter.h"
@@ -35,6 +36,7 @@ TEST_CASE("Dense graph count is checked before loading derived state",
           "[ut][GraphDataCell][graph_count_bounds]") {
     const bool split_io = GENERATE(false, true);
     const InnerIdType count = GENERATE(0, 3, 8, 9);
+    const uint64_t compacted_count = GENERATE(uint64_t{7}, std::numeric_limits<uint64_t>::max());
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common;
     common.allocator_ = allocator;
@@ -60,6 +62,7 @@ TEST_CASE("Dense graph count is checked before loading derived state",
     std::istringstream input(bytes);
     IOStreamReader reader(input);
     auto restored = GraphInterface::MakeInstance(param, common);
+    restored->SetDeserializeCompactedCount(compacted_count);
     auto load = [&]() {
         if (split_io) {
             return restored->ReserveIO(reader);
@@ -392,6 +395,59 @@ TEST_CASE("GraphDataCell Move same id keeps neighbors", "[ut][GraphDataCell]") {
 
     Vector<InnerIdType> incoming(allocator.get());
     graph->GetIncomingNeighbors(1, incoming);
+    REQUIRE(incoming.size() == 1);
+    REQUIRE(incoming[0] == 0);
+}
+
+TEST_CASE("Dense graph shrink and historical reload bound reverse-edge reconstruction",
+          "[ut][GraphDataCell][graph_count_bounds][compacted_graph_count]") {
+    const bool split_io = GENERATE(false, true);
+    const bool historical = GENERATE(false, true);
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.allocator_ = allocator;
+    common.dim_ = 4;
+    auto param = std::make_shared<GraphDataCellParameter>();
+    param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+    param->init_max_capacity_ = 8;
+    param->use_reverse_edges_ = true;
+    param->max_degree_ = 4;
+    auto graph = GraphInterface::MakeInstance(param, common);
+    Vector<InnerIdType> empty(allocator.get());
+    for (InnerIdType id = 0; id < 8; ++id) {
+        graph->InsertNeighborsById(id, empty);
+    }
+    Vector<InnerIdType> edge({1}, allocator.get());
+    graph->InsertNeighborsById(0, edge);
+    graph->ShrinkToFit(4);
+    REQUIRE(graph->TotalCount() == 4);
+    REQUIRE(graph->MaxCapacity() == 4);
+    std::stringstream output;
+    IOStreamWriter writer(output);
+    graph->Serialize(writer);
+    auto bytes = output.str();
+    if (historical) {
+        const InnerIdType old_count = 8;
+        std::memcpy(bytes.data(), &old_count, sizeof(old_count));
+    }
+    std::istringstream input(bytes);
+    IOStreamReader reader(input);
+    auto restored = GraphInterface::MakeInstance(param, common);
+    restored->SetDeserializeCompactedCount(4);
+    if (split_io) {
+        const auto io_size = restored->ReserveIO(reader);
+        const auto io_offset = reader.GetCursor();
+        reader.Seek(io_offset + io_size);
+        restored->DeserializeTail(reader);
+        restored->WriteRaw(reinterpret_cast<const uint8_t*>(bytes.data()) + io_offset, io_size, 0);
+        restored->FinishDeserialize();
+    } else {
+        restored->DeserializeBounded(reader, 4);
+    }
+    REQUIRE(restored->TotalCount() == 4);
+    REQUIRE(restored->MaxCapacity() == 4);
+    Vector<InnerIdType> incoming(allocator.get());
+    restored->GetIncomingNeighbors(1, incoming);
     REQUIRE(incoming.size() == 1);
     REQUIRE(incoming[0] == 0);
 }

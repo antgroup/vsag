@@ -231,6 +231,16 @@ HGraph::deserialize_basic_info(const JsonType& jsonify_basic_info) {
         this->create_param_ptr_ = effective_param;
         this->resize_increase_count_bit_ = index_param->resize_increase_count_bit;
     }
+    // Non-MCI FORCE_REMOVE compacts the dense bottom graph to the live ID range.
+    // Historical writers retained its pre-removal count after shrinking capacity.
+    // Require the enclosing live count and capacity to agree before allowing that shape.
+    uint64_t compacted_count = std::numeric_limits<uint64_t>::max();
+    if (this->support_force_remove() and not this->mci_parameters_.enabled and
+        jsonify_basic_info.Contains("total_count") and
+        jsonify_basic_info["total_count"].GetUint64() == max_capacity) {
+        compacted_count = max_capacity;
+    }
+    this->bottom_graph_->SetDeserializeCompactedCount(compacted_count);
 }
 
 // Magic header used to mark presence of an appended source_id_table block,

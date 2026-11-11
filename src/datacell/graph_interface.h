@@ -215,8 +215,15 @@ public:
         StreamReader::ReadObj(reader, this->maximum_degree_);
 
         if (this->uses_dense_capacity() && this->total_count_ > this->max_capacity_) {
-            throw VsagException(ErrorType::INVALID_BINARY,
-                                "serialized graph count exceeds graph capacity");
+            // Older non-MCI force-removal writers compacted rows and capacity, but kept
+            // the historical high-water count. Only the enclosing index can identify
+            // that compacted shape; never use the historical count to traverse storage.
+            if (deserialize_compacted_count_ == this->max_capacity_) {
+                this->total_count_ = this->max_capacity_;
+            } else {
+                throw VsagException(ErrorType::INVALID_BINARY,
+                                    "serialized graph count exceeds graph capacity");
+            }
         }
         if (this->uses_dense_capacity() && this->max_capacity_ > deserialize_capacity_limit_) {
             throw VsagException(ErrorType::INVALID_BINARY,
@@ -226,6 +233,11 @@ public:
             duplicate_tracker_->DeserializeBounded(
                 reader, std::min(this->max_capacity_, deserialize_capacity_limit_));
         }
+    }
+
+    void
+    SetDeserializeCompactedCount(uint64_t count) {
+        deserialize_compacted_count_ = count;
     }
 
     uint64_t
@@ -337,6 +349,7 @@ public:
 
 private:
     InnerIdType deserialize_capacity_limit_{std::numeric_limits<InnerIdType>::max()};
+    uint64_t deserialize_compacted_count_{std::numeric_limits<uint64_t>::max()};
 
 protected:
     // Dense graph storage can allocate from max_capacity_ without reading that many bytes.

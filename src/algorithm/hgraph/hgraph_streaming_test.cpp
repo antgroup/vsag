@@ -429,6 +429,7 @@ TEST_CASE("HGraph streaming restores sparse routes after force removal",
         "index_param":{"base_quantization_type":"sq8", "support_force_remove":true,
                        "build_thread_count":1, "max_degree":8, "ef_construction":32}
     })";
+    const bool historical = GENERATE(false, true);
     constexpr uint64_t count = 256;
     constexpr uint64_t retained = 128;
     std::vector<int64_t> ids(count);
@@ -456,8 +457,15 @@ TEST_CASE("HGraph streaming restores sparse routes after force removal",
     REQUIRE(index.value()->GetNumElements() == retained);
     std::stringstream output;
     REQUIRE(index.value()->SerializeStreaming(output).has_value());
-    const auto bytes = output.str();
+    auto bytes = output.str();
     const auto bottom = test::FindStreamingBlock(bytes, StreamSerializationTag::BOTTOM_GRAPH);
+    REQUIRE(test::ReadStreamingObj<uint32_t>(bytes, bottom.payload_offset) == retained);
+    if (historical) {
+        test::WriteStreamingObj<uint32_t>(bytes, bottom.payload_offset, count);
+        const auto checksum = StreamHeader::CalculateChecksum(
+            std::string_view(bytes).substr(bottom.payload_offset, bottom.payload_size));
+        test::WriteStreamingObj<uint32_t>(bytes, bottom.header_offset + 24, checksum);
+    }
     REQUIRE(test::ReadStreamingObj<uint32_t>(bytes, bottom.payload_offset + 4) == retained);
     const auto routes = test::FindStreamingBlock(bytes, StreamSerializationTag::ROUTE_GRAPHS);
     REQUIRE(routes.payload_size > 0);

@@ -192,6 +192,7 @@ public:
             node_versions_.resize(capacity);
         }
         this->max_capacity_ = capacity;
+        this->total_count_ = std::min(this->total_count_.load(), capacity);
     }
 
 protected:
