@@ -157,36 +157,11 @@ MakeFlattenDataCellInstance(const FlattenInterfaceParamPtr& param,
                         fmt::format("Unsupported quantization type: {}", actual_quantization));
 }
 
-template <MetricType metric>
+template <MetricType metric, typename IOTmpl>
 FlattenInterfacePtr
-MakeFlattenDataCellForMetric(const FlattenInterfaceParamPtr& param,
-                             const IndexCommonParam& common_param) {
-    const auto& io_type = param->io_parameter->GetTypeName();
-    if (io_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
-        return MakeFlattenDataCellInstance<metric, MemoryBlockIO>(param, common_param);
-    }
-    if (io_type == IO_TYPE_VALUE_MEMORY_IO) {
-        return MakeFlattenDataCellInstance<metric, MemoryIO>(param, common_param);
-    }
-    if (io_type == IO_TYPE_VALUE_BUFFER_IO) {
-        return MakeFlattenDataCellInstance<metric, BufferIO>(param, common_param);
-    }
-    if (io_type == IO_TYPE_VALUE_ASYNC_IO) {
-        return MakeFlattenDataCellInstance<metric, AsyncIO>(param, common_param);
-    }
-    if (io_type == IO_TYPE_VALUE_URING_IO) {
-        return MakeFlattenDataCellInstance<metric, UringIO>(param, common_param);
-    }
-    if (io_type == IO_TYPE_VALUE_MMAP_IO) {
-        return MakeFlattenDataCellInstance<metric, MMapIO>(param, common_param);
-    }
-    if (io_type == IO_TYPE_VALUE_READER_IO) {
-        return MakeFlattenDataCellInstance<metric, ReaderIO>(param, common_param);
-    }
-    if (io_type == IO_TYPE_VALUE_USER_DEFINED_IO) {
-        return MakeFlattenDataCellInstance<metric, UserDefinedIO>(param, common_param);
-    }
-    return nullptr;
+MakeFlattenDataCellShard(const FlattenInterfaceParamPtr& param,
+                         const IndexCommonParam& common_param) {
+    return MakeFlattenDataCellInstance<metric, IOTmpl>(param, common_param);
 }
 
 }  // namespace vsag

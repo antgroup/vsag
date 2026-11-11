@@ -14,31 +14,63 @@
 
 #include "flatten_interface_factory.h"
 #include "index_common_param.h"
+#include "inner_string_params.h"
+#include "io/io_headers.h"
 
 namespace vsag {
 
+// Defined and explicitly instantiated per (metric, IO) in generated shard translation units
+// (see flatten_datacell_factory_shard.cpp.in) to bound per-TU compiler memory.
+template <MetricType metric, typename IOTmpl>
 FlattenInterfacePtr
-make_flatten_data_cell_l2(const FlattenInterfaceParamPtr& param,
-                          const IndexCommonParam& common_param);
+MakeFlattenDataCellShard(const FlattenInterfaceParamPtr& param,
+                         const IndexCommonParam& common_param);
 
-FlattenInterfacePtr
-make_flatten_data_cell_ip(const FlattenInterfaceParamPtr& param,
-                          const IndexCommonParam& common_param);
+namespace {
 
+template <MetricType metric>
 FlattenInterfacePtr
-make_flatten_data_cell_cosine(const FlattenInterfaceParamPtr& param,
-                              const IndexCommonParam& common_param);
+DispatchByIO(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param) {
+    const auto& io_type = param->io_parameter->GetTypeName();
+    if (io_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
+        return MakeFlattenDataCellShard<metric, MemoryBlockIO>(param, common_param);
+    }
+    if (io_type == IO_TYPE_VALUE_MEMORY_IO) {
+        return MakeFlattenDataCellShard<metric, MemoryIO>(param, common_param);
+    }
+    if (io_type == IO_TYPE_VALUE_BUFFER_IO) {
+        return MakeFlattenDataCellShard<metric, BufferIO>(param, common_param);
+    }
+    if (io_type == IO_TYPE_VALUE_ASYNC_IO) {
+        return MakeFlattenDataCellShard<metric, AsyncIO>(param, common_param);
+    }
+    if (io_type == IO_TYPE_VALUE_URING_IO) {
+        return MakeFlattenDataCellShard<metric, UringIO>(param, common_param);
+    }
+    if (io_type == IO_TYPE_VALUE_MMAP_IO) {
+        return MakeFlattenDataCellShard<metric, MMapIO>(param, common_param);
+    }
+    if (io_type == IO_TYPE_VALUE_READER_IO) {
+        return MakeFlattenDataCellShard<metric, ReaderIO>(param, common_param);
+    }
+    if (io_type == IO_TYPE_VALUE_USER_DEFINED_IO) {
+        return MakeFlattenDataCellShard<metric, UserDefinedIO>(param, common_param);
+    }
+    return nullptr;
+}
+
+}  // namespace
 
 FlattenInterfacePtr
 MakeFlattenDataCell(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param) {
     if (common_param.metric_ == MetricType::METRIC_TYPE_L2SQR) {
-        return make_flatten_data_cell_l2(param, common_param);
+        return DispatchByIO<MetricType::METRIC_TYPE_L2SQR>(param, common_param);
     }
     if (common_param.metric_ == MetricType::METRIC_TYPE_IP) {
-        return make_flatten_data_cell_ip(param, common_param);
+        return DispatchByIO<MetricType::METRIC_TYPE_IP>(param, common_param);
     }
     if (common_param.metric_ == MetricType::METRIC_TYPE_COSINE) {
-        return make_flatten_data_cell_cosine(param, common_param);
+        return DispatchByIO<MetricType::METRIC_TYPE_COSINE>(param, common_param);
     }
     return nullptr;
 }

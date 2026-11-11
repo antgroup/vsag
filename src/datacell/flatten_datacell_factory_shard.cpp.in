@@ -16,10 +16,8 @@
 
 namespace vsag {
 
-FlattenInterfacePtr
-make_flatten_data_cell_cosine(const FlattenInterfaceParamPtr& param,
-                              const IndexCommonParam& common_param) {
-    return MakeFlattenDataCellForMetric<MetricType::METRIC_TYPE_COSINE>(param, common_param);
-}
+template FlattenInterfacePtr
+MakeFlattenDataCellShard<MetricType::@SHARD_METRIC@, @SHARD_IO@>(
+    const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param);
 
 }  // namespace vsag
