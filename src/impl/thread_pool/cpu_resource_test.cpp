@@ -34,6 +34,19 @@ TEST_CASE("CPU budget resolves nested and namespaced quotas", "[ut][CPUResource]
     REQUIRE(CgroupCpuSlots("0::/\n", namespaced, read, 16) == 3);
     REQUIRE(CgroupCpuSlots("0::/pod\n", namespaced, read, 16) == 3);
     REQUIRE(CgroupCpuSlots("0::/../../pod\n", namespaced, read, 16) == 1);
+
+    const std::string sibling_mount =
+        "29 23 0:26 / /cg rw - cgroup2 cgroup rw\n"
+        "30 23 0:26 /podB /other rw - cgroup2 cgroup rw\n";
+    files["/cg/podA/task/cpu.max"] = "800000 100000";
+    files["/cg/podA/cpu.max"] = "800000 100000";
+    files["/cg/cpu.max"] = "max 100000";
+    files["/other/podA/task/cpu.max"] = "100000 100000";
+    REQUIRE(CgroupCpuSlots("0::/podA/task\n", sibling_mount, read, 16) == 8);
+    REQUIRE(CgroupCpuSlots(
+                "0::/podA/task\n", "30 23 0:26 /podB /other rw - cgroup2 cgroup rw\n", read, 16) ==
+            16);
+
     REQUIRE(CgroupCpuSlots("invalid", v2, read, 2) == 2);
     REQUIRE(CgroupCpuSlots("", "", read, 64) == 64);  // No index-specific cap.
 }
