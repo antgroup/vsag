@@ -848,36 +848,61 @@ private:
         std::sort(affected_nodes.begin(), affected_nodes.end());
         affected_nodes.erase(std::unique(affected_nodes.begin(), affected_nodes.end()),
                              affected_nodes.end());
+        auto targets = affected_nodes;
         for (const uint64_t source : affected_nodes) {
             if (source >= Size()) {
                 continue;
             }
-            // Preserve valid links to limit topology drift; rank only candidates that can
-            // refill the degree lost by the mutation.
-            auto& repaired = extras_[source];
-            if (repaired.size() >= max_degree_) {
-                continue;
-            }
             remember_row(source, true, false);
-            const auto old_neighbors = repaired;
+            const auto old_neighbors = extras_[source];
+            targets.insert(targets.end(), old_neighbors.begin(), old_neighbors.end());
+            auto candidates = old_neighbors;
+            candidates.insert(
+                candidates.end(), additional_candidates.begin(), additional_candidates.end());
+            std::sort(candidates.begin(), candidates.end());
+            candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
             std::vector<Candidate> ranked;
-            ranked.reserve(additional_candidates.size());
-            for (const uint64_t candidate : additional_candidates) {
-                if (candidate < Size() and candidate != source and
-                    std::find(repaired.begin(), repaired.end(), candidate) == repaired.end()) {
+            ranked.reserve(candidates.size());
+            for (const uint64_t candidate : candidates) {
+                if (candidate < Size() and candidate != source) {
                     ranked.push_back({candidate, distance(source, candidate)});
                 }
             }
             std::sort(ranked.begin(), ranked.end(), Closer{});
-            const uint64_t needed = max_degree_ - repaired.size();
-            const uint64_t retained = std::min(needed, ranked.size());
-            repaired.reserve(repaired.size() + retained);
-            for (uint64_t i = 0; i < retained; ++i) {
-                repaired.push_back(ranked[i].slot);
+            std::vector<uint64_t> selected;
+            selected.reserve(max_degree_);
+            // Experimental alpha=1 occlusion, following the native pruning strategy.
+            // This is not an exported policy or an exact HGraph transplantation.
+            for (const auto& candidate : ranked) {
+                bool accepted = true;
+                for (const uint64_t neighbor : selected) {
+                    if (distance(neighbor, candidate.slot) < candidate.distance) {
+                        accepted = false;
+                        break;
+                    }
+                }
+                if (accepted) {
+                    selected.push_back(candidate.slot);
+                    if (selected.size() == max_degree_) {
+                        break;
+                    }
+                }
             }
-            sync_incoming(source, old_neighbors);
+            // Unlike native HGraph, Lite's degree-retention contract requires refilling
+            // occluded candidates after the diversity pass, up to the existing cap.
+            for (const auto& candidate : ranked) {
+                if (selected.size() == max_degree_) {
+                    break;
+                }
+                if (std::find(selected.begin(), selected.end(), candidate.slot) == selected.end()) {
+                    selected.push_back(candidate.slot);
+                }
+            }
+            replace_neighbors(source, selected);
         }
-        for (const uint64_t target : affected_nodes) {
+        std::sort(targets.begin(), targets.end());
+        targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
+        for (const uint64_t target : targets) {
             if (target < Size()) {
                 ensure_incoming(target);
             }
