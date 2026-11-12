@@ -51,9 +51,11 @@ read_matrix(const std::string& path, int32_t expected_dim = 0) {
     while (true) {
         int32_t dim = 0;
         input.read(reinterpret_cast<char*>(&dim), sizeof(dim));
-        if (input.eof()) {
+        if (input.eof() and input.gcount() == 0) {
             break;
         }
+        require(input.gcount() == static_cast<std::streamsize>(sizeof(dim)),
+                "truncated record dimension");
         require(static_cast<bool>(input) and dim > 0 and dim <= 4096, "invalid record dimension");
         if (matrix.dim == 0) {
             matrix.dim = dim;

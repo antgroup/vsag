@@ -390,6 +390,10 @@ run(int argc, char** argv) {
                 for (uint64_t d = 0; d < dim; ++d) {
                     replacement[d] = 0.875F * base[id][d] + 0.125F * original[donor][d];
                 }
+                if (replacement == base[id]) {
+                    // A donor can be identical or blending can round back to the current vector.
+                    replacement[0] = std::abs(base[id][0]) <= 0.5F ? 1.0F : 0.0F;
+                }
                 require(replacement != base[id], "replacement did not change vector");
             }
             if (mutation_mode == "all" or mutation_mode == "update") {
