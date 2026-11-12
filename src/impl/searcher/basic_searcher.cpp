@@ -40,7 +40,8 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
                      FilterSearchSkipStrategy* skip_strategy,
                      Vector<InnerIdType>& to_be_visited_rid,
                      Vector<InnerIdType>& to_be_visited_id,
-                     Vector<InnerIdType>& neighbors) const {
+                     Vector<InnerIdType>& neighbors,
+                     Vector<InnerIdType>* deferred_ids) const {
     uint32_t count_no_visited = 0;
 
     if (this->mutex_array_ != nullptr) {
@@ -60,6 +61,8 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
                 to_be_visited_rid[count_no_visited] = i;
                 to_be_visited_id[count_no_visited] = neighbors[i];
                 count_no_visited++;
+            } else if (deferred_ids != nullptr) {
+                deferred_ids->push_back(neighbors[i]);
             }
             vl->Set(neighbors[i]);
         }
@@ -243,7 +246,37 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         vl->Set(ep);
     }
 
-    while (not candidate_set->Empty()) {
+    // Neighbors rejected by the filter are deferred rather than dropped: when the queue runs dry
+    // before enough results are found, they are expanded as bridges toward the eligible region.
+    Vector<InnerIdType> deferred_ids(alloc);
+    uint64_t deferred_pos = 0;
+    auto rescue_deferred = [&]() {
+        if constexpr (mode != InnerSearchMode::KNN_SEARCH) {
+            return false;
+        } else {
+            if (top_candidates->Size() >= inner_search_param.min_results ||
+                deferred_pos >= deferred_ids.size()) {
+                return false;
+            }
+            auto count = static_cast<uint32_t>(
+                std::min<uint64_t>(deferred_ids.size() - deferred_pos, to_be_visited_id.size()));
+            for (uint32_t i = 0; i < count; ++i) {
+                to_be_visited_id[i] = deferred_ids[deferred_pos + i];
+            }
+            deferred_pos += count;
+            flatten->Query(line_dists.data(), computer, to_be_visited_id.data(), count, ctx);
+            dist_cmp += count;
+            for (uint32_t i = 0; i < count; ++i) {
+                candidate_set->Push(traversal_priority(line_dists[i]), to_be_visited_id[i]);
+            }
+            return true;
+        }
+    };
+
+    while (true) {
+        if (candidate_set->Empty() and not rescue_deferred()) {
+            break;
+        }
         hops++;
         if (hops >= inner_search_param.hops_limit) {
             break;
@@ -268,7 +301,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                                  skip_strategy.get(),
                                  to_be_visited_rid,
                                  to_be_visited_id,
-                                 neighbors);
+                                 neighbors,
+                                 mode == KNN_SEARCH ? &deferred_ids : nullptr);
 
         dist_cmp += count_no_visited;
 
@@ -415,7 +449,37 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         lower_bound = top_candidates->Top().first;
     }
 
-    while (not candidate_set->Empty()) {
+    // Neighbors rejected by the filter are deferred rather than dropped: when the queue runs dry
+    // before enough results are found, they are expanded as bridges toward the eligible region.
+    Vector<InnerIdType> deferred_ids(alloc);
+    uint64_t deferred_pos = 0;
+    auto rescue_deferred = [&]() {
+        if constexpr (mode != InnerSearchMode::KNN_SEARCH) {
+            return false;
+        } else {
+            if (top_candidates->Size() >= inner_search_param.min_results ||
+                deferred_pos >= deferred_ids.size()) {
+                return false;
+            }
+            auto count = static_cast<uint32_t>(
+                std::min<uint64_t>(deferred_ids.size() - deferred_pos, to_be_visited_id.size()));
+            for (uint32_t i = 0; i < count; ++i) {
+                to_be_visited_id[i] = deferred_ids[deferred_pos + i];
+            }
+            deferred_pos += count;
+            flatten->Query(line_dists.data(), computer, to_be_visited_id.data(), count, ctx);
+            dist_cmp += count;
+            for (uint32_t i = 0; i < count; ++i) {
+                candidate_set->Push(traversal_priority(line_dists[i]), to_be_visited_id[i]);
+            }
+            return true;
+        }
+    };
+
+    while (true) {
+        if (candidate_set->Empty() and not rescue_deferred()) {
+            break;
+        }
         ++hops;
         if (hops >= inner_search_param.hops_limit) {
             break;
@@ -448,7 +512,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                                  skip_strategy.get(),
                                  to_be_visited_rid,
                                  to_be_visited_id,
-                                 neighbors);
+                                 neighbors,
+                                 mode == KNN_SEARCH ? &deferred_ids : nullptr);
 
         flatten->Query(line_dists.data(), computer, to_be_visited_id.data(), count_no_visited, ctx);
         dist_cmp += count_no_visited;

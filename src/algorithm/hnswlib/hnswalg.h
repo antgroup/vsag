@@ -290,7 +290,8 @@ public:
                           vsag::FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE,
                       vsag::Allocator* allocator = nullptr,
                       vsag::IteratorFilterContext* iter_ctx = nullptr,
-                      float min_distance = std::numeric_limits<float>::lowest()) const;
+                      float min_distance = std::numeric_limits<float>::lowest(),
+                      size_t min_results = 0) const;
 
     template <bool has_deletions, bool collect_metrics = false>
     MaxHeap
