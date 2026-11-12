@@ -6884,3 +6884,98 @@ TEST_CASE("HGraph concurrent Add with force-remove flag does not race in codes s
     REQUIRE(add_failures.load() == 0);
     REQUIRE(index->GetNumElements() == kVectorCount);
 }
+
+namespace {
+class TailOnlyFilter3290 : public vsag::Filter {
+public:
+    TailOnlyFilter3290(int64_t first_valid, float valid_ratio)
+        : first_valid_(first_valid), valid_ratio_(valid_ratio) {
+    }
+
+    bool
+    CheckValid(int64_t id) const override {
+        return id >= first_valid_;
+    }
+
+    float
+    ValidRatio() const override {
+        return valid_ratio_;
+    }
+
+private:
+    int64_t first_valid_;
+    float valid_ratio_;
+};
+}  // namespace
+
+TEST_CASE("HGraph filtered search keeps bridges between filter-rejected nodes",
+          "[ft][hgraph][filter]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t count = 400;
+    constexpr int64_t first_valid = 360;
+    constexpr int64_t k = 5;
+    std::vector<int64_t> ids(count);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = i;
+    }
+
+    // The only eligible vectors sit at the far end of a chain of rejected vectors, so a search
+    // that discards rejected neighbors can never reach them from the query side.
+    auto build_param = R"({"dtype":"float32","metric_type":"l2","dim":4,
+        "index_param":{"base_quantization_type":"fp32","max_degree":16,"ef_construction":100}})";
+    auto search_param = R"({"hgraph":{"ef_search":50,"skip_ratio":1.0}})";
+    auto wide_search_param = R"({"hgraph":{"ef_search":400,"skip_ratio":1.0}})";
+
+    std::vector<float> query_vector(dim, 0.0F);
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
+
+    // Approximate graphs can leave vectors unreachable even without a filter; only a fully
+    // reachable graph can be expected to return every eligible vector, so try a few datasets.
+    vsag::IndexPtr index;
+    for (uint32_t seed = 3290; seed < 3310 && index == nullptr; ++seed) {
+        std::vector<float> vectors(count * dim, 0.0F);
+        std::mt19937 rng(seed);
+        std::uniform_real_distribution<float> noise(0.0F, 0.3F);
+        for (int64_t i = 0; i < count; ++i) {
+            vectors[i * dim] = static_cast<float>(i);
+            for (int64_t d = 1; d < dim; ++d) {
+                vectors[i * dim + d] = noise(rng);
+            }
+        }
+        auto candidate = vsag::Factory::CreateIndex("hgraph", build_param).value();
+        auto base = vsag::Dataset::Make();
+        base->NumElements(count)
+            ->Dim(dim)
+            ->Ids(ids.data())
+            ->Float32Vectors(vectors.data())
+            ->Owner(false);
+        REQUIRE(candidate->Build(base).has_value());
+        auto all_valid = std::make_shared<TailOnlyFilter3290>(0, 1.0F);
+        auto result = candidate->KnnSearch(query, count, wide_search_param, all_valid);
+        REQUIRE(result.has_value());
+        if (result.value()->GetDim() == count) {
+            index = candidate;
+        }
+    }
+    REQUIRE(index != nullptr);
+
+    SECTION("enough eligible vectors") {
+        auto filter = std::make_shared<TailOnlyFilter3290>(first_valid, 0.1F);
+        auto result = index->KnnSearch(query, k, search_param, filter);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == k);
+        for (int64_t i = 0; i < k; ++i) {
+            REQUIRE(result.value()->GetIds()[i] >= first_valid);
+        }
+    }
+
+    SECTION("fewer eligible vectors than k") {
+        auto filter = std::make_shared<TailOnlyFilter3290>(count - 2, 0.005F);
+        auto result = index->KnnSearch(query, k, search_param, filter);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 2);
+        REQUIRE(result.value()->GetIds()[0] >= count - 2);
+        REQUIRE(result.value()->GetIds()[1] >= count - 2);
+    }
+}
