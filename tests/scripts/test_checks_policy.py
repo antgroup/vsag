@@ -461,14 +461,14 @@ class HostedFormat(unittest.TestCase):
             with self.subTest(workflow=filename):
                 job = self.job(filename, key)
                 self.assertIn('    runs-on: ubuntu-24.04', job)
-                self.assertIn('vsaglib/vsag:ci-main-base', job)
+                self.assertIn('ghcr.io/antgroup/vsag:ci-main-base', job)
                 self.assertIn('      - uses: ./.github/actions/check-format', job)
                 self.assertIn('persist-credentials: false', job)
                 self.assertNotIn('apt-get', job)
                 self.assertNotIn('install_toolchain', job)
         branch = self.job('main-ci.yml', 'clang-format-check')
         # The out-of-scope identity job must not pay for a container pull.
-        self.assertIn("container: ${{ matrix.check == 'Format Check' && 'vsaglib/vsag:ci-main-base' || '' }}", branch)
+        self.assertIn("container: ${{ matrix.check == 'Format Check' && 'ghcr.io/antgroup/vsag:ci-main-base' || '' }}", branch)
 
     def test_shared_format_action_fails_closed_on_missing_or_wrong_tool(self):
         import re

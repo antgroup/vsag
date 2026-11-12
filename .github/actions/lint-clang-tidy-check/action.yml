@@ -24,9 +24,15 @@ runs:
         key: external-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/**/*.cmake') }}
         restore-keys: |
           external-${{ runner.os }}-${{ runner.arch }}-
-    - name: Install clang-tidy 20
-      shell: sh
-      run: sudo apt install clang-tidy-20 -y
+    - name: Check preinstalled clang-tidy 20
+      shell: bash
+      run: |
+        version=$(clang-tidy-20 --version)
+        echo "$version"
+        if [[ ! "$version" =~ version\ 20\. ]]; then
+          echo '::error::Lint requires preinstalled clang-tidy major version 20.'
+          exit 1
+        fi
     - name: Load Cache
       uses: hendrikmuhs/ccache-action@v1.2
       with:
