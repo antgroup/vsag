@@ -24,7 +24,8 @@ leaves filesystem synchronization and replacement to the caller.
 
 Set `-DENABLE_LITE_PERSISTENT_ADD=ON` for a separate checkpoint and synchronous
 Add log. See [persistent Add](../docs/docs/en/src/development/lite_first.md#optional-persistent-add)
-for the API and process recovery contract.
+for the API and process recovery contract. The [persistent Add benchmark](benchmark/persistent_add/README.md)
+records write volume, recovery time and memory.
 
 - [Current English function/source/test/requirement mapping](../docs/docs/en/src/development/lite_first.md)
 - [当前中文功能、源码、测试及产出要求对照](../docs/docs/zh/src/development/lite_first.md)

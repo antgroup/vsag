@@ -1,0 +1,17 @@
+{
+  "upstream": {
+    "unstripped_bytes": 194016,
+    "gzip_bytes": 75138,
+    "sha256": "f0f05173414282cf2480b9357d9d10e822d72365ebcddcf491c41dd52b502a03"
+  },
+  "default": {
+    "unstripped_bytes": 194240,
+    "gzip_bytes": 75693,
+    "sha256": "31d769fa6b40e5c7022155f618efd3612b7cfd708c549ee5e349409d284b1084"
+  },
+  "enabled": {
+    "unstripped_bytes": 237000,
+    "gzip_bytes": 91048,
+    "sha256": "04786a24896af385a71e6657a7cef92b27a161acf3c3896854fb4053462a92e8"
+  }
+}

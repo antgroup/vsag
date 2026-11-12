@@ -111,7 +111,8 @@ Use one handle per directory and serialize its calls. This interface covers
 Add, Search, Size and export through Save. Include earlier Update/Remove
 changes in the seed checkpoint before creating the directory. The log grows
 by `12 + 4 * dimension` bytes per Add, including for compressed backends, and
-recovery replays every record. Save exports an ordinary Lite snapshot that
+recovery replays every record. The loader reserves vector space for complete log entries
+before reading the checkpoint. Save exports an ordinary Lite snapshot that
 can seed a fresh directory. Process exit recovery is the supported scope.
 
 ## Project output acceptance
