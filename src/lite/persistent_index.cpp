@@ -293,8 +293,10 @@ struct Recovery {
     off_t committed;
 };
 
+using SnapshotLoader = tl::expected<std::unique_ptr<Index>, Error> (*)(std::istream&, uint64_t);
+
 tl::expected<Recovery, Error>
-recover(const std::string& directory, int fd) {
+recover(const std::string& directory, int fd, SnapshotLoader load_snapshot) {
     struct stat info{};
     Header header{};
     if (::fstat(fd, &info) != 0 or not S_ISREG(info.st_mode) or
@@ -320,22 +322,25 @@ recover(const std::string& directory, int fd) {
         return failure(ErrorType::INVALID_BINARY, "persistent Add log does not match checkpoint");
     }
 
-    auto index = Index::Load(input);
-    if (not index) {
-        return tl::unexpected(index.error());
-    }
-    const auto dim = (*index)->Dim();
-    if (dim != get_le<uint64_t>(header.data() + 16)) {
-        return failure(ErrorType::INVALID_BINARY, "persistent Add log dimension mismatch");
-    }
+    const auto dim = get_le<uint64_t>(header.data() + 16);
     const auto size = record_bytes(dim);
     if (not size) {
         return tl::unexpected(size.error());
     }
-    std::vector<uint8_t> record(*size);
-    std::vector<float> vector(dim);
     off_t committed = header.size();
     const auto record_size = static_cast<off_t>(*size);
+    const uint64_t complete_records = (info.st_size - committed) / record_size;
+    // Reserve the final vector payload before loading it. Otherwise the first
+    // replayed Add can grow a full buffer and temporarily duplicate the payload.
+    auto index = load_snapshot(input, complete_records);
+    if (not index) {
+        return tl::unexpected(index.error());
+    }
+    if ((*index)->Dim() != dim) {
+        return failure(ErrorType::INVALID_BINARY, "persistent Add log dimension mismatch");
+    }
+    std::vector<uint8_t> record(*size);
+    std::vector<float> vector(dim);
     while (info.st_size - committed >= record_size) {
         if (not read_all(fd, record.data(), record.size())) {
             return failure(ErrorType::READ_ERROR, "cannot read a complete persistent Add record");
@@ -446,7 +451,7 @@ PersistentIndex::Open(const std::string& directory) {
         if (not lock_file(log.Get())) {
             return failure(ErrorType::WRONG_STATUS, "persistent Lite directory is already in use");
         }
-        auto state = recover(directory, log.Get());
+        auto state = recover(directory, log.Get(), Index::load_with_extra_rows);
         if (not state) {
             return tl::unexpected(state.error());
         }
