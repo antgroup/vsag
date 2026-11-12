@@ -457,7 +457,9 @@ jobs:
   test-python-x86:
     name: Test Python X86 (py${{ matrix.python }}, numpy ${{ matrix.numpy }})
     needs: [changes, build-python-x86]
-    if: (needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true')
+    # An explicit status function replaces the implicit success() check, which would otherwise
+    # skip this job when the intentionally skipped Community format job is an ancestor.
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.build-python-x86.result == 'success' && (needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true') }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false

@@ -435,18 +435,24 @@ class LeanPrChecksTest(unittest.TestCase):
         subprocess.run(["python3", "-m", "unittest", "tests/scripts/test_main_ci.py", "tests/scripts/test_workflow_entries.py"], cwd=ROOT, check=True)
 
     def selected(self, name, *, base="main", event="pull_request", team=False,
-                 cpp=False, python=False, cmake=False, format_result=None):
+                 cpp=False, python=False, cmake=False, format_result=None,
+                 build_result=None):
         body = job_text(ROOT / ".github/workflows/pr-ci-community.yml", name)
         expression = re.search(r"^    if: (.*)$", body, re.M).group(1)
         expression = expression.removeprefix("${{").removesuffix("}}")
         if format_result is None and name != "format":
             format_result = "success" if self.selected("format", base=base, event=event,
                                                        team=team, cpp=cpp, python=python) else "skipped"
+        if build_result is None:
+            build_result = "success" if name == "test-python-x86" and self.selected(
+                "build-python-x86", base=base, event=event, team=team, cpp=cpp,
+                python=python, cmake=cmake, format_result=format_result) else "skipped"
         values = {"github.base_ref": base, "github.event_name": event,
                   "inputs.team-linux": team, "needs.changes.outputs.cpp": str(cpp).lower(),
                   "needs.changes.outputs.python": str(python).lower(),
                   "needs.changes.outputs.cmake": str(cmake).lower(),
-                  "needs.changes.result": "success", "needs.format.result": format_result}
+                  "needs.changes.result": "success", "needs.format.result": format_result,
+                  "needs.build-python-x86.result": build_result}
         for key in sorted(values, key=len, reverse=True):
             expression = expression.replace(key, repr(values[key]))
         expression = expression.replace("&&", " and ").replace("||", " or ")
@@ -469,6 +475,21 @@ class LeanPrChecksTest(unittest.TestCase):
         self.assertIn("needs: [changes, format]", body)
         for result in ("failure", "cancelled"):
             self.assertFalse(self.selected("build-python-x86", python=True, format_result=result))
+            self.assertFalse(self.selected("test-python-x86", python=True, format_result=result))
+
+    def test_python_chain_survives_intentional_format_skip(self):
+        # format skipped -> build succeeds -> pytest runs; a build that is not successful stops it.
+        for flag in ("python", "cmake"):
+            self.assertTrue(self.selected("test-python-x86", cpp=True, team=True, **{flag: True},
+                                          format_result="skipped", build_result="success"))
+            for build in ("failure", "cancelled", "skipped"):
+                self.assertFalse(self.selected("test-python-x86", cpp=True, team=True, **{flag: True},
+                                               format_result="skipped", build_result=build))
+        # GitHub applies an implicit success() to every ancestor unless the condition has an
+        # explicit status function, so a skipped format ancestor would otherwise skip both jobs.
+        for name in ("build-python-x86", "test-python-x86"):
+            body = job_text(ROOT / ".github/workflows/pr-ci-community.yml", name)
+            self.assertIn("!cancelled()", re.search(r"^    if: (.*)$", body, re.M).group(1))
 
     def test_python_matrix_is_reduced_only_for_main_prs(self):
         body = job_text(ROOT / ".github/workflows/pr-ci-community.yml", "test-python-x86")
