@@ -291,7 +291,8 @@ public:
                       vsag::FilterSearchSkipStrategyType skip_strategy_type =
                           vsag::FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE,
                       vsag::Allocator* allocator = nullptr,
-                      vsag::IteratorFilterContext* iter_ctx = nullptr) const;
+                      vsag::IteratorFilterContext* iter_ctx = nullptr,
+                      size_t min_results = 0) const;
 
     template <bool has_deletions, bool collect_metrics = false>
     MaxHeap

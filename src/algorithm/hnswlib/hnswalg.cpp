@@ -540,7 +540,8 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
                                    const float skip_ratio,
                                    vsag::FilterSearchSkipStrategyType skip_strategy_type,
                                    vsag::Allocator* allocator,
-                                   vsag::IteratorFilterContext* iter_ctx) const {
+                                   vsag::IteratorFilterContext* iter_ctx,
+                                   size_t min_results) const {
     VisitedListPtr vl = visited_list_pool_->getFreeVisitedList();
     vl_type* visited_array = vl->mass;
     vl_type visited_array_tag = vl->curV;
@@ -582,7 +583,27 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
     }
 
     std::shared_ptr<char[]> link_data = std::shared_ptr<char[]>(new char[size_links_level0_]);
-    while (not candidate_set.empty()) {
+    // Neighbors rejected by the filter are deferred rather than dropped: when the queue runs dry
+    // before enough results are found, they are expanded as bridges toward the eligible region.
+    vsag::Vector<InnerIdType> deferred(search_allocator);
+    size_t deferred_pos = 0;
+    auto rescue_deferred = [&]() {
+        if (top_candidates.size() >= min_results || deferred_pos >= deferred.size()) {
+            return false;
+        }
+        size_t rescue_end = std::min(deferred.size(), deferred_pos + std::max<size_t>(ef, 1));
+        for (; deferred_pos < rescue_end; ++deferred_pos) {
+            InnerIdType rescued_id = deferred[deferred_pos];
+            float dist =
+                fstdistfunc_(data_point, getDataByInternalId(rescued_id), dist_func_param_);
+            candidate_set.emplace(-dist, rescued_id);
+        }
+        return true;
+    };
+    while (true) {
+        if (candidate_set.empty() and not rescue_deferred()) {
+            break;
+        }
         std::pair<float, InnerIdType> current_node_pair = candidate_set.top();
 
         if ((-current_node_pair.first) > lower_bound &&
@@ -627,6 +648,7 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
                     candidate_valid = is_id_allowed->CheckValid(getExternalLabel(candidate_id));
                     candidate_valid_checked = true;
                     if (not candidate_valid) {
+                        deferred.push_back(candidate_id);
                         continue;
                     }
                 }
@@ -1724,7 +1746,8 @@ HierarchicalNSW::searchKnn(const void* query_data,
                                                         skip_ratio,
                                                         skip_strategy_type,
                                                         allocator,
-                                                        iter_ctx);
+                                                        iter_ctx,
+                                                        k);
     } else {
         int64_t currObj;
         int max_level_copy;
@@ -1773,7 +1796,8 @@ HierarchicalNSW::searchKnn(const void* query_data,
                                                             skip_ratio,
                                                             skip_strategy_type,
                                                             allocator,
-                                                            iter_ctx);
+                                                            iter_ctx,
+                                                            k);
         } else {
             top_candidates = searchBaseLayerST<true, true>(currObj,
                                                            query_data,
@@ -1782,7 +1806,8 @@ HierarchicalNSW::searchKnn(const void* query_data,
                                                            skip_ratio,
                                                            skip_strategy_type,
                                                            allocator,
-                                                           iter_ctx);
+                                                           iter_ctx,
+                                                           k);
         }
     }
 
@@ -1907,7 +1932,8 @@ HierarchicalNSW::searchBaseLayerST<false, false>(
     const float skip_ratio,
     vsag::FilterSearchSkipStrategyType skip_strategy_type,
     vsag::Allocator* allocator,
-    vsag::IteratorFilterContext* iter_ctx) const;
+    vsag::IteratorFilterContext* iter_ctx,
+    size_t min_results) const;
 
 template MaxHeap
 HierarchicalNSW::searchBaseLayerST<false, false>(InnerIdType ep_id,

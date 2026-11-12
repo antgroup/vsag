@@ -197,6 +197,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.ef = std::max(params.ef_search, k);
         search_param.is_inner_id_allowed = ft;
         search_param.topk = static_cast<int64_t>(search_param.ef);
+        search_param.min_results = k;
         search_param.parallel_search_thread_count = params.parallel_search_thread_count;
         search_param.enable_reorder = params.enable_reorder;
         search_param.consider_duplicate = this->support_duplicate_;
@@ -542,6 +543,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         search_param.ef = std::max(params.ef_search, k);
         search_param.is_inner_id_allowed = ft;
         search_param.topk = static_cast<int64_t>(search_param.ef);
+        search_param.min_results = k;
         if (params.topk_factor > 1.0F) {
             search_param.topk =
                 std::min(search_param.topk,

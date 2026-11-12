@@ -16,6 +16,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <limits>
+#include <random>
+#include <regex>
 
 #include "functest.h"
 #include "test_index.h"
@@ -1149,5 +1151,107 @@ TEST_CASE("hnsw with pretrained by conjugate graph", "[ft][feedback][hnsw]") {
 
         fixtures::recall_t recall = 1.0f * correct / query_elements;
         REQUIRE(recall == 1.0);
+    }
+}
+
+namespace {
+class TailOnlyFilter : public vsag::Filter {
+public:
+    explicit TailOnlyFilter(int64_t first_valid, float valid_ratio)
+        : first_valid_(first_valid), valid_ratio_(valid_ratio) {
+    }
+
+    bool
+    CheckValid(int64_t id) const override {
+        return id >= first_valid_;
+    }
+
+    float
+    ValidRatio() const override {
+        return valid_ratio_;
+    }
+
+private:
+    int64_t first_valid_;
+    float valid_ratio_;
+};
+}  // namespace
+
+TEST_CASE("Filtered search keeps bridges between filter-rejected nodes",
+          "[ft][hnsw][hgraph][filter]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t count = 400;
+    constexpr int64_t first_valid = 360;
+    constexpr int64_t k = 5;
+    std::vector<int64_t> ids(count);
+    std::vector<float> vectors(count * dim, 0.0F);
+    std::mt19937 rng(3290);
+    std::uniform_real_distribution<float> noise(0.0F, 0.3F);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = i;
+        vectors[i * dim] = static_cast<float>(i);
+        for (int64_t d = 1; d < dim; ++d) {
+            vectors[i * dim + d] = noise(rng);
+        }
+    }
+
+    // The only eligible vectors sit at the far end of a chain of rejected vectors, so a search
+    // that discards rejected neighbors can never reach them from the query side.
+    auto [name, build_param, search_param] =
+        GENERATE(std::make_tuple(std::string("hnsw"),
+                                 std::string(R"({"dtype":"float32","metric_type":"l2","dim":4,
+                            "hnsw":{"max_degree":16,"ef_construction":100}})"),
+                                 std::string(R"({"hnsw":{"ef_search":50,"skip_ratio":1.0}})")),
+                 std::make_tuple(std::string("hgraph"),
+                                 std::string(R"({"dtype":"float32","metric_type":"l2","dim":4,
+                            "index_param":{"base_quantization_type":"fp32","max_degree":16,
+                            "ef_construction":100}})"),
+                                 std::string(R"({"hgraph":{"ef_search":50,"skip_ratio":1.0}})")));
+    CAPTURE(name);
+
+    auto index = vsag::Factory::CreateIndex(name, build_param).value();
+    auto base = vsag::Dataset::Make();
+    base->NumElements(count)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    std::vector<float> query_vector(dim, 0.0F);
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
+
+    // Approximate graphs can leave vectors unreachable even without a filter; only a fully
+    // reachable graph can be expected to return every eligible vector.
+    {
+        auto all_valid = std::make_shared<TailOnlyFilter>(0, 1.0F);
+        auto wide_param = std::regex_replace(
+            search_param, std::regex("\"ef_search\":50"), "\"ef_search\":" + std::to_string(count));
+        auto result = index->KnnSearch(query, count, wide_param, all_valid);
+        REQUIRE(result.has_value());
+        if (result.value()->GetDim() < count) {
+            WARN("graph is not fully reachable, skip " << name);
+            return;
+        }
+    }
+
+    SECTION("enough eligible vectors") {
+        auto filter = std::make_shared<TailOnlyFilter>(first_valid, 0.1F);
+        auto result = index->KnnSearch(query, k, search_param, filter);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == k);
+        for (int64_t i = 0; i < k; ++i) {
+            REQUIRE(result.value()->GetIds()[i] >= first_valid);
+        }
+    }
+
+    SECTION("fewer eligible vectors than k") {
+        auto filter = std::make_shared<TailOnlyFilter>(count - 2, 0.005F);
+        auto result = index->KnnSearch(query, k, search_param, filter);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 2);
+        REQUIRE(result.value()->GetIds()[0] >= count - 2);
+        REQUIRE(result.value()->GetIds()[1] >= count - 2);
     }
 }
