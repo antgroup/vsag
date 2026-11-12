@@ -17,7 +17,7 @@ pip install pyvsag
 
 ### 每晚构建（TestPyPI）
 
-`pyvsag TestPyPI` 工作流会在每晚和手动触发时，用 `main` 构建 wheel 并发布到 TestPyPI（上传可关闭）。
+`pyvsag TestPyPI` 工作流会在每晚和手动触发时，用 `main` 构建 wheel 并发布到 TestPyPI（上传可暂停）。
 版本号带 `.devN`，需要加 `--pre`；依赖仍从正式 PyPI 安装：
 
 ```bash
