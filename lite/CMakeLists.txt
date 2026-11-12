@@ -9,7 +9,6 @@ get_filename_component(VSAG_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 option(ENABLE_TESTS "Build Lite tests with the repository's Catch2" OFF)
 option(ENABLE_COVERAGE "Instrument Lite sources for gcov" OFF)
 option(ENABLE_RABITQ_LITE_BACKEND "Enable the optional 8-bit RaBitQ graph backend" OFF)
-option(ENABLE_LITE_PERSISTENT_ADD "Enable Lite checkpoint and synchronous Add log" OFF)
 
 set(VSAG_LITE_SOURCES
     "${VSAG_ROOT}/src/lite/index.cpp"
@@ -59,6 +58,7 @@ if(ENABLE_RABITQ_LITE_BACKEND)
     endif()
 endif()
 
+option(ENABLE_LITE_PERSISTENT_ADD "Enable Lite checkpoint and synchronous Add log" OFF)
 if(ENABLE_LITE_PERSISTENT_ADD)
     if(NOT UNIX)
         message(FATAL_ERROR "Lite persistent Add requires POSIX file operations")
