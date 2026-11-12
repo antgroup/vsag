@@ -101,6 +101,7 @@ public:
     friend class HGraphFGIM;
     friend class HGraphFGIMTestAccessor;
     friend class HGraphCodeWriteTestAccess;
+    friend class HGraphCacheTestAccess;
     friend class HGraphFusedInputTestAccess;
     friend struct HGraphMCITestAccess;
     friend class HGraphOptimizedBuildSession;

@@ -1710,7 +1710,10 @@ HGraph::collect_refine_candidates(const DatasetPtr& data,
     std::unordered_set<InnerIdType> seen;
 
     Vector<InnerIdType> current_neighbors(allocator_);
-    this->bottom_graph_->GetNeighbors(inner_id, current_neighbors);
+    {
+        SharedLock lock(neighbors_mutex_, inner_id);
+        this->bottom_graph_->GetNeighbors(inner_id, current_neighbors);
+    }
     seen.reserve(current_neighbors.size() + effective_refine_ef);
 
     // Optimisation #2: replace the per-neighbour ComputePairVectors loop with
@@ -1900,19 +1903,15 @@ HGraph::refine_nodes_two_phase(
             candidates->Pop();
         }
 
-        // Write forward edges (lock inner_id only).
-        // Use read-modify-write to preserve reverse edges installed by
-        // concurrent workers. Minimize lock scope: snapshot under lock,
-        // compute distances + prune outside lock, then re-acquire to write.
+        // Keep the complete forward read-modify-write under one node lock. Releasing it
+        // after the snapshot would let a competing reverse-edge update be overwritten.
+        // Candidate search and initial selection above do not hold this lock.
         {
-            // Snapshot existing neighbors under lock
+            LockGuard cur_lock(neighbors_mutex_, inner_id);
             Vector<InnerIdType> existing_neighbors(allocator_);
-            {
-                LockGuard cur_lock(neighbors_mutex_, inner_id);
-                this->bottom_graph_->GetNeighbors(inner_id, existing_neighbors);
-            }
+            this->bottom_graph_->GetNeighbors(inner_id, existing_neighbors);
 
-            // Merge + prune outside lock (no contention during distance computation)
+            // Merge and prune the current adjacency before publishing its replacement.
             auto merged = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
             std::unordered_set<InnerIdType> seen_ids;
             seen_ids.reserve(existing_neighbors.size() + selected_neighbors.size());
@@ -1934,8 +1933,6 @@ HGraph::refine_nodes_two_phase(
                 merged->Pop();
             }
 
-            // Write back under lock
-            LockGuard cur_lock(neighbors_mutex_, inner_id);
             this->bottom_graph_->InsertNeighborsById(inner_id, final_neighbors);
         }
 
@@ -2386,10 +2383,9 @@ HGraph::cache_warm_start_and_classify(BuildCachePlan& plan) {
 // Rationale: running missed_refine first lets cold-start nodes install
 // both their own forward neighbours and their reverse-edge contributions
 // back into hit-node adjacency lists before hit_refine kicks in. The
-// subsequent hit_refine therefore sees a richer local frontier (warm
-// seed merged with reverse edges produced by missed_refine) and can
-// still exploit the cheap self-entry path on nodes whose neighbour list
-// remains non-empty.
+// subsequent hit_refine therefore sees a richer frontier. Self-entry is safe when every
+// cached node is retained. Additions or removals can split the warm graph into components;
+// those hits must also search from the global entry to join the reachable graph.
 //
 // Hit nodes whose neighbour list is empty when hit_refine starts
 // (either because warm_start could not map any cached neighbour, or
@@ -2411,6 +2407,21 @@ HGraph::cache_run_refine_two_phase(const DatasetPtr& data, BuildCachePlan& plan)
         flatten_codes->GetQuantizerName(),
         this->basic_flatten_codes_ ? this->basic_flatten_codes_->GetQuantizerName() : "null",
         this->high_precise_codes_ ? this->high_precise_codes_->GetQuantizerName() : "null");
+    // The route entry point may itself be a cache miss. Give an empty entry point a
+    // connection into the warm graph before refinement starts; otherwise misses can build
+    // an isolated component while hit nodes only explore their own cached component.
+    if (not plan.hit_ids.empty() and
+        std::find(plan.missed_ids.begin(), plan.missed_ids.end(), this->entry_point_id_) !=
+            plan.missed_ids.end()) {
+        Vector<InnerIdType> entry_neighbors(allocator_);
+        this->bottom_graph_->GetNeighbors(this->entry_point_id_, entry_neighbors);
+        if (entry_neighbors.empty()) {
+            entry_neighbors.push_back(plan.hit_ids.front());
+            this->bottom_graph_->InsertNeighborsById(this->entry_point_id_, entry_neighbors);
+        }
+    }
+    const bool unchanged_cache_membership =
+        plan.missed_ids.empty() and plan.hit_ids.size() == this->cache_->source_ids_.size();
     this->refine_nodes_two_phase(data,
                                  plan.missed_ids,
                                  "missed_refine",
@@ -2424,7 +2435,7 @@ HGraph::cache_run_refine_two_phase(const DatasetPtr& data, BuildCachePlan& plan)
                                  "hit_refine",
                                  1,
                                  this->ef_construct_ / 3,
-                                 /*use_self_as_entry=*/true,
+                                 /*use_self_as_entry=*/unchanged_cache_membership,
                                  flatten_codes,
                                  plan.inner_id_to_input_idx);
 }
