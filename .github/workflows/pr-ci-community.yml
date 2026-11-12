@@ -249,11 +249,10 @@ jobs:
 
   build-python-x86:
     name: Python Build X86
-    # Python validation is disabled on main PRs until it is validated in the development
-    # environment. To enable it, drop the base_ref != 'main' condition here and in
-    # test-python-x86 (and update tests/scripts/test_dependency_workflows.py and docs/agents).
     needs: [changes, format]
-    if: (github.event_name != 'pull_request' || github.base_ref != 'main') && (needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true')
+    # Team-routed cpp changes intentionally skip the Community format job, so a skipped format
+    # result must not skip the wheel build; failed or cancelled prerequisites still do.
+    if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.format.result == 'success' || needs.format.result == 'skipped') && (needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true') }}
     runs-on: ubuntu-24.04
     steps:
       - name: Free Disk Space
@@ -453,21 +452,18 @@ jobs:
       - name: Run Check Compatibility
         run: BUILD_DIR=./build bash ./scripts/check_compatibility.sh
 
-  # One py3-none wheel has to work on every supported CPython and on both numpy majors.
+  # One py3-none wheel has to work on every supported CPython and on both numpy majors. Main PRs
+  # run one primary environment; version branches and manual runs keep the full matrix.
   test-python-x86:
     name: Test Python X86 (py${{ matrix.python }}, numpy ${{ matrix.numpy }})
     needs: [changes, build-python-x86]
-    if: (github.event_name != 'pull_request' || github.base_ref != 'main') && (needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true')
+    # An explicit status function replaces the implicit success() check, which would otherwise
+    # skip this job when the intentionally skipped Community format job is an ancestor.
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.build-python-x86.result == 'success' && (needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true') }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - {python: '3.10', numpy: '1.26.*'}
-          - {python: '3.11', numpy: '2.*'}
-          - {python: '3.12', numpy: '2.*', openmp: true}
-          - {python: '3.13', numpy: '2.*'}
-          - {python: '3.14', numpy: '2.*'}
+      matrix: ${{ fromJSON(github.event_name == 'pull_request' && github.base_ref == 'main' && '{"include":[{"python":"3.12","numpy":"2.*"}]}' || '{"include":[{"python":"3.10","numpy":"1.26.*"},{"python":"3.11","numpy":"2.*"},{"python":"3.12","numpy":"2.*","openmp":true},{"python":"3.13","numpy":"2.*"},{"python":"3.14","numpy":"2.*"}]}') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
