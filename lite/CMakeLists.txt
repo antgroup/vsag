@@ -9,6 +9,7 @@ get_filename_component(VSAG_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 option(ENABLE_TESTS "Build Lite tests with the repository's Catch2" OFF)
 option(ENABLE_COVERAGE "Instrument Lite sources for gcov" OFF)
 option(ENABLE_RABITQ_LITE_BACKEND "Enable the optional 8-bit RaBitQ graph backend" OFF)
+option(ENABLE_LITE_PERSISTENT_ADD "Enable Lite checkpoint and synchronous Add log" OFF)
 
 set(VSAG_LITE_SOURCES
     "${VSAG_ROOT}/src/lite/index.cpp"
@@ -56,6 +57,13 @@ if(ENABLE_RABITQ_LITE_BACKEND)
         set_source_files_properties("${VSAG_ROOT}/src/lite/rabitq_filter_ip_avx512.cpp"
             PROPERTIES COMPILE_FLAGS "-mavx512f -mavx512dq -mavx512bw -mavx512vl -ffp-contract=off")
     endif()
+endif()
+
+if(ENABLE_LITE_PERSISTENT_ADD)
+    if(NOT UNIX)
+        message(FATAL_ERROR "Lite persistent Add requires POSIX file operations")
+    endif()
+    list(APPEND VSAG_LITE_SOURCES "${VSAG_ROOT}/src/lite/persistent_index.cpp")
 endif()
 
 add_library(vsag_lite_objects OBJECT ${VSAG_LITE_SOURCES})
@@ -123,6 +131,15 @@ if(ENABLE_TESTS)
     add_test(NAME lite_graph COMMAND lite_graph_tests "[lite-graph]")
     add_test(NAME lite_graph_allocation COMMAND lite_graph_allocation_tests)
 
+    if(ENABLE_LITE_PERSISTENT_ADD)
+        add_executable(lite_persistent_tests "${VSAG_ROOT}/src/lite/persistent_index_test.cpp")
+        target_link_libraries(lite_persistent_tests PRIVATE vsag::lite Catch2::Catch2WithMain)
+        if(ENABLE_RABITQ_LITE_BACKEND)
+            target_compile_definitions(lite_persistent_tests PRIVATE VSAG_LITE_HAS_RABITQ_BACKEND)
+        endif()
+        add_test(NAME lite_persistent_add COMMAND lite_persistent_tests)
+    endif()
+
     if(ENABLE_RABITQ_LITE_BACKEND)
         add_executable(lite_rabitq_api_tests "${VSAG_ROOT}/src/lite/rabitq_backend_test.cpp")
         target_include_directories(lite_rabitq_api_tests PRIVATE "${VSAG_ROOT}/src")
@@ -144,6 +161,9 @@ install(TARGETS vsag_lite EXPORT vsag-lite-config
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(TARGETS vsag_lite_static ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(FILES "${VSAG_ROOT}/include/vsag/lite/index.h" DESTINATION include/vsag/lite)
+if(ENABLE_LITE_PERSISTENT_ADD)
+    install(FILES "${VSAG_ROOT}/include/vsag/lite/persistent_index.h" DESTINATION include/vsag/lite)
+endif()
 # Header-only error contract dependencies; no Full runtime is linked.
 install(FILES
     "${VSAG_ROOT}/include/vsag/errors.h"
