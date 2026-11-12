@@ -2,8 +2,8 @@ name: pyvsag TestPyPI
 
 # Builds the pyvsag py3-none wheels (x86_64 and aarch64) from main, nightly and on demand,
 # and optionally uploads them to TestPyPI. Nothing here touches the real PyPI or a GitHub Release.
-# Uploading is off by default: manual runs need publish=true, and the nightly run needs the
-# repository variable PYVSAG_NIGHTLY_PUBLISH=true.
+# Uploading is on by default. Manual runs can untick publish to only build, and the repository
+# variable PYVSAG_NIGHTLY_PUBLISH=false pauses the nightly upload without touching the workflow.
 on:
   schedule:
     # 03:00 Beijing time (19:00 UTC the previous day), offset to avoid the top-of-hour rush.
@@ -13,7 +13,7 @@ on:
       publish:
         description: Upload the wheels to TestPyPI (otherwise only build and keep the artifact)
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: read
@@ -80,7 +80,7 @@ jobs:
   publish:
     name: Upload to TestPyPI
     needs: build
-    if: ${{ (inputs.publish || (github.event_name == 'schedule' && vars.PYVSAG_NIGHTLY_PUBLISH == 'true')) && needs.build.result == 'success' }}
+    if: ${{ ((github.event_name == 'workflow_dispatch' && inputs.publish) || (github.event_name == 'schedule' && vars.PYVSAG_NIGHTLY_PUBLISH != 'false')) && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v5
