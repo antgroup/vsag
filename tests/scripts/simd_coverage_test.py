@@ -260,6 +260,36 @@ class ComparisonTest(unittest.TestCase):
             self.assertFalse((root / "simd-base").exists())
             self.assertIn("dependency definitions differ", (root / "simd-coverage/summary.md").read_text())
 
+    def test_removed_unreferenced_pybind11_does_not_block_comparison(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            def git(*args):
+                return coverage.git(root, *args).decode().strip()
+            git("init", "-q")
+            git("config", "user.name", "Test")
+            git("config", "user.email", "test@example.com")
+            pybind = root / "extern/pybind11/pybind11.cmake"
+            pybind.parent.mkdir(parents=True)
+            pybind.write_text("before\n")
+            (root / "extern/other.cmake").write_text("same\n")
+            git("add", ".")
+            git("commit", "-qm", "base")
+            base = git("rev-parse", "HEAD")
+            pybind.unlink()
+            git("add", "-A")
+            git("commit", "-qm", "head")
+            head = git("rev-parse", "HEAD")
+            run = lambda: subprocess.run(["bash", str(ROOT / "scripts/coverage/run_simd_coverage.sh"),
+                                          base, head], cwd=root, capture_output=True)
+            run()
+            summary = root / "simd-coverage/summary.md"
+            self.assertFalse(summary.exists() and "dependency definitions differ" in summary.read_text())
+            (root / "extern/other.cmake").write_text("changed\n")
+            git("commit", "-qam", "head2")
+            head = git("rev-parse", "HEAD")
+            self.assertEqual(run().returncode, 1)
+            self.assertIn("dependency definitions differ", summary.read_text())
+
     def test_workflow_triggers_for_build_inputs_but_not_unrelated_paths(self):
         workflow = (ROOT / ".github/workflows/pr-ci-community.yml").read_text()
         patterns = json.loads((ROOT / "scripts/ci/checks_paths.json").read_text())["simd"]

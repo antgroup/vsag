@@ -24,7 +24,9 @@ if ! git rev-parse --show-toplevel ||
 fi
 # Both builds consume the pinned source checkout prepared by the workflow. If
 # those pins change, reusing it for the base would measure the wrong dependency.
-if git diff --quiet "$base" "$head" -- extern .github/actions/prepare-fetchcontent; then
+# Transitional: extern/pybind11/pybind11.cmake was removed unreferenced, so no build consumes it.
+# Drop this exclude once no supported base still contains it.
+if git diff --quiet "$base" "$head" -- extern ':(exclude)extern/pybind11/pybind11.cmake' .github/actions/prepare-fetchcontent; then
     :
 else
     diff_status=$?
