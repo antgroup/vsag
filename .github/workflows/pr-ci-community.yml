@@ -149,6 +149,7 @@ jobs:
           python3 -m unittest tests/scripts/test_dependency_workflows.py
           python3 -m unittest tests/scripts/test_asan_artifact_workflow.py
           python3 -m unittest tests/scripts/test_toolchain_compatibility.py
+          python3 -m unittest tests/scripts/test_python_license.py
       - name: Prepare Host
         run: |
           sudo env VSAG_INSTALL_INTEL_MKL=OFF bash ./scripts/deps/install_deps_ubuntu.sh

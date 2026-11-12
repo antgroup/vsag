@@ -92,6 +92,7 @@ jobs:
           python3 -m unittest tests/scripts/test_dependency_workflows.py
           python3 -m unittest tests/scripts/test_asan_artifact_workflow.py
           python3 -m unittest tests/scripts/test_toolchain_compatibility.py
+          python3 -m unittest tests/scripts/test_python_license.py
           python3 -m unittest tests/scripts/test_team_test_shards.py
           python3 -m unittest tests/scripts/test_team_mixed.py
           python3 -m unittest tests/scripts/test_team_workflow.py
