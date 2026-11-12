@@ -21,6 +21,16 @@ Requirements:
 - **Dependencies:** `numpy` and `cffi`, installed automatically. The wheel bundles its OpenMP runtime
   and has no libaio, libcurl or OpenBLAS dependency.
 
+### Nightly builds (TestPyPI)
+
+Wheels built from `main` are published to TestPyPI by the `pyvsag TestPyPI` workflow (nightly and
+manual runs; uploads can be switched off). They carry a `.devN` version, so `--pre` is required, and the
+dependencies still come from the real PyPI:
+
+```bash
+pip install --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ pyvsag
+```
+
 ### Build from source
 
 ```bash

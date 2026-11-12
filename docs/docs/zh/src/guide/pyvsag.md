@@ -15,6 +15,15 @@ pip install pyvsag
 - **Python：** CPython 3.10 及以上。支持 3.10 到 3.14；wheel 不依赖 Python ABI，更新的版本无需新的 wheel。
 - **依赖：** `numpy` 和 `cffi`，会自动安装。wheel 自带 OpenMP 运行时，不依赖 libaio、libcurl 和 OpenBLAS。
 
+### 每晚构建（TestPyPI）
+
+`pyvsag TestPyPI` 工作流会在每晚和手动触发时，用 `main` 构建 wheel 并发布到 TestPyPI（上传可关闭）。
+版本号带 `.devN`，需要加 `--pre`；依赖仍从正式 PyPI 安装：
+
+```bash
+pip install --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ pyvsag
+```
+
 ### 从源码构建
 
 ```bash
