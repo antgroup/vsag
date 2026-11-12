@@ -13,6 +13,11 @@ import tempfile
 
 from run_mixed_cpu_acceptance import sha, write_json, validate_build, validate_loaded_library
 
+
+HISTORICAL_FEATURE_SHA = 'dbb2fe0bec685ae7a343b1d2060d0553a98e20d2'
+HISTORICAL_LITE_LIBRARY_SHA256 = '3171d0d7e86866f02096db130f1937eb13c5115cbe993d4a6feb2e9987774330'
+
+
 def validate_fresh_receipt(receipt, feature, install):
     assert receipt['full_source_head'] == feature
     assert receipt['fresh_core'] is True and receipt['ccache'] is False
@@ -27,7 +32,7 @@ def validate_fresh_receipt(receipt, feature, install):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--feature', type=Path, required=True)
-    parser.add_argument('--feature-sha', default='dbb2fe0bec685ae7a343b1d2060d0553a98e20d2',
+    parser.add_argument('--feature-sha', default=HISTORICAL_FEATURE_SHA,
                         help='Exact measured feature commit; nonhistorical runs require fresh receipts')
     parser.add_argument('--feature-build', type=Path, required=True)
     parser.add_argument('--source-repo', type=Path, required=True)
@@ -53,14 +58,19 @@ def main():
         assert shutil.which(tool), 'Missing required tool: ' + tool
     assert os.access('/usr/bin/time', os.X_OK), 'Missing executable /usr/bin/time'
     assert Path('/dev/shm').is_dir() and os.access('/dev/shm', os.W_OK | os.X_OK), 'Writable /dev/shm is required'
-    historical_feature = 'dbb2fe0bec685ae7a343b1d2060d0553a98e20d2'
     expected_feature = args.feature_sha
+    lite_library = args.feature_build / 'libvsag-lite.so'
     current_build_receipt = None
-    if expected_feature != historical_feature:
+    if expected_feature == HISTORICAL_FEATURE_SHA:
+        expected_lite = HISTORICAL_LITE_LIBRARY_SHA256
+        if sha(lite_library) != expected_lite:
+            raise ValueError('Historical Lite library SHA-256 mismatch')
+    else:
         if not args.fresh_full_receipt:
             raise ValueError('Current-source comparison requires a fresh Full receipt')
         current_build_receipt = validate_build(args.feature.resolve(), expected_feature,
-                                                args.feature_build.resolve())
+                                               args.feature_build.resolve())
+        expected_lite = current_build_receipt['library_sha256']
     expected_full = '9aeaa550703f116bef2959769d4f2f03da254b07c906ba941d8186224cc70c72'
     feature_sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=args.feature, text=True).strip()
     assert feature_sha == expected_feature
@@ -81,7 +91,7 @@ def main():
     assert actual_headers == old_provenance['full_headers_sha256']
     for name, digest in old_provenance['full_headers_sha256'].items():
         assert sha(args.full_install / 'include' / name) == digest, name
-    meta = dict(feature_sha=feature_sha, lite_library_sha256=sha(args.feature_build / 'libvsag-lite.so'),
+    meta = dict(feature_sha=feature_sha, lite_library_sha256=expected_lite,
         full_source_sha=old_provenance['full_source_head'], full_library_sha256=expected_full,
         full_boundary=old_provenance['full_build_boundary'], full_headers=old_provenance['full_headers_sha256'],
         full_suite='not rerun', query_ef_both=512, trials=3, loads_per_builder=3,
@@ -116,7 +126,7 @@ def main():
         scratch = Path(directory)
         lite = scratch / 'lite'
         lite.mkdir()
-        (lite / 'libvsag-lite.so').symlink_to((args.feature_build / 'libvsag-lite.so').resolve())
+        (lite / 'libvsag-lite.so').symlink_to(lite_library.resolve())
         for name, source in sources.items():
             path = scratch / name
             path.write_bytes(source)
@@ -140,8 +150,7 @@ def main():
             linkage = subprocess.check_output(['ldd', str(target)], env=env, text=True)
             (args.output / (target.name + '.ldd.txt')).write_text(linkage)
             if not full:
-                validate_loaded_library(linkage, args.feature_build / 'libvsag-lite.so',
-                                        meta['lite_library_sha256'])
+                validate_loaded_library(linkage, lite_library, expected_lite)
             else:
                 matches = [line.split('=>', 1)[1].rsplit(' (', 1)[0].strip()
                            for line in linkage.splitlines() if '=>' in line and
@@ -157,12 +166,13 @@ def main():
         write_json(args.output / 'provenance.json', meta)
         subprocess.run(command, env=env, check=True)
         assert sha(full_library) == expected_full
-        assert sha(args.feature_build / 'libvsag-lite.so') == meta['lite_library_sha256']
+        if sha(lite_library) != expected_lite:
+            raise ValueError('Lite library changed during measurement')
         if current_build_receipt is not None:
             assert validate_build(args.feature.resolve(), expected_feature,
                                   args.feature_build.resolve()) == current_build_receipt
         subprocess.run(['python3', str(scratch / 'measure_elf_closure.py'), '--lite',
-            str(args.feature_build / 'libvsag-lite.so'), '--full', str(full_library),
+            str(lite_library), '--full', str(full_library),
             '--output', str(args.output / 'elf'), '--scratch', str(scratch)], env=env, check=True)
     manifest = {str(p.relative_to(args.output)): sha(p) for p in sorted(args.output.rglob('*')) if p.is_file()}
     write_json(args.output / 'manifest.json', manifest)
