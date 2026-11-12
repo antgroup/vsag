@@ -201,6 +201,12 @@ Linux execution paths, not different correctness requirements.
   explicit manual Python checks remain available. Restore PR validation in both
   `build-python-x86` and `test-python-x86` after that validation; until then,
   Python integration regressions require explicit manual or Daily testing to be detected.
+- `.github/workflows/pyvsag-testpypi.yml` builds the pyvsag `py3-none` wheels for x86_64
+  and aarch64 from `main` every night (03:17 Beijing time, cron `17 19 * * *`) and on manual
+  dispatch, and can upload them to TestPyPI with the `TEST_PYPI_API_TOKEN` secret. Uploading is
+  off by default: manual runs need `publish: true`, the nightly run needs the repository variable
+  `PYVSAG_NIGHTLY_PUBLISH=true`. It never publishes to PyPI or a GitHub Release, and is not part
+  of PR CI.
 - macOS ASan builds and TSan no longer run for main-target PRs. Their main-push and
   manual workflows remain unchanged. Platform-specific and race regressions can thus
   be discovered after merge rather than before it.

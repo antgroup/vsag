@@ -48,10 +48,10 @@ def expression(text, values):
 
 
 class EntryTests(unittest.TestCase):
-    def test_exact_ten_files_and_local_workflow_targets_exist(self):
+    def test_exact_workflow_files_and_local_workflow_targets_exist(self):
         expected = {'pr-ci.yml', 'pr-ci-team.yml', 'pr-ci-community.yml', 'pr-issue-link.yml',
                     'main-ci.yml', 'daily_test.yml', 'manual-checks.yml', 'release.yml',
-                    'maintenance.yml', 'update-ci-image.yml'}
+                    'maintenance.yml', 'update-ci-image.yml', 'pyvsag-testpypi.yml'}
         files = list((ROOT / '.github/workflows').glob('*.y*ml'))
         self.assertEqual({p.name for p in files}, expected)
         for p in files:
@@ -59,6 +59,17 @@ class EntryTests(unittest.TestCase):
                 self.assertIn(name, expected)
             for name in re.findall(r'uses: \./(\.github/actions/[^\s]+)', p.read_text()):
                 self.assertTrue((ROOT / name / 'action.yml').is_file(), name)
+
+    def test_pyvsag_testpypi_workflow_shape(self):
+        text = (ROOT / '.github/workflows/pyvsag-testpypi.yml').read_text()
+        self.assertEqual(re.findall(r"cron: '([^']+)'", text), ['17 19 * * *'])
+        self.assertRegex(text, r'publish:\n(?:.*\n)*?\s+default: false')
+        self.assertNotRegex(text, r'^\s+arch:\s*\n\s+description', re.M)
+        # The matrix context is not available in jobs.<id>.if; GitHub rejects the workflow.
+        for condition in re.findall(r'^    if: (.*)$', text, re.M):
+            self.assertNotIn('matrix', condition)
+        for arch in ('x86_64', 'aarch64'):
+            self.assertIn('{arch: %s,' % arch, text)
 
     def test_consumers_do_not_pull_shared_architecture_tags(self):
         legacy_tag = r'(?:vsaglib/vsag|ghcr\.io/antgroup/vsag):ci-(?:x86|aarch64)-'

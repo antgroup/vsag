@@ -1,0 +1,99 @@
+name: pyvsag TestPyPI
+
+# Builds the pyvsag py3-none wheels (x86_64 and aarch64) from main, nightly and on demand,
+# and optionally uploads them to TestPyPI. Nothing here touches the real PyPI or a GitHub Release.
+# Uploading is off by default: manual runs need publish=true, and the nightly run needs the
+# repository variable PYVSAG_NIGHTLY_PUBLISH=true.
+on:
+  schedule:
+    # 03:00 Beijing time (19:00 UTC the previous day), offset to avoid the top-of-hour rush.
+    - cron: '17 19 * * *'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Upload the wheels to TestPyPI (otherwise only build and keep the artifact)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pyvsag-testpypi
+  cancel-in-progress: false
+
+jobs:
+  resolve-source:
+    name: Pin main source
+    if: ${{ github.event_name != 'schedule' || github.repository == 'antgroup/vsag' }}
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - name: Require main
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "This workflow only builds main; run it from the main branch (got $GITHUB_REF)."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Resolve immutable commit
+        id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build py3-none wheel on ${{ matrix.arch }}
+    needs: resolve-source
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {arch: x86_64, runner: ubuntu-latest}
+          - {arch: aarch64, runner: ubuntu-24.04-arm}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-source.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare build environment
+        run: bash ./scripts/python/prepare_python_build.sh
+      - name: Build wheel
+        uses: pypa/cibuildwheel@v3.3.1
+        with:
+          package-dir: python
+        env:
+          CIBW_ARCHS: ${{ matrix.arch }}
+          CIBW_ENVIRONMENT: ${{ matrix.arch == 'x86_64' && 'VSAG_OPENBLAS_TARGET=GENERIC' || '' }}
+          CIBW_TEST_COMMAND: pip install numpy pytest && python /project/tests/python/run_test.py
+      - uses: actions/upload-artifact@v5
+        with:
+          name: pyvsag-wheels-${{ matrix.arch }}
+          path: ./wheelhouse/*.whl
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Upload to TestPyPI
+    needs: build
+    if: ${{ (inputs.publish || (github.event_name == 'schedule' && vars.PYVSAG_NIGHTLY_PUBLISH == 'true')) && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: pyvsag-wheels-*
+          path: dist
+          merge-multiple: true
+      - name: List distribution files
+        run: ls -la dist/
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+          skip-existing: true
+          verbose: true
