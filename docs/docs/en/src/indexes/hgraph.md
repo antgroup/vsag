@@ -403,6 +403,15 @@ it does not use the specialized fused traversal loop.
 {"hgraph":{"ef_search":100,"use_mci":true,"hgraph_valid_ratio_threshold":0.05,"rabitq_one_bit_search":true}}
 ```
 
+For fused 3+5 on AVX-512, `rabitq_one_bit_search: true` and `mci_batch_distance: true`
+enable Batch4 3-bit screening inside MCI. A conservative full-code distance bound decides
+which candidates need the remaining 5-bit score; refinement reuses the 3-bit inner product.
+The result cutoff uses the requested `topk`, while clique navigation keeps its `ef_search`
+frontier and complete distances. Candidates are skipped only when they cannot improve either
+frontier or results. When the candidate count does not exceed `topk`, MCI keeps the full-code
+Batch4 path. Three scalar projection/bound fields reuse existing affine metadata; record sizes
+are unchanged and no full-code cache is added. Loading an older index rebuilds these fields.
+
 An explicit positive `brute_force_threshold` retains scan priority. An explicit zero disables
 scanning and keeps the MCI/HGraph split. Without a usable MCI companion/seed source, or with
 attribute or SearchRequest bitset predicates, the existing fused HGraph/scan routing remains

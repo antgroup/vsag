@@ -717,6 +717,13 @@ HGraph::try_mci_search(const SearchRequest& request,
 
     auto codes_lock = make_search_read_lock(this->persistent_codes_mutex_);
     auto precise_flatten = this->get_precise_codes();
+    if (precise_flatten.get() == this->basic_flatten_codes_.get() and
+        this->rabitq_split_codes_ != nullptr and this->use_reorder_ and
+        params.rabitq_one_bit_search and not this->support_duplicate_ and
+        not(this->use_conjugate_graph_ and params.use_conjugate_graph_search)) {
+        mci_param.fused_refinement = this->rabitq_split_codes_.get();
+        mci_param.fused_refinement_topk = request.topk_;
+    }
     if (precise_flatten != nullptr) {
         uint64_t precise_vector_stride = 0;
         mci_param.precise_vectors =

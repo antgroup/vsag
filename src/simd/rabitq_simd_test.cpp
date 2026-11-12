@@ -22,6 +22,7 @@
 
 #include "fp32_simd.h"
 #include "kernels/rabitq_compute.h"
+#include "simd/rabitq_refine_simd.h"
 #include "simd_status.h"
 #include "unittest.h"
 
@@ -2000,5 +2001,69 @@ TEST_CASE("FlipSign handles its final full AVX-512 block", "[ut][simd][fused_fht
         generic::FlipSign(signs.data(), expected.data(), dim);
         FlipSign(signs.data(), actual.data(), dim);
         CHECK(std::memcmp(actual.data(), expected.data(), dim * sizeof(float)) == 0);
+    }
+}
+
+TEST_CASE("MCI split Batch4 decodes plane orders and short unaligned tails",
+          "[ut][simd][mci_fused_refinement]") {
+    const uint32_t bits = GENERATE(3U, 5U);
+    std::mt19937 random(11423);
+    for (uint64_t dim : {1, 7, 8, 15, 16, 17, 63, 64, 65, 959, 960, 961, 1024}) {
+        for (uint64_t offset : {0, 1, 3}) {
+            std::vector<float> query(dim + offset);
+            std::array<std::vector<uint8_t>, 4> storage;
+            const uint8_t* codes[4];
+            double expected[4]{};
+            double magnitudes[4]{};
+            for (uint64_t d = 0; d < dim; ++d) {
+                query[d + offset] =
+                    static_cast<float>(static_cast<int32_t>(random() % 2001) - 1000) / 1000;
+            }
+            const uint64_t stride = (dim + 7) / 8;
+            for (uint32_t i = 0; i < 4; ++i) {
+                storage[i].resize(bits * stride + offset);
+                for (auto& byte : storage[i]) {
+                    byte = static_cast<uint8_t>(random());
+                }
+                codes[i] = storage[i].data() + offset;
+                for (uint64_t d = 0; d < dim; ++d) {
+                    uint32_t code = 0;
+                    for (uint32_t b = 0; b < bits; ++b) {
+                        code |= ((codes[i][b * stride + d / 8] >> (d % 8)) & 1U)
+                                << (bits == 3 ? bits - 1 - b : b);
+                    }
+                    const double term =
+                        static_cast<double>(query[d + offset]) * (code - 0.5 * ((1U << bits) - 1));
+                    expected[i] += term;
+                    magnitudes[i] += std::abs(term);
+                }
+            }
+            for (uint32_t count = 0; count <= 4; ++count) {
+                CAPTURE(dim, offset, count);
+                const auto check = [&](RaBitQRefineBatch4 kernel) {
+                    float actual[5] = {-777, -777, -777, -777, -777};
+                    double sum = 0;
+                    for (uint64_t d = 0; d < dim; ++d) {
+                        sum += query[d + offset];
+                    }
+                    kernel(
+                        query.data() + offset, codes, dim, count, static_cast<float>(sum), actual);
+                    for (uint32_t i = 0; i < count; ++i) {
+                        CHECK(std::abs(actual[i] - expected[i]) <= 1e-5 + 3e-6 * magnitudes[i]);
+                    }
+                    for (uint32_t i = count; i < 5; ++i) {
+                        CHECK(actual[i] == -777);
+                    }
+                };
+                check(bits == 3 ? generic::rabitq_three_bit_centered_batch4
+                                : generic::rabitq_five_bit_centered_batch4);
+                check(bits == 3 ? rabitq_three_bit_centered_batch4
+                                : rabitq_five_bit_centered_batch4);
+                if (SimdStatus::SupportAVX512()) {
+                    check(bits == 3 ? avx512::rabitq_three_bit_centered_batch4
+                                    : avx512::rabitq_five_bit_centered_batch4);
+                }
+            }
+        }
     }
 }

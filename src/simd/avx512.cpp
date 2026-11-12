@@ -14,6 +14,7 @@
 // limitations under the License.
 #include "simd/int8_simd.h"
 #include "simd/kernels/rabitq_pack.h"
+#include "simd/rabitq_refine_simd.h"
 #if defined(ENABLE_AVX512)
 #include <immintrin.h>
 
@@ -2075,6 +2076,135 @@ InverseNormalizeWithCentroid(
 #else
     avx2::InverseNormalizeWithCentroid(from, centroid, to, dim, norm);
 #endif
+}
+
+#if defined(ENABLE_AVX512)
+namespace {
+template <uint32_t bits, uint32_t count>
+void
+split_centered_batch4(const float* query,
+                      const uint8_t* const* codes,
+                      uint64_t dim,
+                      float query_sum,
+                      float* results) {
+    const uint64_t stride = (dim + 7) / 8;
+    __m512 sums[4][4];
+    for (uint32_t i = 0; i < count; ++i) {
+        for (auto& sum : sums[i]) {
+            sum = _mm512_setzero_ps();
+        }
+    }
+    uint64_t d = 0;
+    for (; d + 64 <= dim; d += 64) {
+        const auto q0 = _mm512_loadu_ps(query + d);
+        const auto q1 = _mm512_loadu_ps(query + d + 16);
+        const auto q2 = _mm512_loadu_ps(query + d + 32);
+        const auto q3 = _mm512_loadu_ps(query + d + 48);
+#pragma GCC unroll 4
+        for (uint32_t i = 0; i < count; ++i) {
+            auto packed = _mm512_set1_epi8(static_cast<int8_t>(-(1 << (bits - 1))));
+            for (uint32_t bit = 0; bit < bits; ++bit) {
+                uint64_t mask;
+                std::memcpy(&mask, codes[i] + bit * stride + (d >> 3), sizeof(mask));
+                const auto weight =
+                    _mm512_set1_epi8(static_cast<int8_t>(1U << (bits == 3 ? bits - 1 - bit : bit)));
+                packed = _mm512_mask_add_epi8(packed, mask, packed, weight);
+            }
+            const auto c0 =
+                _mm512_cvtepi32_ps(_mm512_cvtepi8_epi32(_mm512_castsi512_si128(packed)));
+            const auto c1 =
+                _mm512_cvtepi32_ps(_mm512_cvtepi8_epi32(_mm512_extracti32x4_epi32(packed, 1)));
+            const auto c2 =
+                _mm512_cvtepi32_ps(_mm512_cvtepi8_epi32(_mm512_extracti32x4_epi32(packed, 2)));
+            const auto c3 =
+                _mm512_cvtepi32_ps(_mm512_cvtepi8_epi32(_mm512_extracti32x4_epi32(packed, 3)));
+            sums[i][0] = _mm512_fmadd_ps(c0, q0, sums[i][0]);
+            sums[i][1] = _mm512_fmadd_ps(c1, q1, sums[i][1]);
+            sums[i][2] = _mm512_fmadd_ps(c2, q2, sums[i][2]);
+            sums[i][3] = _mm512_fmadd_ps(c3, q3, sums[i][3]);
+        }
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        results[i] = _mm512_reduce_add_ps(_mm512_add_ps(_mm512_add_ps(sums[i][0], sums[i][1]),
+                                                        _mm512_add_ps(sums[i][2], sums[i][3])));
+    }
+    for (; d < dim; ++d) {
+        for (uint32_t i = 0; i < count; ++i) {
+            uint32_t code = 0;
+            for (uint32_t bit = 0; bit < bits; ++bit) {
+                code |= ((codes[i][bit * stride + (d >> 3)] >> (d & 7)) & 1U)
+                        << (bits == 3 ? bits - 1 - bit : bit);
+            }
+            results[i] +=
+                query[d] * (static_cast<float>(code) - static_cast<float>(1U << (bits - 1)));
+        }
+    }
+    // The signed bytes center at -4/-16; the shared query sum restores -3.5/-15.5.
+    for (uint32_t i = 0; i < count; ++i) {
+        results[i] += 0.5F * query_sum;
+    }
+}
+}  // namespace
+#endif
+
+void
+rabitq_three_bit_centered_batch4(const float* query,
+                                 const uint8_t* const* codes,
+                                 uint64_t dim,
+                                 uint32_t count,
+                                 float query_sum,
+                                 float* results) {
+#if defined(ENABLE_AVX512)
+    switch (count) {
+        case 0:
+            return;
+        case 1:
+            split_centered_batch4<3, 1>(query, codes, dim, query_sum, results);
+            return;
+        case 2:
+            split_centered_batch4<3, 2>(query, codes, dim, query_sum, results);
+            return;
+        case 3:
+            split_centered_batch4<3, 3>(query, codes, dim, query_sum, results);
+            return;
+        case 4:
+            split_centered_batch4<3, 4>(query, codes, dim, query_sum, results);
+            return;
+        default:
+            break;
+    }
+#endif
+    generic::rabitq_three_bit_centered_batch4(query, codes, dim, count, query_sum, results);
+}
+
+void
+rabitq_five_bit_centered_batch4(const float* query,
+                                const uint8_t* const* codes,
+                                uint64_t dim,
+                                uint32_t count,
+                                float query_sum,
+                                float* results) {
+#if defined(ENABLE_AVX512)
+    switch (count) {
+        case 0:
+            return;
+        case 1:
+            split_centered_batch4<5, 1>(query, codes, dim, query_sum, results);
+            return;
+        case 2:
+            split_centered_batch4<5, 2>(query, codes, dim, query_sum, results);
+            return;
+        case 3:
+            split_centered_batch4<5, 3>(query, codes, dim, query_sum, results);
+            return;
+        case 4:
+            split_centered_batch4<5, 4>(query, codes, dim, query_sum, results);
+            return;
+        default:
+            break;
+    }
+#endif
+    generic::rabitq_five_bit_centered_batch4(query, codes, dim, count, query_sum, results);
 }
 
 }  // namespace vsag::avx512

@@ -3953,7 +3953,64 @@ RaBitQuantizer<metric>::EncodeFusedAffineMetadata(const float* data,
     write_float(one_bit_code + filter_meta_offset + 2U * sizeof(float), filter_error_unit);
     write_float(supplement_code + supplement_meta_offset, full_add);
     write_float(supplement_code + supplement_meta_offset + sizeof(float), full_rescale);
+    PrepareFusedRefinementBounds(one_bit_code, supplement_code);
     return true;
+}
+
+template <MetricType metric>
+void
+RaBitQuantizer<metric>::PrepareFusedRefinementBounds(uint8_t* one_bit_code,
+                                                     uint8_t* supplement_code) const {
+    if (FilterBits() != 3 or ReorderBits() != 5) {
+        return;
+    }
+    float full_add;
+    float full_scale;
+    std::memcpy(&full_add, supplement_code + SupplementMetaOffset(), sizeof(float));
+    std::memcpy(&full_scale, supplement_code + SupplementMetaOffset() + 4, sizeof(float));
+    const auto stride = PlaneBytes();
+    const auto codes = [&](uint64_t d, double& coarse, double& full) {
+        uint32_t x = 0;
+        uint32_t y = 0;
+        for (uint32_t b = 0; b < 3; ++b) {
+            x |= ((one_bit_code[b * stride + (d >> 3)] >> (d & 7)) & 1U) << (2 - b);
+        }
+        for (uint32_t b = 0; b < 5; ++b) {
+            y |= ((supplement_code[b * stride + (d >> 3)] >> (d & 7)) & 1U) << b;
+        }
+        coarse = x - 3.5;
+        full = (x * 32 + y) - 127.5;
+    };
+    double cross = 0.0;
+    double coarse_norm = 0.0;
+    for (uint64_t d = 0; d < this->dim_; ++d) {
+        double coarse;
+        double full;
+        codes(d, coarse, full);
+        cross += coarse * full;
+        coarse_norm += coarse * coarse;
+    }
+    const auto slope = static_cast<float>(static_cast<double>(full_scale) * cross / coarse_norm);
+    double norm_sqr = 0.0;
+    double dot = 0.0;
+    for (uint64_t d = 0; d < this->dim_; ++d) {
+        double coarse;
+        double full;
+        codes(d, coarse, full);
+        const double residual =
+            static_cast<double>(full_scale) * full - static_cast<double>(slope) * coarse;
+        norm_sqr += residual * residual;
+        dot += static_cast<double>(centroid_[d]) * residual;
+    }
+    const auto add = static_cast<float>(static_cast<double>(full_add) + dot);
+    const double guard = 16 * std::numeric_limits<double>::epsilon() * (this->dim_ + 1);
+    const float norm = std::nextafter(static_cast<float>(std::sqrt(norm_sqr) * (1 + guard)),
+                                      std::numeric_limits<float>::infinity());
+    // Full = add + g_add + slope*<q,C3> + <q-centroid, residual>.
+    // Keeping only these three scalars leaves the x/y payload and record sizes unchanged.
+    std::memcpy(one_bit_code + OneBitRecordNormOffset() + 12, &slope, sizeof(float));
+    std::memcpy(supplement_code + SupplementMetaOffset() + 8, &add, sizeof(float));
+    std::memcpy(supplement_code + SupplementMetaOffset() + 12, &norm, sizeof(float));
 }
 
 template <MetricType metric>

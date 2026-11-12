@@ -307,6 +307,8 @@ auto result = index->KnnSearch(
 {"hgraph":{"ef_search":100,"use_mci":true,"hgraph_valid_ratio_threshold":0.05,"rabitq_one_bit_search":true}}
 ```
 
+在 AVX-512 上，fused 3+5 的 MCI 搜索通过 `rabitq_one_bit_search: true` 和 `mci_batch_distance: true` 启用 Batch4 3-bit 粗筛。使用针对全码距离的保守下界决定哪些候选需要计算剩余 5-bit，重排复用已经计算的 3-bit 内积。结果边界使用用户请求的 `topk`；团扩展仍以完整距离维护 `ef_search` 大小的前沿，只有无法改善前沿和结果集的候选才跳过重排。候选数不超过 `topk` 时，直接使用全码 Batch4。三个投影和下界标量复用已有 affine 元数据，记录大小不变，也不增加完整码缓存；加载旧索引时重建这些字段。
+
 显式设置正数 `brute_force_threshold` 时，扫描仍优先；显式设为零时，关闭扫描并保留 MCI/HGraph 分流。MCI 伴随索引或种子来源不可用，以及带属性或 SearchRequest 位图条件的查询，继续使用原有 fused HGraph/扫描路由。`use_hybrid_traversal` 是独立的联合遍历模式，本次不改变其行为。通过统计字段 `mci_hybrid_route`（`mci`、`hgraph`、`brute_force`）确认实际路径。
 
 ### 高选择性过滤下的暴搜回退（`brute_force_threshold`）
