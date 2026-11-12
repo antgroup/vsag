@@ -10,6 +10,7 @@ from pathlib import Path
 import struct
 
 from run_mixed_cpu_acceptance import percentile, sha
+from run_pinned_full_acceptance import HISTORICAL_FEATURE_SHA, HISTORICAL_LITE_LIBRARY_SHA256
 
 
 def verify(output, overrides=None):
@@ -33,7 +34,12 @@ def verify(output, overrides=None):
         assert provenance['full_suite'] == receipt['full_suite']
     assert identity['reference_library_sha256'] == provenance['full_library_sha256']
     assert identity['lite_library_sha256'] == provenance['lite_library_sha256']
-    if provenance.get('source_bound_current_comparison'):
+    if provenance['feature_sha'] == HISTORICAL_FEATURE_SHA:
+        if provenance['lite_library_sha256'] != HISTORICAL_LITE_LIBRARY_SHA256:
+            raise ValueError('Historical Lite library SHA-256 mismatch')
+    else:
+        if not provenance.get('source_bound_current_comparison'):
+            raise ValueError('Current-source comparison requires a Lite build receipt')
         path = output / 'lite-build-source-receipt.json'
         assert sha(path) == provenance['lite_build_source_receipt_sha256']
         receipt = json.loads(path.read_text())

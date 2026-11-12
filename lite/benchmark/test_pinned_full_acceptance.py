@@ -91,6 +91,8 @@ class FullAuditTests(unittest.TestCase):
                 return '9aeaa550703f116bef2959769d4f2f03da254b07c906ba941d8186224cc70c72' if failure == 'legacy replay' else 'a' * 64
             if path.name == 'vsag.h':
                 return 'b' * 64
+            if failure == 'wrong historical Lite library' and path.name == 'libvsag-lite.so':
+                return '0' * 64
             if path.name == 'libvsag-lite.so':
                 return '3171d0d7e86866f02096db130f1937eb13c5115cbe993d4a6feb2e9987774330'
             if path == archive:
@@ -131,6 +133,13 @@ class FullAuditTests(unittest.TestCase):
                                         subprocess.CalledProcessError)):
                     self.invoke_preflight(root, failure)
                 self.assertFalse((root / 'new-parent').exists())
+
+    def test_wrong_historical_lite_library_rejected_before_creating_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self.assertRaisesRegex(ValueError, 'Historical Lite library SHA-256 mismatch'):
+                self.invoke_preflight(root, 'wrong historical Lite library')
+            self.assertFalse((root / 'new-parent').exists())
 
     def test_legacy_replay_preflight_reaches_measurement_boundary(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -177,16 +186,37 @@ class FullAuditTests(unittest.TestCase):
                 ccache=False, prior_object_count=0, core_object_count=100,
                 install='/tmp/full-reference', library_sha256='z' * 64), 'feature', Path('/tmp/full-reference'))
 
-    def fixture(self, directory, ef=512, digest='full'):
+    def fixture(self, directory, ef=512, digest='full', lite_digest=None, feature_sha=None):
         root = Path(directory)
         (root / 'measurements').mkdir()
-        (root / 'provenance.json').write_text(json.dumps(
-            dict(full_library_sha256='full', lite_library_sha256='lite')))
-        (root / 'manifest.json').write_text('{}')
-        (root / 'measurements/identity.json').write_text(json.dumps(dict(
-            arguments=dict(ef=ef, full_ef=512), reference_library_sha256=digest,
-            lite_library_sha256='lite')))
+        if lite_digest is None:
+            lite_digest = '3171d0d7e86866f02096db130f1937eb13c5115cbe993d4a6feb2e9987774330'
+        if feature_sha is None:
+            feature_sha = 'dbb2fe0bec685ae7a343b1d2060d0553a98e20d2'
+        provenance = root / 'provenance.json'
+        identity = root / 'measurements/identity.json'
+        provenance.write_text(json.dumps(dict(feature_sha=feature_sha,
+            full_source_sha='full-source', full_library_sha256='full', lite_library_sha256=lite_digest)))
+        identity.write_text(json.dumps(dict(arguments=dict(ef=ef, full_ef=512, dataset=[]),
+            reference_library_sha256=digest, lite_library_sha256=lite_digest)))
+        rows = root / 'measurements/rows.json'
+        rows.write_text('[]')
+        (root / 'manifest.json').write_text(json.dumps({
+            str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in [provenance, identity, rows]}))
         return root
+
+    def test_matching_historical_records_with_wrong_lite_digest_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.fixture(directory, lite_digest='0' * 64)
+            with self.assertRaisesRegex(ValueError, 'Historical Lite library SHA-256 mismatch'):
+                verify(root)
+
+    def test_current_records_without_lite_source_receipt_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.fixture(directory, feature_sha='c' * 40)
+            with self.assertRaisesRegex(ValueError, 'Current-source comparison requires a Lite build receipt'):
+                verify(root)
 
     def test_unequal_query_budget_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
