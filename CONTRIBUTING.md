@@ -59,7 +59,7 @@ Before sending your pull requests for review, make sure your changes are consist
 
 ### Developer Certificate of Origin (DCO)
 
-All contributions to this project must be accompanied by acknowledgment of, and agreement to, the [Developer Certificate of Origin](https://developercertificate.org/). Acknowledgment of and agreement to the Developer Certificate of Origin _must_ be included in the comment section of each contribution and _must_ take the form of `Signed-off-by: {{Full Name}} <{{email address}}>` (without the `{}`). Contributions without this acknowledgment will be required to add it before being accepted. If contributors are unable or unwilling to agree to the Developer Certificate of Origin, their contribution will not be included.
+All contributions to this project must be accompanied by acknowledgment of, and agreement to, the [Developer Certificate of Origin](https://developercertificate.org/). Acknowledgment of and agreement to the Developer Certificate of Origin _must_ be included in each commit message and _must_ take the form of `Signed-off-by: {{Full Name}} <{{email address}}>` (without the `{}`). Contributions without this acknowledgment will be required to add it before being accepted. If contributors are unable or unwilling to agree to the Developer Certificate of Origin, their contribution will not be included.
 
 Contributors sign-off that they adhere to DCO by adding the following Signed-off-by line to commit messages:
 
@@ -69,11 +69,13 @@ This is my commit message
 Signed-off-by: Random J Developer <random@developer.example.org>
 ```
 
-Git also has a `-s` command line option to append this automatically to your commit message:
+For human-authored commits, Git has a `-s` command line option to append this automatically to your commit message:
 
 ```shell
 $ git commit -s -m 'This is my commit message'
 ```
+
+For AI-assisted changes, follow the [commit-message guidance](docs/agents/contribution-workflow.md#commit-messages): agents must write the human `Signed-off-by:` followed immediately by `Assisted-by: <AgentName>:<ModelVersion>` and must not invoke `git commit -s`. DCO applies to commits, not issue or PR comments.
 
 ## Coding Style
 The coding style used in vsag generally follow [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html).
@@ -154,9 +156,11 @@ See the [testing guide](docs/docs/en/src/development/testing.md#pre-merge-simd-s
 Every pull request **must** have the following two labels before it can be merged:
 
 -   A **`kind/*`** label indicating the type of change: `kind/bug` (bug fix), `kind/feature` (new feature), `kind/improvement` (refactor, chore, or minor improvement), or `kind/documentation` (documentation change).
--   A **`version/*`** label indicating the target version, e.g. `version/1.0`, `version/0.18`.
+-   A **`version/*`** label matching the target release line.
 
-Mergify enforces these labels via check runs. The PR merge will be blocked until both labels are present.
+`vsag-bot` applies these labels automatically; you do not need to supply them when creating a PR. Check the result after automation runs and correct missing or inaccurate labels, or ask a maintainer if you lack permissions. Do not copy a version label from an old example. Mergify also adds path-based `area/*` and `module/*` labels.
+
+The current Mergify label-presence protections apply to PRs targeting `main`: merging is blocked until both categories are present. See the [agent label guidance](docs/agents/contribution-workflow.md#pull-request-labels) for details.
 
 ## Linking an Issue
 
@@ -176,11 +180,12 @@ exempt from this requirement.
 
 This rule is enforced by:
 
-1.  The `PR Issue Link Check` GitHub Action, which runs on every PR
-    targeting `main` or `0.*` branches. Repo administrators are expected
-    to add it to the **required status checks** for those branches so
-    that a failed check actually blocks merge.
-2.  A Mergify `merge_protections` rule as a defense-in-depth fallback.
+1.  The `Issue Link` job in the `PR Metadata` workflow, triggered by PR
+    creation, edits, reopening, code updates and label additions/removals
+    targeting `main` or `0.*` branches.
+2.  A Mergify `merge_protections` rule that independently enforces the issue
+    reference on those target branches. See [CI routing](docs/agents/ci-routing.md)
+    for required-check guidance.
 
 If the check fails, edit the PR description to add the required keyword
 and the check will re-run automatically.

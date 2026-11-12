@@ -48,14 +48,15 @@ Node.js/TypeScript bindings provided by `vsag`.
   branch to the contributor's fork rather than directly to the main
   `antgroup/vsag` repository. Push to the main repository only when explicitly
   required or authorized.
-- **Pull requests need two labels:** one `kind/*` (`kind/bug`,
-  `kind/feature`, `kind/improvement`, `kind/documentation`) and one
-  `version/*` (e.g. `version/1.0`). Mergify enforces both.
+- **PR labels:** let `vsag-bot` apply `kind/*` and `version/*` automatically;
+  do not require manual labels when creating a PR. Verify them after automation
+  runs and correct missing or inaccurate labels. Mergify requires both on `main`.
+  See the [label guidance](docs/agents/contribution-workflow.md#pull-request-labels).
 - **`kind/bug` / `kind/feature` PRs must link an issue** in the
   description using a GitHub auto-closing keyword (`Fixes: #N`,
   `Closes: #N`, `Resolves: #N`; cross-repo or full issue URL also OK).
   `kind/improvement` and `kind/documentation` PRs are exempt. Enforced
-  by the `PR Issue Link Check` Action and a Mergify protection.
+  by the `Issue Link` job in `PR Metadata` and a Mergify protection.
 - **Issues do NOT carry `Signed-off-by:`** — DCO only applies to commits.
 
 ## Quick Command Reference

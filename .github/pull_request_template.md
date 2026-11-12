@@ -29,6 +29,13 @@ this blank (delete the line below or keep it empty).
 
 ## Test Evidence
 
+<!--
+Follow docs/agents/contribution-workflow.md#required-validation-before-opening-or-updating-a-pr.
+Record the tested revision, platform/toolchain, exact commands and outcomes.
+Mark checks that do not apply as N/A with a reason; report unvalidated checks
+explicitly. Pure documentation changes do not require C++ builds.
+-->
+
 - [ ] `make fmt`
 - [ ] `make lint`
 - [ ] `make test`
@@ -58,6 +65,7 @@ Test details:
   - [ ] `README.md`
   - [ ] `DEVELOPMENT.md`
   - [ ] `CONTRIBUTING.md`
+  - [ ] Website docs under `docs/docs/{en,zh}/src/`
   - [ ] Other: <!-- path -->
 
 ## Risk and Rollback
@@ -71,4 +79,4 @@ Test details:
 - [ ] I have added/updated tests for new behavior or bug fixes
 - [ ] I have considered API compatibility impact
 - [ ] I have updated docs if behavior/workflow changed
-- [ ] My commit messages follow project conventions (Conventional Commits, optional `[skip ci]` prefix)
+- [ ] My commit messages follow project conventions (Conventional Commits, DCO sign-off, `Assisted-by` when applicable, optional `[skip ci]` prefix)

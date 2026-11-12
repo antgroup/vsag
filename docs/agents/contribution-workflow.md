@@ -6,12 +6,12 @@ key-facts:
   - Use Conventional Commits with DCO sign-off; AI agents must NOT self-sign
   - AI agents: do NOT use `git commit -s` (it appends Signed-off-by last, with a blank line before it). Write both trailers manually in the commit body, deriving the human Signed-off-by from `git config user.name`/`user.email`
   - Trailer order: Signed-off-by first, Assisted-by immediately after, no blank line between them
-  - Every PR needs both a kind/* and a version/* label
+  - Let vsag-bot apply PR labels; verify kind/* and version/* after automation runs
   - PRs labeled kind/bug or kind/feature must link an issue with Fixes:/Closes:/Resolves: #N (or owner/repo#N / issue URL)
 related:
   - ../../CONTRIBUTING.md
   - ../../.github/pull_request_template.md
-last-reviewed: 2026-08-13
+last-reviewed: 2026-11-12
 -->
 
 # Contribution Workflow
@@ -109,11 +109,20 @@ Every pull request **must** have two labels before it can be merged:
 - A `kind/*` label for the type of change: `kind/bug` (bug fix),
   `kind/feature` (new feature), `kind/improvement` (refactor, chore, or minor
   improvement), or `kind/documentation` (documentation change).
-- A `version/*` label for the target version (e.g. `version/1.0`,
-  `version/0.18`).
+- A `version/*` label matching the target release line; do not copy a version
+  from an old PR or documentation example.
 
-Mergify enforces these via check runs. Always add both labels when creating
-a PR.
+`vsag-bot` automatically applies these labels. Create the PR without requiring
+manual `--label` arguments, then inspect the labels after automation runs. If a
+label is missing or inaccurate, add or correct it when authorized, or ask a
+maintainer when you lack label permissions. Do not treat automation as proof
+that the labels are complete or correct. Automatic labeling of both categories
+is visible, for example, in [PR #3335](https://github.com/antgroup/vsag/pull/3335).
+
+The label requirement remains: `.github/mergify.yml` enforces `kind/*` and
+`version/*` on PRs targeting `main`. Its label-presence rules do not currently
+cover release branches. Mergify also adds `area/*` and `module/*` labels from
+changed paths; contributors do not need to pre-populate those labels.
 
 ## Linking an issue
 
@@ -131,19 +140,20 @@ Closes: https://github.com/antgroup/vsag/issues/100
 ```
 
 `kind/improvement` and `kind/documentation` PRs are exempt — link an issue
-only if it helps reviewers. The placeholder line in
+only if it helps reviewers. The issue-number placeholder in
 `.github/pull_request_template.md` lives inside an HTML comment and does
-**not** satisfy the rule on its own; you must replace it with a real
-reference.
+**not** satisfy the rule on its own; replace it with a real reference.
 
 Enforcement happens in two places:
 
-1. The `PR Issue Link Check` GitHub Action runs on every PR open / edit /
-   sync targeting `main` or `0.*` branches. Repo administrators are
-   expected to add it to the **required status checks** on those
-   branches so a failed check actually blocks merge.
-2. A Mergify `merge_protections` rule (`Require linked issue for
-   feature/bug PRs`) blocks merge as a defense-in-depth fallback.
+1. The `PR Metadata` workflow (`.github/workflows/pr-issue-link.yml`) runs
+   its `Issue Link` job on opened, edited, reopened, synchronize, labeled and
+   unlabeled PR events targeting `main` or `0.*` branches. It reads the current
+   PR body and labels, so automatic labeling can trigger validation too.
+2. The Mergify `merge_protections` rule `Require linked issue for feature/bug
+   PRs` enforces the issue reference on those target branches independently.
+   See [CI routing](ci-routing.md) for required-check guidance; do not configure
+   a required check using the obsolete name `PR Issue Link Check`.
 
 ## Documentation expectations
 
