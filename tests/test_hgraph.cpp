@@ -5739,7 +5739,7 @@ TEST_CASE("HGraph returns finite duplicate labels at the entry point within ef",
 }
 
 TEST_CASE("HGraph ExportCache + ImportCache + Build acceleration smoke test",
-          "[ft][hgraph][cache][pr]") {
+          "[ft][hgraph][cache][concurrent][pr]") {
     // End-to-end smoke test for the cache-accelerated Build path:
     //   (1) Build a baseline HGraph with N points carrying source_id.
     //   (2) ExportCache to an in-memory stream.
@@ -5847,7 +5847,8 @@ TEST_CASE("HGraph ExportCache + ImportCache + Build acceleration smoke test",
     REQUIRE(found_self);
 }
 
-TEST_CASE("HGraph ExportCache + ImportCache + Build miss-only path", "[ft][hgraph][cache][pr]") {
+TEST_CASE("HGraph ExportCache + ImportCache + Build miss-only path",
+          "[ft][hgraph][cache][concurrent][pr]") {
     // Force every node to take the *missed* branch of build_with_cache:
     //   (1) Build baseline with source_id="sid_A" and ExportCache.
     //   (2) Fresh index, ImportCache (so cache_->neighbors_ has key "sid_A"),
