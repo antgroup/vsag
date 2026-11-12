@@ -107,7 +107,24 @@ Optional `--checkpoint-every` and isolated `--mutation-mode` controls are
 quality diagnostics: extra oracle/rebuild/fork work changes their timing scope.
 All positive and adverse outcomes must remain in the result.
 
+The current mixed probe uses FP32(0.875 * current + 0.125 * original donor).
+When the donor or FP32 rounding leaves the vector unchanged, it sets coordinate 0 to 1 if its absolute current
+value is at most 0.5, otherwise to 0. This deterministic fallback ensures a real
+mutation for duplicate vectors and small datasets. It does not apply to the
+intentional unchanged-vector `reinsert` control. The verifier checks the complete
+operation/round/ID/query schedule, including the default `all` mode. These tool
+fixes do not change any archived measurement or its recorded source.
+
 ### Native Full and runtime package
+
+A fresh Full build explicitly clears both CMake compiler launchers and disables
+ccache, including inherited launcher environment variables. Runtime-package
+smoke checks wait for the probe and every packaged ELF dependency to appear in
+`/proc/PID/maps`; observing only the executable during loader startup is
+insufficient. Mapped files are identified by their ELF header rather than a
+filename suffix; ordinary mapped inputs are ignored and unexpected ELF mappings
+are rejected. The Full RaBitQ input reader rejects partial dimension headers as
+well as short vector payloads.
 
 Full consumers are independently built in `lite/benchmark/full`:
 `full_main.cpp`, `full_dataset_main.cpp`, `full_rabitq_dataset_main.cpp`.
@@ -210,6 +227,11 @@ resident protocol's resources. SIFT preparation uses one N-by-dimension buffer
 per query; bounded subsets are required rather than unbounded dataset preparation.
 
 ## Tool responsibilities
+
+Mixed-CRUD timing and CPU totals retain the original ordered binary64 summation
+rule explicitly. Python 3.12 changed builtin floating-point `sum`; using it would
+alter derived metrics when verifying earlier archives. Both recording and offline
+verification use the fixed rule, keeping exact comparisons and original data intact.
 
 | File | Responsibility |
 | --- | --- |

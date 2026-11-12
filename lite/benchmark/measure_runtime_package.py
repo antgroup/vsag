@@ -208,6 +208,8 @@ def build_bundle(application, library_directory, root, feature, env, full):
 
 def smoke(root, dataset, storage, snapshot, env, output, minimum_recall=.95):
     command = [str(root / 'run'), str(dataset), str(snapshot), storage]
+    expected = {str(root / 'bin/probe')} | {
+        str(path) for path in (root / 'lib').iterdir() if path.is_file() and not path.is_symlink()}
     process = subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     mapped = None
     try:
@@ -218,9 +220,21 @@ def smoke(root, dataset, storage, snapshot, env, output, minimum_recall=.95):
                 lines = Path(f'/proc/{process.pid}/maps').read_text().splitlines()
             except FileNotFoundError:
                 continue
-            paths = {line.split()[-1] for line in lines if '/' in line and not line.endswith('(deleted)')}
-            if str(root / 'bin/probe') in paths:
-                mapped = sorted(p for p in paths if '.so' in p or p == str(root / 'bin/probe'))
+            paths = {fields[5] for line in lines
+                     if len(fields := line.split(maxsplit=5)) == 6
+                     and fields[5].startswith('/') and not fields[5].endswith(' (deleted)')}
+            if expected <= paths:
+                try:
+                    elf_paths = set(expected)
+                    for path in paths - expected:
+                        with Path(path).open('rb') as stream:
+                            if stream.read(4) == b'\x7fELF':
+                                elf_paths.add(path)
+                except OSError:
+                    # A mapping can disappear while reading /proc; require a stable observation.
+                    time.sleep(.01)
+                    continue
+                mapped = sorted(elf_paths)
                 break
             time.sleep(.01)
         stdout, stderr = process.communicate(timeout=120)
@@ -232,6 +246,7 @@ def smoke(root, dataset, storage, snapshot, env, output, minimum_recall=.95):
     output.with_suffix('.stderr').write_text(stderr)
     assert process.returncode == 0, stderr
     assert mapped and all(root in Path(p).parents for p in mapped), mapped
+    assert set(mapped) == expected, mapped
     lines = stdout.splitlines()
     header = next(i for i, line in enumerate(lines) if line.startswith(('base_count,', 'mode,base_count,')))
     metrics = next(csv.DictReader(io.StringIO('\n'.join(lines[header:header+2]))))

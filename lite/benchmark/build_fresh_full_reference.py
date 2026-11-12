@@ -105,7 +105,10 @@ def main():
     assert not args.install.exists() and not args.output.exists(), 'Never overwrite a reference'
     assert hashlib.md5(args.antlr_archive.read_bytes()).hexdigest() == '3b75610fc8a827119258cba09a068be5'
     args.output.mkdir(parents=True)
-    env = dict(os.environ, TMPDIR='/dev/shm')
+    env = dict(os.environ, TMPDIR='/dev/shm', CCACHE_DISABLE='1')
+    # CMake reads launcher environment variables even when ENABLE_CCACHE is OFF.
+    for name in ['CMAKE_C_COMPILER_LAUNCHER', 'CMAKE_CXX_COMPILER_LAUNCHER']:
+        env.pop(name, None)
     records = []
     def run(tag,command):
         begin=time.monotonic()
@@ -131,7 +134,8 @@ def main():
         print('BUILD SOURCE', build_source, 'strict_fp', args.strict_fp, flush=True)
         command=['cmake','-G','Ninja','-S',str(build_source),'-B',str(build),
             '-DCMAKE_BUILD_TYPE=Release','-DCMAKE_EXPORT_COMPILE_COMMANDS=ON',
-            '-DENABLE_CCACHE=OFF','-DENABLE_TESTS=OFF','-DENABLE_EXAMPLES=OFF',
+            '-DENABLE_CCACHE=OFF','-DCMAKE_C_COMPILER_LAUNCHER=',
+            '-DCMAKE_CXX_COMPILER_LAUNCHER=','-DENABLE_TESTS=OFF','-DENABLE_EXAMPLES=OFF',
             '-DENABLE_TOOLS=OFF','-DENABLE_PYBINDS=OFF','-DENABLE_NODE_BINDS=OFF',
             '-DENABLE_INTEL_MKL=OFF','-DVSAG_USE_SYSTEM_DEPS=AUTO',
             '-DVSAG_USE_SYSTEM_OPENBLAS=ON','-DVSAG_USE_SYSTEM_FMT=ON',

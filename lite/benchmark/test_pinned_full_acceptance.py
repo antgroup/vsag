@@ -394,6 +394,56 @@ class CurrentSourceTests(unittest.TestCase):
                     subprocess.run(['cmake', '-P', str(script)], check=True,
                                    capture_output=True, text=True)
 
+
+    def test_fresh_full_ignores_inherited_compiler_launchers(self):
+        from contextlib import nullcontext
+        import os
+        with tempfile.TemporaryDirectory(dir='/dev/shm') as directory:
+            root = Path(directory)
+            source, deps = root / 'source', root / 'deps'
+            source.mkdir()
+            for folder, sentinel in [('cpuinfo-src', 'CMakeLists.txt'),
+                    ('nlohmann_json-src', 'CMakeLists.txt'), ('roaringbitmap-src', 'CMakeLists.txt'),
+                    ('thread_pool-src', 'ThreadPool.h'), ('tsl-src', 'CMakeLists.txt')]:
+                (deps / folder).mkdir(parents=True)
+                (deps / folder / sentinel).write_text('fixture')
+            archive = root / 'antlr.tar.gz'
+            archive.write_bytes(b'fixture archive')
+            launcher = root / 'cache-launcher'
+            launcher.write_text('#!/bin/sh\n: > "$0.used"\nexit 91\n')
+            launcher.chmod(0o755)
+            captured = {}
+            def inspect_configure(command, **kwargs):
+                captured.update(command=command, env=kwargs['env'])
+                raise RuntimeError('configure boundary')
+            args = ['builder', '--source', str(source), '--source-sha', 'a' * 40,
+                    '--deps', str(deps), '--antlr-archive', str(archive),
+                    '--install', str(root / 'install'), '--output', str(root / 'output')]
+            with mock.patch.dict(os.environ, {'CMAKE_C_COMPILER_LAUNCHER': str(launcher),
+                    'CMAKE_CXX_COMPILER_LAUNCHER': str(launcher), 'CCACHE_DISABLE': '0'}), \
+                 mock.patch.object(sys, 'argv', args), \
+                 mock.patch.object(build_fresh_full_reference, 'validate_source_checkout', return_value={}), \
+                 mock.patch.object(build_fresh_full_reference.hashlib, 'md5') as digest, \
+                 mock.patch.object(build_fresh_full_reference, 'cached_archive_url', return_value=nullcontext('http://127.0.0.1/fixture')), \
+                 mock.patch.object(build_fresh_full_reference.subprocess, 'run', side_effect=inspect_configure):
+                digest.return_value.hexdigest.return_value = '3b75610fc8a827119258cba09a068be5'
+                with self.assertRaisesRegex(RuntimeError, '^configure boundary$'):
+                    build_fresh_full_reference.main()
+            # Use the actual tool's captured environment/launcher settings in a real C/C++ build.
+            (source / 'CMakeLists.txt').write_text('cmake_minimum_required(VERSION 3.18)\nproject(cache_fixture LANGUAGES C CXX)\nadd_executable(probe main.cpp helper.c)\n')
+            (source / 'main.cpp').write_text('extern "C" int marker(); int main(){return marker()==7?0:1;}\n')
+            (source / 'helper.c').write_text('int marker(void){return 7;}\n')
+            flags = [arg for arg in captured['command'] if arg.startswith(('-DCMAKE_C_COMPILER_LAUNCHER=', '-DCMAKE_CXX_COMPILER_LAUNCHER='))]
+            build = root / 'actual-build'
+            subprocess.run(['cmake', '-S', str(source), '-B', str(build), '-G', 'Ninja', *flags],
+                           env=captured['env'], check=True, capture_output=True, text=True)
+            subprocess.run(['cmake', '--build', str(build)], env=captured['env'],
+                           check=True, capture_output=True, text=True)
+            subprocess.run([str(build / 'probe')], check=True)
+            self.assertFalse(Path(str(launcher) + '.used').exists())
+            self.assertEqual(captured['env']['CCACHE_DISABLE'], '1')
+            self.assertEqual(set(flags), {'-DCMAKE_C_COMPILER_LAUNCHER=', '-DCMAKE_CXX_COMPILER_LAUNCHER='})
+
     def test_full_source_identity_checks_clean_tracked_inputs(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

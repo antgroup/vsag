@@ -64,7 +64,11 @@ python3 lite/benchmark/pack_mixed_cpu_acceptance.py "$BENCH_RESULT"
 
 `--checkpoint-every` 和 `--mutation-mode` 是可选质量诊断；额外真值、重建和 fork 会改变计时范围。功能检查、诊断曲线与正式性能不能混为同一结果。
 
+当前 mixed probe 保留既有混合公式；若 donor 相同或 FP32 舍入使结果未变，便将第 0 维设为 1（当前绝对值不超过 0.5 时），否则设为 0。该确定性回退保证重复向量和小数据集也发生真实修改；刻意保持原向量的 `reinsert` 对照不使用此回退。校验器核对所有模式（包括默认 `all`）的操作、轮次、ID 和查询顺序。这些工具修复不改写历史测量或其源码身份。
+
 ## Full 与运行时包
+
+新编 Full 工具显式清空 CMake 的 C/C++ compiler launcher 并关闭 ccache，阻断环境变量继承的编译缓存。运行时包 smoke 等待探针和全部打包 ELF 依赖出现在 `/proc/PID/maps`；只看到加载早期的可执行文件不足以证明依赖完整。映射文件按 ELF 文件头识别，普通输入文件的映射不计入，预期闭包之外的 ELF 映射会被拒绝。Full RaBitQ 输入读取同时拒绝不完整的维度头和向量数据。
 
 Full 消费程序在 `lite/benchmark/full` 独立构建。比较运行器还需要显式匹配的 helper 仓库和源码引用，包体程序需要固定哈希的 consumer 源码包；这些都是必须记录的输入，不能替换后绕过校验。
 
@@ -104,6 +108,9 @@ done
 合成数据 `main.cpp` 稳定性 CSV 的 `resident_rss_kib` 在 CRUD/查询后、Save/Load 前采样；稍后采集的 `peak_rss_kib` 是进程累计高水位，两次高水位相减不是单轮峰值。保留原字段以兼容旧结果，也不与真实数据 resident 协议混用。SIFT 准备过程每条查询有一个 N×维度的差分缓冲，使用有界子集，不作为无界数据准备工具。
 
 ## 工具职责
+
+混合 CRUD 的耗时和 CPU 合计显式沿用原记录的按顺序 binary64 逐项累加规则。
+Python 3.12 改变了内置浮点 `sum`；记录与离线复核共同使用固定规则，保留精确比较和原始数据。
 
 | 文件 | 职责 |
 | --- | --- |

@@ -21,6 +21,19 @@ from verify_mixed_cpu_acceptance import verify
 
 
 
+class HistoricalAggregationTests(unittest.TestCase):
+    def test_ordered_float_rounding_matches_recorded_python_profile(self):
+        # Compensated builtin sum in Python 3.12 gives 1e16 + 2 for this input.
+        # Historical metrics use left-to-right binary64 additions instead.
+        self.assertEqual(runner.historical_float_sum([1e16, 1.0, 1.0]), 1e16)
+        self.assertEqual(runner.historical_float_sum([1e16, 1.0, -1e16]), 0.0)
+
+    def test_empty_and_generator_samples_keep_the_same_rule(self):
+        self.assertEqual(runner.historical_float_sum([]), 0.0)
+        self.assertEqual(runner.historical_float_sum(x for x in [1e16, 1.0, 1.0]), 1e16)
+        self.assertEqual(runner.historical_float_sum([0.125, 0.25, 0.5]), 0.875)
+
+
 class BuildSourceTests(unittest.TestCase):
     def fixture(self, root):
         feature = root / 'feature'
@@ -260,13 +273,63 @@ class AcceptanceTests(unittest.TestCase):
             writer = csv.writer(stream)
             writer.writerow(['round', 'id', 'operation', 'wall_us', 'user_us',
                              'system_us', 'voluntary', 'involuntary', 'peak_kib'])
-            for operation, count in dict(build=1, add=1, remove=1, update=1,
-                                         query=3, save=1, load=1).items():
-                for _ in range(count):
-                    writer.writerow([1, 0, operation, 2, 1, 0, 0, 0, 100])
+            for number, identifier, operation in [
+                    (0, -1, 'build'), (1, 0, 'update'), (1, 0, 'query'),
+                    (1, 0, 'remove'), (1, 0, 'query'), (1, 0, 'add'),
+                    (1, 0, 'query'), (1, -1, 'save'), (1, -1, 'load')]:
+                writer.writerow([number, identifier, operation, 2, 1, 0, 0, 0, 100])
         (folder / 'quality.csv').write_text('round,query,hits,k\n0,0,10,10\n1,0,9,10\n')
         (folder / 'states.csv').write_text(
             'round,count,rss_kib,peak_kib,snapshot_bytes\n0,100,90,100,0\n1,100,95,100,20\n')
+
+
+    def test_all_mode_rejects_grouped_and_wrong_identity_samples(self):
+        for change in ['grouped', 'round', 'id', 'query']:
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.fixture(root)
+                with (root / 'samples.csv').open() as stream:
+                    rows = list(csv.DictReader(stream))
+                fields = list(rows[0])
+                if change == 'grouped':
+                    order = ['build', 'update', 'remove', 'add', 'query', 'save', 'load']
+                    rows.sort(key=lambda row: order.index(row['operation']))
+                elif change == 'query':
+                    next(row for row in rows if row['operation'] == 'query')['id'] = '1'
+                else:
+                    rows[1][change] = '7'
+                with (root / 'samples.csv').open('w', newline='') as stream:
+                    writer = csv.DictWriter(stream, fieldnames=fields)
+                    writer.writeheader()
+                    writer.writerows(rows)
+                with self.assertRaises(AssertionError):
+                    verify_run(root, 1, 1, 1)
+
+    @unittest.skipUnless(os.environ.get('VSAG_MIXED_PROBE'), 'Compiled C++ probe required')
+    def test_small_and_duplicate_inputs_still_perform_real_mutations(self):
+        for duplicate in [False, True]:
+            with tempfile.TemporaryDirectory(dir='/dev/shm') as directory:
+                root = Path(directory)
+                dataset = root / 'input'
+                dataset.mkdir()
+                for name, count in [('base.fvecs', 98), ('queries.fvecs', 2)]:
+                    with (dataset / name).open('wb') as stream:
+                        for row in range(count):
+                            values = [0.0 if duplicate else float((row + 1) * (d + 1))
+                                      for d in range(17)]
+                            stream.write(struct.pack('<i17f', 17, *values))
+                for storage in ['fp32', 'fp16', 'rabitq8']:
+                    for mode in ['all', 'update', 'replace']:
+                        with self.subTest(duplicate=duplicate, storage=storage, mode=mode):
+                            tag = storage + '-' + mode
+                            snapshots = root / (tag + '-snapshots')
+                            snapshots.mkdir()
+                            output = root / tag
+                            subprocess.run([os.environ['VSAG_MIXED_PROBE'], str(dataset),
+                                str(output), storage, '1', '1', str(snapshots),
+                                'resident', '1', mode], check=True, capture_output=True, text=True)
+                            raw = verify_run(output, 1, 1, 2, mode)
+                            self.assertEqual([int(row['count']) for row in raw['states']], [98, 98])
 
     def test_valid_raw_and_missing_call(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -470,10 +533,10 @@ class ExtendedPublishedTests(unittest.TestCase):
                     self.assertEqual(process['system_s'], float(fields['System time (seconds)']))
                     self.assertEqual(process['cpu_core_percent'], (process['user_s'] + process['system_s']) / elapsed * 100)
                     operations = ['build', 'add', 'remove', 'update', 'query', 'save', 'load']
-                    api_wall = sum(row[op]['wall_sum_ms'] for op in operations) / 1000
+                    api_wall = runner.historical_float_sum(row[op]['wall_sum_ms'] for op in operations) / 1000
                     self.assertEqual(process['timed_api_wall_s'], api_wall)
                     self.assertEqual(process['other_wall_s'], elapsed - api_wall)
-                    self.assertEqual(process['timed_api_cpu_s'], sum(row[op]['user_sum_ms'] + row[op]['system_sum_ms'] for op in operations) / 1000)
+                    self.assertEqual(process['timed_api_cpu_s'], runner.historical_float_sum(row[op]['user_sum_ms'] + row[op]['system_sum_ms'] for op in operations) / 1000)
                     early, late, ids = [], [], set()
                     with (raw / tag / 'samples.csv').open() as samples:
                         for sample in csv.DictReader(samples):

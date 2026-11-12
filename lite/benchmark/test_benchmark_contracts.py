@@ -247,6 +247,26 @@ class ReviewFixedEvidenceTests(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which('c++'), 'C++ compiler required for benchmark helper regression')
 class BenchmarkContractTests(unittest.TestCase):
+
+    def test_full_rabitq_reader_rejects_partial_headers(self):
+        original = (Path(__file__).parent / 'full_rabitq_dataset_main.cpp').read_text()
+        code = '#include <cstdint>\n#include <fstream>\n#include <stdexcept>\n#include <string>\n#include <vector>\n'
+        code += function_body(original, 'template <typename T>\nstruct Matrix') + ';\n'
+        code += function_body(original, 'void\nrequire(') + '\n'
+        code += function_body(original, 'template <typename T>\nMatrix<T>\nread_matrix(')
+        code += '\nint main(int argc, char** argv) { try { return read_matrix<float>(argv[1], 2).count == 2 ? 0 : 2; } catch (const std::exception&) { return 3; } }\n'
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, binary, data = root / 'reader.cpp', root / 'reader', root / 'vectors.fvecs'
+            source.write_text(code)
+            subprocess.run(['c++', '-std=c++17', str(source), '-o', str(binary)], check=True)
+            valid = struct.pack('<iffiff', 2, 1.0, 2.0, 2, 3.0, 4.0)
+            data.write_bytes(valid)
+            subprocess.run([str(binary), str(data)], check=True)
+            for malformed in [valid + b'x', valid + b'xy', valid + b'xyz', valid[:-1], b'']:
+                data.write_bytes(malformed)
+                self.assertNotEqual(subprocess.run([str(binary), str(data)]).returncode, 0)
+
     def test_all_percentile_implementations(self):
         root = Path(__file__).parent
         paths = ['main.cpp', 'dataset_main.cpp', 'full_main.cpp',

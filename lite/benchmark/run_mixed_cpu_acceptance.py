@@ -32,6 +32,16 @@ def percentile(values, fraction):
     return sorted(values)[max(1, math.ceil(len(values) * fraction)) - 1]
 
 
+def historical_float_sum(values):
+    # Preserve the ordered binary64 accumulation used by the original records.
+    # Python 3.12 changed builtin sum(float), which changes derived metrics' bits.
+    # Recording and verification share this rule; raw samples remain untouched.
+    total = 0.0
+    for value in values:
+        total += value
+    return total
+
+
 def mutation_factor(mode):
     if mode not in ['all', 'update', 'replace', 'reinsert']:
         raise ValueError('Invalid mutation mode')
@@ -58,12 +68,12 @@ def verify_run(output, rounds, cycles, queries, mutation_mode='all'):
         if count == 0:
             continue
         walls = [float(row['wall_us']) for row in selected]
-        total = sum(walls)
+        total = historical_float_sum(walls)
         result[operation] = dict(count=count, p50_us=percentile(walls, .5),
             p99_us=percentile(walls, .99), wall_sum_ms=total / 1000,
             call_only_ops_per_second=count * 1e6 / total,
-            user_sum_ms=sum(float(row['user_us']) for row in selected) / 1000,
-            system_sum_ms=sum(float(row['system_us']) for row in selected) / 1000)
+            user_sum_ms=historical_float_sum(float(row['user_us']) for row in selected) / 1000,
+            system_sum_ms=historical_float_sum(float(row['system_us']) for row in selected) / 1000)
         for row in selected:
             assert all(float(row[key]) >= 0 for key in
                        ['user_us', 'system_us', 'voluntary', 'involuntary', 'peak_kib'])
@@ -89,27 +99,27 @@ def verify_run(output, rounds, cycles, queries, mutation_mode='all'):
         assert high_water == sorted(high_water)
         assert all(value > 0 and value >= int(row['rss_kib']) for value, row in zip(high_water, states))
     result['states'] = states
-    if mutation_mode != 'all':
-        # Verify stage purity and the exact deterministic ID/query schedule, not only totals.
-        position = 0
-        query = 0
-        def consume(number, identifier, operation):
-            nonlocal position
-            row = samples[position]
-            assert (int(row['round']), int(row['id']), row['operation']) == (number, identifier, operation)
-            position += 1
-        consume(0, -1, 'build')
-        stages = ['update'] if mutation_mode == 'update' else ['remove', 'add']
-        for number in range(1, rounds + 1):
-            for cycle in range(cycles):
-                identifier = ((number - 1) * 65537 + cycle * 8191) % count
-                for operation in stages:
-                    consume(number, identifier, operation)
-                    consume(number, query % queries, 'query')
-                    query += 1
-            consume(number, -1, 'save')
-            consume(number, -1, 'load')
-        assert position == len(samples)
+    # Verify stage purity and the exact deterministic ID/query schedule, not only totals.
+    position = 0
+    query = 0
+    def consume(number, identifier, operation):
+        nonlocal position
+        row = samples[position]
+        assert (int(row['round']), int(row['id']), row['operation']) == (number, identifier, operation)
+        position += 1
+    consume(0, -1, 'build')
+    stages = (['update', 'remove', 'add'] if mutation_mode == 'all' else
+              ['update'] if mutation_mode == 'update' else ['remove', 'add'])
+    for number in range(1, rounds + 1):
+        for cycle in range(cycles):
+            identifier = ((number - 1) * 65537 + cycle * 8191) % count
+            for operation in stages:
+                consume(number, identifier, operation)
+                consume(number, query % queries, 'query')
+                query += 1
+        consume(number, -1, 'save')
+        consume(number, -1, 'load')
+    assert position == len(samples)
     return result
 
 

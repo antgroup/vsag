@@ -18,6 +18,61 @@ from run_mixed_cpu_acceptance import sha
 
 
 class RuntimePackageTests(unittest.TestCase):
+
+    def mapping_fixture(self, root):
+        (root / 'bin').mkdir()
+        (root / 'lib').mkdir()
+        probe = root / 'bin/probe'
+        libraries = [root / 'lib/ld-linux-fixture.so', root / 'lib/library-runtime']
+        for path in [probe, *libraries]:
+            path.write_bytes(b'elf fixture')
+        (root / 'lib/library.so').symlink_to(libraries[1].name)
+        snapshot = root / 'snapshot'
+        snapshot.write_bytes(b'fixture')
+        process = mock.Mock(pid=12345, returncode=0)
+        process.poll.return_value = None
+        process.communicate.return_value = ('base_count,recall_at_k\n10000,1.0\n', '')
+        def maps(paths):
+            return '\n'.join('1000-2000 r-xp 00000000 00:00 0 ' + str(path) for path in paths)
+        return probe, libraries, snapshot, process, maps
+
+    def test_smoke_waits_for_entire_dependency_closure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            probe, libraries, snapshot, process, maps = self.mapping_fixture(root)
+            data = root / 'mapped.so.data'
+            data.write_bytes(b'ordinary mapped input')
+            with mock.patch.object(measure_runtime_package.subprocess, 'Popen', return_value=process), \
+                 mock.patch.object(Path, 'read_text', side_effect=[maps([probe]), maps([probe, *libraries, data])]) as read_maps, \
+                 mock.patch.object(measure_runtime_package.time, 'sleep'):
+                result = measure_runtime_package.smoke(root, root, 'fp32', snapshot, {}, root / 'smoke')
+            self.assertEqual(set(result['mapped_elf_paths']), {str(p) for p in [probe, *libraries]})
+            self.assertEqual(read_maps.call_count, 2)
+            process.kill.assert_not_called()
+
+    def test_smoke_rejects_external_elf_without_shared_library_suffix(self):
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as external:
+            root = Path(directory)
+            probe, libraries, snapshot, process, maps = self.mapping_fixture(root)
+            foreign = Path(external) / 'foreign-runtime'
+            foreign.write_bytes(b'\x7fELFfixture')
+            with mock.patch.object(measure_runtime_package.subprocess, 'Popen', return_value=process), \
+                 mock.patch.object(Path, 'read_text', return_value=maps([probe, *libraries, foreign])), \
+                 mock.patch.object(measure_runtime_package.time, 'sleep'):
+                with self.assertRaises(AssertionError):
+                    measure_runtime_package.smoke(root, root, 'fp32', snapshot, {}, root / 'smoke')
+
+    def test_smoke_rejects_incomplete_startup_mappings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            probe, libraries, snapshot, process, maps = self.mapping_fixture(root)
+            process.poll.side_effect = [None, 0]
+            with mock.patch.object(measure_runtime_package.subprocess, 'Popen', return_value=process), \
+                 mock.patch.object(Path, 'read_text', return_value=maps([probe])), \
+                 mock.patch.object(measure_runtime_package.time, 'sleep'):
+                with self.assertRaises(AssertionError):
+                    measure_runtime_package.smoke(root, root, 'fp32', snapshot, {}, root / 'smoke')
+
     def test_composed_archive_symlinks_cannot_write_outside_destination(self):
         attacks = [
             [('inside/keep', b'safe'), ('dir/link', '../inside'),
