@@ -65,6 +65,18 @@ incoming edge when another edge can be safely removed; the farthest fallback
 remains if none can. It is not a global connectivity or recall guarantee.
 See [RaBitQ design](lite_rabitq_design.md) for the actual configuration and model limits.
 
+### Graph repair after mutations
+
+After a physical deletion or a changed-vector update, affected adjacency rows
+are reselected from their current neighbors and the previous neighbors of the
+changed record. Reselection includes rows that are already at their degree cap.
+It uses a diversity pass, then fills any remaining capacity by distance.
+Incoming-edge protection still applies. RaBitQ uses the existing encoded
+distance estimates for this process.
+
+This helps preserve navigability under repeated mutations. It adds work to
+Delete and Update, and recall still depends on the workload and search budget.
+
 ## Compatibility, persistence and failure boundaries
 
 This is a separate Lite API, not an ABI-compatible replacement for Full Index.
