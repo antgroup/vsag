@@ -91,18 +91,16 @@ jobs:
     # Python-only changes still need Community formatting.
     if: (needs.changes.outputs.cpp == 'true' || needs.changes.outputs.python == 'true') && !(github.event_name == 'pull_request' && github.base_ref == 'main' && inputs.team-linux && needs.changes.outputs.cpp == 'true')
     runs-on: ubuntu-24.04
+    container: vsaglib/vsag:ci-main-base
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      - name: Install Clang format
-        run: |
-          sudo apt-get update
-          sudo bash scripts/deps/install_toolchain_ubuntu.sh
-          sudo apt-get install -y clang-format-20
-          sudo ln -sf /usr/bin/clang-format-20 /usr/bin/clang-format
-          clang-format --version
-      - name: Run Clang format check
-        run: ./scripts/format/check_format.sh
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/check-format
 
   coverage-config:
     name: Coverage Configuration

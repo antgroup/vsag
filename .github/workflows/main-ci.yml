@@ -77,6 +77,10 @@ jobs:
       matrix:
         check: ${{ fromJSON((github.event.deleted != true && (needs.select-checks.result != 'success' || needs.select-checks.outputs.format == 'true')) && '["Format Check"]' || '["Format Check Not Required"]') }}
     runs-on: ubuntu-24.04
+    container: ${{ matrix.check == 'Format Check' && 'vsaglib/vsag:ci-main-base' || '' }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Require successful check selection
         if: matrix.check == 'Format Check'
@@ -90,6 +94,8 @@ jobs:
       - name: Checkout code
         if: matrix.check == 'Format Check'
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/check-format
         if: matrix.check == 'Format Check'
 

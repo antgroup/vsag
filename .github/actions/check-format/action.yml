@@ -1,16 +1,18 @@
 name: check-format
-description: Shared steps for automatic and manual checks
+description: Check repository formatting with preinstalled clang-format 20
 runs:
   using: composite
   steps:
-    - name: Install Clang format
+    - name: Check formatter prerequisites
       shell: bash
       run: |
-        sudo apt-get update
-        sudo bash scripts/deps/install_toolchain_ubuntu.sh
-        sudo apt-get install -y clang-format-20
-        sudo ln -sf /usr/bin/clang-format-20 /usr/bin/clang-format
-        clang-format --version
+        ./scripts/ci/configure-git-safe-directory.sh
+        version=$(clang-format-20 --version)
+        echo "$version"
+        if [[ ! "$version" =~ version\ 20\. ]]; then
+          echo '::error::Format Check requires preinstalled clang-format major version 20.'
+          exit 1
+        fi
     - name: Run Clang format check
       shell: bash
       run: ./scripts/format/check_format.sh
