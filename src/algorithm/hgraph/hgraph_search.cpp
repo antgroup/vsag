@@ -231,6 +231,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
             search_param.distance_threshold = threshold;
             search_param.topk = static_cast<int64_t>(search_param.ef);
             search_param.rerank_topk = k;
+            search_param.min_results = k;
             search_param.parallel_search_thread_count = params.parallel_search_thread_count;
             search_param.enable_reorder = params.enable_reorder;
             search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
@@ -896,6 +897,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     }
     base_search_param.topk = static_cast<int64_t>(base_search_param.ef);
     base_search_param.rerank_topk = k;
+    base_search_param.min_results = k;
     if (params.topk_factor > 1.0F) {
         base_search_param.topk =
             std::min(base_search_param.topk,

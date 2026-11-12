@@ -43,6 +43,8 @@ public:
 
 public:
     int64_t topk{0};
+    // Result count the filtered KNN search tries to reach by re-expanding filter-rejected bridges.
+    uint64_t min_results{0};
     int64_t rerank_topk{0};
     float radius{0.0F};
     InnerIdType ep{0};
