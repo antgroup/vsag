@@ -11,7 +11,10 @@ import subprocess
 import tarfile
 import tempfile
 
-from run_mixed_cpu_acceptance import sha, write_json, validate_build, validate_loaded_library
+from run_mixed_cpu_acceptance import (
+    add_exec_scratch, executable_scratch, sha, snapshot_scratch, validate_build,
+    validate_loaded_library, write_json,
+)
 
 
 HISTORICAL_FEATURE_SHA = 'dbb2fe0bec685ae7a343b1d2060d0553a98e20d2'
@@ -43,6 +46,7 @@ def main():
     parser.add_argument('--fresh-full-receipt', type=Path)
     parser.add_argument('--reference-provenance', type=Path, help='Explicit matching installed Full provenance when no fresh receipt is supplied')
     parser.add_argument('--output', type=Path, required=True)
+    add_exec_scratch(parser)
     args = parser.parse_args()
     args.output = args.output.resolve()
     if args.output.exists():
@@ -58,7 +62,6 @@ def main():
     for tool in ['git', 'c++', 'python3', 'taskset', 'ldd', 'strip']:
         assert shutil.which(tool), 'Missing required tool: ' + tool
     assert os.access('/usr/bin/time', os.X_OK), 'Missing executable /usr/bin/time'
-    assert Path('/dev/shm').is_dir() and os.access('/dev/shm', os.W_OK | os.X_OK), 'Writable /dev/shm is required'
     expected_feature = args.feature_sha
     lite_library = args.feature_build / 'libvsag-lite.so'
     current_build_receipt = None
@@ -114,6 +117,8 @@ def main():
     sources = {name: subprocess.check_output(
         ['git', 'show', args.source_ref + ':lite/benchmark/' + name], cwd=args.source_repo)
         for name in names}
+    exec_root = executable_scratch(args.exec_scratch)
+    snapshot_root = snapshot_scratch()
     args.output.mkdir(parents=True, exist_ok=False)
     if args.fresh_full_receipt:
         (args.output / 'fresh-full-receipt.json').write_bytes(args.fresh_full_receipt.read_bytes())
@@ -123,7 +128,9 @@ def main():
     env = {k: v for k, v in os.environ.items() if not k.startswith('VSAG_') and k not in
            ['LD_PRELOAD', 'LD_LIBRARY_PATH', 'LD_AUDIT', 'LD_DEBUG']}
     env.update(OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1', MKL_NUM_THREADS='1')
-    with tempfile.TemporaryDirectory(prefix='vsag-equal-full-', dir='/dev/shm') as directory:
+    with tempfile.TemporaryDirectory(prefix='vsag-equal-full-', dir=exec_root) as directory, \
+         tempfile.TemporaryDirectory(prefix='vsag-equal-full-snapshots-', dir=snapshot_root) as snapshots_dir:
+        env['TMPDIR'] = directory
         scratch = Path(directory)
         lite = scratch / 'lite'
         lite.mkdir()
@@ -160,7 +167,7 @@ def main():
         command = ['python3', str(scratch / 'run_aligned_comparison.py'), '--lite-build', str(lite),
             '--full-library', str(full_library), '--full-builder', str(scratch / 'full_builder'),
             '--full-loader', str(scratch / 'full_loader'), '--output', str(args.output / 'measurements'),
-            '--scratch', str(scratch), '--trials', '3', '--loads', '3', '--ef', '512', '--full-ef', '512', '--cpu', '0']
+            '--scratch', snapshots_dir, '--trials', '3', '--loads', '3', '--ef', '512', '--full-ef', '512', '--cpu', '0']
         for value in args.dataset:
             command += ['--dataset', value]
         meta['measurement_command'] = command
@@ -174,7 +181,7 @@ def main():
                                   args.feature_build.resolve()) == current_build_receipt
         subprocess.run(['python3', str(scratch / 'measure_elf_closure.py'), '--lite',
             str(lite_library), '--full', str(full_library),
-            '--output', str(args.output / 'elf'), '--scratch', str(scratch)], env=env, check=True)
+            '--output', str(args.output / 'elf'), '--scratch', snapshots_dir], env=env, check=True)
     manifest = {str(p.relative_to(args.output)): sha(p) for p in sorted(args.output.rglob('*')) if p.is_file()}
     write_json(args.output / 'manifest.json', manifest)
     with tarfile.open(args.output / 'raw.tar.gz', 'w:gz') as stream:

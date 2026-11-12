@@ -14,6 +14,7 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 import run_mixed_cpu_acceptance as runner
 from run_mixed_cpu_acceptance import percentile, sha, verify_run
@@ -144,6 +145,25 @@ class BuildSourceTests(unittest.TestCase):
             shutil.copytree(build, copy)
             with self.assertRaisesRegex(ValueError, 'copied'):
                 runner.validate_build(feature, head, copy)
+
+    def test_noexec_scratch_is_rejected_before_output_creation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            feature, build, head = self.fixture(root)
+            dataset = root / 'input'
+            dataset.mkdir()
+            for name in ('base.fvecs', 'queries.fvecs'):
+                (dataset / name).write_bytes(struct.pack('<if', 1, 0.0))
+            output = root / 'must-not-exist'
+            args = ['runner', '--feature-repo', str(feature), '--feature-sha', head,
+                    '--build', str(build), '--dataset', 'Fixture=' + str(dataset),
+                    '--output', str(output), '--exec-scratch', str(root),
+                    '--cpu', str(min(os.sched_getaffinity(0)))]
+            with mock.patch.object(sys, 'argv', args), \
+                 mock.patch.object(os, 'statvfs', return_value=mock.Mock(f_flag=os.ST_NOEXEC)):
+                with self.assertRaisesRegex(ValueError, 'Executable scratch is mounted noexec'):
+                    runner.main()
+            self.assertFalse(output.exists())
 
     def test_runtime_library_binding(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -12,6 +12,8 @@ Update-only、Remove/Add-only 和同最终向量重建是下一步核对方法�
 
 工具版本遵循当前仓库的 `AGENTS.md` 与构建说明：格式检查和静态检查使用 clang-format 20、clang-tidy 20；独立 Lite 和消费程序仍使用 C++17。当前工程验证环境与历史性能测量环境分别记录，不能互相替代。
 
+编译或执行探针的工具接受 `--exec-scratch`，可指定已存在且允许执行的工作目录。默认使用系统临时目录，优先读取 `TMPDIR`。构建目录和输入 SDK 的动态库也应放在允许执行的挂载点。快照仍存放在 `/dev/shm` 内存盘，该挂载点可以保留 `noexec`。请按工作负载为快照预留空间。
+
 ```bash
 BENCH_ROOT=$(pwd -P)
 BENCH_WORK=$(mktemp -d /tmp/vsag-lite-accept.XXXXXX)
@@ -51,10 +53,10 @@ BENCH_RESULT="$BENCH_WORK/resident-result"
 BENCH_CPU=0
 python3 lite/benchmark/run_mixed_cpu_acceptance.py \
   --prepare-build --feature-repo "$BENCH_FEATURE" --feature-sha "$BENCH_FEATURE_SHA" \
-  --build "$BENCH_FEATURE_BUILD"
+  --build "$BENCH_FEATURE_BUILD" --exec-scratch "$BENCH_WORK"
 python3 lite/benchmark/run_mixed_cpu_acceptance.py \
   --feature-repo "$BENCH_FEATURE" --feature-sha "$BENCH_FEATURE_SHA" \
-  --build "$BENCH_FEATURE_BUILD" --dataset SIFT="$BENCH_DATASET" \
+  --build "$BENCH_FEATURE_BUILD" --exec-scratch "$BENCH_WORK" --dataset SIFT="$BENCH_DATASET" \
   --resident --trials 3 --rounds 20 --cycles 250 --cpu "$BENCH_CPU" --output "$BENCH_RESULT"
 python3 lite/benchmark/verify_mixed_cpu_acceptance.py "$BENCH_RESULT"
 python3 lite/benchmark/pack_mixed_cpu_acceptance.py "$BENCH_RESULT"

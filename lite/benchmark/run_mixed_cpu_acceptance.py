@@ -14,6 +14,27 @@ import subprocess
 import tempfile
 
 
+def add_exec_scratch(parser):
+    parser.add_argument('--exec-scratch', type=Path,
+                        help='Writable directory on an executable mount (default: system temp directory)')
+
+
+def executable_scratch(directory):
+    root = Path(directory if directory is not None else tempfile.gettempdir()).resolve()
+    if not root.is_dir() or not os.access(root, os.W_OK | os.X_OK):
+        raise ValueError(f'Executable scratch must be an existing writable directory: {root}')
+    if os.statvfs(root).f_flag & os.ST_NOEXEC:
+        raise ValueError(f'Executable scratch is mounted noexec: {root}; choose another --exec-scratch')
+    return root
+
+
+def snapshot_scratch():
+    root = Path('/dev/shm')
+    if not root.is_dir() or not os.access(root, os.W_OK | os.X_OK):
+        raise ValueError('Writable /dev/shm is required for RAM-backed snapshots')
+    return root
+
+
 def sha(path):
     digest = hashlib.sha256()
     with Path(path).open('rb') as stream:
@@ -261,7 +282,7 @@ def clean_environment():
     return env
 
 
-def prepare_build(feature, expected, build):
+def prepare_build(feature, expected, build, exec_root=None):
     source = feature_identity(feature, expected)
     if build.exists():
         raise FileExistsError('Use a new build directory; existing builds are never cleaned: ' + str(build))
@@ -273,6 +294,7 @@ def prepare_build(feature, expected, build):
         ['cmake', '--build', str(build), '--target', 'vsag_lite', '-j2']]
     env = clean_environment()
     env['CCACHE_DISABLE'] = '1'
+    env['TMPDIR'] = str(executable_scratch(exec_root))
     build.mkdir(parents=True, exist_ok=False)
     with (build / 'prepare-build.log').open('w') as log:
         for command in commands:
@@ -349,13 +371,14 @@ def main():
                         help='Opt-in resident quality/rebuild diagnosis every N rounds; not production tuning')
     parser.add_argument('--mutation-mode', choices=['all', 'update', 'replace', 'reinsert'],
                         default='all', help='Opt-in isolated mutation workload; requires resident checkpoints')
+    add_exec_scratch(parser)
     args = parser.parse_args()
     args.feature_repo = args.feature_repo.resolve(strict=True)
     args.build = args.build.resolve()
     if args.prepare_build:
         if args.dataset or args.output:
             parser.error('--prepare-build cannot be combined with --dataset or --output')
-        prepare_build(args.feature_repo, args.feature_sha, args.build)
+        prepare_build(args.feature_repo, args.feature_sha, args.build, args.exec_scratch)
         print('Prepared source-bound Lite build:', args.build, flush=True)
         return
     if not args.dataset or args.output is None:
@@ -434,15 +457,19 @@ def main():
         identity['inputs'][name] = {filename: dict(path=str(path / filename), sha256=sha(path / filename))
                                     for filename in ['base.fvecs', 'queries.fvecs']}
         datasets.append((name, path))
+    exec_root = executable_scratch(args.exec_scratch)
+    snapshot_root = snapshot_scratch()
     args.output.mkdir(parents=True, exist_ok=False)
     (args.output / 'source.cpp').write_bytes(source.read_bytes())
     for name in ['CMakeCache.txt', 'compile_commands.json', BUILD_RECEIPT]:
         (args.output / name).write_bytes((args.build / name).read_bytes())
     write_json(args.output / 'identity.json', identity)
     runs = []
-    with tempfile.TemporaryDirectory(prefix='vsag-mixed2926-', dir='/dev/shm') as temporary:
-        scratch = Path(temporary)
-        binary = scratch / 'probe'
+    with tempfile.TemporaryDirectory(prefix='vsag-mixed2926-', dir=exec_root) as directory, \
+         tempfile.TemporaryDirectory(prefix='vsag-mixed2926-snapshots-', dir=snapshot_root) as snapshots_dir:
+        env['TMPDIR'] = directory
+        snapshots_root = Path(snapshots_dir)
+        binary = Path(directory) / 'probe'
         command = ['c++', '-std=c++17', '-O3', '-DNDEBUG', '-Wall', '-Wextra', '-Wpedantic',
             '-I' + str(args.feature_repo / 'include'), str(source), '-L' + str(args.build),
             '-Wl,-rpath,' + str(args.build), '-lvsag-lite', '-o', str(binary)]
@@ -459,7 +486,7 @@ def main():
                 for mode in modes[trial % 3:] + modes[:trial % 3]:
                     tag = f'{name}-{mode}-{trial}'
                     selected = args.output / tag
-                    snapshots = scratch / tag
+                    snapshots = snapshots_root / tag
                     snapshots.mkdir()
                     command = ['/usr/bin/time', '-v', '-o', str(args.output / (tag + '.resources.txt')),
                         'taskset', '-c', str(args.cpu), str(binary), str(dataset), str(selected),
@@ -492,7 +519,7 @@ def main():
                     write_json(selected / 'audit.json', result)
                     runs.append(result)
                     write_json(args.output / 'rows.json', runs)
-                    release_verified_snapshots(scratch, snapshots, result['snapshots'])
+                    release_verified_snapshots(snapshots_root, snapshots, result['snapshots'])
                     print(tag, 'PASS', 'recall', result['recall'], flush=True)
         assert sha(library) == identity['library_sha256'], 'Library changed during measurement'
         validate_build(args.feature_repo, args.feature_sha, args.build)

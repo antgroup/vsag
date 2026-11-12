@@ -500,7 +500,7 @@ class CurrentPublishedFullTests(unittest.TestCase):
 
 class CurrentSourceTests(unittest.TestCase):
     def test_actual_cmake_soname_alias_chain_survives_sdk_copy(self):
-        with tempfile.TemporaryDirectory(dir='/dev/shm') as directory:
+        with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source, build = root / 'source', root / 'build'
             source.mkdir()
@@ -591,7 +591,7 @@ class CurrentSourceTests(unittest.TestCase):
     def test_fresh_full_ignores_inherited_compiler_launchers(self):
         from contextlib import nullcontext
         import os
-        with tempfile.TemporaryDirectory(dir='/dev/shm') as directory:
+        with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source, deps = root / 'source', root / 'deps'
             source.mkdir()

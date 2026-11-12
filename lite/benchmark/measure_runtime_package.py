@@ -17,7 +17,9 @@ import tempfile
 import time
 
 from pack_mixed_cpu_acceptance import unpack
-from run_mixed_cpu_acceptance import sha, write_json, validate_build
+from run_mixed_cpu_acceptance import (
+    add_exec_scratch, executable_scratch, sha, snapshot_scratch, validate_build, write_json,
+)
 from run_pinned_full_acceptance import validate_fresh_receipt
 
 
@@ -267,6 +269,7 @@ def main():
     parser.add_argument('--dataset', type=Path, required=True)
     parser.add_argument('--source-archive', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    add_exec_scratch(parser)
     args = parser.parse_args()
     args.output = args.output.resolve()
     if args.output.exists():
@@ -278,7 +281,6 @@ def main():
         assert (install / 'include').is_dir(), 'Missing SDK headers: ' + str(install)
     for tool in ['c++', 'ldd', 'strip', 'dpkg-query']:
         assert shutil.which(tool), 'Missing required tool: ' + tool
-    assert Path('/dev/shm').is_dir() and os.access('/dev/shm', os.W_OK | os.X_OK), 'Writable /dev/shm is required'
     assert Path('/proc/self/maps').is_file(), 'Linux /proc is required'
     assert sha(args.source_archive) == '0c6697115a21dc210ab63cc0dfd659c53614d39ffc89115292765a1565ca9b54', 'Untrusted consumer-source archive'
     current = None
@@ -299,13 +301,17 @@ def main():
         excludes=['SDK headers/static archives', 'Python bindings', 'container/OS/kernel/shell', 'datasets/snapshots', 'dlopen plugins'],
         source_archive_sha256=sha(args.source_archive), redistribution='measurement prototype only; license notices copied, no legal certification',
         strip=subprocess.check_output(['strip','--version'],text=True).splitlines()[0], packages={})
+    exec_root = executable_scratch(args.exec_scratch)
+    snapshot_root = snapshot_scratch()
     args.output.mkdir(parents=True, exist_ok=False)
     if current is not None:
         write_json(args.output / 'current-source-receipts.json', current)
         report['source_bound_current_package'] = dict(feature_sha=args.feature_sha,
             receipts_sha256=sha(args.output / 'current-source-receipts.json'))
         report['quality_policy'] = 'Record measured recall only; no project acceptance threshold'
-    with tempfile.TemporaryDirectory(prefix='vsag-runtime-package-',dir='/dev/shm') as directory:
+    with tempfile.TemporaryDirectory(prefix='vsag-runtime-package-', dir=exec_root) as directory, \
+         tempfile.TemporaryDirectory(prefix='vsag-runtime-package-snapshots-', dir=snapshot_root) as snapshots_dir:
+        env['TMPDIR'] = directory
         scratch = Path(directory)
         sources = scratch / 'sources'
         unpack(args.source_archive, sources)
@@ -328,7 +334,7 @@ def main():
             listing = subprocess.check_output([str(relocated/'lib'/loader),'--inhibit-cache','--library-path',
                 str(relocated/'lib'),'--list',str(relocated/'bin/probe')],env=env,text=True)
             (args.output/(mode+'-loader-list.txt')).write_text(listing)
-            checks = [smoke(relocated,args.dataset,storage,scratch/(mode+'-'+storage+'.snapshot'),env,
+            checks = [smoke(relocated,args.dataset,storage,Path(snapshots_dir)/(mode+'-'+storage+'.snapshot'),env,
                             args.output/(mode+'-'+storage), minimum_recall=0.0 if current else .95)
                       for storage in ['fp32','fp16','rabitq8']]
             report['packages'][mode] = dict(compile=command,consumer_source_sha256=sha(source),files=files,

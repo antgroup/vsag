@@ -17,7 +17,7 @@ import subprocess
 import tempfile
 import time
 
-from run_mixed_cpu_acceptance import sha, write_json
+from run_mixed_cpu_acceptance import add_exec_scratch, executable_scratch, sha, write_json
 
 
 def strict_fp_config(original):
@@ -94,6 +94,7 @@ def main():
     parser.add_argument('--install', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--strict-fp', action='store_true', help='Build isolated native Full with -O3 instead of -Ofast')
+    add_exec_scratch(parser)
     args = parser.parse_args()
     args.source = args.source.resolve(strict=True)
     args.deps = args.deps.resolve(strict=True)
@@ -104,8 +105,9 @@ def main():
     source_hashes = validate_source_checkout(args.source, head)
     assert not args.install.exists() and not args.output.exists(), 'Never overwrite a reference'
     assert hashlib.md5(args.antlr_archive.read_bytes()).hexdigest() == '3b75610fc8a827119258cba09a068be5'
+    exec_root = executable_scratch(args.exec_scratch)
     args.output.mkdir(parents=True)
-    env = dict(os.environ, TMPDIR='/dev/shm', CCACHE_DISABLE='1')
+    env = dict(os.environ, TMPDIR=str(exec_root), CCACHE_DISABLE='1')
     # CMake reads launcher environment variables even when ENABLE_CCACHE is OFF.
     for name in ['CMAKE_C_COMPILER_LAUNCHER', 'CMAKE_CXX_COMPILER_LAUNCHER']:
         env.pop(name, None)
@@ -117,7 +119,7 @@ def main():
         records.append(dict(tag=tag,argv=command,exit=result.returncode,wall_seconds=time.monotonic()-begin))
         write_json(args.output/'commands.json',records)
         assert result.returncode == 0, tag+' failed; log retained'
-    with cached_archive_url(args.antlr_archive) as archive_url, tempfile.TemporaryDirectory(prefix='vsag-fresh-full-',dir='/dev/shm') as directory:
+    with cached_archive_url(args.antlr_archive) as archive_url, tempfile.TemporaryDirectory(prefix='vsag-fresh-full-', dir=exec_root) as directory:
         env['VSAG_THIRDPARTY_ANTLR4_4_13_2'] = archive_url
         build=Path(directory)/'build'
         assert not build.exists()
