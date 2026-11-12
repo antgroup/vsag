@@ -1860,6 +1860,51 @@ TEST_CASE("RaBitQSplitDataCell hybrid IO (1bit in memory, supplement on disk)",
     }
 }
 
+TEST_CASE("BinaryFlattenDataCell scattered insert uses restored packed stride",
+          "[ut][FlattenDataCell][binary][serialize]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(JsonType::Parse(R"({
+        "io_params": { "type": "memory_io" },
+        "quantization_params": { "type": "binary" }
+    })"));
+
+    IndexCommonParam original_common;
+    original_common.allocator_ = allocator;
+    original_common.dim_ = 65;
+    original_common.metric_ = MetricType::METRIC_TYPE_HAMMING;
+    original_common.data_type_ = DataTypes::DATA_TYPE_BINARY;
+
+    std::array<uint8_t, 18> packed{};
+    for (uint64_t i = 0; i < packed.size(); ++i) {
+        packed[i] = static_cast<uint8_t>(i * 11U + 3U);
+    }
+    packed[8] &= 0x01U;
+    packed[17] &= 0x01U;
+
+    auto original = FlattenInterface::MakeInstance(param, original_common);
+    original->BatchInsertVector(packed.data(), 1);
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    original->Serialize(writer);
+
+    auto restored_common = original_common;
+    restored_common.dim_ = 128;
+    auto restored = FlattenInterface::MakeInstance(param, restored_common);
+    stream.seekg(0, std::ios::beg);
+    IOStreamReader reader(stream);
+    restored->Deserialize(reader);
+    REQUIRE(restored->code_size_ == 9);
+
+    std::array<InnerIdType, 2> ids = {0, 2};
+    restored->BatchInsertVector(packed.data(), 2, ids.data());
+    std::array<uint8_t, 9> actual{};
+    REQUIRE(restored->GetCodesById(0, actual.data()));
+    REQUIRE(std::memcmp(actual.data(), packed.data(), actual.size()) == 0);
+    REQUIRE(restored->GetCodesById(2, actual.data()));
+    REQUIRE(std::memcmp(actual.data(), packed.data() + actual.size(), actual.size()) == 0);
+}
+
 TEST_CASE("RaBitQSplitDataCell optimized scalar-code build",
           "[ut][RaBitQSplitDataCell][optimized_build]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();

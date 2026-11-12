@@ -200,6 +200,10 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         optimizer_ = std::make_shared<Optimizer<BasicSearcher>>(common_param);
     }
     check_and_init_raw_vector(hgraph_param->raw_vector_param, common_param);
+    if (data_type_ == DataTypes::DATA_TYPE_BINARY and
+        basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_BINARY) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
+    }
     if (this->using_dedup_storage()) {
         this->basic_flatten_codes_ = MakeCodeSlotFlattenAdapter(
             this->basic_flatten_codes_, this->code_slot_map_, allocator_, &this->total_count_);
@@ -240,6 +244,9 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
 
     // map
     auto inner_json = map_hgraph_param(hgraph_json);
+    if (data_type_ == DataTypes::DATA_TYPE_BINARY) {
+        ApplyBinaryQuantizationDefaults(hgraph_json, inner_json);
+    }
     ValidateMRLEDim(hgraph_json, this->dim_);
     const bool requires_raw_vector = RequiresRawVectorForMRLERaBitQSplit(inner_json);
     if (requires_raw_vector) {
@@ -249,11 +256,16 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     // construct param obj
     auto hgraph_parameter = std::make_shared<HGraphParameter>();
     hgraph_parameter->FromJson(inner_json);
+    CHECK_ARGUMENT(
+        data_type_ != DataTypes::DATA_TYPE_BINARY or not hgraph_parameter->mci_parameters.enabled,
+        "binary HGraph does not support MCI");
     auto inner_parameter = std::make_shared<InnerIndexParameter>();
     inner_parameter->FromJson(inner_json);
 
     // init new_basic_code obj
     auto common_param = this->basic_flatten_codes_->ExportCommonParam();
+    // Deserialize restores dim_ but leaves the datacell's constructor-time common parameter stale.
+    common_param.dim_ = this->dim_;
     auto new_basic_code =
         FlattenInterface::MakeInstance(hgraph_parameter->base_codes_param, common_param);
     FlattenInterfacePtr new_precise_code;
@@ -308,15 +320,27 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
         if (covers_active_ids(raw_vector_)) {
             tune_source = raw_vector_;
         } else if (covers_active_ids(high_precise_codes_) and
-                   high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+                   (high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32 or
+                    high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_BINARY)) {
             tune_source = high_precise_codes_;
         } else if (covers_active_ids(basic_flatten_codes_) and
-                   basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+                   (basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32 or
+                    basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_BINARY)) {
             tune_source = basic_flatten_codes_;
         } else {
             return false;
         }
     }
+
+    const auto is_binary_code = [](const FlattenInterfacePtr& code) {
+        return code != nullptr and code->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_BINARY;
+    };
+    const bool binary_tune_source = is_binary_code(tune_source);
+    const bool skip_float_train_data =
+        data_type_ == DataTypes::DATA_TYPE_BINARY and
+        (not is_tune_base_code or is_binary_code(new_basic_code)) and
+        (not is_tune_precise_code or is_binary_code(new_precise_code)) and
+        (not is_tune_raw_code or is_binary_code(new_raw_code));
 
     auto decode_tune_source = [&](InnerIdType inner_id, float* data) {
         auto buffer = tune_source->AcquireCodesById(inner_id);
@@ -339,12 +363,14 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     CHECK_ARGUMENT(static_cast<uint64_t>(train_count) <=
                        (std::numeric_limits<size_t>::max() - (sizeof(float) - 1)) / row_bytes,
                    "Tune training buffer size overflows");
-    const auto train_bytes = static_cast<size_t>(train_count) * row_bytes;
+    const auto train_bytes =
+        skip_float_train_data ? 0 : static_cast<size_t>(train_count) * row_bytes;
     // Train consumes tightly packed native input, including FP16/BF16. Keep the
     // allocation float-aligned, and decode through aligned scratch: odd half
     // dimensions need not leave each packed row aligned for Decode's float* API.
     Vector<float> train_data((train_bytes + sizeof(float) - 1) / sizeof(float), 0, allocator_);
-    if (is_tune_base_code or is_tune_precise_code or is_tune_raw_code) {
+    if (not skip_float_train_data and
+        (is_tune_base_code or is_tune_precise_code or is_tune_raw_code)) {
         Vector<float> decoded_row(dim_, 0, allocator_);
         auto* packed_data = reinterpret_cast<uint8_t*>(train_data.data());
         for (InnerIdType i = 0; i < train_count; i++) {
@@ -376,7 +402,21 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
             new_code = wrap_new_code(new_code);
             new_code->Train(train_data.data(), train_count);
 
-            Vector<float> insert_buffer(dim_, 0, allocator_);
+            const bool packed_binary_rebuild = data_type_ == DataTypes::DATA_TYPE_BINARY and
+                                               binary_tune_source and is_binary_code(new_code);
+            if (packed_binary_rebuild) {
+                const auto expected_size = (static_cast<uint64_t>(dim_) + 7U) / 8U;
+                CHECK_ARGUMENT(tune_source->GetQuantizerCodeSize() == expected_size and
+                                   new_code->GetQuantizerCodeSize() == expected_size,
+                               "binary Tune source and destination packed widths must match dim");
+            }
+            const uint64_t insert_buffer_bytes = packed_binary_rebuild
+                                                     ? new_code->GetQuantizerCodeSize()
+                                                     : static_cast<uint64_t>(dim_) * sizeof(float);
+            // Binary decode/encode type-erases packed bytes through float*, so only the byte
+            // capacity changes; other dtypes retain their original float scratch layout.
+            Vector<float> insert_buffer(
+                (insert_buffer_bytes + sizeof(float) - 1) / sizeof(float), 0, allocator_);
             for (int64_t i = 0; i < current_count; ++i) {
                 decode_tune_source(i, insert_buffer.data());
                 new_code->InsertVector(static_cast<const void*>(insert_buffer.data()), i);
@@ -994,10 +1034,13 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
     void* new_base_vec = nullptr;
     uint64_t data_size = 0;
     get_vectors(data_type_, dim_, new_base, &new_base_vec, &data_size);
+    // reject malformed replacements before constructing queries or re-encoding;
+    // a wrong declared dimension would make binary updates read past the buffer.
+    CHECK_ARGUMENT(
+        new_base->GetDim() == dim_,
+        fmt::format("new_base.dim({}) must be equal to index.dim({})", new_base->GetDim(), dim_));
+    CHECK_ARGUMENT(new_base_vec != nullptr, "updated vector must not be null");
     if (this->rabitq_fused_datacell_ != nullptr) {
-        CHECK_ARGUMENT(new_base->GetDim() == dim_,
-                       "updated vector dimension must match the index dimension");
-        CHECK_ARGUMENT(new_base_vec != nullptr, "updated vector must not be null");
         this->validate_fused_vector_data(static_cast<const float*>(new_base_vec), 1);
     }
     if (not force_update) {
@@ -1068,6 +1111,9 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
     }
     if (has_precise_reorder()) {
         update_status = update_status && high_precise_codes_->UpdateVector(new_base_vec, inner_id);
+    }
+    if (update_status and create_new_raw_vector_ and raw_vector_ != nullptr) {
+        update_status = raw_vector_->UpdateVector(new_base_vec, inner_id);
     }
     return update_status;
 }

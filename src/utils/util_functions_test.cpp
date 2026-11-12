@@ -122,8 +122,10 @@ TEST_CASE("sample_train_data honors a fixed random seed", "[ut][UtilFunctions]")
         ->Owner(false);
     auto allocator = std::make_shared<DefaultAllocator>();
 
-    auto first = sample_train_data(data, count, dim, sample_count, allocator.get(), 0x52425131U);
-    auto second = sample_train_data(data, count, dim, sample_count, allocator.get(), 0x52425131U);
+    auto first = sample_train_data(
+        data, count, dim, sample_count, DataTypes::DATA_TYPE_FLOAT, allocator.get(), 0x52425131U);
+    auto second = sample_train_data(
+        data, count, dim, sample_count, DataTypes::DATA_TYPE_FLOAT, allocator.get(), 0x52425131U);
 
     REQUIRE(first->GetNumElements() == sample_count);
     REQUIRE(second->GetNumElements() == sample_count);
@@ -143,7 +145,8 @@ TEST_CASE("sample_train_data honors configured counts above the default", "[ut][
     data->NumElements(count)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
     auto allocator = std::make_shared<DefaultAllocator>();
 
-    auto sampled = sample_train_data(data, count, dim, sample_count, allocator.get(), 0x52425131U);
+    auto sampled = sample_train_data(
+        data, count, dim, sample_count, DataTypes::DATA_TYPE_FLOAT, allocator.get(), 0x52425131U);
 
     REQUIRE(sampled->GetNumElements() == sample_count);
 }
@@ -156,8 +159,12 @@ TEST_CASE("sample_train_data uses all vectors for an unbounded count", "[ut][Uti
     data->NumElements(count)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
     auto allocator = std::make_shared<DefaultAllocator>();
 
-    auto sampled =
-        sample_train_data(data, count, dim, std::numeric_limits<int64_t>::max(), allocator.get());
+    auto sampled = sample_train_data(data,
+                                     count,
+                                     dim,
+                                     std::numeric_limits<int64_t>::max(),
+                                     DataTypes::DATA_TYPE_FLOAT,
+                                     allocator.get());
 
     REQUIRE(sampled == data);
     REQUIRE(sampled->GetNumElements() == count);
@@ -184,7 +191,7 @@ TEST_CASE("Training sampling preserves configured half input", "[ut][UtilFunctio
                     ->Float32Vectors(floats.data())
                     ->Owner(false);
     DefaultAllocator allocator;
-    auto sampled = sample_train_data(base, count, dim, 512, &allocator, 42, dtype);
+    auto sampled = sample_train_data(base, count, dim, 512, dtype, &allocator, 42);
     REQUIRE(sampled->GetNumElements() == 512);
     REQUIRE(sampled->GetFloat16Vectors() != nullptr);
     if (count == 512) {
@@ -285,7 +292,7 @@ CheckSamplingReview(DataTypes dtype, bool with_ids, bool default_allocator) {
     SamplingReviewAllocator allocator;
     allocator.row_bytes = sampled_count * dim * sizeof(T);
     auto sampled = sample_train_data(
-        base, count, dim, sampled_count, default_allocator ? nullptr : &allocator, 42, dtype);
+        base, count, dim, sampled_count, dtype, default_allocator ? nullptr : &allocator, 42);
     REQUIRE(sampled != base);
     REQUIRE(sampled->GetNumElements() == sampled_count);
     REQUIRE(sampled->GetDim() == dim);
@@ -352,7 +359,9 @@ TEST_CASE("Training sample allocation failure releases owned rows",
     // Reservoir allocation succeeds. Fail the first allocator request following
     // row allocation: with IDs this is the ID buffer, regardless of call count.
     allocator.fail_after_rows = true;
-    REQUIRE_THROWS_AS(sample_train_data(base, count, dim, 512, &allocator, 42), std::bad_alloc);
+    REQUIRE_THROWS_AS(
+        sample_train_data(base, count, dim, 512, DataTypes::DATA_TYPE_FLOAT, &allocator, 42),
+        std::bad_alloc);
     REQUIRE(allocator.saw_rows);
     REQUIRE(allocator.live.empty());
     REQUIRE_FALSE(allocator.invalid_free);
@@ -384,7 +393,7 @@ TEST_CASE("Training sampling rejects overflowing spans before allocation or read
         allocator.reject_all = true;
         bool rejected = false;
         try {
-            auto sampled = sample_train_data(base, count, dim, samples, &allocator, 42, dtype);
+            auto sampled = sample_train_data(base, count, dim, samples, dtype, &allocator, 42);
         } catch (const VsagException& error) {
             REQUIRE(error.error_.type == ErrorType::INVALID_ARGUMENT);
             rejected = true;
@@ -414,7 +423,7 @@ TEST_CASE("Training sampling rejects unsupported dtype before allocation",
     allocator.reject_all = true;
     bool rejected = false;
     try {
-        auto sampled = sample_train_data(base, 513, 1, 512, &allocator, 42, dtype);
+        auto sampled = sample_train_data(base, 513, 1, 512, dtype, &allocator, 42);
     } catch (const VsagException& error) {
         REQUIRE(error.error_.type == ErrorType::INVALID_ARGUMENT);
         rejected = true;

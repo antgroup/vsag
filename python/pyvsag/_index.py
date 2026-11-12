@@ -24,6 +24,7 @@ _DENSE_DTYPES = {
     "float32": ("float32", "numpy.float32"),
     "float16": ("float16", "numpy.float16"),
     "bfloat16": ("uint16", "numpy.uint16 (raw bfloat16 bits)"),
+    "binary": ("uint8", "numpy.uint8 (bit-packed binary vectors)"),
 }
 
 _FLOAT32 = np.dtype(np.float32)
@@ -144,6 +145,8 @@ class _Dataset:
         self._keep.append(array)
         if array.dtype == np.float32:
             err = lib.vsag_dataset_set_float32_vectors(self.handle, _ptr(array, "float*"))
+        elif array.dtype == np.uint8:
+            err = lib.vsag_dataset_set_binary_vectors(self.handle, _ptr(array, "uint8_t*"))
         else:
             err = lib.vsag_dataset_set_float16_vectors(self.handle, _ptr(array, "uint16_t*"))
         _check(err, "dataset failed")
@@ -186,6 +189,7 @@ class Index:
       - float32 indexes accept numpy.float32 vectors
       - float16 indexes accept numpy.float16 vectors
       - bfloat16 indexes accept numpy.uint16 arrays containing raw bfloat16 bits
+      - binary indexes accept numpy.uint8 arrays containing ceil(dim / 8) packed bytes per vector
 
     The methods are thread-safe in the same way as the underlying C++ index; the GIL is
     released while the C++ library runs.
@@ -198,13 +202,20 @@ class Index:
             raise RuntimeError(_CREATE_ERRORS.get(code, "error type: unexpectedError"))
         self._handle = ffi.gc(out[0], lib.vsag_index_destroy)
         self._dtype = _parse_dtype(parameters)
+        self._dim = self._get_dim() if self._dtype == "binary" else 0
         self._encoded_parameters = {}
+
+    def _get_dim(self):
+        value = ffi.new("int64_t*")
+        _check(lib.vsag_index_get_dim(self._handle, value), "get_dim failed")
+        return int(value[0])
 
     def _dense_kind(self, operation):
         kind = _DENSE_DTYPES.get(self._dtype)
         if kind is None:
             raise ValueError(
-                "%s only supports indexes with dtype in [float32, float16, bfloat16]" % operation
+                "%s only supports indexes with dtype in [float32, float16, bfloat16, binary]"
+                % operation
             )
         return kind
 
@@ -246,7 +257,14 @@ class Index:
 
     def _dense_dataset(self, operation, vectors, ids, num_elements, dim):
         num_elements, dim = int(num_elements), int(dim)
-        array = self._dense_array(vectors, operation, "vectors", num_elements * dim, dim)
+        if self._dtype == "binary" and dim != self._dim:
+            raise ValueError(
+                "dim (%d) must equal the index dimension (%d)" % (dim, self._dim)
+            )
+        input_dim = (dim + 7) // 8 if self._dtype == "binary" else dim
+        array = self._dense_array(
+            vectors, operation, "vectors", num_elements * input_dim, input_dim
+        )
         ids = _int64_ids(ids, num_elements)
         return _Dataset(num_elements, dim, ids).dense(array)
 
@@ -323,9 +341,11 @@ class Index:
 
     def _dense_knn(self, vector, k, parameters, operation):
         """Search one vector; return (ids, dists, result, error) with -1 filled on failure."""
-        vector = self._dense_array(vector, operation, "vector")
+        query_size = (self._dim + 7) // 8 if self._dtype == "binary" else 0
+        vector = self._dense_array(vector, operation, "vector", expected_size=query_size)
         k = int(k)
-        dataset = _Dataset(1, vector.shape[0]).dense(vector)
+        query_dim = self._dim if self._dtype == "binary" else vector.shape[0]
+        dataset = _Dataset(1, query_dim).dense(vector)
         out = ffi.new("vsag_search_result_t**")
         err = lib.vsag_index_knn_search(
             self._handle, dataset.handle, k, parameters.encode(), ffi.NULL, out
@@ -445,8 +465,10 @@ class Index:
         return ids, dists
 
     def _range(self, point, threshold, parameters, operation):
-        point = self._dense_array(point, operation, "point")
-        dataset = _Dataset(1, point.shape[0]).dense(point)
+        query_size = (self._dim + 7) // 8 if self._dtype == "binary" else 0
+        point = self._dense_array(point, operation, "point", expected_size=query_size)
+        query_dim = self._dim if self._dtype == "binary" else point.shape[0]
+        dataset = _Dataset(1, query_dim).dense(point)
         out = ffi.new("vsag_search_result_t**")
         err = lib.vsag_index_range_search(
             self._handle, dataset.handle, float(threshold), -1, parameters.encode(), ffi.NULL, out
@@ -469,14 +491,24 @@ class Index:
 
     def calc_distances_by_id(self, query, ids):
         """Return the distances between the query and the vectors with the given ids."""
-        query = np.ascontiguousarray(query, dtype=np.float32)
+        if self._dtype == "binary":
+            query = self._dense_array(
+                query,
+                "calc_distances_by_id",
+                "query",
+                expected_size=(self._dim + 7) // 8,
+            )
+        else:
+            # Unsupported (sparse) indexes keep the C++ RuntimeError contract for dense queries.
+            query = np.ascontiguousarray(query, dtype=np.float32)
         ids = _int_array(ids, np.int64, "ids")
         if query.ndim != 1 or ids.ndim != 1:
             raise ValueError("query and ids must be 1-dimensional")
         if query.shape[0] == 0:
             raise RuntimeError("calc_distances_by_id failed: query must not be empty")
         dists = np.empty(ids.shape[0], dtype=np.float32)
-        dataset = _Dataset(1, query.shape[0]).dense(query)
+        query_dim = self._dim if self._dtype == "binary" else query.shape[0]
+        dataset = _Dataset(1, query_dim).dense(query)
         err = lib.vsag_index_calc_distances_by_ids(
             self._handle, dataset.handle, _ptr(ids, "int64_t*"), ids.shape[0], _ptr(dists, "float*")
         )
@@ -514,3 +546,5 @@ class Index:
     def load(self, filename):
         """Load the index from a file written by save."""
         _check(lib.vsag_index_deserialize_file(self._handle, os.fsencode(filename)), "load failed")
+        if self._dtype == "binary":
+            self._dim = self._get_dim()
