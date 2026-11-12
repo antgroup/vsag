@@ -29,7 +29,7 @@ class QualityTargetTests(unittest.TestCase):
         self.assertEqual(env['VSAG_FULL_PROFILE'], 'small')
 
     def test_real_loader_substitution_is_rejected_for_lite_and_full(self):
-        with tempfile.TemporaryDirectory(dir='/dev/shm') as directory:
+        with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             wanted, foreign = root / 'wanted', root / 'foreign'
             wanted.mkdir()

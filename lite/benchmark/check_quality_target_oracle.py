@@ -4,28 +4,32 @@
 """Independent direct FP64 L2 oracle cross-check, outside all measured runs."""
 import argparse
 import csv
+import os
 from pathlib import Path
 import struct
 import subprocess
 import tempfile
-from run_mixed_cpu_acceptance import sha, write_json
+from run_mixed_cpu_acceptance import add_exec_scratch, executable_scratch, sha, write_json
 
 
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('output',type=Path)
     parser.add_argument('--dataset',type=Path)
+    add_exec_scratch(parser)
     args=parser.parse_args()
     for name in ['fp64-neighbors.csv', 'fp64-oracle.json']:
         if (args.output / name).exists() or (args.output / name).is_symlink():
             raise FileExistsError('Independent oracle results must not be overwritten: ' + name)
     dataset=args.dataset or args.output/'dataset/scale-10000'
     source=Path(__file__).with_name('quality_target_fp64.cpp')
-    with tempfile.TemporaryDirectory(prefix='vsag-fp64-oracle-',dir='/dev/shm') as directory:
+    exec_root = executable_scratch(args.exec_scratch)
+    with tempfile.TemporaryDirectory(prefix='vsag-fp64-oracle-', dir=exec_root) as directory:
         binary=Path(directory)/'oracle'
-        subprocess.run(['c++','-std=c++17','-O3','-DNDEBUG',str(source),'-o',str(binary)],check=True)
+        env = dict(os.environ, TMPDIR=directory)
+        subprocess.run(['c++','-std=c++17','-O3','-DNDEBUG',str(source),'-o',str(binary)],env=env,check=True)
         with (args.output/'fp64-neighbors.csv').open('w') as stream:
-            subprocess.run([str(binary),str(dataset/'base.fvecs'),str(dataset/'queries.fvecs')],stdout=stream,check=True)
+            subprocess.run([str(binary),str(dataset/'base.fvecs'),str(dataset/'queries.fvecs')],stdout=stream,env=env,check=True)
     with (args.output/'fp64-neighbors.csv').open() as stream: rows=list(csv.DictReader(stream))
     assert len(rows)==10000
     truth=(dataset/'groundtruth.ivecs').read_bytes()

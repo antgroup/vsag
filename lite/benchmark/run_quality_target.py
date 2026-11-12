@@ -15,7 +15,10 @@ import subprocess
 import tarfile
 import tempfile
 
-from run_mixed_cpu_acceptance import sha, write_json, percentile, clean_environment
+from run_mixed_cpu_acceptance import (
+    add_exec_scratch, clean_environment, executable_scratch, percentile, sha, snapshot_scratch,
+    write_json,
+)
 from run_pinned_full_acceptance import validate_fresh_receipt
 
 
@@ -73,6 +76,7 @@ def main():
     parser.add_argument('--raw-gist', type=Path, required=True)
     parser.add_argument('--prior-dataset', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    add_exec_scratch(parser)
     args = parser.parse_args()
     if not args.full_receipt.is_file():
         parser.error('--full-receipt must name an existing build receipt JSON')
@@ -94,7 +98,6 @@ def main():
         assert path.is_file() and path.stat().st_size > 0, 'Missing or empty input: ' + str(path)
     for tool in ['git', 'c++', 'taskset', 'ldd']:
         assert shutil.which(tool), 'Missing required tool: ' + tool
-    assert Path('/dev/shm').is_dir() and os.access('/dev/shm', os.W_OK | os.X_OK), 'Writable /dev/shm is required'
     receipt_path = args.full_receipt
     receipt = json.loads(receipt_path.read_text())
     validate_fresh_receipt(receipt, expected, full)
@@ -106,6 +109,8 @@ def main():
     sources = {name: subprocess.check_output(
         ['git', 'show', ref + ':lite/benchmark/' + name], cwd=source)
         for name in ['graph_crud_quality.cpp', 'full_rabitq_dataset_main.cpp']}
+    exec_root = executable_scratch(args.exec_scratch)
+    snapshot_root = snapshot_scratch()
     output.mkdir(parents=True, exist_ok=False)
     env = quality_environment()
     commands = []
@@ -128,7 +133,9 @@ def main():
     (output/'source-query_fixed_snapshot.cpp').write_bytes((root/'query_fixed_snapshot.cpp').read_bytes())
     write_json(output/'raw-input-receipt.json',{name:dict(bytes=(args.raw_gist/name).stat().st_size,sha256=sha(args.raw_gist/name))
         for name in ['base-100k.fbin','queries.fbin']})
-    with tempfile.TemporaryDirectory(prefix='vsag-quality-target-',dir='/dev/shm') as directory:
+    with tempfile.TemporaryDirectory(prefix='vsag-quality-target-', dir=exec_root) as directory, \
+         tempfile.TemporaryDirectory(prefix='vsag-quality-target-snapshots-', dir=snapshot_root) as snapshots_dir:
+        env['TMPDIR'] = directory
         scratch = Path(directory)
         for name, content in sources.items():
             (scratch/name).write_bytes(content)
@@ -175,7 +182,7 @@ def main():
             for trial in range(3):
                 for side in (['full','lite'] if trial%2==0 else ['lite','full']):
                     tag = f'{storage}-{trial}-{side}'
-                    snapshot = scratch/(tag+'.snapshot')
+                    snapshot = Path(snapshots_dir)/(tag+'.snapshot')
                     snapshots[tag] = snapshot
                     env.update(VSAG_GRAPH_STORAGE=storage,VSAG_GRAPH_DEGREE='16',VSAG_GRAPH_EF='128',VSAG_GRAPH_QUERY_EF='512')
                     argv = ([scratch/'full-builder',dataset,snapshot,'rabitq3x5' if storage=='rabitq8' else storage,512,0]
