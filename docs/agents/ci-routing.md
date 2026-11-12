@@ -479,3 +479,15 @@ is abruptly terminated, the upload/final sample cannot be guaranteed; consult
 the already streamed samples and GitHub's runner annotations. Exit 137 or a
 shutdown signal alone does not establish OOM. Compare counter deltas and memory
 pressure; unavailable cgroup evidence is unknown, not proof of no OOM.
+
+### Hosted formatting environment
+
+Branch, Community and Manual Format checks run on GitHub-hosted Ubuntu runners
+inside `vsaglib/vsag:ci-main-base`. Their shared `check-format` action verifies
+preinstalled clang-format major version 20 and runs the existing full-repository
+format check; it does not install packages at job runtime. A missing or wrong
+formatter fails the check. Container Git trust is limited to `GITHUB_WORKSPACE`.
+The Branch `Format Check Not Required` job uses no container and retains its
+existing no-op check identity. Team keeps its reviewed digest image and existing
+format/helper job. Image pulls still require registry connectivity. Image-size
+optimization is tracked separately in [#3327](https://github.com/antgroup/vsag/issues/3327).

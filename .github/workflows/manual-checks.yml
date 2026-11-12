@@ -48,9 +48,15 @@ jobs:
     if: inputs.check == 'format'
     name: Manual Format
     runs-on: ubuntu-24.04
+    container: vsaglib/vsag:ci-main-base
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/check-format
 
   build-test-install:
