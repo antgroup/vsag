@@ -151,6 +151,10 @@ vsag_dataset_set_float32_vectors(vsag_dataset_t* dataset, const float* vectors);
 vsag_error_t*
 vsag_dataset_set_float16_vectors(vsag_dataset_t* dataset, const uint16_t* vectors);
 
+/** Bit-packed binary vectors; each row holds ceil(dim / 8) bytes and `dim` is measured in bits. */
+vsag_error_t*
+vsag_dataset_set_binary_vectors(vsag_dataset_t* dataset, const uint8_t* vectors);
+
 vsag_error_t*
 vsag_dataset_set_int8_vectors(vsag_dataset_t* dataset, const int8_t* vectors);
 
@@ -436,6 +440,10 @@ vsag_index_deserialize_reader(vsag_index_t* index,
 
 vsag_error_t*
 vsag_index_get_num_elements(const vsag_index_t* index, int64_t* out_num_elements);
+
+/** Returns the logical vector dimension in elements, or in bits for binary indexes. */
+vsag_error_t*
+vsag_index_get_dim(const vsag_index_t* index, int64_t* out_dim);
 
 vsag_error_t*
 vsag_index_get_memory_usage(const vsag_index_t* index, int64_t* out_memory_usage);
