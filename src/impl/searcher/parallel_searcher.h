@@ -56,7 +56,8 @@ private:
           Vector<InnerIdType>& to_be_visited_rid,
           Vector<InnerIdType>& to_be_visited_id,
           std::vector<Vector<InnerIdType>>& neighbors,
-          uint64_t point_visited_num) const;
+          uint64_t point_visited_num,
+          Vector<InnerIdType>* deferred_ids = nullptr) const;
 
     template <InnerSearchMode mode = KNN_SEARCH>
     DistHeapPtr

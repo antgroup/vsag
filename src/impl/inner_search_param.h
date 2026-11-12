@@ -38,6 +38,8 @@ public:
 
 public:
     int64_t topk{0};
+    // Result count the filtered KNN search tries to reach by re-expanding filter-rejected bridges.
+    uint64_t min_results{0};
     float radius{0.0F};
     InnerIdType ep{0};
     uint64_t ef{10};
@@ -76,6 +78,7 @@ public:
     operator=(const InnerSearchParam& other) {
         if (this != &other) {
             topk = other.topk;
+            min_results = other.min_results;
             radius = other.radius;
             ep = other.ep;
             ef = other.ef;

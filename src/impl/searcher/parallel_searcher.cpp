@@ -44,7 +44,8 @@ ParallelSearcher::visit(const GraphInterfacePtr& graph,
                         Vector<InnerIdType>& to_be_visited_rid,
                         Vector<InnerIdType>& to_be_visited_id,
                         std::vector<Vector<InnerIdType>>& neighbors,
-                        uint64_t point_visited_num) const {
+                        uint64_t point_visited_num,
+                        Vector<InnerIdType>* deferred_ids) const {
     uint32_t count_no_visited = 0;
 
     if (this->mutex_array_ != nullptr) {
@@ -69,6 +70,8 @@ ParallelSearcher::visit(const GraphInterfacePtr& graph,
                     to_be_visited_rid[count_no_visited] = j;
                     to_be_visited_id[count_no_visited] = neighbors[i][j];
                     count_no_visited++;
+                } else if (deferred_ids != nullptr) {
+                    deferred_ids->push_back(neighbors[i][j]);
                 }
                 vl->Set(neighbors[i][j]);
             }
@@ -229,7 +232,37 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         worker_tasks.emplace_back(pool->GeneralEnqueue(task, i));
     }
 
-    while (not candidate_set->Empty()) {
+    // Neighbors rejected by the filter are deferred rather than dropped: when the queue runs dry
+    // before enough results are found, they are expanded as bridges toward the eligible region.
+    Vector<InnerIdType> deferred_ids(alloc);
+    uint64_t deferred_pos = 0;
+    auto rescue_deferred = [&]() {
+        if constexpr (mode != InnerSearchMode::KNN_SEARCH) {
+            return false;
+        } else {
+            if (top_candidates->Size() >= inner_search_param.min_results ||
+                deferred_pos >= deferred_ids.size()) {
+                return false;
+            }
+            auto count = static_cast<uint32_t>(
+                std::min<uint64_t>(deferred_ids.size() - deferred_pos, to_be_visited_id.size()));
+            for (uint32_t i = 0; i < count; ++i) {
+                to_be_visited_id[i] = deferred_ids[deferred_pos + i];
+            }
+            deferred_pos += count;
+            flatten->Query(line_dists.data(), computer, to_be_visited_id.data(), count, ctx);
+            dist_cmp += count;
+            for (uint32_t i = 0; i < count; ++i) {
+                candidate_set->Push(traversal_priority(line_dists[i]), to_be_visited_id[i]);
+            }
+            return true;
+        }
+    };
+
+    while (true) {
+        if (candidate_set->Empty() and not rescue_deferred()) {
+            break;
+        }
         hops++;
         auto num_explore_nodes = candidate_set->Size() < beam ? candidate_set->Size() : beam;
 
@@ -256,7 +289,8 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                                  to_be_visited_rid,
                                  to_be_visited_id,
                                  neighbors,
-                                 num_explore_nodes);
+                                 num_explore_nodes,
+                                 mode == KNN_SEARCH ? &deferred_ids : nullptr);
 
         dist_cmp += count_no_visited;
         num_points.store(0, std::memory_order_relaxed);
