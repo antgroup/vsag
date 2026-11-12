@@ -88,6 +88,9 @@ private:
         float avg_distance_from_entry{0.0F};
     };
 
+    DatasetPtr
+    make_query_dataset(const float* native_query) const;
+
     static JsonType
     get_index_node_structure(IndexNode* root);
 
