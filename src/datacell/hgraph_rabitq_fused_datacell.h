@@ -49,7 +49,8 @@ public:
     HGraphRaBitQFusedDataCell(const GraphDataCellParamPtr& graph_param,
                               uint64_t one_bit_code_size,
                               uint64_t supplement_code_size,
-                              const IndexCommonParam& common_param);
+                              const IndexCommonParam& common_param,
+                              uint32_t cluster_count = K_FUSED_DEFAULT_CLUSTER_COUNT);
 
     void
     InsertNeighborsById(InnerIdType id, const Vector<InnerIdType>& neighbor_ids) override;
@@ -271,6 +272,7 @@ private:
     uint64_t supplement_code_size_{0};
     int64_t dim_{0};
     std::string codec_model_;
+    uint32_t cluster_count_{K_FUSED_DEFAULT_CLUSTER_COUNT};
     // Guards build-time block allocation and directory growth. Mutable HGraph searches hold the owning
     // HGraph's global read lock while resize takes its global write lock; after SetImmutable,
     // the block directory cannot be resized and read-path access is lock-free.

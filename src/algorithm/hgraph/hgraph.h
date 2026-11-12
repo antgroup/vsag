@@ -67,12 +67,12 @@ struct ComponentManifestEntry;
 class FlattenOptimizedBuildInterface;
 class HGraphFGIM;
 class HGraphRaBitQFusedDataCell;
+struct RaBitQFusedCodeView;
 class HGraphRaBitQSearcher;
 class HGraphOptimizedBuildSession;
 class MciIncrementalAddExecutor;
 class IteratorFilterContext;
 class RaBitQSplitDataCellInterface;
-struct RaBitQFusedCodeView;
 
 /**
  * @brief HGraph: hierarchical navigable graph index.
@@ -469,7 +469,9 @@ public:
     insert_persistent_codes_to_slot(const void* data, CodeSlotIdType code_slot_id);
 
     void
-    sync_fused_node_codes(InnerIdType inner_id, const void* data);
+    sync_fused_node_codes(InnerIdType inner_id,
+                          const void* data,
+                          const RaBitQFusedCodeView* fused_code = nullptr);
 
     void
     restore_fused_codec();
@@ -482,9 +484,9 @@ public:
     void
     ensure_physical_code_capacity_unlocked(CodeSlotIdType required_capacity);
 
-    /// Grow internal storage to at least new_size capacity.
+    /// Grow internal storage; fused Add doubles capacity, while Build reserves exactly (aligned).
     void
-    resize(uint64_t new_size);
+    resize(uint64_t new_size, bool geometric_growth = false);
 
     /// Create a single route (upper-layer) graph from the hierarchical params.
     GraphInterfacePtr
@@ -540,6 +542,9 @@ private:
                                int64_t id,
                                bool calculate_precise_distance) const;
 
+    [[nodiscard]] bool
+    skip_scalar_codes_for_fused_odescent() const;
+
     void
     check_fused_mutation_supported(std::string_view operation) const;
 
@@ -589,6 +594,12 @@ private:
     void
     train_codes_with_dataset(const DatasetPtr& train_data);
 
+    void
+    validate_fused_training_data(const DatasetPtr& full_data) const;
+
+    // Requires the base quantizer's transform to be trained first.
+    void
+    train_fused_codec(const DatasetPtr& full_data);
     // Batch-local encoded rows, indexed by input position rather than reserved inner ID.
     // Keep them alive until every insertion task has drained, including on failure.
     struct FusedBatchCodes {
@@ -1243,6 +1254,8 @@ private:
     Vector<GraphInterfacePtr> route_graphs_;   // upper-layer route graphs
     GraphInterfacePtr bottom_graph_{nullptr};  // base-level graph (all vectors)
     std::shared_ptr<HGraphRaBitQFusedDataCell> rabitq_fused_datacell_{nullptr};
+    uint32_t rabitq_centroid_count_{16};
+    uint32_t kmeans_iterations_{25};
     std::shared_ptr<RaBitQSplitDataCellInterface> rabitq_split_codes_{nullptr};
     std::shared_ptr<HGraphRaBitQSearcher> rabitq_fused_searcher_{nullptr};
     SparseGraphDatacellParamPtr hierarchical_datacell_param_{nullptr};  // params for route graphs

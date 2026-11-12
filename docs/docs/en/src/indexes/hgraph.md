@@ -110,7 +110,9 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 | `saq_segment_count` | int | `0` | SAQ segment count; `0` selects boundaries dynamically. |
 | `saq_random_rotation` | bool | `true` | Apply an independent orthogonal rotation inside each SAQ segment. |
 | `rabitq_fused_datacell` | bool | `false` | Fuse the bottom HGraph node and RaBitQ split codes into one in-memory record. Requires L2/IP, flat in-memory graph storage, RaBitQ x+y split codes with x in `[1, 4]`, and the other constraints described in [RaBitQ x+y split](../quantization/rabitq_split.md). |
-| `train_sample_count` | int | `65536` | Maximum number of vectors sampled for quantizer training; must be at least `512` when set explicitly. |
+| `train_sample_count` | int | `65536` | Maximum number of vectors sampled for quantizer training; must be at least `512` when set explicitly. Fused ODescent using FP32 graph distances skips this sampling/global-mean training; fused KMeans always uses the full initial batch. |
+| `rabitq_centroid_count` | int | `16` | Fused residual center count: any positive integer up to the initial dataset size and `INT32_MAX`. Fused KMeans uses the full dataset regardless of `train_sample_count`. |
+| `kmeans_iterations` | int | `25` | Number of full-data exact KMeans iterations in fused mode; positive integer up to `INT32_MAX`. Like `rabitq_centroid_count`, it takes effect only with `rabitq_fused_datacell=true`; otherwise it is range-validated but unused. |
 | `build_thread_count` | int | `100` | Threads used to parallelise build |
 | `support_duplicate` | bool | `false` | Group duplicate vectors while retaining their individual labels |
 | `deduplicate_storage` | bool | `false` | Share vector storage between duplicates; requires `support_duplicate: true` |
@@ -125,7 +127,7 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 | `hgraph_init_capacity` | int | `100` | Initial capacity hint (doesn't cap the final size) |
 | `persist_source_id` | bool | `false` | Persist source-ID metadata during serialization so a restored index can later export a reusable build cache. |
 | `use_conjugate_graph` | bool | `false` | Enable `Feedback`/`Pretrain` graph enhancement; see [Graph Index Enhancement](../advanced/enhance_graph.md). |
-| `resize_increase_count_bit` | int | `10` | `log2` of the slot-growth batch. Valid range is `1` to `31`; `1` grows in 2-slot batches and `10` in 1,024-slot batches. Smaller values reduce preallocation but can increase reallocations. |
+| `resize_increase_count_bit` | int | `10` | `log2` of the slot-growth alignment. Valid range is `1` to `31`; `1` aligns to 2 slots and `10` to 1,024 slots. Fused `Build` reserves for the full input and fused `Add` grows geometrically with this alignment; non-fused indexes retain fixed-batch growth. |
 
 `sq8_local` and `sq4_local` support float32/float16/bfloat16 input with L2/IP/cosine base and precise stores (including RaBitQ + local SQ4/SQ8 reranking). See [layout, numeric limits and Tune compatibility](../quantization/sq.md#local-sq4--sq8-float32-l2-ip-and-cosine).
 

@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -104,6 +105,14 @@ public:
 };
 
 struct RaBitQFusedTraversalQuery {
+    RaBitQFusedQueryCache* cluster_cache{nullptr};
+
+    void
+    EnsureCluster(uint32_t id) const {
+        // GetFusedTraversalQuery always attaches its owning query computer's cache.
+        assert(cluster_cache != nullptr);
+        cluster_cache->Ensure(id);
+    }
     const uint8_t* query_planes{nullptr};
     const float* transformed_query{nullptr};
     const float* cluster_g_add{nullptr};
@@ -194,7 +203,17 @@ public:
                 QueryContext* ctx) const = 0;
 
     virtual void
-    TrainFusedCodec(const float* data, uint64_t count, uint32_t cluster_count) = 0;
+    TrainFusedTransform() = 0;
+
+    // Require an explicit iteration count; HGraph passes the configured kmeans_iterations.
+    virtual void
+    TrainFusedCodec(const float* data,
+                    uint64_t count,
+                    uint32_t cluster_count,
+                    uint32_t iterations) = 0;
+
+    [[nodiscard]] virtual uint32_t
+    FusedClusterCount() const = 0;
 
     virtual bool
     EncodeFused(const float* data,
@@ -337,8 +356,7 @@ public:
         explicit FusedComputer(Allocator* allocator)
             : transformed_query_(allocator),
               hnsw_query_planes_(allocator),
-              hnsw_g_add_(allocator),
-              hnsw_g_error_(allocator) {
+              cluster_cache_(allocator) {
         }
 
         Vector<float> transformed_query_;
@@ -346,8 +364,7 @@ public:
         float hnsw_query_delta_{0.0F};
         float hnsw_query_vl_{0.0F};
         float hnsw_query_sum_{0.0F};
-        Vector<float> hnsw_g_add_;
-        Vector<float> hnsw_g_error_;
+        RaBitQFusedQueryCache cluster_cache_;
         float query_raw_norm_{0.0F};
         typename RaBitQuantizer<metric>::norm_type mrq_norm_sqr_{0.0F};
     };
@@ -368,8 +385,6 @@ public:
         auto quantizer_common = common_param;
         quantizer_common.data_type_ = DataTypes::DATA_TYPE_FLOAT;
         this->quantizer_ = std::make_shared<QuantizerT>(quantization_param, quantizer_common);
-        this->quantization_param_ =
-            std::dynamic_pointer_cast<RaBitQuantizerParameter>(quantization_param);
         if (not this->bottom_quantizer().SupportSplitCodeStorage()) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
                                 "rabitq split data cell requires rabitq_version=split, "
@@ -1716,40 +1731,20 @@ public:
         }
     }
 
-    // Pair-distance residual codes live in the rotated space. Keep a derived cache in that
-    // same space; fused_centroids_ remains in the original space for assignment/serialization.
+    // Pair-distance residual codes share the rotated centers used by query scoring. Cache
+    // only per-center sums: a pair table would require quadratic space for large K.
     void
     refresh_fused_cluster_stats() {
-        const uint64_t cluster_count = fused_quantizers_.size();
+        const uint64_t cluster_count = FusedClusterCount();
         const uint64_t dim = static_cast<uint64_t>(common_param_.dim_);
-        fused_rotated_centroids_.clear();
         fused_centroid_sums_.assign(cluster_count, 0.0F);
-        fused_centroid_pair_ip_.assign(cluster_count * cluster_count, 0.0F);
-        if (cluster_count == 0 or fused_centroids_.size() != cluster_count * dim) {
-            return;
-        }
-        fused_rotated_centroids_.resize(cluster_count * dim);
-        Vector<float> transformed_centroid(dim, 0.0F, this->allocator_);
         for (uint64_t i = 0; i < cluster_count; ++i) {
-            float raw_norm = 0.0F;
-            typename BottomQuantizer::norm_type mrq_norm_sqr = 0.0F;
-            this->bottom_quantizer().TransformFusedQuery(
-                fused_centroids_.data() + i * dim, transformed_centroid, raw_norm, mrq_norm_sqr);
-            std::copy(transformed_centroid.begin(),
-                      transformed_centroid.end(),
-                      fused_rotated_centroids_.data() + i * dim);
             const float* centroid_i = fused_rotated_centroids_.data() + i * dim;
             float sum = 0.0F;
             for (uint64_t d = 0; d < dim; ++d) {
                 sum += centroid_i[d];
             }
             fused_centroid_sums_[i] = sum;
-            for (uint64_t j = 0; j <= i; ++j) {
-                const float* centroid_j = fused_rotated_centroids_.data() + j * dim;
-                const float ip = FP32ComputeIP(centroid_i, centroid_j, dim);
-                fused_centroid_pair_ip_[i * cluster_count + j] = ip;
-                fused_centroid_pair_ip_[j * cluster_count + i] = ip;
-            }
         }
     }
 
@@ -1764,9 +1759,9 @@ public:
         const uint64_t dim = static_cast<uint64_t>(common_param_.dim_);
         // The code-domain kernels unpack whole 64-lane blocks; other dimensions (and other
         // codec layouts) keep using the float reconstruction path.
-        if (fused_code_storage_ == nullptr or fused_quantizers_.empty() or
-            fused_centroid_sums_.size() != fused_quantizers_.size() or
-            fused_rotated_centroids_.size() != fused_quantizers_.size() * dim or
+        if (fused_code_storage_ == nullptr or FusedClusterCount() == 0 or
+            fused_centroid_sums_.size() != FusedClusterCount() or
+            fused_rotated_centroids_.size() != uint64_t{FusedClusterCount()} * dim or
             (dim & 63U) != 0U or bottom_quantizer().FilterBits() != 1 or
             bottom_quantizer().ReorderBits() != 7) {
             return false;
@@ -1775,15 +1770,15 @@ public:
         RaBitQFusedCodeView view2;
         if (not fused_code_storage_->GetFusedCodeView(id1, view1) or
             not fused_code_storage_->GetFusedCodeView(id2, view2) or
-            view1.cluster_id >= fused_quantizers_.size() or
-            view2.cluster_id >= fused_quantizers_.size()) {
+            view1.cluster_id >= FusedClusterCount() or view2.cluster_id >= FusedClusterCount()) {
             return false;
         }
         if constexpr (metric == MetricType::METRIC_TYPE_IP) {
-            const uint64_t cluster_count = fused_quantizers_.size();
-            const uint64_t index1 =
-                static_cast<uint64_t>(view1.cluster_id) * cluster_count + view2.cluster_id;
-            return fused_quantizers_[view1.cluster_id]->ComputeFusedPairIP(
+            const float centroid_ip = FP32ComputeIP(
+                fused_rotated_centroids_.data() + static_cast<uint64_t>(view1.cluster_id) * dim,
+                fused_rotated_centroids_.data() + static_cast<uint64_t>(view2.cluster_id) * dim,
+                dim);
+            return bottom_quantizer().ComputeFusedPairIP(
                 view1.one_bit_code,
                 view1.supplement_code,
                 fused_rotated_centroids_.data() + static_cast<uint64_t>(view1.cluster_id) * dim,
@@ -1792,7 +1787,7 @@ public:
                 view2.supplement_code,
                 fused_rotated_centroids_.data() + static_cast<uint64_t>(view2.cluster_id) * dim,
                 fused_centroid_sums_[view2.cluster_id],
-                fused_centroid_pair_ip_[index1],
+                centroid_ip,
                 distance);
         } else {
             const bool same_cluster = view1.cluster_id == view2.cluster_id;
@@ -1824,15 +1819,14 @@ public:
             }
             const float centroid_diff_sum =
                 fused_centroid_sums_[view1.cluster_id] - fused_centroid_sums_[view2.cluster_id];
-            return fused_quantizers_[view1.cluster_id]->ComputeFusedPairL2Difference(
-                view1.one_bit_code,
-                view1.supplement_code,
-                view2.one_bit_code,
-                view2.supplement_code,
-                centroid_diff_sq,
-                centroid_diff_sum,
-                centroid_diff,
-                distance);
+            return bottom_quantizer().ComputeFusedPairL2Difference(view1.one_bit_code,
+                                                                   view1.supplement_code,
+                                                                   view2.one_bit_code,
+                                                                   view2.supplement_code,
+                                                                   centroid_diff_sq,
+                                                                   centroid_diff_sum,
+                                                                   centroid_diff,
+                                                                   distance);
         }
     }
 
@@ -2081,19 +2075,20 @@ public:
     bool
     DecodeFusedById(InnerIdType id, float* data, bool apply_inverse_rotation) const override {
         if (data == nullptr or fused_code_storage_ == nullptr or id >= this->TotalCount() or
-            fused_quantizers_.empty()) {
+            fused_centroids_.empty()) {
             return false;
         }
         RaBitQFusedCodeView view;
         if (not fused_code_storage_->GetFusedCodeView(id, view) or
-            view.cluster_id >= fused_quantizers_.size()) {
+            view.cluster_id >= FusedClusterCount()) {
             return false;
         }
-        return fused_quantizers_[view.cluster_id]->DecodeFusedSplitCode(view.one_bit_code,
-                                                                        view.supplement_code,
-                                                                        IsLegacyHnswFusedCodec(),
-                                                                        data,
-                                                                        apply_inverse_rotation);
+        return this->FusedQuantizer(view.cluster_id)
+            .DecodeFusedSplitCode(view.one_bit_code,
+                                  view.supplement_code,
+                                  IsLegacyHnswFusedCodec(),
+                                  data,
+                                  apply_inverse_rotation);
     }
 
     bool
@@ -2153,49 +2148,36 @@ public:
     }
 
     void
-    TrainFusedCodec(const float* data, uint64_t count, uint32_t cluster_count) override {
+    TrainFusedTransform() override {
+        this->bottom_quantizer().TrainFusedTransform();
+    }
+
+    void
+    TrainFusedCodec(const float* data,
+                    uint64_t count,
+                    uint32_t cluster_count,
+                    uint32_t iterations) override {
+        CHECK_ARGUMENT(this->bottom_quantizer().IsTrained(),
+                       "fused RaBitQ requires Train or TrainFusedTransform before TrainFusedCodec");
         CHECK_ARGUMENT(data != nullptr and count > 0,
                        "fused RaBitQ training data must not be empty");
-        CHECK_ARGUMENT(cluster_count == 16, "fused RaBitQ requires exactly 16 clusters");
-        CHECK_ARGUMENT(this->quantization_param_ != nullptr,
-                       "fused RaBitQ quantizer parameter is unavailable");
+        CHECK_ARGUMENT(cluster_count > 0 and cluster_count <= count and
+                           cluster_count <= std::numeric_limits<int32_t>::max(),
+                       "fused RaBitQ requires 1 <= cluster count <= training count and INT32_MAX");
         CHECK_ARGUMENT(this->AreFusedVectorsFinite(data, count),
                        "fused RaBitQ training data must contain only finite values");
 
         KMeansCluster kmeans(
             static_cast<int32_t>(common_param_.dim_), allocator_, common_param_.thread_pool_);
-        const auto trained_cluster_count =
-            static_cast<uint32_t>(std::min<uint64_t>(cluster_count, count));
-        kmeans.Run(trained_cluster_count,
-                   data,
-                   count,
-                   25,
-                   nullptr,
-                   false,
-                   1e-6F,
-                   KMeansInitMethod::KMEANS_PLUS_PLUS,
-                   0x52425131U,
-                   true);
-        fused_centroids_.resize(static_cast<uint64_t>(cluster_count) * common_param_.dim_);
-        for (uint32_t cluster_id = 0; cluster_id < cluster_count; ++cluster_id) {
-            const auto source_cluster = cluster_id % trained_cluster_count;
-            std::copy_n(
-                kmeans.k_centroids_ + static_cast<uint64_t>(source_cluster) * common_param_.dim_,
-                common_param_.dim_,
-                fused_centroids_.data() + static_cast<uint64_t>(cluster_id) * common_param_.dim_);
-        }
+        kmeans.RunFull(cluster_count, data, count, iterations, 0x52425131U, false);
+        const auto values = static_cast<uint64_t>(cluster_count) * common_param_.dim_;
+        fused_centroids_.assign(kmeans.k_centroids_, kmeans.k_centroids_ + values);
+        this->PrepareFusedCenters();
+    }
 
-        fused_quantizers_.clear();
-        fused_quantizers_.reserve(cluster_count);
-        for (uint32_t cluster_id = 0; cluster_id < cluster_count; ++cluster_id) {
-            auto quantizer =
-                std::make_shared<RaBitQuantizer<metric>>(quantization_param_, common_param_);
-            quantizer->ShareFusedModelFrom(this->bottom_quantizer());
-            quantizer->SetCentroid(fused_centroids_.data() +
-                                   static_cast<uint64_t>(cluster_id) * common_param_.dim_);
-            fused_quantizers_.push_back(std::move(quantizer));
-        }
-        refresh_fused_cluster_stats();
+    [[nodiscard]] uint32_t
+    FusedClusterCount() const override {
+        return static_cast<uint32_t>(fused_centroid_norms_.size());
     }
 
     bool
@@ -2204,7 +2186,7 @@ public:
                 uint8_t* supplement_code,
                 uint32_t* cluster_id) const override {
         if (data == nullptr or one_bit_code == nullptr or supplement_code == nullptr or
-            cluster_id == nullptr or fused_quantizers_.empty()) {
+            cluster_id == nullptr or fused_centroids_.empty()) {
             return false;
         }
         if (not this->AreFusedVectorsFinite(data, 1)) {
@@ -2212,17 +2194,17 @@ public:
         }
         *cluster_id = NearestFusedCluster(data);
         ByteBuffer full_code(code_size_, allocator_);
-        auto& quantizer = fused_quantizers_[*cluster_id];
-        if (not quantizer->EncodeOne(data, full_code.data)) {
+        auto quantizer = this->FusedQuantizer(*cluster_id);
+        if (not quantizer.EncodeOne(data, full_code.data)) {
             return false;
         }
-        quantizer->SplitCode(full_code.data, one_bit_code, supplement_code);
+        quantizer.SplitCode(full_code.data, one_bit_code, supplement_code);
         if (IsLegacyHnswFusedCodec()) {
-            quantizer->EncodeHnswOneBitMetadata(data, one_bit_code);
-            if (not quantizer->EncodeHnswSupplement(data, supplement_code)) {
+            quantizer.EncodeHnswOneBitMetadata(data, one_bit_code);
+            if (not quantizer.EncodeHnswSupplement(data, supplement_code)) {
                 return false;
             }
-        } else if (not quantizer->EncodeFusedAffineMetadata(data, one_bit_code, supplement_code)) {
+        } else if (not quantizer.EncodeFusedAffineMetadata(data, one_bit_code, supplement_code)) {
             return false;
         }
         return true;
@@ -2231,10 +2213,10 @@ public:
     ComputerInterfacePtr
     FactoryFusedComputer(const void* query) const override {
         auto result = std::make_shared<FusedComputer>(allocator_);
-        if (fused_quantizers_.empty()) {
+        if (fused_centroids_.empty()) {
             return result;
         }
-        result->transformed_query_.resize(fused_quantizers_.front()->GetDim());
+        result->transformed_query_.resize(this->bottom_quantizer().GetDim());
         Vector<float> input_scratch(this->allocator_);
         const float* input = this->prepare_dense_input(query, 1, input_scratch);
         for (uint64_t i = 0; i < static_cast<uint64_t>(common_param_.dim_); ++i) {
@@ -2243,14 +2225,14 @@ public:
                                     "RaBitQ query must contain only finite values");
             }
         }
-        fused_quantizers_.front()->TransformFusedQuery(
+        this->bottom_quantizer().TransformFusedQuery(
             input, result->transformed_query_, result->query_raw_norm_, result->mrq_norm_sqr_);
         if (bottom_quantizer().FilterBits() == 1) {
-            fused_quantizers_.front()->PrepareHnswFourBitQuery(result->transformed_query_.data(),
-                                                               result->hnsw_query_planes_,
-                                                               result->hnsw_query_delta_,
-                                                               result->hnsw_query_vl_,
-                                                               result->hnsw_query_sum_);
+            this->bottom_quantizer().PrepareHnswFourBitQuery(result->transformed_query_.data(),
+                                                             result->hnsw_query_planes_,
+                                                             result->hnsw_query_delta_,
+                                                             result->hnsw_query_vl_,
+                                                             result->hnsw_query_sum_);
         } else {
             double query_sum = 0.0;
             for (const float value : result->transformed_query_) {
@@ -2258,14 +2240,12 @@ public:
             }
             result->hnsw_query_sum_ = static_cast<float>(query_sum);
         }
-        result->hnsw_g_add_.resize(fused_quantizers_.size());
-        result->hnsw_g_error_.resize(fused_quantizers_.size());
-        for (uint64_t cluster_id = 0; cluster_id < fused_quantizers_.size(); ++cluster_id) {
-            fused_quantizers_[cluster_id]->ComputeHnswCentroidTerms(
-                result->transformed_query_.data(),
-                result->hnsw_g_add_[cluster_id],
-                result->hnsw_g_error_[cluster_id]);
-        }
+        result->cluster_cache_.Initialize(result->transformed_query_.data(),
+                                          fused_rotated_centroids_.data(),
+                                          fused_centroid_norms_.data(),
+                                          common_param_.dim_,
+                                          FusedClusterCount(),
+                                          metric);
         return result;
     }
 
@@ -2277,21 +2257,22 @@ public:
         }
         *query = {};
         auto* fused_computer = static_cast<FusedComputer*>(computer.get());
-        if (fused_computer == nullptr or fused_quantizers_.empty()) {
+        if (fused_computer == nullptr or fused_centroids_.empty()) {
             return false;
         }
         const auto filter_bits = bottom_quantizer().FilterBits();
         query->query_planes =
             filter_bits == 1 ? fused_computer->hnsw_query_planes_.data() : nullptr;
         query->transformed_query = fused_computer->transformed_query_.data();
-        query->cluster_g_add = fused_computer->hnsw_g_add_.data();
-        query->cluster_g_error = fused_computer->hnsw_g_error_.data();
+        query->cluster_cache = &fused_computer->cluster_cache_;
+        query->cluster_g_add = fused_computer->cluster_cache_.add.data();
+        query->cluster_g_error = fused_computer->cluster_cache_.error.data();
         query->dim = common_param_.dim_;
         query->one_bit_metadata_offset = IsLegacyHnswFusedCodec()
                                              ? bottom_quantizer().PlaneBytes()
                                              : bottom_quantizer().OneBitRecordNormOffset();
         query->supplement_metadata_offset = bottom_quantizer().SupplementMetaOffset();
-        query->cluster_count = static_cast<uint32_t>(fused_quantizers_.size());
+        query->cluster_count = static_cast<uint32_t>(FusedClusterCount());
         query->filter_bits = filter_bits;
         query->supplement_bits = bottom_quantizer().ReorderBits();
         query->query_delta = fused_computer->hnsw_query_delta_;
@@ -2315,9 +2296,10 @@ public:
                                    float* filter_inner_product,
                                    QueryContext* ctx) const override {
         auto* fused_computer = static_cast<FusedComputer*>(computer.get());
-        if (fused_computer == nullptr or cluster_id >= fused_quantizers_.size()) {
+        if (fused_computer == nullptr or cluster_id >= FusedClusterCount()) {
             return false;
         }
+        fused_computer->cluster_cache_.Ensure(cluster_id);
         this->add_filter_count(ctx, 1);
         if (filter_inner_product != nullptr) {
             *filter_inner_product = std::numeric_limits<float>::quiet_NaN();
@@ -2325,13 +2307,13 @@ public:
         float local_filter_inner_product = std::numeric_limits<float>::quiet_NaN();
         bool computed = false;
         if (IsLegacyHnswFusedCodec()) {
-            computed = fused_quantizers_[cluster_id]->ComputeHnswOneBit(
+            computed = this->bottom_quantizer().ComputeHnswOneBit(
                 fused_computer->hnsw_query_planes_.data(),
                 fused_computer->hnsw_query_delta_,
                 fused_computer->hnsw_query_vl_,
                 fused_computer->hnsw_query_sum_,
-                fused_computer->hnsw_g_add_[cluster_id],
-                fused_computer->hnsw_g_error_[cluster_id],
+                fused_computer->cluster_cache_.add[cluster_id],
+                fused_computer->cluster_cache_.error[cluster_id],
                 one_bit_code,
                 supplement_code,
                 distance,
@@ -2343,14 +2325,14 @@ public:
             const auto* query_planes = bottom_quantizer().FilterBits() == 1
                                            ? fused_computer->hnsw_query_planes_.data()
                                            : nullptr;
-            computed = fused_quantizers_[cluster_id]->ComputeFusedAffineFilter(
+            computed = this->bottom_quantizer().ComputeFusedAffineFilter(
                 fused_computer->transformed_query_.data(),
                 query_planes,
                 fused_computer->hnsw_query_delta_,
                 fused_computer->hnsw_query_vl_,
                 fused_computer->hnsw_query_sum_,
-                fused_computer->hnsw_g_add_[cluster_id],
-                fused_computer->hnsw_g_error_[cluster_id],
+                fused_computer->cluster_cache_.add[cluster_id],
+                fused_computer->cluster_cache_.error[cluster_id],
                 one_bit_code,
                 this->query_rabitq_error_rate(ctx),
                 distance,
@@ -2377,16 +2359,17 @@ public:
                                  float* distance,
                                  QueryContext* ctx) const override {
         auto* fused_computer = static_cast<FusedComputer*>(computer.get());
-        if (fused_computer == nullptr or cluster_id >= fused_quantizers_.size()) {
+        if (fused_computer == nullptr or cluster_id >= FusedClusterCount()) {
             return false;
         }
+        fused_computer->cluster_cache_.Ensure(cluster_id);
         this->add_full_count(ctx, 1);
         bool computed = false;
         if (not IsLegacyHnswFusedCodec() and bottom_quantizer().FilterBits() >= 2) {
-            computed = fused_quantizers_[cluster_id]->ComputeFusedAffineFullWithFilterIP(
+            computed = this->bottom_quantizer().ComputeFusedAffineFullWithFilterIP(
                 fused_computer->transformed_query_.data(),
                 fused_computer->hnsw_query_sum_,
-                fused_computer->hnsw_g_add_[cluster_id],
+                fused_computer->cluster_cache_.add[cluster_id],
                 one_bit_code,
                 supplement_code,
                 filter_inner_product,
@@ -2408,15 +2391,16 @@ public:
                      float* distance,
                      QueryContext* ctx) const override {
         auto* fused_computer = static_cast<FusedComputer*>(computer.get());
-        if (fused_computer == nullptr or cluster_id >= fused_quantizers_.size()) {
+        if (fused_computer == nullptr or cluster_id >= FusedClusterCount()) {
             return false;
         }
+        fused_computer->cluster_cache_.Ensure(cluster_id);
         this->add_full_count(ctx, 1);
         if (not IsLegacyHnswFusedCodec()) {
-            return fused_quantizers_[cluster_id]->ComputeFusedAffineFullDirect(
+            return this->bottom_quantizer().ComputeFusedAffineFullDirect(
                 fused_computer->transformed_query_.data(),
                 fused_computer->hnsw_query_sum_,
-                fused_computer->hnsw_g_add_[cluster_id],
+                fused_computer->cluster_cache_.add[cluster_id],
                 one_bit_code,
                 supplement_code,
                 distance);
@@ -2429,11 +2413,11 @@ public:
         const float filter_inner_product =
             0.5F * (signed_ip / inv_sqrt_dim + fused_computer->hnsw_query_sum_);
         float lower_bound = 0.0F;
-        return fused_quantizers_[cluster_id]->ComputeHnswFull(
+        return this->bottom_quantizer().ComputeHnswFull(
             fused_computer->transformed_query_.data(),
             fused_computer->hnsw_query_sum_,
-            fused_computer->hnsw_g_add_[cluster_id],
-            fused_computer->hnsw_g_error_[cluster_id],
+            fused_computer->cluster_cache_.add[cluster_id],
+            fused_computer->cluster_cache_.error[cluster_id],
             one_bit_code,
             supplement_code,
             filter_inner_product,
@@ -2443,68 +2427,63 @@ public:
 
     [[nodiscard]] std::string
     ExportFusedCodec() const override {
-        if (fused_quantizers_.empty()) {
+        if (fused_centroids_.empty()) {
             return {};
         }
         std::stringstream output;
         IOStreamWriter writer(output);
-        constexpr uint32_t version = 1;
+        constexpr uint32_t version = K_FUSED_CODEC_VERSION;
         StreamWriter::WriteObj(writer, version);
-        StreamWriter::WriteVector(writer, fused_centroids_);
-        const auto cluster_count = static_cast<uint32_t>(fused_quantizers_.size());
+        const auto cluster_count = static_cast<uint32_t>(FusedClusterCount());
         StreamWriter::WriteObj(writer, cluster_count);
+        const auto dim = static_cast<uint64_t>(common_param_.dim_);
+        StreamWriter::WriteObj(writer, dim);
+        writer.Write(reinterpret_cast<const char*>(fused_centroids_.data()),
+                     fused_centroids_.size() * sizeof(float));
+        writer.Write(reinterpret_cast<const char*>(fused_rotated_centroids_.data()),
+                     fused_rotated_centroids_.size() * sizeof(float));
+        // Norms are derived from rotated centers on import and are not stored in codec v3.
         return output.str();
     }
 
     void
     ImportFusedCodec(const std::string& serialized) override {
         CHECK_ARGUMENT(not serialized.empty(), "fused RaBitQ codec payload is empty");
-        CHECK_ARGUMENT(this->quantization_param_ != nullptr,
-                       "fused RaBitQ quantizer parameter is unavailable");
-        constexpr uint64_t cluster_count = 16;
-        constexpr uint64_t fixed_payload_size =
-            sizeof(uint32_t) + sizeof(uint64_t) + sizeof(uint32_t);
-        constexpr uint64_t bytes_per_dimension = cluster_count * sizeof(float);
-        CHECK_ARGUMENT(common_param_.dim_ > 0, "invalid fused RaBitQ dimension");
-        const auto dim = static_cast<uint64_t>(common_param_.dim_);
-        CHECK_ARGUMENT(dim <= (std::numeric_limits<uint64_t>::max() - fixed_payload_size) /
-                                  bytes_per_dimension,
-                       "fused RaBitQ codec size overflow");
-        const uint64_t expected_centroid_count = cluster_count * dim;
-        const uint64_t expected_payload_size =
-            fixed_payload_size + expected_centroid_count * sizeof(float);
-        CHECK_ARGUMENT(serialized.size() == expected_payload_size,
-                       "invalid fused RaBitQ codec payload size");
-
+        CHECK_ARGUMENT(serialized.size() >= K_FUSED_CODEC_HEADER_SIZE,
+                       "truncated fused codec header");
         std::stringstream input(serialized);
         IOStreamReader reader(input);
         uint32_t version = 0;
         StreamReader::ReadObj(reader, version);
-        CHECK_ARGUMENT(version == 1, "unsupported fused RaBitQ codec version");
-        uint64_t centroid_count = 0;
-        StreamReader::ReadObj(reader, centroid_count);
-        CHECK_ARGUMENT(centroid_count == expected_centroid_count,
-                       "invalid fused RaBitQ centroid payload");
-        fused_centroids_.resize(expected_centroid_count);
-        reader.Read(reinterpret_cast<char*>(fused_centroids_.data()),
-                    expected_centroid_count * sizeof(float));
+        CHECK_ARGUMENT(version == K_FUSED_CODEC_VERSION, "unsupported fused RaBitQ codec version");
         uint32_t serialized_cluster_count = 0;
         StreamReader::ReadObj(reader, serialized_cluster_count);
-        CHECK_ARGUMENT(serialized_cluster_count == cluster_count,
-                       "invalid fused RaBitQ cluster count");
-        CHECK_ARGUMENT(reader.GetCursor() == reader.Length(),
-                       "trailing fused RaBitQ codec payload");
-
-        fused_quantizers_.clear();
-        fused_quantizers_.reserve(serialized_cluster_count);
-        for (uint32_t cluster_id = 0; cluster_id < serialized_cluster_count; ++cluster_id) {
-            auto quantizer =
-                std::make_shared<RaBitQuantizer<metric>>(quantization_param_, common_param_);
-            quantizer->ShareFusedModelFrom(this->bottom_quantizer());
-            quantizer->SetCentroid(fused_centroids_.data() +
-                                   static_cast<uint64_t>(cluster_id) * common_param_.dim_);
-            fused_quantizers_.push_back(std::move(quantizer));
+        uint64_t dim = 0;
+        StreamReader::ReadObj(reader, dim);
+        CHECK_ARGUMENT(dim == static_cast<uint64_t>(common_param_.dim_),
+                       "fused codec dimension mismatch");
+        CHECK_ARGUMENT(serialized.size() == CheckedFusedCodecSize(dim, serialized_cluster_count),
+                       "invalid fused RaBitQ codec payload size");
+        const uint64_t values = dim * serialized_cluster_count;
+        std::vector<float> centers(values), rotated(values);
+        std::vector<double> norms(serialized_cluster_count);
+        reader.Read(reinterpret_cast<char*>(centers.data()), values * sizeof(float));
+        reader.Read(reinterpret_cast<char*>(rotated.data()), values * sizeof(float));
+        CHECK_ARGUMENT(AreFusedVectorsFinite(centers.data(), serialized_cluster_count) and
+                           AreFusedVectorsFinite(rotated.data(), serialized_cluster_count),
+                       "fused codec centers must be finite");
+        // Norms are derived state, not serialized fields. Compute them from validated centers.
+        for (uint32_t id = 0; id < serialized_cluster_count; ++id) {
+            double norm = 0.0;
+            for (uint64_t d = 0; d < dim; ++d) {
+                const double value = rotated[uint64_t{id} * dim + d];
+                norm += value * value;
+            }
+            norms[id] = norm;
         }
+        fused_centroids_ = std::move(centers);
+        fused_rotated_centroids_ = std::move(rotated);
+        fused_centroid_norms_ = std::move(norms);
         refresh_fused_cluster_stats();
     }
 
@@ -2770,23 +2749,20 @@ public:
             memory += this->optimized_build_code_sums_->capacity() * sizeof(uint64_t);
         }
         memory += sizeof(QuantizerT);
-        memory += fused_quantizers_.size() * sizeof(RaBitQuantizer<metric>);
         memory += fused_centroids_.capacity() * sizeof(float);
         memory += fused_rotated_centroids_.capacity() * sizeof(float);
+        memory += fused_centroid_norms_.capacity() * sizeof(double);
         memory += fused_centroid_sums_.capacity() * sizeof(float);
-        memory += fused_centroid_pair_ip_.capacity() * sizeof(float);
         return memory;
     }
 
 public:
     IndexCommonParam common_param_;
-    RaBitQuantizerParamPtr quantization_param_{nullptr};
     std::shared_ptr<QuantizerT> quantizer_{nullptr};
-    std::vector<std::shared_ptr<RaBitQuantizer<metric>>> fused_quantizers_;
     std::vector<float> fused_centroids_;
     std::vector<float> fused_rotated_centroids_;
+    std::vector<double> fused_centroid_norms_;
     std::vector<float> fused_centroid_sums_;
-    std::vector<float> fused_centroid_pair_ip_;
     std::shared_ptr<FixedLayout<OneBitIOTmpl>> x_bit_layout_{nullptr};
     std::shared_ptr<FixedLayout<SupplementIOTmpl>> supplement_layout_{nullptr};
     std::shared_ptr<FixedLayout<MemoryIO>> optimized_build_scalar_layout_{nullptr};
@@ -2814,6 +2790,38 @@ public:
     uint64_t optimized_build_prefetch_bytes_{0};
 
 private:
+    [[nodiscard]] RaBitQuantizer<metric>
+    FusedQuantizer(uint32_t id) const {
+        // A per-operation centroid view: no per-center quantizer table or shared mutable centroid.
+        // Query scoring uses bottom_quantizer() directly and does not construct this view.
+        return RaBitQuantizer<metric>(
+            bottom_quantizer(),
+            fused_rotated_centroids_.data() + uint64_t{id} * common_param_.dim_);
+    }
+
+    void
+    PrepareFusedCenters() {
+        const auto dim = static_cast<uint64_t>(common_param_.dim_);
+        const auto count = fused_centroids_.size() / dim;
+        fused_rotated_centroids_.resize(fused_centroids_.size());
+        fused_centroid_norms_.resize(count);
+        Vector<float> rotated(dim, 0.0F, allocator_);
+        for (uint64_t id = 0; id < count; ++id) {
+            float raw_norm = 0.0F;
+            typename RaBitQuantizer<metric>::norm_type mrq = 0.0F;
+            bottom_quantizer().TransformFusedQuery(
+                fused_centroids_.data() + id * dim, rotated, raw_norm, mrq);
+            std::copy(rotated.begin(), rotated.end(), fused_rotated_centroids_.data() + id * dim);
+            double norm = 0.0;
+            for (const auto value : rotated) {
+                CHECK_ARGUMENT(IsFiniteRaBitQValue(value), "fused rotated center must be finite");
+                norm += static_cast<double>(value) * value;
+            }
+            fused_centroid_norms_[id] = norm;
+        }
+        refresh_fused_cluster_stats();
+    }
+
     void
     insert_vector_with_scratch(const void* vector, InnerIdType idx, Vector<float>& input_scratch) {
         {
@@ -2970,7 +2978,7 @@ private:
     NearestFusedCluster(const float* data) const {
         uint32_t nearest = 0;
         double nearest_distance = std::numeric_limits<double>::max();
-        for (uint32_t cluster_id = 0; cluster_id < fused_quantizers_.size(); ++cluster_id) {
+        for (uint32_t cluster_id = 0; cluster_id < FusedClusterCount(); ++cluster_id) {
             const auto* centroid =
                 fused_centroids_.data() + static_cast<uint64_t>(cluster_id) * common_param_.dim_;
             const double distance =

@@ -153,6 +153,18 @@ TEST_CASE("QueryComputerPool reuses computers by cell identity", "[ut][query_com
         REQUIRE(stats.query_computer_count.load(std::memory_order_relaxed) == 3);
     }
 
+    SECTION("fallback without a context creates independent owned computers") {
+        auto cell = MakeCountingFlatten(kDim);
+        auto first = vsag::AcquireQueryComputer(cell, query_a.data(), nullptr);
+        auto second = vsag::AcquireQueryComputer(cell, query_a.data(), nullptr);
+        REQUIRE_NOTHROW(first.Validate(cell, query_a.data()));
+        REQUIRE_NOTHROW(second.Validate(cell, query_a.data()));
+        REQUIRE(first.computer != second.computer);
+        REQUIRE(cell->factory_count.load(std::memory_order_relaxed) == 2);
+        REQUIRE_THROWS_AS(vsag::AcquireQueryComputer(nullptr, query_a.data(), nullptr),
+                          vsag::VsagException);
+    }
+
     SECTION("fallback without a pool records and owns a valid computer") {
         auto cell = MakeCountingFlatten(kDim);
         std::weak_ptr<CountingFlattenDataCell> weak_cell = cell;
