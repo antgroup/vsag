@@ -198,7 +198,10 @@ Linux execution paths, not different correctness requirements.
 - Python wheel build/test (`build-python-x86` and `test-python-x86`) runs on main-target PRs
   that change Python/bindings, the C ABI, or CMake/packaging files (the `python` and `cmake`
   path filters). It builds the `py3-none` wheel with `make pyvsag` and runs pytest against it
-  (#3295). Automatic main-push Python checks remain paused
+  (#3295). Main PRs test one primary environment (Python 3.12, NumPy 2); the Python 3.10-3.14 /
+  NumPy 1.x-2.x matrix and the OpenMP coexistence test stay on version branches and manual runs, and
+  belong in Daily. The wheel build tolerates the intentionally skipped Community format job on
+  Team-routed C++ changes, but still stops on failed or cancelled prerequisites. Automatic main-push Python checks remain paused
   (see [Temporary main-push Python pause](#temporary-main-push-python-pause-3295));
   explicit manual Python checks remain available.
 - `.github/workflows/pyvsag-testpypi.yml` builds the pyvsag `py3-none` wheels for x86_64

@@ -3,6 +3,7 @@
 
 from pathlib import Path
 import os
+import json
 import re
 import shlex
 import shutil
@@ -434,18 +435,23 @@ class LeanPrChecksTest(unittest.TestCase):
         subprocess.run(["python3", "-m", "unittest", "tests/scripts/test_main_ci.py", "tests/scripts/test_workflow_entries.py"], cwd=ROOT, check=True)
 
     def selected(self, name, *, base="main", event="pull_request", team=False,
-                 cpp=False, python=False, cmake=False):
+                 cpp=False, python=False, cmake=False, format_result=None):
         body = job_text(ROOT / ".github/workflows/pr-ci-community.yml", name)
         expression = re.search(r"^    if: (.*)$", body, re.M).group(1)
+        expression = expression.removeprefix("${{").removesuffix("}}")
+        if format_result is None and name != "format":
+            format_result = "success" if self.selected("format", base=base, event=event,
+                                                       team=team, cpp=cpp, python=python) else "skipped"
         values = {"github.base_ref": base, "github.event_name": event,
                   "inputs.team-linux": team, "needs.changes.outputs.cpp": str(cpp).lower(),
                   "needs.changes.outputs.python": str(python).lower(),
-                  "needs.changes.outputs.cmake": str(cmake).lower()}
+                  "needs.changes.outputs.cmake": str(cmake).lower(),
+                  "needs.changes.result": "success", "needs.format.result": format_result}
         for key in sorted(values, key=len, reverse=True):
             expression = expression.replace(key, repr(values[key]))
         expression = expression.replace("&&", " and ").replace("||", " or ")
         expression = re.sub(r"!(?!=)", " not ", expression)
-        return eval(expression, {"__builtins__": {}}, {})
+        return eval(expression, {"__builtins__": {}}, {"cancelled": lambda: False})
 
     def test_main_pr_selection_matrix(self):
         for team in (False, True):
@@ -454,10 +460,23 @@ class LeanPrChecksTest(unittest.TestCase):
                 for python, cmake in ((True, False), (False, True), (True, True)):
                     self.assertTrue(self.selected(name, python=python, cmake=cmake, team=team))
                 self.assertFalse(self.selected(name, cpp=True, team=team))
+            # Team-routed cpp changes skip Community format but must still build the wheel.
+            for flag in ("python", "cmake"):
+                self.assertTrue(self.selected("build-python-x86", cpp=True, team=team, **{flag: True}))
             self.assertEqual(self.selected("format", cpp=True, team=team), not team)
             self.assertTrue(self.selected("format", python=True, team=team))
         body = job_text(ROOT / ".github/workflows/pr-ci-community.yml", "build-python-x86")
         self.assertIn("needs: [changes, format]", body)
+        for result in ("failure", "cancelled"):
+            self.assertFalse(self.selected("build-python-x86", python=True, format_result=result))
+
+    def test_python_matrix_is_reduced_only_for_main_prs(self):
+        body = job_text(ROOT / ".github/workflows/pr-ci-community.yml", "test-python-x86")
+        primary, full = re.findall(r"'(\{\"include\".*?\]\})'", body)
+        self.assertEqual(json.loads(primary), {"include": [{"python": "3.12", "numpy": "2.*"}]})
+        self.assertEqual([item["python"] for item in json.loads(full)["include"]],
+                         ["3.10", "3.11", "3.12", "3.13", "3.14"])
+        self.assertIn("github.event_name == 'pull_request' && github.base_ref == 'main'", body)
 
     def test_version_and_dispatch_preserve_legacy_selection(self):
         for context in ({"base": "0.18"}, {"event": "workflow_dispatch", "base": ""}):
