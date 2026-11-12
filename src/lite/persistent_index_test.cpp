@@ -8,6 +8,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -16,6 +17,44 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <utility>
+
+#ifdef VSAG_LITE_WRAP_PERSISTENT_IO
+namespace {
+uint64_t sync_failures = 0;
+bool interrupt_append = false;
+constexpr size_t PARTIAL_RECORD_BYTES = 7;
+}  // namespace
+
+extern "C" int
+__real_fsync(int fd);
+extern "C" ssize_t
+__real_write(int fd, const void* data, size_t size);
+
+extern "C" int
+__wrap_fsync(int fd) {
+    if (sync_failures != 0) {
+        --sync_failures;
+        errno = EIO;
+        return -1;
+    }
+    return __real_fsync(fd);
+}
+
+extern "C" ssize_t
+__wrap_write(int fd, const void* data, size_t size) {
+    if (interrupt_append) {
+        interrupt_append = false;
+        const auto partial = std::min(size, PARTIAL_RECORD_BYTES);
+        if (__real_write(fd, data, partial) != static_cast<ssize_t>(partial)) {
+            ::_exit(3);
+        }
+        ::kill(::getpid(), SIGKILL);
+        ::_exit(4);
+    }
+    return __real_write(fd, data, size);
+}
+#endif
 
 namespace vsag::lite {
 namespace {
@@ -406,5 +445,75 @@ TEST_CASE("A short Add write rolls back the log and closes the writer", "[lite-p
     REQUIRE((*index)->Size().value() == SEED_ROWS + 1);
     REQUIRE((*index)->Add(101, vector.data(), DIM).has_value());
 }
+
+#ifdef VSAG_LITE_WRAP_PERSISTENT_IO
+TEST_CASE("An interrupted log append preserves acknowledged additions", "[lite-persistent-add]") {
+    TempDirectory temporary;
+    const auto path = temporary.Store().string();
+    const auto log = temporary.Store() / "add.log";
+    const auto vector = make_vector(5);
+    auto index = PersistentIndex::Create(path, make_seed(0));
+    REQUIRE(index.has_value());
+    REQUIRE((*index)->Add(5, vector.data(), DIM).has_value());
+    index->reset();
+    const auto committed = fs::file_size(log);
+
+    const auto pid = ::fork();
+    if (pid == 0) {
+        auto child = PersistentIndex::Open(path);
+        if (not child) {
+            ::_exit(1);
+        }
+        interrupt_append = true;
+        (*child)->Add(6, vector.data(), DIM);
+        ::_exit(2);
+    }
+    REQUIRE(pid > 0);
+    int status{};
+    REQUIRE(::waitpid(pid, &status, 0) == pid);
+    REQUIRE(WIFSIGNALED(status));
+    REQUIRE(WTERMSIG(status) == SIGKILL);
+    REQUIRE(fs::file_size(log) == committed + PARTIAL_RECORD_BYTES);
+
+    index = PersistentIndex::Open(path);
+    REQUIRE(index.has_value());
+    CHECK(fs::file_size(log) == committed);
+    CHECK((*index)->Size().value() == 1);
+    REQUIRE((*index)->Add(6, vector.data(), DIM).has_value());
+}
+
+TEST_CASE("Sync failure after a complete Add closes the writer and restores the log",
+          "[lite-persistent-add]") {
+    const auto failures = GENERATE(1U, 2U);
+    TempDirectory temporary;
+    const auto path = temporary.Store().string();
+    const auto log = temporary.Store() / "add.log";
+    const auto vector = make_vector(5);
+    auto index = PersistentIndex::Create(path, make_seed(0));
+    REQUIRE(index.has_value());
+    REQUIRE((*index)->Add(5, vector.data(), DIM).has_value());
+    const auto committed = fs::file_size(log);
+
+    sync_failures = failures;
+    const auto failed = (*index)->Add(6, vector.data(), DIM);
+    const auto remaining = std::exchange(sync_failures, 0);
+    CHECK(remaining == 0);
+    REQUIRE_FALSE(failed.has_value());
+    CHECK(failed.error().type == ErrorType::INTERNAL_ERROR);
+    CHECK((failed.error().message.find("outcome uncertain") != std::string::npos) ==
+          (failures == 2));
+    CHECK_FALSE((*index)->Size().has_value());
+    CHECK_FALSE((*index)->Add(7, vector.data(), DIM).has_value());
+    CHECK_FALSE((*index)->Search(vector.data(), DIM, 1).has_value());
+    std::ostringstream output;
+    CHECK_FALSE((*index)->Save(output).has_value());
+    CHECK(fs::file_size(log) == committed);
+
+    index = PersistentIndex::Open(path);
+    REQUIRE(index.has_value());
+    CHECK((*index)->Size().value() == 1);
+    REQUIRE((*index)->Add(6, vector.data(), DIM).has_value());
+}
+#endif
 
 }  // namespace vsag::lite
