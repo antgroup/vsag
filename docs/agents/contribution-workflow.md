@@ -58,11 +58,9 @@ maintainer confirmation before submitting without them. Likewise report real
 failures and obtain confirmation for any exception; do not mask failures or
 substitute future main/daily checks for the required pre-submission validation.
 
-The main-target Python PR suspension is temporary; these contributor-side
-requirements apply during it. Automated Python PR checks will be restored once
-the new pyvsag packaging (#3295) has been validated in the development
-environment. See [CI routing](ci-routing.md#main-target-pr-check-scope)
-and [build/test guidance](build-and-test.md).
+Python wheel build and pytest also run automatically on main-target PRs that touch Python, the
+C ABI or packaging, but run the contributor-side checks above before submitting. See
+[CI routing](ci-routing.md#main-target-pr-check-scope) and [build/test guidance](build-and-test.md).
 
 ## Commit messages
 

@@ -249,11 +249,8 @@ jobs:
 
   build-python-x86:
     name: Python Build X86
-    # Python validation is disabled on main PRs until it is validated in the development
-    # environment. To enable it, drop the base_ref != 'main' condition here and in
-    # test-python-x86 (and update tests/scripts/test_dependency_workflows.py and docs/agents).
     needs: [changes, format]
-    if: (github.event_name != 'pull_request' || github.base_ref != 'main') && (needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true')
+    if: (needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true')
     runs-on: ubuntu-24.04
     steps:
       - name: Free Disk Space
@@ -457,7 +454,7 @@ jobs:
   test-python-x86:
     name: Test Python X86 (py${{ matrix.python }}, numpy ${{ matrix.numpy }})
     needs: [changes, build-python-x86]
-    if: (github.event_name != 'pull_request' || github.base_ref != 'main') && (needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true')
+    if: (needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true')
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false

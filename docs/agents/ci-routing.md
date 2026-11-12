@@ -195,12 +195,12 @@ PRs targeting `main` keep the Linux ASan tests, examples, compatibility, changed
 lint, formatting, routing checks and `PR CI Gate`. Team and Community remain alternative
 Linux execution paths, not different correctness requirements.
 
-- Python wheel build/test is temporarily disabled for all main-target PRs, including
-  Python changes. The pyvsag rework (#3295) has landed, but the checks stay off until the new
-  packaging has been validated in the development environment. Automatic main-push Python checks are also temporarily paused;
-  explicit manual Python checks remain available. Restore PR validation in both
-  `build-python-x86` and `test-python-x86` after that validation; until then,
-  Python integration regressions require explicit manual or Daily testing to be detected.
+- Python wheel build/test (`build-python-x86` and `test-python-x86`) runs on main-target PRs
+  that change Python/bindings, the C ABI, or CMake/packaging files (the `python` and `cmake`
+  path filters). It builds the `py3-none` wheel with `make pyvsag` and runs pytest against it
+  (#3295). Automatic main-push Python checks remain paused
+  (see [Temporary main-push Python pause](#temporary-main-push-python-pause-3295));
+  explicit manual Python checks remain available.
 - `.github/workflows/pyvsag-testpypi.yml` builds the pyvsag `py3-none` wheels for x86_64
   and aarch64 from `main` every night (03:17 Beijing time, cron `17 19 * * *`) and on manual
   dispatch, and can upload them to TestPyPI with the `TEST_PYPI_API_TOKEN` secret. Uploading is

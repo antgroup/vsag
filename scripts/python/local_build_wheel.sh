@@ -86,6 +86,7 @@ run_build() {
   if $HAVE_DOCKER; then
     echo "🛠️  Starting cibuildwheel... "
     CIBW_ARCHS="${ARCH}" \
+    CIBW_ENVIRONMENT_PASS_LINUX="CMAKE_BUILD_PARALLEL_LEVEL" \
     CIBW_TEST_COMMAND="pip install numpy pytest && python /project/tests/python/run_test.py" \
     cibuildwheel --platform linux --output-dir wheelhouse python
   else

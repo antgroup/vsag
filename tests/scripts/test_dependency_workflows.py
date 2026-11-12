@@ -450,11 +450,10 @@ class LeanPrChecksTest(unittest.TestCase):
     def test_main_pr_selection_matrix(self):
         for team in (False, True):
             self.assertFalse(self.selected("build-asan-macos-arm64", cpp=True, team=team))
-            self.assertFalse(self.selected("build-python-x86", cpp=True, python=True, team=team))
             for name in ("build-python-x86", "test-python-x86"):
                 for python, cmake in ((True, False), (False, True), (True, True)):
-                    self.assertFalse(self.selected(name, python=python, cmake=cmake, team=team))
-                self.assertFalse(self.selected(name, team=team))
+                    self.assertTrue(self.selected(name, python=python, cmake=cmake, team=team))
+                self.assertFalse(self.selected(name, cpp=True, team=team))
             self.assertEqual(self.selected("format", cpp=True, team=team), not team)
             self.assertTrue(self.selected("format", python=True, team=team))
         body = job_text(ROOT / ".github/workflows/pr-ci-community.yml", "build-python-x86")
