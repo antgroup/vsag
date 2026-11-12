@@ -7,12 +7,22 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Install required tools
+    - name: Check preinstalled tools
       shell: bash
       run: |
-        sudo apt-get update
-        sudo bash scripts/deps/install_toolchain_ubuntu.sh
-        sudo apt-get install -y clang-format-20 clang-tidy-20 ninja-build
+        ./scripts/ci/configure-git-safe-directory.sh
+        for tool in clang-format-20 clang-tidy-20; do
+          version=$("$tool" --version)
+          echo "$version"
+          if [[ ! "$version" =~ version\ 20\. ]]; then
+            echo "::error::Lite requires preinstalled $tool major version 20."
+            exit 1
+          fi
+        done
+        for tool in cmake ninja c++ gcov python3; do
+          command -v "$tool"
+          "$tool" --version
+        done
     - name: Check all Lite formatting
       shell: bash
       run: |

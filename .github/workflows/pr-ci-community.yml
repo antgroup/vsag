@@ -91,7 +91,8 @@ jobs:
     # Python-only changes still need Community formatting.
     if: (needs.changes.outputs.cpp == 'true' || needs.changes.outputs.python == 'true') && !(github.event_name == 'pull_request' && github.base_ref == 'main' && inputs.team-linux && needs.changes.outputs.cpp == 'true')
     runs-on: ubuntu-24.04
-    container: vsaglib/vsag:ci-main-base
+    # Docker Hub alternative: vsaglib/vsag:ci-main-base
+    container: ghcr.io/antgroup/vsag:ci-main-base
     defaults:
       run:
         shell: bash
@@ -289,7 +290,8 @@ jobs:
     if: ${{ !inputs.team-linux && needs.changes.outputs.cpp == 'true' }}
     runs-on: ubuntu-24.04
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -331,7 +333,8 @@ jobs:
     env:
       LD_LIBRARY_PATH: ${{ github.workspace }}/build/src
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -369,7 +372,8 @@ jobs:
     if: ${{ !inputs.team-linux && needs.changes.outputs.cpp == 'true' }}
     runs-on: ubuntu-24.04
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -406,7 +410,8 @@ jobs:
       COMPATIBILITY_INDEX_DIR: ${{ github.workspace }}/.ci-compatibility-inputs
       LD_LIBRARY_PATH: ${{ github.workspace }}/build/src
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -517,7 +522,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
     steps:
       - uses: actions/checkout@v4
         with:
@@ -576,6 +582,9 @@ jobs:
     if: inputs.run-lite
     name: Lite ${{ matrix.mode }}
     runs-on: ubuntu-24.04
+    # Lite needs GCC/gcov, LLVM 20 format/tidy, CMake/Ninja, Python and Git; no BLAS/MKL.
+    # Docker Hub alternative: vsaglib/vsag:ci-main-base
+    container: ghcr.io/antgroup/vsag:ci-main-base
     strategy:
       fail-fast: false
       matrix:
@@ -637,7 +646,8 @@ jobs:
       group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -682,7 +692,8 @@ jobs:
       group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/tsan-build-and-test-test-tsan

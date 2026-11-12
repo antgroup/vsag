@@ -48,7 +48,8 @@ jobs:
     if: inputs.check == 'format'
     name: Manual Format
     runs-on: ubuntu-24.04
-    container: vsaglib/vsag:ci-main-base
+    # Docker Hub alternative: vsaglib/vsag:ci-main-base
+    container: ghcr.io/antgroup/vsag:ci-main-base
     defaults:
       run:
         shell: bash
@@ -63,6 +64,9 @@ jobs:
     if: inputs.check == 'lite'
     name: Manual Lite ${{ matrix.mode }}
     runs-on: ubuntu-24.04
+    # Lite needs GCC/gcov, LLVM 20 format/tidy, CMake/Ninja, Python and Git; no BLAS/MKL.
+    # Docker Hub alternative: vsaglib/vsag:ci-main-base
+    container: ghcr.io/antgroup/vsag:ci-main-base
     strategy:
       fail-fast: false
       matrix:
@@ -114,6 +118,12 @@ jobs:
     name: Manual Toolchain Installed Client
   toolchain-source-baseline:
     runs-on: ubuntu-24.04
+    # Retain Ubuntu 22.04 for the GCC 9 / Clang 13 source and C++17 client baseline.
+    # Requires old compilers, Fortran, CMake/Ninja/Make, Git, OpenBLAS/LAPACKE,
+    # libaio and LLVM 13 OpenMP; installed by toolchain-compatibility-source-baseline.
+    # docker/ CI images use Ubuntu 26.04 + GCC 13/LLVM 20; dist images use manylinux.
+    # Neither preserves this baseline. A future lightweight image must retain it.
+    # Docker Hub official image: docker.io/library/ubuntu:22.04; no project GHCR mirror.
     container: ubuntu:22.04
     strategy:
       fail-fast: false
