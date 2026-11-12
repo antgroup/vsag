@@ -505,9 +505,9 @@ TEST_CASE("SINDI worker parameters require bounded JSON integers", "[ut][SINDIPa
                                   "18446744073709551616"}) {
             CAPTURE(key, value);
             SINDISearchParameter parameter;
-            REQUIRE_THROWS_AS(parameter.FromJson(JsonType::Parse(std::string("{\"sindi\":{\"") +
-                                                                 key + "\":" + value + "}}")),
-                              VsagException);
+            std::string payload("{\"sindi\":{\"");
+            payload.append(key).append("\":").append(value).append("}}");
+            REQUIRE_THROWS_AS(parameter.FromJson(JsonType::Parse(payload)), VsagException);
         }
         auto json = JsonType::Parse("{\"sindi\":{}}");
         json["sindi"][key].SetInt(1);
