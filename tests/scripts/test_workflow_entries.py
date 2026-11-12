@@ -48,10 +48,10 @@ def expression(text, values):
 
 
 class EntryTests(unittest.TestCase):
-    def test_exact_ten_files_and_local_workflow_targets_exist(self):
+    def test_exact_workflow_files_and_local_workflow_targets_exist(self):
         expected = {'pr-ci.yml', 'pr-ci-team.yml', 'pr-ci-community.yml', 'pr-issue-link.yml',
                     'main-ci.yml', 'daily_test.yml', 'manual-checks.yml', 'release.yml',
-                    'maintenance.yml', 'update-ci-image.yml'}
+                    'maintenance.yml', 'update-ci-image.yml', 'pyvsag-testpypi.yml'}
         files = list((ROOT / '.github/workflows').glob('*.y*ml'))
         self.assertEqual({p.name for p in files}, expected)
         for p in files:
