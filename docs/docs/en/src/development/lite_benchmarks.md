@@ -169,7 +169,9 @@ of disabling its check. The fixed-reference path uses `--reference-provenance`
 when no fresh Full receipt is provided and still enforces the exact library and
 header hashes. The runner and offline verifier both require the pinned Lite
 library SHA-256 for the historical dbb2fe0 feature revision. New-source
-comparisons require matching fresh Full/Lite receipts.
+comparisons require matching fresh Full/Lite receipts in the archived manifest.
+The verifier checks each loader summary against its raw CSV and external peak
+RSS, then matches the dimension, vector count, and snapshot size.
 Record O3/Ofast semantics and actual selected SIMD paths; equal ef is not equal
 quality. Package bytes cover the stated application/runtime/loader/notices only.
 The fresh Full SDK retains CMake's actual versioned SONAME aliases rather than

@@ -16,6 +16,7 @@ from run_mixed_cpu_acceptance import sha, write_json, validate_build, validate_l
 
 HISTORICAL_FEATURE_SHA = 'dbb2fe0bec685ae7a343b1d2060d0553a98e20d2'
 HISTORICAL_LITE_LIBRARY_SHA256 = '3171d0d7e86866f02096db130f1937eb13c5115cbe993d4a6feb2e9987774330'
+HISTORICAL_FULL_LIBRARY_SHA256 = '9aeaa550703f116bef2959769d4f2f03da254b07c906ba941d8186224cc70c72'
 
 
 def validate_fresh_receipt(receipt, feature, install):
@@ -71,7 +72,7 @@ def main():
         current_build_receipt = validate_build(args.feature.resolve(), expected_feature,
                                                args.feature_build.resolve())
         expected_lite = current_build_receipt['library_sha256']
-    expected_full = '9aeaa550703f116bef2959769d4f2f03da254b07c906ba941d8186224cc70c72'
+    expected_full = HISTORICAL_FULL_LIBRARY_SHA256
     feature_sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=args.feature, text=True).strip()
     assert feature_sha == expected_feature
     assert not subprocess.check_output(['git', 'status', '--porcelain', '-uno'], cwd=args.feature)

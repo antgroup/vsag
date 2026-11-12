@@ -5,6 +5,7 @@ import hashlib
 import io
 import shutil
 import statistics
+import struct
 import tarfile
 from pathlib import Path
 import subprocess
@@ -186,19 +187,22 @@ class FullAuditTests(unittest.TestCase):
                 ccache=False, prior_object_count=0, core_object_count=100,
                 install='/tmp/full-reference', library_sha256='z' * 64), 'feature', Path('/tmp/full-reference'))
 
-    def fixture(self, directory, ef=512, digest='full', lite_digest=None, feature_sha=None):
+    def fixture(self, directory, ef=512, digest=None, lite_digest=None, feature_sha=None, full_digest=None):
         root = Path(directory)
         (root / 'measurements').mkdir()
         if lite_digest is None:
             lite_digest = '3171d0d7e86866f02096db130f1937eb13c5115cbe993d4a6feb2e9987774330'
         if feature_sha is None:
             feature_sha = 'dbb2fe0bec685ae7a343b1d2060d0553a98e20d2'
+        if full_digest is None:
+            full_digest = '9aeaa550703f116bef2959769d4f2f03da254b07c906ba941d8186224cc70c72'
         provenance = root / 'provenance.json'
         identity = root / 'measurements/identity.json'
         provenance.write_text(json.dumps(dict(feature_sha=feature_sha,
-            full_source_sha='full-source', full_library_sha256='full', lite_library_sha256=lite_digest)))
+            full_source_sha='full-source', full_library_sha256=full_digest, lite_library_sha256=lite_digest)))
         identity.write_text(json.dumps(dict(arguments=dict(ef=ef, full_ef=512, dataset=[]),
-            reference_library_sha256=digest, lite_library_sha256=lite_digest)))
+            reference_library_sha256=full_digest if digest is None else digest,
+            lite_library_sha256=lite_digest)))
         rows = root / 'measurements/rows.json'
         rows.write_text('[]')
         (root / 'manifest.json').write_text(json.dumps({
@@ -215,6 +219,8 @@ class FullAuditTests(unittest.TestCase):
     def test_current_records_without_lite_source_receipt_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = self.fixture(directory, feature_sha='c' * 40)
+            self.add_fresh_full_receipt(root)
+            self.write_manifest(root)
             with self.assertRaisesRegex(ValueError, 'Current-source comparison requires a Lite build receipt'):
                 verify(root)
 
@@ -227,15 +233,172 @@ class FullAuditTests(unittest.TestCase):
     def test_wrong_reference_library_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = self.fixture(directory, digest='old-lite')
-            with self.assertRaises(AssertionError):
+            with self.assertRaisesRegex(ValueError, 'Measured library digests'):
                 verify(root)
 
     def test_manifest_corruption_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = self.fixture(directory)
             (root / 'manifest.json').write_text(json.dumps({'provenance.json': 'incorrect'}))
-            with self.assertRaises(AssertionError):
+            with self.assertRaisesRegex(ValueError, 'Manifest SHA-256 mismatch'):
                 verify(root)
+
+    def add_fresh_full_receipt(self, root, source=None):
+        provenance_path = root / 'provenance.json'
+        provenance = json.loads(provenance_path.read_text())
+        provenance.update(fresh_full_core=True, full_source_sha=provenance['feature_sha'],
+                          full_headers={'vsag.h': 'b' * 64}, full_boundary='fixture',
+                          full_suite='not rerun')
+        receipt = root / 'fresh-full-receipt.json'
+        receipt.write_text(json.dumps(dict(fresh_core=True, ccache=False,
+            prior_object_count=0, core_object_count=100,
+            full_source_head=source or provenance['feature_sha'],
+            library_sha256=provenance['full_library_sha256'], full_headers_sha256=provenance['full_headers'],
+            full_build_boundary=provenance['full_boundary'], full_suite=provenance['full_suite'])))
+        provenance['fresh_full_receipt_sha256'] = hashlib.sha256(receipt.read_bytes()).hexdigest()
+        provenance_path.write_text(json.dumps(provenance))
+
+    def write_manifest(self, root, omit=None):
+        manifest = root / 'manifest.json'
+        manifest.write_text(json.dumps({
+            str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in root.rglob('*') if path.is_file() and path not in (manifest, omit)}))
+
+    def test_current_lite_receipt_cannot_substitute_for_fresh_full_receipt(self):
+        feature = 'c' * 40
+        for flag in (False, None, 'true'):
+            with self.subTest(flag=flag), tempfile.TemporaryDirectory() as directory:
+                root = self.fixture(directory, feature_sha=feature)
+                provenance_path = root / 'provenance.json'
+                provenance = json.loads(provenance_path.read_text())
+                receipt = root / 'lite-build-source-receipt.json'
+                receipt.write_text(json.dumps(dict(source=dict(feature_sha=feature),
+                    library_sha256=provenance['lite_library_sha256'])))
+                provenance.update(source_bound_current_comparison=True,
+                    lite_build_source_receipt_sha256=hashlib.sha256(receipt.read_bytes()).hexdigest())
+                if flag is not None:
+                    provenance['fresh_full_core'] = flag
+                provenance_path.write_text(json.dumps(provenance))
+                self.write_manifest(root)
+                with self.assertRaisesRegex(ValueError, 'requires a fresh Full receipt'):
+                    verify(root)
+
+    def test_fresh_full_receipt_must_match_current_feature(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.fixture(directory, feature_sha='c' * 40)
+            self.add_fresh_full_receipt(root, source='d' * 40)
+            self.write_manifest(root)
+            with self.assertRaisesRegex(ValueError, 'Full receipt does not match the measured feature commit'):
+                verify(root)
+
+    def test_fresh_full_receipt_must_be_in_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.fixture(directory, feature_sha='c' * 40)
+            self.add_fresh_full_receipt(root)
+            self.write_manifest(root, omit=root / 'fresh-full-receipt.json')
+            with self.assertRaisesRegex(ValueError, 'fresh Full receipt in manifest'):
+                verify(root)
+
+    def test_historical_without_fresh_full_receipt_requires_pinned_full_library(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.fixture(directory, full_digest='full')
+            with self.assertRaisesRegex(ValueError, 'Historical Full library SHA-256 mismatch'):
+                verify(root)
+
+    def loader_fixture(self, root):
+        self.fixture(root)
+        data = root / 'dataset'
+        data.mkdir()
+        vector = struct.pack('<if', 1, 0)
+        (data / 'base.fvecs').write_bytes(vector * 10000)
+        (data / 'queries.fvecs').write_bytes(vector)
+        (data / 'groundtruth.ivecs').write_bytes(struct.pack('<11i', 10, *range(10)))
+
+        measurements = root / 'measurements'
+        identity_path = measurements / 'identity.json'
+        identity = json.loads(identity_path.read_text())
+        identity['arguments']['dataset'] = [f'Fixture={data}']
+        identity_path.write_text(json.dumps(identity))
+        (measurements / 'Fixture.dataset.json').write_text(json.dumps({
+            path.name: dict(sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+            for path in data.iterdir()}))
+        loader = dict(dim='1', count='10000', snapshot_bytes='20', load_ms='1.25',
+                      before_create_rss_kib='3', before_load_rss_kib='4', loaded_rss_kib='6',
+                      process_peak_rss_kib='7', page_cache_control='warm_uncontrolled',
+                      external_peak_rss_kib=8)
+        csv_fields = list(loader)[:-1]
+        raw = ','.join(csv_fields) + '\n' + ','.join(loader[key] for key in csv_fields) + '\n'
+        rows = []
+        for storage in ('fp32', 'fp16', 'rabitq8'):
+            for trial in range(3):
+                for side in ('lite', 'full'):
+                    stem = f'Fixture-{storage}-{trial}-{side}'
+                    query = stem + ('.queries.csv' if side == 'lite' else '')
+                    (measurements / (query + '.latencies.csv')).write_text('latency_us\n1\n')
+                    (measurements / (query + '.neighbors.csv')).write_text(
+                        'query,rank,id,distance\n' + ''.join(f'0,{i},{i},0x0p+0\n' for i in range(10)))
+                    for sample in range(3):
+                        tag = f'{stem}-load-{sample}'
+                        stdout = ('[info] Full startup\n' if side == 'full' else '') + raw
+                        (measurements / (tag + '.stdout')).write_text(stdout)
+                        (measurements / (tag + '.peak_kib')).write_text('8\n')
+                    rows.append(dict(dataset='Fixture', storage=storage, trial=trial, name=side,
+                        build=dict(search_p50_us='1', search_p99_us='1', recall_at_k='1',
+                                   snapshot_bytes='20'), loads=[dict(loader) for _ in range(3)]))
+        (measurements / 'rows.json').write_text(json.dumps(rows))
+        self.write_manifest(root)
+        return rows
+
+    def test_verify_loader_samples_with_full_startup_logs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.loader_fixture(root)
+            self.assertEqual(verify(root)['fresh_loaders'], 54)
+
+    def test_rehashed_loader_summary_cannot_disagree_with_stdout_or_peak(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rows = self.loader_fixture(root)
+            for field, value in [('load_ms', '2.25'), ('before_load_rss_kib', '5'),
+                                 ('loaded_rss_kib', '7'), ('external_peak_rss_kib', 9)]:
+                with self.subTest(field=field):
+                    sample = rows[1]['loads'][1]
+                    old = sample[field]
+                    sample[field] = value
+                    (root / 'measurements/rows.json').write_text(json.dumps(rows))
+                    self.write_manifest(root)
+                    with self.assertRaisesRegex(ValueError, 'Loader summary differs.*Fixture-fp32-0-full-load-1'):
+                        verify(root)
+                    sample[field] = old
+
+    def test_raw_loader_sample_must_be_in_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.loader_fixture(root)
+            self.write_manifest(root, omit=root / 'measurements/Fixture-fp32-0-lite-load-0.stdout')
+            with self.assertRaisesRegex(ValueError, 'Missing raw loader evidence in manifest'):
+                verify(root)
+
+    def test_matching_loader_records_must_describe_the_expected_snapshot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rows = self.loader_fixture(root)
+            for field, new, old_row, new_row in [
+                    ('dim', '2', '1,10000,20,', '2,10000,20,'),
+                    ('snapshot_bytes', '21', '1,10000,20,', '1,10000,21,')]:
+                with self.subTest(field=field):
+                    stdout = root / 'measurements/Fixture-fp32-0-lite-load-0.stdout'
+                    original = stdout.read_text()
+                    stdout.write_text(original.replace(old_row, new_row))
+                    sample = rows[0]['loads'][0]
+                    old = sample[field]
+                    sample[field] = new
+                    (root / 'measurements/rows.json').write_text(json.dumps(rows))
+                    self.write_manifest(root)
+                    with self.assertRaisesRegex(ValueError, 'Loader identity differs'):
+                        verify(root)
+                    stdout.write_text(original)
+                    sample[field] = old
 
 
 class CurrentPublishedFullTests(unittest.TestCase):

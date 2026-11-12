@@ -72,7 +72,7 @@ python3 lite/benchmark/pack_mixed_cpu_acceptance.py "$BENCH_RESULT"
 
 Full 消费程序在 `lite/benchmark/full` 独立构建。比较运行器还需要显式匹配的 helper 仓库和源码引用，包体程序需要固定哈希的 consumer 源码包；这些都是必须记录的输入，不能替换后绕过校验。
 
-[英文 Full/包体命令](../../../en/src/development/lite_benchmarks.md#native-full-and-runtime-package)说明 `build_fresh_full_reference.py`、`run_pinned_full_acceptance.py`、`measure_runtime_package.py` 及对应校验器。新源码比较要求匹配的新编 Full/Lite 收据；固定引用复核在没有 fresh Full 收据时显式传入 `--reference-provenance`，仍核对库和头文件哈希。对于历史功能版本 dbb2fe0，运行脚本和离线校验器都要求 Lite 库的 SHA-256 与固定值一致。
+[英文 Full/包体命令](../../../en/src/development/lite_benchmarks.md#native-full-and-runtime-package)说明 `build_fresh_full_reference.py`、`run_pinned_full_acceptance.py`、`measure_runtime_package.py` 及对应校验器。新源码比较要求归档清单包含匹配的新编 Full/Lite 收据；固定引用复核在没有 fresh Full 收据时显式传入 `--reference-provenance`，仍核对库和头文件哈希。对于历史功能版本 dbb2fe0，运行脚本和离线校验器都要求 Lite 库的 SHA-256 与固定值一致。离线校验器逐条核对加载汇总、原始 CSV 和外部进程峰值 RSS，并核对维度、向量数和快照大小。
 
 Full O3 实验配置与默认 Ofast 不能混用；相同 ef 不保证同质量。运行时包仅涵盖应用、递归 ELF 依赖、loader、launcher 和 notices；结果归档大小不代表产品包大小。SDK、Python、容器、系统、数据和快照不在该包体范围内。
 
