@@ -10,6 +10,7 @@
 - [查询统计信息](guide/search_statistics.md)
 - [C API](guide/c_api.md)
 - [pyvsag](guide/pyvsag.md)
+- [LangChain 集成](guide/langchain.md)
 
 # 索引
 

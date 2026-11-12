@@ -219,6 +219,21 @@ pyvsag.set_logger_debug()   # 输出详细调试信息
 - 使用 `multiprocessing` 时请选择 `spawn` 启动方式，不要在 `fork` 之间共享索引。
 - 对 `copy.copy(index)` 得到的浅拷贝与原对象共享同一个原生索引；最后一个引用消失时才释放原生索引。
 
+## LangChain 集成
+
+LangChain 支持是可选 extra，`pip install pyvsag` 不会安装它：
+
+```bash
+pip install "pyvsag[langchain]"
+```
+
+```python
+from pyvsag.langchain import VSAGVectorStore
+```
+
+用法、分数语义和已知限制参见 [LangChain 集成](langchain.md)。要求 CPython 3.10+
+（这是 LangChain 的要求）以及 `langchain-core>=0.3.77,<2`。
+
 ## 与 C++ 库的关系
 
 `pyvsag` 封装的是同一份 `vsag::Index` 实现，并与 C++ 共享底层索引二进制，因此行为和性能特征一致。
