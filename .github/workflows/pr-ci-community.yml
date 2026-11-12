@@ -77,6 +77,8 @@ jobs:
               - 'tests/scripts/simd_coverage_test.py'
             python:
               - 'python/**'
+              - 'include/vsag/vsag_c_api.h'
+              - 'src/vsag_c_api.cpp'
               - 'cmake/vsag_c.map'
               - 'tests/python/**'
               - '.github/workflows/**'
@@ -248,8 +250,9 @@ jobs:
 
   build-python-x86:
     name: Python Build X86
-    # Temporarily disable Python validation on main PRs until the Python rework lands.
-    # Restore PR validation here and in test-python-x86 after that work.
+    # Python validation is disabled on main PRs until it is validated in the development
+    # environment. To enable it, drop the base_ref != 'main' condition here and in
+    # test-python-x86 (and update tests/scripts/test_dependency_workflows.py and docs/agents).
     needs: [changes, format]
     if: (github.event_name != 'pull_request' || github.base_ref != 'main') && (needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true')
     runs-on: ubuntu-24.04
