@@ -135,6 +135,38 @@ TEST_CASE("SQ8 SIMD Compute", "[ut][simd]") {
     }
 }
 
+TEST_CASE("SQ8 L2 Batch4 matches four single distances", "[ut][simd][batch4]") {
+    for (const uint64_t dim : {1ULL, 7ULL, 16ULL, 17ULL, 31ULL, 32ULL, 960ULL}) {
+        auto query = fixtures::generate_vectors(1, dim);
+        auto lower_bound = fixtures::generate_vectors(1, dim, true, 183);
+        auto diff = fixtures::generate_vectors(1, dim, true, 657);
+        std::vector<uint8_t> codes(4 * dim);
+        for (uint64_t i = 0; i < codes.size(); ++i) {
+            codes[i] = static_cast<uint8_t>((i * 37) % 256);
+        }
+
+        float dist1 = 0, dist2 = 0, dist3 = 0, dist4 = 0;
+        SQ8ComputeL2SqrBatch4(query.data(),
+                              codes.data(),
+                              codes.data() + dim,
+                              codes.data() + 2 * dim,
+                              codes.data() + 3 * dim,
+                              lower_bound.data(),
+                              diff.data(),
+                              dim,
+                              dist1,
+                              dist2,
+                              dist3,
+                              dist4);
+        const float actual[4] = {dist1, dist2, dist3, dist4};
+        for (uint64_t i = 0; i < 4; ++i) {
+            const float expected = SQ8ComputeL2Sqr(
+                query.data(), codes.data() + i * dim, lower_bound.data(), diff.data(), dim);
+            REQUIRE(fixtures::dist_t(actual[i]) == fixtures::dist_t(expected));
+        }
+    }
+}
+
 #define BENCHMARK_SIMD_COMPUTE_QUERY(Simd, Comp)                                                   \
     BENCHMARK_ADVANCED(#Simd #Comp) {                                                              \
         for (int i = 0; i < count; ++i) {                                                          \

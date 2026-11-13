@@ -228,6 +228,38 @@ ScalarQuantizer<metric, bit>::ComputeDistImpl(Computer<ScalarQuantizer>& compute
 
 template <MetricType metric, int bit>
 void
+ScalarQuantizer<metric, bit>::ComputeDistsBatch4Impl(Computer<ScalarQuantizer>& computer,
+                                                     const uint8_t* codes1,
+                                                     const uint8_t* codes2,
+                                                     const uint8_t* codes3,
+                                                     const uint8_t* codes4,
+                                                     float& dist1,
+                                                     float& dist2,
+                                                     float& dist3,
+                                                     float& dist4) const {
+    if constexpr (metric == MetricType::METRIC_TYPE_L2SQR and bit == 8) {
+        SQ8ComputeL2SqrBatch4(reinterpret_cast<float*>(computer.buf_),
+                              codes1,
+                              codes2,
+                              codes3,
+                              codes4,
+                              lower_bound_.data(),
+                              diff_.data(),
+                              this->dim_,
+                              dist1,
+                              dist2,
+                              dist3,
+                              dist4);
+    } else {
+        this->ComputeDistImpl(computer, codes1, &dist1);
+        this->ComputeDistImpl(computer, codes2, &dist2);
+        this->ComputeDistImpl(computer, codes3, &dist3);
+        this->ComputeDistImpl(computer, codes4, &dist4);
+    }
+}
+
+template <MetricType metric, int bit>
+void
 ScalarQuantizer<metric, bit>::SerializeImpl(StreamWriter& writer) {
     StreamWriter::WriteVector(writer, this->diff_);
     StreamWriter::WriteVector(writer, this->lower_bound_);
