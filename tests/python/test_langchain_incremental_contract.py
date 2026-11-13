@@ -22,11 +22,11 @@ public ``pyvsag.Index`` backend boundary; it does not implement the adapter.
 
 import pytest
 
+np = pytest.importorskip("numpy")
+Document = pytest.importorskip("langchain_core.documents").Document
 _langchain = pytest.importorskip(
     "pyvsag.langchain", reason="companion tests run after PR #3119 provides the adapter"
 )
-np = pytest.importorskip("numpy")
-Document = pytest.importorskip("langchain_core.documents").Document
 VSAGVectorStore = _langchain.VSAGVectorStore
 
 
@@ -208,7 +208,13 @@ def test_custom_ids_coexist_with_later_generated_document_ids():
     assert len(generated_ids) == 2
     assert all(isinstance(doc_id, str) and doc_id for doc_id in generated_ids)
     assert len(set(generated_ids)) == 2
-    assert custom_id not in generated_ids
+    backend_int_ids = [
+        int_id
+        for batch in store.index.build_ids + store.index.add_ids
+        for int_id in batch
+    ]
+    assert len(backend_int_ids) == 3
+    assert len(set(backend_int_ids)) == 3
     expected = [
         Document(id=custom_id, page_content="custom", metadata={}),
         Document(id=generated_ids[0], page_content="generated-a", metadata={}),
