@@ -28,6 +28,85 @@ IVF 通常是一个更合适的默认选择。
 正交中心划分（`first_order_buckets_count` × `second_order_buckets_count`），在超大规模
 语料上能得到更精细的分区。
 
+### 均衡 k-means 训练（`ivf_train_type: "balanced_kmeans"`）
+
+普通 k-means 把每条向量分配给最近的中心，不限制桶容量，因此偏斜、包含大量重复或
+分布不均的数据集会产出大小悬殊甚至为空的桶：过大的桶会拉高检索延迟、削弱分区裁剪。
+
+`balanced_kmeans` 保持与 `kmeans` 相同的平方 L2 目标与均值中心更新，但每一步分配都
+受容量约束：`n` 条训练向量、`buckets_count` 个桶时，每个桶最终恰好容纳
+`floor(n / k)` 或 `ceil(n / k)` 条向量。当 `buckets_per_data: 1` 时，该保证还延伸到
+`Build` 的首次桶分配，存储的桶继承均衡性；均衡分配生效且 `1 <= k <= n` 时不会出现空桶。
+
+每次迭代的流程：
+
+1. 每条向量只保留最近的 `num_candidates`（默认 8）个候选桶；距离按固定分块并行逐条
+   计算，永远不会物化 `n × k` 距离矩阵，峰值内存为 `O(n · candidates + k · dim)`
+   而非 `O(n · k)`。
+2. 无约束最近分配吸引票数最多的 `n mod k` 个桶获得 `ceil(n / k)` 个名额，其余桶
+   各得 `floor(n / k)` 个。
+3. 向量按“后悔值”（首选与次选候选的代价差）从大到小依次落位——最容易被挤出的向量
+   优先保住首选名额；每条向量选择仍有空位且距离最近的候选桶；若候选全部满员，则按需
+   重算到所有尚有空位桶的距离。由于总容量恰好等于 `n`，名额总是够用。
+4. 每个中心更新为其成员的均值，重复上述过程直到损失不再下降（由
+   `kmeans_iter_count` 限制迭代次数）。
+
+复杂度与取舍。每次迭代与标准 k-means 同样需要 `O(n · k · dim)` 次距离计算，另加
+`O(n log n)` 排序；内存如上所述有界。均衡分配采用后悔值贪心启发式而非精确的运输问题
+求解，因此损失可能略高于无约束 k-means：在均匀或簇大小均衡的数据上差距很小，在偏斜
+严重的数据上差距更大（等大的桶必须拆分紧密的簇）。可用 `cluster_balance_bench`
+在自家数据形状上实测两边。换来的收益是桶大小的硬上界：每个桶至多容纳
+`ceil(n / k)` 条向量，单次查询的扫描量被 `scan_buckets_count × ceil(n / k)` 封顶，
+长尾延迟不再取决于语料有多偏斜。
+
+补充说明：
+
+- `random` 与 `kmeans` 的行为不变，默认仍是 `kmeans`。
+- cosine 索引下训练后的中心归一化与 `kmeans` 路径完全一致；首次桶分配沿用各度量自身
+  的路由顺序（IP/cosine 用 `1 - <x, c>`，L2 用平方距离）。
+- `balanced_kmeans` 仅支持 `partition_strategy_type: "ivf"`；GNO-IMI 始终训练普通
+  k-means。
+- 均衡训练与首次分配在 CPU 上执行，`enable_gpu_build` 不会加速它们。
+- 给定输入与随机种子时结果确定，且与线程数无关。
+- 仅当 `buckets_per_data: 1` 时，`Build` 的首次分配才会均衡；其他取值仍按普通的
+  最近中心路由分配，但均衡中心训练仍然生效。
+- 用可复现的 `cluster_balance_bench` 工具（`tools/cluster_balance_bench`）对比
+  均衡度、损失、时间与内存。
+
+#### 基准工具
+
+`cluster_balance_bench` 在带随机种子的合成数据集上分别训练 `KMeansCluster` 和
+`BalancedKMeansCluster`：均匀数据、刻意偏斜的数据、大小不能整除 `k` 的偏斜数据，以及
+含重复向量的数据。工具针对每种训练器和数据集报告：
+
+- 桶大小的最小值、最大值、平均值、标准差和变异系数；
+- 聚类损失（每条向量到其分配中心的平方距离均值；根据返回的标签重新计算，两种训练器
+  使用相同口径）；
+- 训练耗时；以及
+- 训练器在数据集之外分配的峰值内存（通过记录分配器测量），并给出稠密 `n × k` 浮点
+  距离矩阵的大小作为参照。
+
+在 Linux 上，使用 `ENABLE_TOOLS=ON` 和 `ENABLE_CXX11_ABI=ON` 构建工具：
+
+```bash
+make release EXTRA_DEFINED="-DENABLE_TOOLS=ON -DENABLE_CXX11_ABI=ON"
+# 或在已有的构建目录中只构建此目标：
+cmake --build <build-dir> --target cluster_balance_bench
+```
+
+用法：
+
+```text
+cluster_balance_bench [--dataset all|uniform|skewed|indivisible|duplicates]
+                      [--n 50000] [--dim 64] [--k 256] [--iter 25]
+                      [--seed 42] [--threads N]
+```
+
+每次运行都完全由种子控制，普通 k-means 也使用确定性归约。相同参数重复运行时，聚类
+分配、中心和聚类损失均可复现；耗时会因运行环境而异。为保证这一点，工具会拒绝
+`k >= 10000`：否则普通 k-means 会使用近似 HGraph 分配，其并行图构建过程不具有确定性。
+如需可复现的对比，请使用更小的 `k`。
+
 ## 快速开始
 
 ```cpp
@@ -73,8 +152,8 @@ auto result = index->KnnSearch(
 | `buckets_count` | int | `10` | 倒排列表数量（`ivf` 策略下生效） |
 | `first_order_buckets_count` | int | `10` | 第一级桶数（`gno_imi` 策略下生效） |
 | `second_order_buckets_count` | int | `10` | 第二级桶数（`gno_imi` 策略下生效） |
-| `ivf_train_type` | string | `"kmeans"` | 中心训练方式：`kmeans` 或 `random` |
-| `kmeans_iter_count` | int | `25`（`ivf`）、`30`（`gno_imi`） | KMeans 质心训练的迭代次数（`ivf_train_type: "kmeans"` 时生效）。越大桶划分质量越好，构建越慢。 |
+| `ivf_train_type` | string | `"kmeans"` | 中心训练方式：`kmeans`、`balanced_kmeans` 或 `random` |
+| `kmeans_iter_count` | int | `25`（`ivf`）、`30`（`gno_imi`） | KMeans 质心训练的迭代次数（`ivf_train_type: "kmeans"` 或 `"balanced_kmeans"` 时生效）。越大桶划分质量越好，构建越慢。 |
 | `route_max_degree` | int | `64` | 路由 HGraph 的最大度数（`ivf` 策略下生效） |
 | `route_ef_construction` | int | `300` | 路由 HGraph 的构建搜索宽度（`ivf` 策略下生效） |
 | `enable_gpu_build` | bool | `false` | 构建时使用 CUDA 后端（`ivf` 策略下生效），参见 [GPU 加速构建](#gpu-加速构建) |

@@ -1348,31 +1348,74 @@ RaBitQSplitBucketDataCell::Train(const void* data, uint64_t count) {
         return;
     }
 
-    const auto* input = static_cast<const float*>(data);
-    Vector<float> train_data(count * this->dim_, this->allocator_);
-    Vector<float> normalized(this->dim_, this->allocator_);
-    Vector<float> centroid(this->dim_, this->allocator_);
-    const float* classify_data = input;
-    Vector<float> normalized_data(this->allocator_);
-    if (this->metric_ == MetricType::METRIC_TYPE_COSINE) {
-        normalized_data.resize(count * this->dim_);
-        for (uint64_t i = 0; i < count; ++i) {
-            Normalize(input + i * this->dim_, normalized_data.data() + i * this->dim_, this->dim_);
-        }
-        classify_data = normalized_data.data();
-    }
     CHECK_ARGUMENT(count <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
                    "RaBitQ split training count is too large");
-    auto buckets =
-        this->strategy_->ClassifyDatas(classify_data, static_cast<int64_t>(count), 1, nullptr);
+    const auto* input = static_cast<const float*>(data);
+    const bool train_nearest = this->strategy_->HasDistinctBuildAssignment();
+    const uint64_t buffer_factor = train_nearest ? 2 : 1;
+    CHECK_ARGUMENT(this->dim_ != 0 and
+                       count <= std::numeric_limits<uint64_t>::max() / this->dim_ / buffer_factor,
+                   "RaBitQ split residual training size overflow");
+    Vector<float> centroid(this->dim_, this->allocator_);
+    const float* classify_data = input;
+    Vector<float> train_data(this->allocator_);
+    if (this->metric_ == MetricType::METRIC_TYPE_COSINE) {
+        // Normalize into the residual buffer so the corpus is not duplicated for classification.
+        train_data.resize(count * this->dim_);
+        for (uint64_t i = 0; i < count; ++i) {
+            Normalize(input + i * this->dim_, train_data.data() + i * this->dim_, this->dim_);
+        }
+        classify_data = train_data.data();
+    }
+    // Balanced Build uses capacity-constrained assignments, while later Add calls
+    // use nearest-centroid routing. Train on both residual populations so either
+    // route remains inside the population used to fit the RaBitQ codes.
+    auto build_buckets = this->strategy_->ClassifyDatasForBuild(
+        classify_data, static_cast<int64_t>(count), 1, nullptr);
+    Vector<BucketIdType> nearest_buckets(this->allocator_);
+    uint64_t train_count = count;
+    if (train_nearest) {
+        nearest_buckets =
+            this->strategy_->ClassifyDatas(classify_data, static_cast<int64_t>(count), 1, nullptr);
+        for (uint64_t i = 0; i < count; ++i) {
+            if (build_buckets[i] != nearest_buckets[i]) {
+                ++train_count;
+            }
+        }
+    }
+    const bool regrow_normalized =
+        this->metric_ == MetricType::METRIC_TYPE_COSINE and train_count > count;
+    if (regrow_normalized) {
+        // Release the classification corpus before growing so vector reallocation cannot briefly
+        // retain both the old buffer and the complete dual-population buffer.
+        Vector<float>(this->allocator_).swap(train_data);
+    }
+    train_data.resize(train_count * this->dim_);
+    if (this->metric_ == MetricType::METRIC_TYPE_COSINE) {
+        if (regrow_normalized) {
+            for (uint64_t i = 0; i < count; ++i) {
+                Normalize(input + i * this->dim_, train_data.data() + i * this->dim_, this->dim_);
+            }
+        }
+        classify_data = train_data.data();
+    }
+    uint64_t nearest_offset = count;
     for (uint64_t i = 0; i < count; ++i) {
-        this->strategy_->GetCentroid(buckets[i], centroid);
+        if (train_nearest and build_buckets[i] != nearest_buckets[i]) {
+            this->strategy_->GetCentroid(nearest_buckets[i], centroid);
+            FP32Sub(classify_data + i * this->dim_,
+                    centroid.data(),
+                    train_data.data() + nearest_offset * this->dim_,
+                    this->dim_);
+            ++nearest_offset;
+        }
+        this->strategy_->GetCentroid(build_buckets[i], centroid);
         FP32Sub(classify_data + i * this->dim_,
                 centroid.data(),
                 train_data.data() + i * this->dim_,
                 this->dim_);
     }
-    this->codes_->Train(train_data.data(), count);
+    this->codes_->Train(train_data.data(), train_count);
     this->rebuild_residual_centroid_transforms();
 }
 
