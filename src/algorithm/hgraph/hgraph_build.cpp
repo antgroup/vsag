@@ -1583,7 +1583,13 @@ HGraph::elp_optimize() {
     param.is_inner_id_allowed = nullptr;
     searcher_->SetMockParameters(bottom_graph_, basic_flatten_codes_, pool_, param, dim_);
     // TODO(ZXY): optimize PREFETCH_DEPTH_CODE and add default value for the others
-    optimizer_->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_CODE, 1, 10, 1));
+    const auto stride = static_cast<float>(basic_flatten_codes_->prefetch_stride_code_);
+    if (stride > 1) {
+        // Start at the current stride so an unsuccessful sweep restores it.
+        optimizer_->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_CODE, stride, 1, -1));
+    } else {
+        optimizer_->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_CODE, 1, 10, 1));
+    }
     optimizer_->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_VISIT, 1, 10, 1));
     optimizer_->Optimize(searcher_);
 }

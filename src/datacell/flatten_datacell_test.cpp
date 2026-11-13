@@ -146,6 +146,14 @@ private:
 
 }  // namespace
 
+TEST_CASE("FlattenDataCell prefetch stride follows storage type", "[ut][FlattenDataCell]") {
+    using Quantizer = FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>;
+    FlattenDataCell<Quantizer, FixedLayout<MemoryIO>> memory_cell;
+    FlattenDataCell<Quantizer, FailingBatchLayout> file_cell;
+    REQUIRE(memory_cell.prefetch_stride_code_ == 6);
+    REQUIRE(file_cell.prefetch_stride_code_ == 1);
+}
+
 TEST_CASE("FlattenDataCell rejects invalid distance reads", "[ut][Flatten][invalid_reads]") {
     IndexCommonParam common;
     common.dim_ = 8;
