@@ -4508,3 +4508,37 @@ TEST_CASE("IVF builds with the documented GPU configuration", "[ft][ivf][pr]") {
         REQUIRE(ids_of(reloaded_result.value(), topk) == ids);
     }
 }
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
+                             "IVF Build With E-Means Training",
+                             "[ft][ivf][pr]") {
+    auto dim = 64;
+    std::string param = fmt::format(R"(
+    {{
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": {},
+        "index_param": {{
+            "buckets_count": 32,
+            "base_quantization_type": "fp32",
+            "partition_strategy_type": "ivf",
+            "ivf_train_type": "e_means",
+            "e_means_epochs": 3,
+            "train_sample_count": 2048
+        }}
+    }}
+    )",
+                                    dim);
+
+    auto index = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, param, true);
+    auto dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, 2048, "l2");
+    fixtures::TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto serialize_result = index->Serialize();
+    REQUIRE(serialize_result.has_value());
+    auto restored = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, param, true);
+    REQUIRE(restored->Deserialize(serialize_result.value()).has_value());
+
+    auto search_param = fmt::format(fixtures::search_param_tmp, 32);
+    fixtures::IVFTestIndex::TestGeneral(restored, dataset, search_param, 0.90F);
+}

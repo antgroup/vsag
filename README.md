@@ -325,7 +325,7 @@ Thrive together in VSAG community with users and developers from all around the 
 
 ## Reference
 
-VSAG draws on the following works for graph construction, vector quantization, filtered search, and integer compression:
+VSAG draws on the following works for graph construction, vector quantization, filtered search, clustering, and integer compression:
 
 1. Efficient and Robust Approximate Nearest Neighbor Search Using Hierarchical Navigable Small World Graphs [_TPAMI_, 2020] \
    Yu. A. Malkov, D. A. Yashunin \
@@ -371,6 +371,11 @@ VSAG draws on the following works for graph construction, vector quantization, f
    Sebastiano Vigna \
    Elias–Fano integer encoding in the compression implementation. \
    [PDF](https://dl.acm.org/doi/pdf/10.1145/2433396.2433409) | [DOI](https://doi.org/10.1145/2433396.2433409)
+
+10. e-means: outperforming k-means (in one-tenth the epochs) [_arXiv_, 2026] \
+    Swann Bessa, Pierre-Emmanuel Mazaré, Gergely Szilvasy, Hugo Touvron, David Picard, Matthijs Douze, Hervé Jégou \
+    EMA mini-batch updates, cosine step annealing, dead-cluster revival and scaling laws in `EMeansCluster`. \
+    [PDF](https://arxiv.org/pdf/2611.09501) | [CODE](https://github.com/facebookresearch/faiss/tree/main/contrib/e_means)
 
 ## Contributors
 
