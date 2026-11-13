@@ -2645,7 +2645,8 @@ public:
     Deserialize(LvalueOrRvalue<StreamReader> reader) override {
         FlattenInterface::Deserialize(reader);
         if (this->fused_code_storage_ != nullptr) {
-            const uint64_t payload_cursor = reader->GetCursor();
+            // Fused storage requires model-only v1; detached split payloads are intentionally
+            // unsupported here, including when the source reader can seek.
             uint64_t magic = 0;
             StreamReader::ReadObj(reader, magic);
             if (magic == kFusedModelMagic) {
@@ -2668,29 +2669,8 @@ public:
                                "serialized fused RaBitQ code sizes do not match the node layout");
                 return;
             }
-            reader->Seek(payload_cursor);
-            this->DeserializeSupplementIOType(reader);
-            // Legacy (detached-code) payloads also carry the supplement layout descriptor
-            // written by `serialize_supplement_layout` before the two serialized code layouts.
-            (void)this->deserialize_supplement_layout(*reader);
-            auto skip_serialized_layout = [](StreamReader& stream) {
-                uint64_t size = 0;
-                StreamReader::ReadObj(stream, size);
-                const uint64_t cursor = stream.GetCursor();
-                CHECK_ARGUMENT(cursor <= stream.Length() and size <= stream.Length() - cursor,
-                               "serialized RaBitQ split code payload exceeds its stream boundary");
-                stream.Seek(cursor + size);
-            };
-            skip_serialized_layout(*reader);
-            skip_serialized_layout(*reader);
-            this->quantizer_->Deserialize(reader);
-            this->refresh_code_sizes();
-            CHECK_ARGUMENT(
-                this->fused_code_storage_->FusedOneBitCodeSize() == this->one_bit_code_size_ and
-                    this->fused_code_storage_->FusedSupplementCodeSize() ==
-                        this->supplement_code_size_,
-                "legacy split RaBitQ code sizes do not match the fused node layout");
-            return;
+            throw VsagException(ErrorType::INVALID_BINARY,
+                                "legacy split payload is unsupported for fused RaBitQ storage");
         }
         this->DeserializeSupplementIOType(reader);
         const auto supplement_layout = this->deserialize_supplement_layout(reader);
@@ -3057,18 +3037,24 @@ private:
     void
     DeserializeSupplementIOType(StreamReader& reader) {
         this->supplement_io_type_.clear();
-        const uint64_t cursor = reader.GetCursor();
+        // The explicit field is required even for shared IO (encoded as an empty string).
+        // Descriptor v1 alone does not imply that this field was present in older snapshots.
         uint64_t length = 0;
         StreamReader::ReadObj(reader, length);
+        if (length == SUPPLEMENT_STORAGE_MAGIC) {
+            throw VsagException(ErrorType::INVALID_BINARY,
+                                "RaBitQ split snapshot requires supplement_io_type");
+        }
 
         if (length == 0) {
             return;
         }
 
         constexpr uint64_t kMaxIOTypeLength = 64;
-        if (length > kMaxIOTypeLength or reader.GetCursor() + length > reader.Length()) {
-            reader.Seek(cursor);
-            return;
+        if (length > kMaxIOTypeLength or reader.GetCursor() > reader.Length() or
+            length > reader.Length() - reader.GetCursor()) {
+            throw VsagException(ErrorType::INVALID_BINARY,
+                                "invalid RaBitQ supplement IO type length");
         }
 
         std::string io_type(length, '\0');
@@ -3078,7 +3064,7 @@ private:
             return;
         }
 
-        reader.Seek(cursor);
+        throw VsagException(ErrorType::INVALID_BINARY, "unknown RaBitQ supplement IO type");
     }
 
     void

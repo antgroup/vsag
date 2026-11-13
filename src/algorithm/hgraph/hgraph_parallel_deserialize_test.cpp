@@ -34,6 +34,7 @@
 #include "storage/serialization.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
+#include "storage/streaming_serialization_test_utils.h"
 #include "unittest.h"
 #include "vsag/deserialize_reader.h"
 #include "vsag/serialize_writer.h"
@@ -1043,4 +1044,114 @@ TEST_CASE("HGraph ParallelDeserialize Rejects Non-Empty Index",
     REQUIRE_FALSE(result.has_value());
     REQUIRE(result.error().type == vsag::ErrorType::INDEX_NOT_EMPTY);
     REQUIRE(non_empty->GetNumElements() == data.count);
+}
+
+TEST_CASE("HGraph compressed parallel load bounds source string extents",
+          "[ut][hgraph][parallel_deserialize][count_safety]") {
+    auto data = MakeTestData(16, 32);
+    std::vector<std::string> sources(data.count, "source");
+    auto dataset = MakeDataset(data);
+    dataset->SourceID(sources.data());
+    auto params = MakeHGraphJson();
+    params["persist_source_id"].SetBool(true);
+    auto index = MakeHGraphIndex(MakeCommonParam(data.dim), params);
+    REQUIRE(index->Build(dataset).has_value());
+    FrameSerializeWriter writer;
+    REQUIRE(index->Serialize(writer, 4096).has_value());
+    // Label table is the first whole compressed frame. Skip its test-codec header,
+    // labels, remap pairs, source IO type and source count to reach the first string.
+    auto read_count = [&](uint64_t offset) {
+        uint64_t value = 0;
+        REQUIRE(offset + sizeof(value) <= writer.buffer_.size());
+        std::memcpy(&value, writer.buffer_.data() + offset, sizeof(value));
+        return value;
+    };
+    uint64_t offset = sizeof(uint64_t);
+    const auto labels = read_count(offset);
+    offset += sizeof(uint64_t) + labels * sizeof(vsag::LabelType);
+    const auto remap = read_count(offset);
+    offset += sizeof(uint64_t) + remap * (sizeof(vsag::LabelType) + sizeof(vsag::InnerIdType));
+    offset += 2 * sizeof(uint64_t);
+    REQUIRE(read_count(offset) == sources.front().size());
+    const uint64_t oversized = uint64_t{1} << 29;
+    std::memcpy(writer.buffer_.data() + offset, &oversized, sizeof(oversized));
+    FrameMemoryReader reader(writer.buffer_);
+    auto loaded = MakeHGraphIndex(MakeCommonParam(data.dim, MakeThreadPool(4)), params);
+    REQUIRE_FALSE(loaded->ParallelDeserialize(reader).has_value());
+}
+
+TEST_CASE("HGraph reloads compacted non-MCI force-removal snapshots",
+          "[ut][hgraph][parallel_deserialize][force_remove_shrink_reload]") {
+    const bool historical = GENERATE(false, true);
+    const auto mode = GENERATE(0, 1, 2, 3);
+    auto data = MakeTestData(16, 256);
+    auto params = MakeHGraphJson();
+    params["support_force_remove"].SetBool(true);
+    auto index = MakeHGraphIndex(MakeCommonParam(data.dim), params);
+    REQUIRE(index->Build(MakeDataset(data)).has_value());
+    std::vector<int64_t> removed(data.ids.begin() + 128, data.ids.end());
+    REQUIRE(index->Remove(removed, vsag::RemoveMode::FORCE_REMOVE).value() == 128);
+    REQUIRE(index->GetNumElements() == 128);
+
+    // Capture the real writer's dense graph payload to locate the same component in
+    // the sequential format. Only its historical count is restored for compatibility.
+    std::ostringstream streaming;
+    REQUIRE(index->SerializeStreaming(streaming).has_value());
+    const auto stream_bytes = streaming.str();
+    const auto bottom =
+        vsag::test::FindStreamingBlock(stream_bytes, vsag::StreamSerializationTag::BOTTOM_GRAPH);
+    const auto graph_payload = stream_bytes.substr(bottom.payload_offset, bottom.payload_size);
+    REQUIRE(vsag::test::ReadStreamingObj<uint32_t>(graph_payload, 0) == 128);
+    REQUIRE(vsag::test::ReadStreamingObj<uint32_t>(graph_payload, 4) == 128);
+
+    std::string bytes;
+    if (mode <= 1) {
+        std::ostringstream writer;
+        REQUIRE(index->Serialize(writer).has_value());
+        bytes = writer.str();
+        const auto graph_offset = bytes.find(graph_payload);
+        REQUIRE(graph_offset != std::string::npos);
+        REQUIRE(bytes.find(graph_payload, graph_offset + 1) == std::string::npos);
+        if (historical) {
+            vsag::test::WriteStreamingObj<uint32_t>(bytes, graph_offset, 256);
+        }
+    } else {
+        if (mode == 2) {
+            BufferSerializeWriter writer;
+            REQUIRE(index->Serialize(writer, 512).has_value());
+            bytes = writer.buffer_;
+        } else {
+            FrameSerializeWriter writer;
+            REQUIRE(index->Serialize(writer, 512).has_value());
+            bytes = writer.buffer_;
+        }
+        std::istringstream footer_input(bytes);
+        vsag::IOStreamReader footer_reader(footer_input);
+        auto footer = vsag::Footer::Parse(footer_reader);
+        REQUIRE(footer != nullptr);
+        const auto manifest =
+            vsag::ChunkedManifest::FromJson(footer->GetMetadata()->Get(vsag::CHUNKED_LAYOUT_KEY));
+        const auto* graph = manifest.FindComponent("bottom_graph");
+        REQUIRE(graph != nullptr);
+        REQUIRE(graph->granularity == vsag::ComponentGranularity::Byte);
+        REQUIRE(vsag::test::ReadStreamingObj<uint32_t>(bytes, graph->head_offset) == 128);
+        if (historical) {
+            vsag::test::WriteStreamingObj<uint32_t>(bytes, graph->head_offset, 256);
+        }
+    }
+    auto restored = MakeHGraphIndex(MakeCommonParam(data.dim, MakeThreadPool(4)), params);
+    if (mode == 0) {
+        std::istringstream reader(bytes);
+        auto result = restored->Deserialize(reader);
+        INFO((result.has_value() ? "loaded" : result.error().message));
+        REQUIRE(result.has_value());
+    } else if (mode == 3) {
+        FrameMemoryReader reader(bytes);
+        REQUIRE(restored->ParallelDeserialize(reader).has_value());
+    } else {
+        PlainMemoryReader reader(bytes);
+        REQUIRE(restored->ParallelDeserialize(reader).has_value());
+    }
+    REQUIRE(restored->GetNumElements() == 128);
+    RequireSameKnnResults(index, restored, data);
 }
