@@ -55,6 +55,7 @@ struct RequestContext {
     uint64_t query_count{0};
     uint64_t ground_truth_k{0};
     bool enable_recall{false};
+    bool has_query_filters{false};
     bool keep_intermediate{false};
     bool include_raw_eval{false};
 };
