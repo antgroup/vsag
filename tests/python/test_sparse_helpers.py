@@ -298,3 +298,17 @@ def test_term_weights_to_csr_rejects_non_finite_or_overflowing_weights(weight):
 def test_term_weights_to_csr_rejects_non_numeric_weights(weight):
     with pytest.raises(TypeError, match="must be numeric"):
         term_weights_to_csr([{"term": weight}], {"term": 0})
+
+
+@pytest.mark.parametrize(
+    "weight",
+    [
+        1 + 2j,
+        np.complex64(1 + 2j),
+        np.complex128(1 + 2j),
+        np.complex128(complex(1.0, float("inf"))),
+    ],
+)
+def test_term_weights_to_csr_rejects_complex_weights(weight):
+    with pytest.raises(TypeError, match="must be numeric"):
+        term_weights_to_csr([{"term": weight}], {"term": 0})

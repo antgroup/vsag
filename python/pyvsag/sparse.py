@@ -418,7 +418,7 @@ def _validate_term_id(term: str, value: Any) -> int:
 
 def _validate_weight(term: str, value: Any) -> float:
     """Return ``value`` as a finite float that fits in float32."""
-    if isinstance(value, (str, bytes, bytearray)):
+    if isinstance(value, (str, bytes, bytearray, complex, np.complexfloating)):
         raise TypeError(
             f"weight for term {term!r} must be numeric, got "
             f"{type(value).__name__}"
