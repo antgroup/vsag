@@ -315,6 +315,11 @@ Index::Save(std::ostream& output) const {
 
 tl::expected<std::unique_ptr<Index>, Error>
 Index::Load(std::istream& input) {
+    return load_with_extra_rows(input, 0);
+}
+
+tl::expected<std::unique_ptr<Index>, Error>
+Index::load_with_extra_rows(std::istream& input, uint64_t extra_rows) {
     try {
         const auto start = input.tellg();
         input.seekg(0, std::ios::end);
@@ -329,7 +334,7 @@ Index::Load(std::istream& input) {
 #ifdef VSAG_LITE_HAS_RABITQ_BACKEND
         if (input and std::memcmp(magic, "VSAGLQ01", 8) == 0) {
             input.seekg(start);
-            auto backend = detail::load_rabitq_graph_backend(input);
+            auto backend = detail::load_rabitq_graph_backend(input, extra_rows);
             if (not backend) {
                 return tl::unexpected(backend.error());
             }
@@ -373,6 +378,9 @@ Index::Load(std::istream& input) {
                 return failure(ErrorType::INVALID_BINARY, "invalid graph options");
             }
         }
+        if (extra_rows > UINT64_MAX / dim - count) {
+            return failure(ErrorType::INVALID_BINARY, "snapshot replay capacity overflow");
+        }
         // Validate the layout before allocating and keep one owned copy of each payload.
         const bool little_endian = native_little_endian();
         std::vector<int64_t> ids(count);
@@ -388,6 +396,9 @@ Index::Load(std::istream& input) {
         std::vector<float> vectors;
         std::vector<uint16_t> fp16_vectors;
         if (version == 3) {
+            if (extra_rows != 0) {
+                fp16_vectors.reserve((count + extra_rows) * dim);
+            }
             fp16_vectors.resize(count * dim);
             read_bytes(input, fp16_vectors.data(), fp16_vectors.size() * sizeof(uint16_t));
             for (auto& value : fp16_vectors) {
@@ -399,6 +410,9 @@ Index::Load(std::istream& input) {
                 }
             }
         } else {
+            if (extra_rows != 0) {
+                vectors.reserve((count + extra_rows) * dim);
+            }
             vectors.resize(count * dim);
             read_bytes(input, vectors.data(), vectors.size() * sizeof(float));
             for (auto& value : vectors) {

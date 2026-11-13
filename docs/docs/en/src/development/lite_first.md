@@ -90,6 +90,31 @@ cause cannot be distinguished. Failed graph transactions preserve logical state,
 not allocator capacity. Complete identical stored representations preserve graph
 topology on Update; equal RaBitQ codes do not mean raw inputs are identical.
 
+## Optional persistent Add
+
+Build with `-DENABLE_LITE_PERSISTENT_ADD=ON` and include
+`vsag/lite/persistent_index.h` on a local POSIX filesystem. Pass an empty
+BruteForce index, a built FP32/FP16 graph, or a trained RaBitQ8 graph to
+`PersistentIndex::Create(new_directory, std::move(seed))`. To import a plain
+snapshot, use `Index::Load` before `Create`.
+
+The directory contains `checkpoint.vsag` and `add.log`. Successful `Add`
+synchronizes one record containing the external ID, FP32 input and checksum.
+`PersistentIndex::Open` loads the checkpoint and replays records in order.
+It discards an incomplete final record and reports checksum failures in
+complete records. If the writer exits before returning, a complete record
+may be recovered. Use the external ID to determine whether to retry.
+An append or sync error invalidates the handle and releases its lock.
+Reopen to recover the index and check the ID before retrying.
+
+Use one handle per directory and serialize its calls. This interface covers
+Add, Search, Size and export through Save. Include earlier Update/Remove
+changes in the seed checkpoint before creating the directory. The log grows
+by `12 + 4 * dimension` bytes per Add, including for compressed backends, and
+recovery replays every record. The loader reserves vector space for complete log entries
+before reading the checkpoint. Save exports an ordinary Lite snapshot that
+can seed a fresh directory. Process exit recovery is the supported scope.
+
 ## Project output acceptance
 
 | Required output | Present evidence | Remaining acceptance |

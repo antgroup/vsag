@@ -1,0 +1,544 @@
+{
+  "status": "PASS",
+  "metadata": {
+    "platform": "Linux-5.15.0-190-generic-x86_64-with-glibc2.35",
+    "cpu_affinity": 7,
+    "filesystem": "ext4",
+    "background_start": [
+      {
+        "cpu": 0,
+        "command": "functests"
+      },
+      {
+        "cpu": 6,
+        "command": "functests"
+      },
+      {
+        "cpu": 2,
+        "command": "functests"
+      },
+      {
+        "cpu": 7,
+        "command": "functests"
+      }
+    ],
+    "background_end": [
+      {
+        "cpu": 0,
+        "command": "functests"
+      },
+      {
+        "cpu": 2,
+        "command": "functests"
+      },
+      {
+        "cpu": 3,
+        "command": "functests"
+      },
+      {
+        "cpu": 4,
+        "command": "functests"
+      }
+    ],
+    "library_sha256": "2bce5e353061e330413e26de63844d562f5e3f5a55d2321b66a38f4ce72cde11",
+    "benchmark_sha256": "0c2780d0b7589f9b2b8951b4e944f165a541063a04cb104ae850ccb63917fd17",
+    "inputs": {
+      "SIFT": {
+        "base.fvecs": "1e90414a3254361aba48a0d58e461f7661fb135dabb3da985290e94de8f60fe0",
+        "queries.fvecs": "8667c6608803790773cbb056c036811b7d57d134238fd95ea3721965737ad54f"
+      },
+      "GIST": {
+        "base.fvecs": "359290ad0de501d683122967de2b353ecd6522b0ffc630c59ca945e228fd5444",
+        "queries.fvecs": "0d1d620049de12da455ed7201e97cbab372c4d54d0e6dedbc8c503f62c911299"
+      }
+    }
+  },
+  "paired_runs": 108,
+  "scaling_runs": 36,
+  "recall_at_10": {
+    "SIFT-1000-bruteforce": 1.0,
+    "SIFT-1000-fp32": 0.999,
+    "SIFT-1000-fp16": 0.999,
+    "SIFT-1000-rabitq8": 0.998,
+    "SIFT-10000-bruteforce": 1.0,
+    "SIFT-10000-fp32": 0.985,
+    "SIFT-10000-fp16": 0.985,
+    "SIFT-10000-rabitq8": 0.977,
+    "GIST-10000-bruteforce": 1.0,
+    "GIST-10000-fp32": 0.915,
+    "GIST-10000-fp16": 0.914,
+    "GIST-10000-rabitq8": 0.914
+  },
+  "paired": {
+    "SIFT/1000/bruteforce/32/memory": {
+      "write_bytes": 0,
+      "recovery_us": 248.874,
+      "recovery_peak_rss_kib": 18164,
+      "query_p50_us": 10.78,
+      "query_p99_us": 23.82,
+      "add_p50_us": 0.1,
+      "add_p99_us": 158.217,
+      "add_per_second": 188561.39441151175
+    },
+    "SIFT/1000/bruteforce/32/snapshot": {
+      "write_bytes": 16916096,
+      "recovery_us": 314.832,
+      "recovery_peak_rss_kib": 18164,
+      "query_p50_us": 10.7635,
+      "query_p99_us": 20.22,
+      "add_p50_us": 15171.8825,
+      "add_p99_us": 19867.631,
+      "add_per_second": 66.2523441062778
+    },
+    "SIFT/1000/bruteforce/32/journal": {
+      "write_bytes": 16768,
+      "recovery_us": 1625.762,
+      "recovery_peak_rss_kib": 18164,
+      "query_p50_us": 9.4905,
+      "query_p99_us": 19.97,
+      "add_p50_us": 7151.491,
+      "add_p99_us": 9726.691,
+      "add_per_second": 143.10076744181356
+    },
+    "SIFT/1000/fp32/32/memory": {
+      "write_bytes": 0,
+      "recovery_us": 485.279,
+      "recovery_peak_rss_kib": 18920,
+      "query_p50_us": 34.188500000000005,
+      "query_p99_us": 52.11,
+      "add_p50_us": 50.173500000000004,
+      "add_p99_us": 252.645,
+      "add_per_second": 16687.282413481655
+    },
+    "SIFT/1000/fp32/32/snapshot": {
+      "write_bytes": 21340416,
+      "recovery_us": 558.188,
+      "recovery_peak_rss_kib": 18656,
+      "query_p50_us": 32.83,
+      "query_p99_us": 48.798,
+      "add_p50_us": 15754.908,
+      "add_p99_us": 20698.441,
+      "add_per_second": 64.48752283518297
+    },
+    "SIFT/1000/fp32/32/journal": {
+      "write_bytes": 16768,
+      "recovery_us": 3891.348,
+      "recovery_peak_rss_kib": 18656,
+      "query_p50_us": 33.748999999999995,
+      "query_p99_us": 51.109,
+      "add_p50_us": 7255.778,
+      "add_p99_us": 10507.323,
+      "add_per_second": 139.67730239340244
+    },
+    "SIFT/1000/fp16/32/memory": {
+      "write_bytes": 0,
+      "recovery_us": 409.22,
+      "recovery_peak_rss_kib": 18920,
+      "query_p50_us": 33.414500000000004,
+      "query_p99_us": 50.799,
+      "add_p50_us": 48.724000000000004,
+      "add_p99_us": 169.336,
+      "add_per_second": 18166.34582250686
+    },
+    "SIFT/1000/fp16/32/snapshot": {
+      "write_bytes": 13013248,
+      "recovery_us": 425.221,
+      "recovery_peak_rss_kib": 18920,
+      "query_p50_us": 33.8595,
+      "query_p99_us": 58.859,
+      "add_p50_us": 13903.2515,
+      "add_p99_us": 20068.196,
+      "add_per_second": 71.60715776198094
+    },
+    "SIFT/1000/fp16/32/journal": {
+      "write_bytes": 16768,
+      "recovery_us": 3249.924,
+      "recovery_peak_rss_kib": 18920,
+      "query_p50_us": 33.455,
+      "query_p99_us": 46.03,
+      "add_p50_us": 6092.851000000001,
+      "add_p99_us": 9821.628,
+      "add_per_second": 163.42517012470833
+    },
+    "SIFT/1000/rabitq8/32/memory": {
+      "write_bytes": 0,
+      "recovery_us": 536.198,
+      "recovery_peak_rss_kib": 19184,
+      "query_p50_us": 44.339,
+      "query_p99_us": 74.438,
+      "add_p50_us": 82.5125,
+      "add_p99_us": 345.162,
+      "add_per_second": 10597.858305309726
+    },
+    "SIFT/1000/rabitq8/32/snapshot": {
+      "write_bytes": 9649792,
+      "recovery_us": 566.926,
+      "recovery_peak_rss_kib": 19184,
+      "query_p50_us": 43.888000000000005,
+      "query_p99_us": 65.408,
+      "add_p50_us": 13437.6975,
+      "add_p99_us": 19224.726,
+      "add_per_second": 72.67817168483778
+    },
+    "SIFT/1000/rabitq8/32/journal": {
+      "write_bytes": 16768,
+      "recovery_us": 4085.583,
+      "recovery_peak_rss_kib": 19184,
+      "query_p50_us": 44.0795,
+      "query_p99_us": 65.608,
+      "add_p50_us": 7017.114,
+      "add_p99_us": 10153.889,
+      "add_per_second": 142.00814336822637
+    },
+    "SIFT/10000/bruteforce/32/memory": {
+      "write_bytes": 0,
+      "recovery_us": 2132.07,
+      "recovery_peak_rss_kib": 20480,
+      "query_p50_us": 102.013,
+      "query_p99_us": 135.637,
+      "add_p50_us": 0.10500000000000001,
+      "add_p99_us": 1627.943,
+      "add_per_second": 19546.663995289236
+    },
+    "SIFT/10000/bruteforce/32/snapshot": {
+      "write_bytes": 166676096,
+      "recovery_us": 2333.975,
+      "recovery_peak_rss_kib": 20464,
+      "query_p50_us": 94.2935,
+      "query_p99_us": 144.187,
+      "add_p50_us": 27713.764499999997,
+      "add_p99_us": 29909.694,
+      "add_per_second": 35.74561491060052
+    },
+    "SIFT/10000/bruteforce/32/journal": {
+      "write_bytes": 16768,
+      "recovery_us": 14452.079,
+      "recovery_peak_rss_kib": 20472,
+      "query_p50_us": 104.5275,
+      "query_p99_us": 145.276,
+      "add_p50_us": 1735.274,
+      "add_p99_us": 3304.981,
+      "add_per_second": 537.0716293606922
+    },
+    "SIFT/10000/fp32/32/memory": {
+      "write_bytes": 0,
+      "recovery_us": 4591.132,
+      "recovery_peak_rss_kib": 20616,
+      "query_p50_us": 56.7485,
+      "query_p99_us": 94.848,
+      "add_p50_us": 89.443,
+      "add_p99_us": 1901.085,
+      "add_per_second": 6730.172858180326
+    },
+    "SIFT/10000/fp32/32/snapshot": {
+      "write_bytes": 210268416,
+      "recovery_us": 4462.915,
+      "recovery_peak_rss_kib": 20592,
+      "query_p50_us": 59.409000000000006,
+      "query_p99_us": 97.457,
+      "add_p50_us": 35886.957500000004,
+      "add_p99_us": 39011.168,
+      "add_per_second": 27.742370373492665
+    },
+    "SIFT/10000/fp32/32/journal": {
+      "write_bytes": 16768,
+      "recovery_us": 23010.007,
+      "recovery_peak_rss_kib": 20600,
+      "query_p50_us": 62.6685,
+      "query_p99_us": 96.739,
+      "add_p50_us": 1684.3854999999999,
+      "add_p99_us": 3578.786,
+      "add_per_second": 529.7526381308897
+    },
+    "SIFT/10000/fp16/32/memory": {
+      "write_bytes": 0,
+      "recovery_us": 3493.757,
+      "recovery_peak_rss_kib": 20732,
+      "query_p50_us": 51.3495,
+      "query_p99_us": 78.367,
+      "add_p50_us": 82.48349999999999,
+      "add_p99_us": 1006.556,
+      "add_per_second": 8872.538771608099
+    },
+    "SIFT/10000/fp16/32/snapshot": {
+      "write_bytes": 128213248,
+      "recovery_us": 3635.924,
+      "recovery_peak_rss_kib": 20716,
+      "query_p50_us": 51.079,
+      "query_p99_us": 76.009,
+      "add_p50_us": 23326.7535,
+      "add_p99_us": 26169.073,
+      "add_per_second": 42.53086702594838
+    },
+    "SIFT/10000/fp16/32/journal": {
+      "write_bytes": 16768,
+      "recovery_us": 15536.562,
+      "recovery_peak_rss_kib": 20724,
+      "query_p50_us": 56.129,
+      "query_p99_us": 84.768,
+      "add_p50_us": 1752.2595000000001,
+      "add_p99_us": 3067.128,
+      "add_per_second": 540.3640642091652
+    },
+    "SIFT/10000/rabitq8/32/memory": {
+      "write_bytes": 0,
+      "recovery_us": 4597.972,
+      "recovery_peak_rss_kib": 20940,
+      "query_p50_us": 67.57849999999999,
+      "query_p99_us": 103.028,
+      "add_p50_us": 122.5925,
+      "add_p99_us": 2432.742,
+      "add_per_second": 5036.739076611477
+    },
+    "SIFT/10000/rabitq8/32/snapshot": {
+      "write_bytes": 94897792,
+      "recovery_us": 4705.379,
+      "recovery_peak_rss_kib": 20916,
+      "query_p50_us": 68.8835,
+      "query_p99_us": 102.737,
+      "add_p50_us": 17940.286999999997,
+      "add_p99_us": 21356.026,
+      "add_per_second": 55.0364558129521
+    },
+    "SIFT/10000/rabitq8/32/journal": {
+      "write_bytes": 16768,
+      "recovery_us": 15762.258,
+      "recovery_peak_rss_kib": 20916,
+      "query_p50_us": 74.2125,
+      "query_p99_us": 105.068,
+      "add_p50_us": 1776.843,
+      "add_p99_us": 3823.34,
+      "add_per_second": 517.9547978581858
+    },
+    "GIST/10000/bruteforce/32/memory": {
+      "write_bytes": 0,
+      "recovery_us": 14217.684,
+      "recovery_peak_rss_kib": 41816,
+      "query_p50_us": 750.4475,
+      "query_p99_us": 1113.445,
+      "add_p50_us": 1.209,
+      "add_p99_us": 10737.316,
+      "add_per_second": 2969.2831371070197
+    },
+    "GIST/10000/bruteforce/32/snapshot": {
+      "write_bytes": 1233393280,
+      "recovery_us": 14469.598,
+      "recovery_peak_rss_kib": 41796,
+      "query_p50_us": 912.7585,
+      "query_p99_us": 1026.995,
+      "add_p50_us": 180156.0145,
+      "add_p99_us": 191924.845,
+      "add_per_second": 5.529756683116352
+    },
+    "GIST/10000/bruteforce/32/journal": {
+      "write_bytes": 123264,
+      "recovery_us": 100187.604,
+      "recovery_peak_rss_kib": 41824,
+      "query_p50_us": 1049.9805000000001,
+      "query_p99_us": 1209.94,
+      "add_p50_us": 1757.659,
+      "add_p99_us": 12908.756,
+      "add_per_second": 448.51659513504427
+    },
+    "GIST/10000/fp32/32/memory": {
+      "write_bytes": 0,
+      "recovery_us": 16759.863,
+      "recovery_peak_rss_kib": 45016,
+      "query_p50_us": 158.1905,
+      "query_p99_us": 263.694,
+      "add_p50_us": 241.6095,
+      "add_p99_us": 11365.322,
+      "add_per_second": 1685.493275408548
+    },
+    "GIST/10000/fp32/32/snapshot": {
+      "write_bytes": 1276985600,
+      "recovery_us": 16790.693,
+      "recovery_peak_rss_kib": 45040,
+      "query_p50_us": 156.1415,
+      "query_p99_us": 267.924,
+      "add_p50_us": 189112.0415,
+      "add_p99_us": 202473.945,
+      "add_per_second": 5.267195151306678
+    },
+    "GIST/10000/fp32/32/journal": {
+      "write_bytes": 123264,
+      "recovery_us": 114085.433,
+      "recovery_peak_rss_kib": 45564,
+      "query_p50_us": 155.0965,
+      "query_p99_us": 235.905,
+      "add_p50_us": 2034.232,
+      "add_p99_us": 13490.911,
+      "add_per_second": 404.6083679281917
+    },
+    "GIST/10000/fp16/32/memory": {
+      "write_bytes": 0,
+      "recovery_us": 11163.966,
+      "recovery_peak_rss_kib": 26340,
+      "query_p50_us": 143.39749999999998,
+      "query_p99_us": 241.724,
+      "add_p50_us": 255.3245,
+      "add_p99_us": 6078.427,
+      "add_per_second": 2273.2653972705316
+    },
+    "GIST/10000/fp16/32/snapshot": {
+      "write_bytes": 661571840,
+      "recovery_us": 11115.437,
+      "recovery_peak_rss_kib": 26212,
+      "query_p50_us": 156.44600000000003,
+      "query_p99_us": 273.823,
+      "add_p50_us": 104691.3905,
+      "add_p99_us": 110277.933,
+      "add_per_second": 9.519105218840245
+    },
+    "GIST/10000/fp16/32/journal": {
+      "write_bytes": 123264,
+      "recovery_us": 65285.186,
+      "recovery_peak_rss_kib": 26532,
+      "query_p50_us": 142.926,
+      "query_p99_us": 224.613,
+      "add_p50_us": 2056.1059999999998,
+      "add_p99_us": 7301.907,
+      "add_per_second": 424.14371282628883
+    },
+    "GIST/10000/rabitq8/32/memory": {
+      "write_bytes": 0,
+      "recovery_us": 7954.513,
+      "recovery_peak_rss_kib": 21412,
+      "query_p50_us": 176.406,
+      "query_p99_us": 247.303,
+      "add_p50_us": 384.39099999999996,
+      "add_p99_us": 7792.976,
+      "add_per_second": 1616.3844812946431
+    },
+    "GIST/10000/rabitq8/32/snapshot": {
+      "write_bytes": 361696896,
+      "recovery_us": 8048.909,
+      "recovery_peak_rss_kib": 21388,
+      "query_p50_us": 185.1165,
+      "query_p99_us": 257.084,
+      "add_p50_us": 57335.1195,
+      "add_p99_us": 64533.324,
+      "add_per_second": 17.351384112698998
+    },
+    "GIST/10000/rabitq8/32/journal": {
+      "write_bytes": 123264,
+      "recovery_us": 46229.737,
+      "recovery_peak_rss_kib": 21400,
+      "query_p50_us": 187.661,
+      "query_p99_us": 278.764,
+      "add_p50_us": 2175.2084999999997,
+      "add_p99_us": 8968.368,
+      "add_per_second": 403.7295628625727
+    }
+  },
+  "replay_scaling": {
+    "SIFT/1000/fp32/0/journal": {
+      "write_bytes": 0,
+      "recovery_us": 1988.263,
+      "recovery_peak_rss_kib": 21440,
+      "query_p50_us": 32.9645,
+      "query_p99_us": 47.539
+    },
+    "SIFT/1000/fp32/0/memory": {
+      "write_bytes": 0,
+      "recovery_us": 418.421,
+      "recovery_peak_rss_kib": 21440,
+      "query_p50_us": 32.0645,
+      "query_p99_us": 46.558
+    },
+    "SIFT/1000/fp32/128/journal": {
+      "write_bytes": 67072,
+      "recovery_us": 8328.942,
+      "recovery_peak_rss_kib": 21440,
+      "query_p50_us": 33.875,
+      "query_p99_us": 43.259,
+      "add_p50_us": 1643.247,
+      "add_p99_us": 3016.468,
+      "add_per_second": 574.9372336979441
+    },
+    "SIFT/1000/fp32/128/memory": {
+      "write_bytes": 0,
+      "recovery_us": 509.018,
+      "recovery_peak_rss_kib": 21440,
+      "query_p50_us": 34.014,
+      "query_p99_us": 52.1,
+      "add_p50_us": 45.8095,
+      "add_p99_us": 74.018,
+      "add_per_second": 20741.99966488707
+    },
+    "SIFT/1000/fp32/1024/journal": {
+      "write_bytes": 536576,
+      "recovery_us": 54186.39,
+      "recovery_peak_rss_kib": 21456,
+      "query_p50_us": 37.289500000000004,
+      "query_p99_us": 49.939,
+      "add_p50_us": 1621.1770000000001,
+      "add_p99_us": 3489.247,
+      "add_per_second": 575.5305303939871
+    },
+    "SIFT/1000/fp32/1024/memory": {
+      "write_bytes": 0,
+      "recovery_us": 889.789,
+      "recovery_peak_rss_kib": 21456,
+      "query_p50_us": 36.4845,
+      "query_p99_us": 50.279,
+      "add_p50_us": 48.504000000000005,
+      "add_p99_us": 70.989,
+      "add_per_second": 20090.545971769985
+    },
+    "SIFT/1000/rabitq8/0/journal": {
+      "write_bytes": 0,
+      "recovery_us": 1208.541,
+      "recovery_peak_rss_kib": 21640,
+      "query_p50_us": 42.949,
+      "query_p99_us": 62.189
+    },
+    "SIFT/1000/rabitq8/0/memory": {
+      "write_bytes": 0,
+      "recovery_us": 457.089,
+      "recovery_peak_rss_kib": 21640,
+      "query_p50_us": 42.7545,
+      "query_p99_us": 58.03
+    },
+    "SIFT/1000/rabitq8/128/journal": {
+      "write_bytes": 67072,
+      "recovery_us": 11773.542,
+      "recovery_peak_rss_kib": 21640,
+      "query_p50_us": 43.924,
+      "query_p99_us": 50.77,
+      "add_p50_us": 1680.77,
+      "add_p99_us": 3554.107,
+      "add_per_second": 552.9976868365976
+    },
+    "SIFT/1000/rabitq8/128/memory": {
+      "write_bytes": 0,
+      "recovery_us": 572.476,
+      "recovery_peak_rss_kib": 21640,
+      "query_p50_us": 44.1395,
+      "query_p99_us": 67.669,
+      "add_p50_us": 77.35900000000001,
+      "add_p99_us": 111.587,
+      "add_per_second": 12484.625865999004
+    },
+    "SIFT/1000/rabitq8/1024/journal": {
+      "write_bytes": 536576,
+      "recovery_us": 85308.473,
+      "recovery_peak_rss_kib": 21640,
+      "query_p50_us": 46.8585,
+      "query_p99_us": 60.629,
+      "add_p50_us": 1681.801,
+      "add_p99_us": 3432.548,
+      "add_per_second": 565.6863724000626
+    },
+    "SIFT/1000/rabitq8/1024/memory": {
+      "write_bytes": 0,
+      "recovery_us": 983.697,
+      "recovery_peak_rss_kib": 21640,
+      "query_p50_us": 47.204,
+      "query_p99_us": 71.687,
+      "add_p50_us": 79.42349999999999,
+      "add_p99_us": 103.368,
+      "add_per_second": 12424.475357418123
+    }
+  }
+}
