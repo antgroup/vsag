@@ -208,6 +208,8 @@ split base codes and retains original FP32 vectors for decode-only operations. S
 [Pyramid page](../indexes/pyramid.md#mrle-with-split-rabitq) for a complete configuration and
 storage/recall tradeoffs.
 
+Pyramid `KnnSearch` additionally accepts flat search parameters `tail_start_after` (default `20`), `tail_batch_size` (default `1`) and optional `tail_relative_gap`. Defaults retain native traversal; batch size `16` enables B16, and setting the gap enables early stopping. See [Pyramid tail search](../indexes/pyramid.md#batched-tail-expansion-and-gap-stopping) for requirements and usage.
+
 ## SINDI (sparse vectors)
 
 ```json

@@ -195,6 +195,8 @@ MRLE 与 split RaBitQ 组合使用 `base_quantization_type: "tq"`、
 精排，并保留原始 FP32 向量供仅解码路径使用。完整配置及存储/召回权衡见
 [Pyramid 页面](../indexes/pyramid.md)。
 
+Pyramid `KnnSearch` 还接受并列搜索参数 `tail_start_after`（默认 `20`）、`tail_batch_size`（默认 `1`）和可选的 `tail_relative_gap`。默认走原生搜索，批大小 `16` 开启 B16，设置 gap 开启早停。支持条件和用法见 [Pyramid 批量展开与早停](../indexes/pyramid.md#批量展开与距离间隔早停)。
+
 ## SINDI（稀疏向量）
 
 ```json

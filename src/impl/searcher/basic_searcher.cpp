@@ -26,6 +26,7 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/query_computer_pool.h"
 #include "impl/reasoning/reasoning_context.h"
+#include "impl/searcher/batched_graph_search.h"
 #include "impl/searcher/searcher_utils.h"
 #include "utils/filter_search_skip_strategy.h"
 #include "vsag/allocator.h"
@@ -565,6 +566,28 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                            QueryContext* ctx,
                            DistanceRecordVector* rabitq_lower_bound_candidates,
                            const ComputerInterfacePtr& preset_computer) const {
+    if (inner_search_param.tail_search != nullptr) {
+        CHECK_ARGUMENT(graph != nullptr and flatten != nullptr,
+                       "tail search requires graph and vector storage");
+        ComputerLease lease;
+        auto computer = preset_computer;
+        if (computer == nullptr) {
+            lease = AcquireQueryComputer(flatten, query, ctx);
+            computer = lease.computer;
+        }
+        return SearchBatchedGraph(graph,
+                                  flatten,
+                                  vl,
+                                  computer,
+                                  inner_search_param,
+                                  select_query_allocator(ctx, allocator_),
+                                  mutex_array_,
+                                  ctx,
+                                  rabitq_lower_bound_candidates,
+                                  *inner_search_param.tail_search,
+                                  inner_search_param.tail_topk);
+    }
+
     // set customize query alloctor
     Allocator* alloc = select_query_allocator(ctx, allocator_);
 

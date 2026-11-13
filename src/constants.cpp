@@ -277,6 +277,9 @@ const char* const PYRAMID_PRECISE_FILE_PATH = "precise_file_path";
 const char* const PYRAMID_PARAMETER_EF_SEARCH = "ef_search";
 const char* const PYRAMID_PARAMETER_SUBINDEX_EF_SEARCH = "subindex_ef_search";
 const char* const PYRAMID_PARAMETER_HOPS_LIMIT = "hops_limit";
+const char* const PYRAMID_PARAMETER_TAIL_START_AFTER = "tail_start_after";
+const char* const PYRAMID_PARAMETER_TAIL_BATCH_SIZE = "tail_batch_size";
+const char* const PYRAMID_PARAMETER_TAIL_RELATIVE_GAP = "tail_relative_gap";
 const char* const PYRAMID_PARAMETER_RABITQ_ONE_BIT_SEARCH = "rabitq_one_bit_search";
 // search-time param key (in search JSON under "pyramid")
 const char* const PYRAMID_PARAMETER_HIERARCHIES = "hierarchies";
