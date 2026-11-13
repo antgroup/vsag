@@ -294,7 +294,7 @@ jobs:
           fi
       - name: Publish to PyPI
         if: steps.list_files.outputs.should_publish == 'true'
-        uses: pypa/gh-action-pypi-publish@v1
+        uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
           verbose: true

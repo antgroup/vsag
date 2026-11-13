@@ -72,6 +72,12 @@ class EntryTests(unittest.TestCase):
         for arch in ('x86_64', 'aarch64'):
             self.assertIn('{arch: %s,' % arch, text)
 
+    def test_pypi_publish_action_uses_existing_ref(self):
+        # pypa/gh-action-pypi-publish has no `v1` tag; the moving ref is the release/v1 branch.
+        for workflow in (ROOT / '.github/workflows').glob('*.y*ml'):
+            with self.subTest(workflow=workflow.name):
+                self.assertNotRegex(workflow.read_text(), r'pypa/gh-action-pypi-publish@v1\b(?!\.)')
+
     def test_consumers_do_not_pull_shared_architecture_tags(self):
         legacy_tag = r'(?:vsaglib/vsag|ghcr\.io/antgroup/vsag):ci-(?:x86|aarch64)-'
         for workflow in (ROOT / '.github/workflows').glob('*.y*ml'):
