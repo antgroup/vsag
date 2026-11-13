@@ -12,113 +12,114 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-import numpy as np
+"""Build and search a SINDI index from readable term-weight mappings.
+
+SINDI consumes sparse vectors as CSR (Compressed Sparse Row) arrays whose
+column indices are integer term IDs. Real applications usually start from
+human-readable terms, such as tokens, tags, or keywords. This example shows
+the complete pipeline:
+
+    documents with string terms -> vocabulary -> CSR arrays -> build -> search
+
+``pyvsag.sparse`` provides the reusable helpers; the same functions work for
+both the document corpus and query terms.
+"""
+
 import json
-import sys
+
+import numpy as np
 import pyvsag
 
+from pyvsag.sparse import build_term_vocabulary, term_weights_to_csr
 
-def cal_recall(index, index_pointers, indices, values, ids, k, search_params):
-    correct = 0
-    res_ids, res_dists = index.knn_search(
-        index_pointers, indices, values, k, search_params
-    )
-    for i in range(len(ids)):
-        if ids[i] == res_ids[i][0]:
-            correct += 1
-
-    return correct / len(ids)
-
-
-def convert_to_csr(vectors_with_metadata):
-    """
-    Convert a list of metadata-augmented sparse vectors to CSR format.
-
-    Args:
-        vectors_with_metadata (list of dict): Each item has:
-            {
-                "id": int,              # Business-level vector ID (e.g., item/user ID)
-                "features": dict        # Sparse features: {feature_dim_index: value}
-            }
-
-    Returns:
-        tuple:
-            - index_pointers (np.ndarray, uint32): CSR index_pointers array, shape (batch_size + 1,)
-            - indices (np.ndarray, uint32): Feature column indices, shape (nnz,)
-            - values (np.ndarray, float32): Non-zero values, shape (nnz,)
-            - ids (np.ndarray, int64): Original IDs for result mapping, shape (batch_size,)
-    """
-    index_pointers = [0]
-    indices = []
-    values = []
-    ids = []
-
-    for item in vectors_with_metadata:
-        vid = item["id"]
-        features = item["features"]
-
-        ids.append(vid)
-
-        sorted_features = sorted(features.items())
-
-        for feat_idx, feat_val in sorted_features:
-            indices.append(int(feat_idx))
-            values.append(float(feat_val))
-
-        index_pointers.append(len(indices))
-
-    return (
-        np.array(index_pointers, dtype=np.uint32),
-        np.array(indices, dtype=np.uint32),
-        np.array(values, dtype=np.float32),
-        np.array(ids, dtype=np.int64),
-    )
+# Each document carries business metadata plus a {term: weight} mapping.
+# Weights can be TF-IDF, SPLADE activations, BM25 term frequencies, or any
+# other non-negative value produced by your encoder.
+DOCUMENTS = [
+    {
+        "id": 1001,
+        "title": "Guide to vector search",
+        "terms": {"vector": 1.0, "search": 1.0, "guide": 0.6},
+    },
+    {
+        "id": 1002,
+        "title": "Sparse retrieval with SINDI",
+        "terms": {"sparse": 1.0, "retrieval": 1.0, "sindi": 0.9},
+    },
+    {
+        "id": 1003,
+        "title": "Vector database indexing",
+        "terms": {"vector": 1.0, "database": 0.8, "indexing": 0.9},
+    },
+    {
+        "id": 1004,
+        "title": "Full-text search with keywords",
+        "terms": {"full": 0.7, "text": 0.8, "search": 1.0, "keyword": 1.0},
+    },
+    {
+        "id": 1005,
+        "title": "Approximate nearest neighbor search",
+        "terms": {
+            "approximate": 1.0,
+            "nearest": 1.0,
+            "neighbor": 0.9,
+            "search": 0.8,
+        },
+    },
+    {
+        "id": 1006,
+        "title": "Sparse vector index tuning",
+        "terms": {"sparse": 1.0, "vector": 0.9, "index": 1.0, "tuning": 0.7},
+    },
+]
 
 
-def sindi_test():
-    # Sparse vectors in DICT format.
-    vectors_in_dict = [
-        {"id": 1001, "features": {0: 1.0, 3: 2.0}},
-        {"id": 1002, "features": {1: 1.5, 2: 1.0, 4: 3.0}},
-        {"id": 1003, "features": {0: 0.8, 1: 0.9, 2: 1.1}},
-    ]
+def print_results(result_ids, result_distances, titles):
+    """Print the neighbours of one query in a readable form."""
+    for rank, (doc_id, distance) in enumerate(
+        zip(result_ids, result_distances), start=1
+    ):
+        doc_id = int(doc_id)
+        if doc_id not in titles:
+            print(f"  {rank}. <no result>")
+            continue
+        print(f"  {rank}. {titles[doc_id]} (id={doc_id}, distance={float(distance):.4f})")
 
-    index_pointers, indices, values, ids = convert_to_csr(vectors_in_dict)
 
-    # Sparse vectors in CSR (Compressed Sparse Row) format.
-    # This format is used to represent multiple sparse vectors efficiently.
+def sindi_term_weight_example():
+    term_weights = [document["terms"] for document in DOCUMENTS]
+    ids = np.array([document["id"] for document in DOCUMENTS], dtype=np.int64)
+    titles = {document["id"]: document["title"] for document in DOCUMENTS}
 
-    # index_pointers: array of start/end positions in `indices` and `values` for each vector.
-    #   Shape: (batch_size + 1,)
-    #   Example: [0, 2, 5, 8] means:
-    #       Vector 0: uses values[0:2]   -> 2 non-zero elements
-    #       Vector 1: uses values[2:5]   -> 3 non-zero elements
-    #       Vector 2: uses values[5:8]   -> 3 non-zero elements
-    assert list(index_pointers) == [0, 2, 5, 8]
+    # Step 1: assign a stable uint32 term ID to every string term. Terms are
+    # sorted lexicographically, so the vocabulary does not depend on dict
+    # insertion order or document order.
+    vocabulary = build_term_vocabulary(term_weights)
+    print("Term vocabulary:")
+    for term, term_id in vocabulary.items():
+        print(f"  {term_id:>2} -> {term}")
 
-    # indices: column indices (feature dimensions) of non-zero values.
-    #   These are the "internal feature IDs" (e.g., vocabulary indices).
-    #   Must be uint32 to match C++ interface requirements.
-    assert list(indices) == [0, 3, 1, 2, 4, 0, 1, 2]
+    # Step 2: convert documents to the CSR arrays consumed by pyvsag.
+    index_pointers, indices, values = term_weights_to_csr(term_weights, vocabulary)
+    print("\nCSR preview:")
+    print("  index_pointers:", index_pointers.tolist())
+    print("  indices:       ", indices.tolist())
+    # `values` holds one weight per non-zero term, ordered by term ID within
+    # each row; the vocabulary printed above maps each term to its ID.
+    print("  values:        ", [float(v) for v in values.tolist()])
 
-    # values: actual floating-point values of non-zero elements.
-    #   Corresponds to TF-IDF weights, counts, or other sparse features.
-    assert np.allclose(values, [1.0, 2.0, 1.5, 1.0, 3.0, 0.8, 0.9, 1.1])
-
-    # ids: user-defined identifiers (labels) for each vector.
-    #   Not used in computation; only for tracking results (e.g., mapping ANN results back to business entities).
-    #   Example: item IDs, user IDs, document IDs.
-    assert list(ids) == [1001, 1002, 1003]
-
-    # build index
+    # `dim` is the maximum number of non-zero terms per vector, not the
+    # vocabulary size. `term_id_limit` must cover the largest term ID + 1.
+    max_terms_per_document = max(len(weights) for weights in term_weights)
     index_params = json.dumps(
         {
             "dtype": "sparse",
-            "dim": 128,
+            "dim": max_terms_per_document,
             "metric_type": "ip",
             "index_param": {
-                "doc_prune_ratio": 0.0,
+                "term_id_limit": max(1, len(vocabulary)),
                 "window_size": 50000,
+                "doc_prune_ratio": 0.0,
                 "use_reorder": True,
                 "rerank_type": "fp32",
             },
@@ -126,26 +127,57 @@ def sindi_test():
     )
     index = pyvsag.Index("sindi", index_params)
 
+    # Step 3: build the index from the CSR arrays.
     index.build(index_pointers=index_pointers, indices=indices, values=values, ids=ids)
+    print(f"\nBuilt SINDI index with {index.get_num_elements()} documents")
 
-    search_params = json.dumps({"sindi": {"query_prune_ratio": 0, "n_candidate": 3}})
+    # Step 4: search with readable query terms. The same helper converts the
+    # query to CSR; unknown terms must be filtered or mapped beforehand.
+    topk = 3
+    search_params = json.dumps({"sindi": {"query_prune_ratio": 0.0, "n_candidate": 6}})
+    query_terms = {"vector": 1.0, "search": 0.8}
+    missing = sorted(set(query_terms) - set(vocabulary))
+    if missing:
+        raise ValueError(f"query terms missing from the vocabulary: {missing}")
 
-    # cal recall
-    print(
-        "[build] sindi recall:",
-        cal_recall(index, index_pointers, indices, values, ids, 1, search_params),
+    # Convert the query once and reuse the same CSR arrays before and after
+    # the save/load round-trip, so both searches really use one query.
+    query_pointers, query_indices, query_values = term_weights_to_csr(
+        [query_terms], vocabulary
     )
+    result_ids, result_distances = index.knn_search(
+        query_pointers, query_indices, query_values, topk, search_params
+    )
+    print(f"\nQuery terms: {query_terms}")
+    print_results(result_ids[0], result_distances[0], titles)
+
+    # Step 5: persist the index and confirm the loaded copy returns the same
+    # neighbours for the same query.
     filename = "./python_example_sindi.index"
     index.save(filename)
+    restored = pyvsag.Index("sindi", index_params)
+    restored.load(filename)
+    print(f"\nReloaded index from {filename}")
 
-    # deserialize and cal recall
-    index = pyvsag.Index("sindi", index_params)
-    index.load(filename)
-    print(
-        "[deserialize] sindi recall:",
-        cal_recall(index, index_pointers, indices, values, ids, 1, search_params),
+    restored_ids, restored_distances = restored.knn_search(
+        query_pointers, query_indices, query_values, topk, search_params
     )
+    ids_match = bool(np.array_equal(result_ids, restored_ids))
+    dists_match = bool(np.allclose(result_distances, restored_distances))
+    print("\nSave/Load round-trip test:")
+    print(f"  result_ids match:       {ids_match}")
+    print(f"  result_distances match: {dists_match}")
+    if not (ids_match and dists_match):
+        print("  FAIL: save/load round-trip changed results")
+        if not ids_match:
+            print(f"    before IDs:   {result_ids.tolist()}")
+            print(f"    after IDs:    {restored_ids.tolist()}")
+        if not dists_match:
+            print(f"    before dists: {result_distances.tolist()}")
+            print(f"    after dists:  {restored_distances.tolist()}")
+        raise SystemExit(1)
+    print("  PASS: save/load round-trip preserves results")
 
 
 if __name__ == "__main__":
-    sindi_test()
+    sindi_term_weight_example()
