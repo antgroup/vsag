@@ -447,5 +447,73 @@ class GitRanges(unittest.TestCase):
             policy.changed_paths('push',{'before':'--help','after':head})
 
 
+class HostedFormat(unittest.TestCase):
+    @staticmethod
+    def job(filename, key):
+        import re
+        text = (ROOT / '.github/workflows' / filename).read_text()
+        return re.search(r'^  ' + key + r':\n.*?(?=^  [\w-]+:\n|\Z)', text, re.M | re.S).group()
+
+    def test_all_hosted_format_callers_use_preinstalled_container(self):
+        for filename, key in (('main-ci.yml', 'clang-format-check'),
+                              ('manual-checks.yml', 'clang-format-check'),
+                              ('pr-ci-community.yml', 'format')):
+            with self.subTest(workflow=filename):
+                job = self.job(filename, key)
+                self.assertIn('    runs-on: ubuntu-24.04', job)
+                self.assertIn('ghcr.io/antgroup/vsag:ci-main-base', job)
+                self.assertIn('      - uses: ./.github/actions/check-format', job)
+                self.assertIn('persist-credentials: false', job)
+                self.assertNotIn('apt-get', job)
+                self.assertNotIn('install_toolchain', job)
+        branch = self.job('main-ci.yml', 'clang-format-check')
+        # The out-of-scope identity job must not pay for a container pull.
+        self.assertIn("container: ${{ matrix.check == 'Format Check' && 'ghcr.io/antgroup/vsag:ci-main-base' || '' }}", branch)
+
+    def test_shared_format_action_fails_closed_on_missing_or_wrong_tool(self):
+        import re
+        import shutil
+        import textwrap
+        action = (ROOT / '.github/actions/check-format/action.yml').read_text()
+        self.assertNotIn('apt-get', action)
+        self.assertNotIn('install_toolchain', action)
+        self.assertIn('run: ./scripts/format/check_format.sh', action)
+        preflight = textwrap.dedent(re.search(
+            r'      run: \|\n(.*?)(?=^    - |\Z)', action, re.M | re.S).group(1))
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            workspace = base / 'repo'
+            scripts = workspace / 'scripts/ci'
+            scripts.mkdir(parents=True)
+            shutil.copy(ROOT / 'scripts/ci/configure-git-safe-directory.sh', scripts)
+            binary = base / 'bin'
+            binary.mkdir()
+            formatter = binary / 'clang-format-20'
+            formatter.write_text('#!/bin/sh\n[ "$1" = --version ] || exit 99\n'
+                                 'printf "%s\\n" "$FORMAT_TEST_VERSION"\n'
+                                 'exit "$FORMAT_TEST_EXIT"\n')
+            formatter.chmod(0o755)
+            config = base / 'gitconfig'
+            env = dict(os.environ, PATH=str(binary) + os.pathsep + os.environ['PATH'],
+                       GITHUB_ACTIONS='true', GITHUB_WORKSPACE=str(workspace),
+                       GIT_CONFIG_GLOBAL=str(config), GIT_CONFIG_NOSYSTEM='1')
+            for version, code, success in (
+                ('Ubuntu clang-format version 20.1.8', '0', True),
+                ('clang-format version 19.1.0', '0', False),
+                ('clang-format version 21.0.0', '0', False),
+                ('unrecognized version', '0', False),
+                ('clang-format version 20.1.8', '127', False),
+            ):
+                with self.subTest(version=version, exit_code=code):
+                    result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', preflight],
+                                            cwd=workspace, env=dict(env, FORMAT_TEST_VERSION=version,
+                                                                    FORMAT_TEST_EXIT=code),
+                                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                    self.assertEqual(result.returncode == 0, success, result.stdout)
+            trusted = subprocess.check_output(['git', 'config', '--global', '--get-all',
+                                               'safe.directory'], env=env, text=True).splitlines()
+            self.assertEqual(set(trusted), {str(workspace)})
+
+
 if __name__=='__main__':
     unittest.main()

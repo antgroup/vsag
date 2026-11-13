@@ -92,7 +92,9 @@ jobs:
           python3 -m unittest tests/scripts/test_dependency_workflows.py
           python3 -m unittest tests/scripts/test_asan_artifact_workflow.py
           python3 -m unittest tests/scripts/test_toolchain_compatibility.py
+          python3 -m unittest tests/scripts/test_python_license.py
           python3 -m unittest tests/scripts/test_team_test_shards.py
+          python3 -m unittest tests/scripts/test_team_test_timings.py
           python3 -m unittest tests/scripts/test_team_mixed.py
           python3 -m unittest tests/scripts/test_team_workflow.py
           python3 -m unittest tests/scripts/test_team_timing.py
@@ -644,6 +646,22 @@ jobs:
           module.write_json('ci-summary/summary.json', summary)
           assert summary['success'], '; '.join(summary['errors'])
           PY
+      - name: Export case and example timing CSVs
+        if: ${{ always() && needs.changes.outputs.cpp == 'true' && hashFiles('ci-summary/plan/plan.json') != '' }}
+        run: |
+          python3 scripts/testing/team_test_timings.py export \
+            --plan ci-summary/plan/plan.json --results-dir ci-summary/results \
+            --platform linux-amd64 --build-profile asan \
+            --omp-num-threads "$OMP_NUM_THREADS" --openblas-num-threads "$OPENBLAS_NUM_THREADS" \
+            --output-dir ci-summary/timings
+      - name: Upload case and example timing CSVs
+        if: ${{ always() && hashFiles('ci-summary/timings/test-timings.csv') != '' }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: team-test-timings-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-summary/timings/*.csv
+          if-no-files-found: error
+          retention-days: 30
       - name: Upload merged test summary
         if: ${{ !cancelled() && hashFiles('ci-summary/summary.json') != '' }}
         uses: actions/upload-artifact@v5

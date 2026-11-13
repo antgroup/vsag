@@ -22,6 +22,8 @@ import argparse
 import json
 import sys
 
+from ._index import _check
+from ._lib import lib
 from .analyzer import analyze_index
 
 EXIT_SUCCESS = 0
@@ -103,22 +105,16 @@ def build_parser():
 
 
 def _silence_native_logs():
-    """Keep the native library from writing INFO logs to stdout."""
-    try:
-        import pyvsag
-
-        pyvsag.set_logger_off()
-    except Exception:  # pragma: no cover - logging is best-effort
-        pass
+    """Disable logging on the same CFFI library used by the analyzer."""
+    _check(lib.vsag_set_log_level(lib.VSAG_LOG_OFF), "set log level failed")
 
 
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    _silence_native_logs()
-
     try:
+        _silence_native_logs()
         report = analyze_index(
             index_path=args.index_path,
             build_parameter=args.build_parameter,

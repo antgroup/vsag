@@ -39,7 +39,10 @@ running `tests/python`. See the [pyvsag guide](../docs/en/src/guide/pyvsag.md).
 - Recommended: use the published Docker development image
   (`vsaglib/vsag:ubuntu`).
 - Hosted CI on main uses [`ci-main-*` platform tags](../../docker/README.md)
-  for OpenBLAS (amd64 and arm64) and MKL (amd64). These images are
+  for OpenBLAS (amd64 and arm64) and MKL (amd64). Hosted jobs pull these
+  images from GHCR; adjacent Docker Hub comments retain the alternative addresses
+  for debugging. Lite and Lint validate preinstalled LLVM 20 tools instead of
+  installing packages at job runtime. These images are
   published to both `vsaglib/vsag` on Docker Hub and
   `ghcr.io/antgroup/vsag` on GitHub Container Registry.
 - Supported local environments include Ubuntu 20.04+ and CentOS 7+.

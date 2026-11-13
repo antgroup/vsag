@@ -20,7 +20,8 @@ native analyzer component, so loading and analysis behavior cannot drift between
 
 import json
 
-from _pyvsag import analyze_index_json as _analyze_index_json
+from ._index import _take_error
+from ._lib import ffi, lib
 
 __all__ = ["ANALYSIS_SCHEMA_VERSION", "analyze_index"]
 
@@ -34,6 +35,44 @@ def _optional_path(value, name):
     if not isinstance(value, str):
         raise TypeError("{} must be a string or None".format(name))
     return value
+
+
+def _analyze_index_json(
+    index_path,
+    build_parameter,
+    query_path,
+    query_data_type,
+    base_path,
+    groundtruth_path,
+    save_groundtruth_path,
+    search_parameter,
+    topk,
+):
+    out_json = ffi.new("char**")
+    error = lib.vsag_analyze_index(
+        index_path.encode("utf-8"),
+        build_parameter.encode("utf-8"),
+        query_path.encode("utf-8"),
+        query_data_type.encode("utf-8"),
+        base_path.encode("utf-8"),
+        groundtruth_path.encode("utf-8"),
+        save_groundtruth_path.encode("utf-8"),
+        search_parameter.encode("utf-8"),
+        topk,
+        out_json,
+    )
+    code, message = _take_error(error)
+    if code == lib.VSAG_INVALID_ARGUMENT:
+        raise ValueError(message)
+    if code != lib.VSAG_SUCCESS:
+        raise RuntimeError(message or "index analysis failed")
+    if out_json[0] == ffi.NULL:
+        raise RuntimeError("index analysis returned no JSON result")
+
+    try:
+        return ffi.string(out_json[0]).decode("utf-8")
+    finally:
+        lib.vsag_string_destroy(out_json[0])
 
 
 def analyze_index(

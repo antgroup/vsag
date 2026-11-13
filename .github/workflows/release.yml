@@ -209,6 +209,12 @@ jobs:
       contents: read
   toolchain-source-baseline:
     runs-on: ubuntu-24.04
+    # Retain Ubuntu 22.04 for the GCC 9 / Clang 13 source and C++17 client baseline.
+    # Requires old compilers, Fortran, CMake/Ninja/Make, Git, OpenBLAS/LAPACKE,
+    # libaio and LLVM 13 OpenMP; installed by toolchain-compatibility-source-baseline.
+    # docker/ CI images use Ubuntu 26.04 + GCC 13/LLVM 20; dist images use manylinux.
+    # Neither preserves this baseline. A future lightweight image must retain it.
+    # Docker Hub official image: docker.io/library/ubuntu:22.04; no project GHCR mirror.
     container: ubuntu:22.04
     strategy:
       fail-fast: false
@@ -302,7 +308,8 @@ jobs:
     permissions:
       contents: write
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
     steps:
       - name: Get Repo
         uses: actions/checkout@v4

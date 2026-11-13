@@ -217,6 +217,25 @@ TEST_CASE("vsag_c_api build, search and serialize", "[vsag_c_api][ut]") {
     auto dir = fixtures::TempDir("vsag_c_api");
     auto path = dir.GenerateRandomFile();
     REQUIRE_OK(vsag_index_serialize_file(index.get(), path.data()));
+
+    char* analysis = nullptr;
+    REQUIRE_OK(vsag_analyze_index(
+        path.data(), "default", "", "auto", "", "", "", "default", 100, &analysis));
+    REQUIRE(analysis != nullptr);
+    const std::string report(analysis);
+    vsag_string_destroy(analysis);
+    REQUIRE(report.find("\"schema_version\"") != std::string::npos);
+    REQUIRE(report.find("\"static_analysis\"") != std::string::npos);
+    analysis = nullptr;
+    REQUIRE(code_of(vsag_analyze_index(
+                path.data(), "default", "", "auto", "", "", "", "default", 0, &analysis)) ==
+            VSAG_INVALID_ARGUMENT);
+    REQUIRE(analysis == nullptr);
+    REQUIRE(code_of(vsag_analyze_index(
+                path.data(), "default", "", "auto", "", "", "", "default", 100, nullptr)) ==
+            VSAG_INVALID_ARGUMENT);
+    vsag_string_destroy(nullptr);
+
     auto loaded = make_index();
     REQUIRE_OK(vsag_index_deserialize_file(loaded.get(), path.data()));
     data.CheckIndex(loaded.get());

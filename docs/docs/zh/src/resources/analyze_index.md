@@ -5,6 +5,8 @@ VSAG 提供了对**已构建或已加载索引**进行内省诊断的能力，�
 
 - C++ 接口 `Index::AnalyzeIndexBySearch`（声明在 `include/vsag/index.h`）；
 - C++ 命令行诊断工具 `analyze_index`，位于 `tools/analyze_index/`；
+- C ABI `vsag_analyze_index`（声明在 `include/vsag/vsag_c_api.h`），返回由调用方通过
+  `vsag_string_destroy()` 释放的 JSON 字符串；
 - 官方 `pyvsag` wheel 提供的公开 Python API `pyvsag.analyze_index()`；
 - 安装后可直接使用的 `pyvsag-analyze-index` 命令，它是上述 Python API 的轻量封装。
 
@@ -203,8 +205,10 @@ SINDI 动态召回和距离质量指标需要真值集。可通过 `groundtruth_
 输出索引元数据与 `GetStats()` 结果，并可选地针对查询文件运行 `AnalyzeIndexBySearch`。
 
 C++ 可执行程序、Python API 与安装后的命令都调用同一套原生组件
-（`vsag::AnalyzeIndex`，实现在 `src/analyzer/index_analyzer.cpp`）。不存在仅 Python 使用的
-索引加载或分析实现。
+（`vsag::AnalyzeIndex`，实现在 `src/analyzer/index_analyzer.cpp`）。Python 通过 `libvsag_c`
+中的 `vsag_analyze_index` 调用该组件，与 `pyvsag.Index` 共用同一个 CFFI 加载的库及 logger，
+不再需要独立的 Python 扩展，也不存在仅 Python 使用的索引加载或分析实现。C ABI 调用方获得的
+JSON 字符串由调用方持有，必须通过 `vsag_string_destroy()` 释放。
 
 ### 通过 pip 安装
 

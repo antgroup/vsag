@@ -32,7 +32,7 @@ constexpr const char* INDEX_ANALYSIS_SCHEMA_VERSION = "1.0";
  * @brief Options accepted by the reusable index analysis component.
  *
  * The component performs no command-line parsing and no output formatting. It is shared by the
- * C++ `analyze_index` executable, the `pyvsag` Python bindings and the installed
+ * C++ `analyze_index` executable, the C ABI used by `pyvsag`, and the installed
  * `pyvsag-analyze-index` command.
  */
 struct IndexAnalysisOptions {

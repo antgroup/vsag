@@ -77,6 +77,11 @@ jobs:
       matrix:
         check: ${{ fromJSON((github.event.deleted != true && (needs.select-checks.result != 'success' || needs.select-checks.outputs.format == 'true')) && '["Format Check"]' || '["Format Check Not Required"]') }}
     runs-on: ubuntu-24.04
+    # Docker Hub alternative: vsaglib/vsag:ci-main-base
+    container: ${{ matrix.check == 'Format Check' && 'ghcr.io/antgroup/vsag:ci-main-base' || '' }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Require successful check selection
         if: matrix.check == 'Format Check'
@@ -90,6 +95,8 @@ jobs:
       - name: Checkout code
         if: matrix.check == 'Format Check'
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/check-format
         if: matrix.check == 'Format Check'
 
@@ -138,7 +145,8 @@ jobs:
     name: Asan Build X86
     runs-on: ubuntu-24.04
     container:
-      image: vsaglib/vsag:ci-main-mkl
+      # Docker Hub alternative: vsaglib/vsag:ci-main-mkl
+      image: ghcr.io/antgroup/vsag:ci-main-mkl
       volumes:
         - /opt:/useless
     concurrency:
@@ -157,7 +165,8 @@ jobs:
     name: Asan Build Aarch64
     runs-on: ubuntu-24.04-arm
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     concurrency:
@@ -206,7 +215,8 @@ jobs:
           - unittests
           - functests
     container:
-      image: vsaglib/vsag:ci-main-mkl
+      # Docker Hub alternative: vsaglib/vsag:ci-main-mkl
+      image: ghcr.io/antgroup/vsag:ci-main-mkl
       volumes:
         - /opt:/useless
     steps:
@@ -232,7 +242,8 @@ jobs:
           - unittests
           - functests
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     concurrency:
@@ -281,7 +292,8 @@ jobs:
       - platforms-build-asan-x86
     runs-on: ubuntu-24.04
     container:
-      image: vsaglib/vsag:ci-main-mkl
+      # Docker Hub alternative: vsaglib/vsag:ci-main-mkl
+      image: ghcr.io/antgroup/vsag:ci-main-mkl
       volumes:
         - /opt:/useless
     concurrency:
@@ -303,7 +315,8 @@ jobs:
       SMOKE: ${{ (needs.entry-scope.outputs.profile == 'full-branch' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch')) }}
     runs-on: ubuntu-24.04-arm
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     concurrency:
@@ -495,7 +508,8 @@ jobs:
       group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -542,7 +556,8 @@ jobs:
       group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/tsan-build-and-test-test-tsan
@@ -570,7 +585,8 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
     env:
       VSAG_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.ci-fetchcontent
       VSAG_THIRDPARTY_DOWNLOAD_DIR: ${{ github.workspace }}/.ci-downloads
@@ -633,7 +649,8 @@ jobs:
       group: coverage-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
     env:
       VSAG_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.ci-fetchcontent
       VSAG_THIRDPARTY_DOWNLOAD_DIR: ${{ github.workspace }}/.ci-downloads
@@ -672,7 +689,8 @@ jobs:
       group: compatibility-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
     env:
       COMPATIBILITY_INDEX_DIR: ${{ github.workspace }}/.ci-compatibility-inputs
     steps:
@@ -719,7 +737,8 @@ jobs:
     name: Asan Build Simd
     runs-on: ubuntu-24.04
     container:
-      image: vsaglib/vsag:ci-main-mkl
+      # Docker Hub alternative: vsaglib/vsag:ci-main-mkl
+      image: ghcr.io/antgroup/vsag:ci-main-mkl
       volumes:
         - /opt:/useless
     strategy:
@@ -786,7 +805,8 @@ jobs:
       group: test-${{ matrix.simd_key }}-${{ matrix.test_type }}-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-main-mkl
+      # Docker Hub alternative: vsaglib/vsag:ci-main-mkl
+      image: ghcr.io/antgroup/vsag:ci-main-mkl
       volumes:
         - /opt:/useless
     steps:

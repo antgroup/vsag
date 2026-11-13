@@ -195,12 +195,21 @@ PRs targeting `main` keep the Linux ASan tests, examples, compatibility, changed
 lint, formatting, routing checks and `PR CI Gate`. Team and Community remain alternative
 Linux execution paths, not different correctness requirements.
 
-- Python wheel build/test is temporarily disabled for all main-target PRs, including
-  Python changes. The pyvsag rework (#3295) has landed, but the checks stay off until the new
-  packaging has been validated in the development environment. Automatic main-push Python checks are also temporarily paused;
-  explicit manual Python checks remain available. Restore PR validation in both
-  `build-python-x86` and `test-python-x86` after that validation; until then,
-  Python integration regressions require explicit manual or Daily testing to be detected.
+- Python wheel build/test (`build-python-x86` and `test-python-x86`) runs on main-target PRs
+  that change Python/bindings, the C ABI, or CMake/packaging files (the `python` and `cmake`
+  path filters). It builds the `py3-none` wheel with `make pyvsag` and runs pytest against it
+  (#3295). Main PRs test one primary environment (Python 3.12, NumPy 2); the Python 3.10-3.14 /
+  NumPy 1.x-2.x matrix and the OpenMP coexistence test stay on version branches and manual runs, and
+  belong in Daily. The wheel build tolerates the intentionally skipped Community format job on
+  Team-routed C++ changes, but still stops on failed or cancelled prerequisites. Automatic main-push Python checks remain paused
+  (see [Temporary main-push Python pause](#temporary-main-push-python-pause-3295));
+  explicit manual Python checks remain available.
+- `.github/workflows/pyvsag-testpypi.yml` builds the pyvsag `py3-none` wheels for x86_64
+  and aarch64 from `main` every night (03:17 Beijing time, cron `17 19 * * *`) and on manual
+  dispatch, and can upload them to TestPyPI with the `TEST_PYPI_API_TOKEN` secret. Uploading is
+  on by default: manual runs can set `publish: false` to only build, and the repository variable
+  `PYVSAG_NIGHTLY_PUBLISH=false` pauses the nightly upload. It never publishes to PyPI or a GitHub Release, and is not part
+  of PR CI.
 - macOS ASan builds and TSan no longer run for main-target PRs. Their main-push and
   manual workflows remain unchanged. Platform-specific and race regressions can thus
   be discovered after merge rather than before it.
@@ -479,3 +488,88 @@ is abruptly terminated, the upload/final sample cannot be guaranteed; consult
 the already streamed samples and GitHub's runner annotations. Exit 137 or a
 shutdown signal alone does not establish OOM. Compare counter deltas and memory
 pressure; unavailable cgroup evidence is unknown, not proof of no OOM.
+
+### Hosted formatting environment
+
+Branch, Community and Manual Format checks run on GitHub-hosted Ubuntu runners
+inside `vsaglib/vsag:ci-main-base`. Their shared `check-format` action verifies
+preinstalled clang-format major version 20 and runs the existing full-repository
+format check; it does not install packages at job runtime. A missing or wrong
+formatter fails the check. Container Git trust is limited to `GITHUB_WORKSPACE`.
+The Branch `Format Check Not Required` job uses no container and retains its
+existing no-op check identity. Team keeps its reviewed digest image and existing
+format/helper job. Image pulls still require registry connectivity. Image-size
+optimization is tracked separately in [#3327](https://github.com/antgroup/vsag/issues/3327).
+
+## Per-case and example timing CSVs
+
+Team Summary exports `team-test-timings-<run_id>-<run_attempt>` (30-day retention)
+with two UTF-8 CSV files. Download it from the workflow run's Artifacts section.
+This is post-processing of existing Catch2 XML-derived results and example process
+measurements; it does not run tests again, add per-case subprocesses, change
+sharding, or publish trusted timing history. The existing JSON manifests and
+complete-result gate remain authoritative for CI correctness.
+
+- `test-timings.csv`: one row per planned Catch2 case or numbered example, including
+  failed, skipped, timed-out, cancelled and missing results. Tool-binary cases are
+  included. It covers the Team plan's non-daily scope, not every Daily configuration.
+- `test-duration-estimates.csv`: only successful measured cases/examples from
+  successful batches, grouped by repository, performance identity and environment.
+  Per-run estimates usually have one sample. Multi-run estimates use the most
+  recent 20 samples by default, with median, nearest-rank p90, minimum, maximum and
+  last-seen time. Identical records deduplicate; conflicting duplicates are rejected.
+
+The raw schema is versioned (`schema_version=1`). Key fields:
+
+| Fields | Meaning |
+| --- | --- |
+| `record_id`, `repository_id`, `run_id`, `run_attempt`, `plan_digest` | Exact observation provenance; reruns are separate samples. |
+| `head_sha`, `commit_sha` | PR head and actual tested commit (usually the synthetic merge commit). |
+| `case_id`, `execution_id` | Performance hint ID and strict sealed execution identity. The hint hashes kind, binary, exact name, tags and source file, excluding source line; examples use their binary path. It survives line shifts, but source-file/path or name changes intentionally create a new hint. Strict source-line and binary-hash verification is unchanged. |
+| `kind`, `binary`, `case_name`, `tags`, `source_file`, `source_line` | Human-readable case or example identity. |
+| `platform`, `build_profile`, `image` | Execution environment; the image digest distinguishes toolchains. Never pool different sanitizer/platform/image configurations. |
+| `workers`, `batch_size`, `batch_target_seconds`, `omp_num_threads`, `openblas_num_threads` | Concurrency and batching settings, also separated in estimates. |
+| `shard`, `seed`, `observed_at` | Assignment, random seed and shard completion time in UTC (not a per-case start/finish timestamp). |
+| `duration_seconds`, `measurement` | Catch2 top-level case duration (`catch2_case`) or example process wall duration (`process_wall`), in seconds. |
+| `status`, `batch_status`, `batch_seconds` | Case/example outcome and enclosing batch outcome/wall duration. Batch duration repeats for its cases: do not sum it per row. |
+
+Missing/unusable per-case XML yields an empty duration, never an invented zero or
+an apportionment of batch time. Examples cancelled before launch or failing to
+launch also have empty durations and `measurement=unavailable`; a real exit code,
+including cancellation/timeout signals, preserves the measured process wall time.
+A missing shard yields `missing` rows; a batch that
+reported success without usable case data yields `unavailable`. Any case with
+reported skips is excluded from estimates. If the job is killed before publishing
+its result, its individual timings cannot be recovered from these small artifacts.
+A plan must exist to enumerate missing observations. CSV failures do not turn failed
+CI into success or relax the gate.
+
+To regenerate reports locally from downloaded plan/results:
+
+```bash
+python3 scripts/testing/team_test_timings.py export \
+  --plan plan/plan.json --results-dir results \
+  --platform linux-amd64 --build-profile asan \
+  --omp-num-threads 2 --openblas-num-threads 2 --output-dir timings
+```
+
+To aggregate downloaded raw CSVs from multiple runs:
+
+```bash
+python3 scripts/testing/team_test_timings.py estimate \
+  --input run-a/test-timings.csv --input run-b/test-timings.csv \
+  --window 20 --output test-duration-estimates.csv
+```
+
+Excel, Numbers, pandas and DuckDB can read these CSVs. Empty duration cells mean
+unknown, while a numeric zero is a real measurement. Text cells beginning with
+spreadsheet formula characters (or an apostrophe) receive a protective leading
+apostrophe; the helper reverses this escaping when reading CSVs. The estimator
+is a bounded sample window, not an elapsed-day window. Random parameter values are
+not collected yet, so these data support duration estimation but cannot by
+themselves explain or fit dimension/data-size cost coefficients.
+
+These reports are observations, **not authorization or trusted shared history**.
+They do not automatically replace the planner's existing ID-to-seconds JSON or
+update the production cache publisher. Promotion and scheduling changes require
+separate validation; a digest verifies consistency, not who produced the data.

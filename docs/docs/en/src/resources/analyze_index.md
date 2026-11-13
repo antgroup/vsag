@@ -6,6 +6,8 @@ performance **without** rebuilding the index. This capability is exposed in seve
 
 - the C++ API `Index::AnalyzeIndexBySearch` (declared in `include/vsag/index.h`);
 - the C++ command-line diagnostic tool `analyze_index`, located under `tools/analyze_index/`;
+- the C ABI `vsag_analyze_index` (declared in `include/vsag/vsag_c_api.h`), which returns an owned
+  JSON string released with `vsag_string_destroy()`;
 - the public Python API `pyvsag.analyze_index()` in the official `pyvsag` wheel;
 - the installed `pyvsag-analyze-index` command, which is a thin wrapper around that Python API.
 
@@ -213,8 +215,10 @@ index from disk, reports its metadata and `GetStats()` output, and (optionally) 
 `AnalyzeIndexBySearch` against a query file.
 
 The C++ executable, the Python API and the installed command all call the same native component
-(`vsag::AnalyzeIndex`, implemented in `src/analyzer/index_analyzer.cpp`). There is no separate
-Python-specific loading or analysis implementation.
+(`vsag::AnalyzeIndex`, implemented in `src/analyzer/index_analyzer.cpp`). Python reaches it through
+`vsag_analyze_index` in `libvsag_c`, the same CFFI-loaded library and logger used by `pyvsag.Index`;
+there is no separate Python extension or Python-specific loading and analysis implementation. C ABI
+callers receive an owned JSON string and must release it with `vsag_string_destroy()`.
 
 ### Installing from pip
 

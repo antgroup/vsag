@@ -20,6 +20,7 @@ The C API is versioned with `VSAG_C_API_VERSION`; a binding should compare it wi
   buffer passed to a call only has to stay valid for that call; a buffer attached to a dataset or
   bitmap filter has to stay valid while that handle is in use.
 - **Returned pointers:** pointers read from a handle stay valid until that handle is destroyed.
+  Owned strings returned by analysis must instead be released with `vsag_string_destroy`.
 - **Types:** signatures use fixed-width integers only. Flags are `int32_t` (0 is false).
 - **Parameters:** index and search parameters are JSON strings, as in the C++ API.
 - **Threads:** an index can be searched concurrently. A dataset, filter or search result may be
@@ -79,6 +80,17 @@ it with `vsag_search_result_destroy`. The pointers can be wrapped without copyin
 For dense float32 queries, `vsag_index_knn_search_float32` is the low-overhead path: one call, no
 handles, and caller-allocated `out_ids`/`out_distances` buffers of `num_queries * k` entries.
 
+## Index analysis
+
+`vsag_analyze_index` loads a serialized index and returns the same static or query-driven JSON report
+as the [index analysis tool](../resources/analyze_index.md). Pass `"default"` for embedded build or
+search parameters, `"auto"`, `"dense"` or `"sparse"` for the query data type, and an empty string
+for an unused optional path. All string arguments must be non-`NULL`.
+
+On success, `out_json` receives an owned NUL-terminated JSON string. Copy or wrap it as needed, then
+release it with `vsag_string_destroy`; destroying `NULL` is a no-op. On failure, `out_json` is `NULL`
+and the returned error distinguishes invalid arguments from loading or analysis failures.
+
 ## Filters
 
 Filters are plain data, so no call crosses the language boundary per candidate:
@@ -113,6 +125,7 @@ callback and are safe while other threads log.
 - **Persistence:** `vsag_index_serialize_file`, `vsag_index_deserialize_file`, and, for hosts that
   keep index bytes in their own storage, `vsag_index_serialize_writer` and
   `vsag_index_deserialize_reader`.
+- **Analysis:** `vsag_analyze_index` and `vsag_string_destroy`.
 
 Support still depends on the selected index. An unsupported operation returns
 `VSAG_UNSUPPORTED_INDEX_OPERATION`. Check the returned error code for `VSAG_READ_ERROR`,

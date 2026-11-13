@@ -77,6 +77,8 @@ jobs:
               - 'tests/scripts/simd_coverage_test.py'
             python:
               - 'python/**'
+              - 'include/vsag/vsag_c_api.h'
+              - 'src/vsag_c_api.cpp'
               - 'cmake/vsag_c.map'
               - 'tests/python/**'
               - '.github/workflows/**'
@@ -89,18 +91,17 @@ jobs:
     # Python-only changes still need Community formatting.
     if: (needs.changes.outputs.cpp == 'true' || needs.changes.outputs.python == 'true') && !(github.event_name == 'pull_request' && github.base_ref == 'main' && inputs.team-linux && needs.changes.outputs.cpp == 'true')
     runs-on: ubuntu-24.04
+    # Docker Hub alternative: vsaglib/vsag:ci-main-base
+    container: ghcr.io/antgroup/vsag:ci-main-base
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      - name: Install Clang format
-        run: |
-          sudo apt-get update
-          sudo bash scripts/deps/install_toolchain_ubuntu.sh
-          sudo apt-get install -y clang-format-20
-          sudo ln -sf /usr/bin/clang-format-20 /usr/bin/clang-format
-          clang-format --version
-      - name: Run Clang format check
-        run: ./scripts/format/check_format.sh
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/check-format
 
   coverage-config:
     name: Coverage Configuration
@@ -149,6 +150,7 @@ jobs:
           python3 -m unittest tests/scripts/test_dependency_workflows.py
           python3 -m unittest tests/scripts/test_asan_artifact_workflow.py
           python3 -m unittest tests/scripts/test_toolchain_compatibility.py
+          python3 -m unittest tests/scripts/test_python_license.py
       - name: Prepare Host
         run: |
           sudo env VSAG_INSTALL_INTEL_MKL=OFF bash ./scripts/deps/install_deps_ubuntu.sh
@@ -247,10 +249,10 @@ jobs:
 
   build-python-x86:
     name: Python Build X86
-    # Temporarily disable Python validation on main PRs until the Python rework lands.
-    # Restore PR validation here and in test-python-x86 after that work.
     needs: [changes, format]
-    if: (github.event_name != 'pull_request' || github.base_ref != 'main') && (needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true')
+    # Team-routed cpp changes intentionally skip the Community format job, so a skipped format
+    # result must not skip the wheel build; failed or cancelled prerequisites still do.
+    if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.format.result == 'success' || needs.format.result == 'skipped') && (needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true') }}
     runs-on: ubuntu-24.04
     steps:
       - name: Free Disk Space
@@ -287,7 +289,8 @@ jobs:
     if: ${{ !inputs.team-linux && needs.changes.outputs.cpp == 'true' }}
     runs-on: ubuntu-24.04
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -329,7 +332,8 @@ jobs:
     env:
       LD_LIBRARY_PATH: ${{ github.workspace }}/build/src
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -367,7 +371,8 @@ jobs:
     if: ${{ !inputs.team-linux && needs.changes.outputs.cpp == 'true' }}
     runs-on: ubuntu-24.04
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -404,7 +409,8 @@ jobs:
       COMPATIBILITY_INDEX_DIR: ${{ github.workspace }}/.ci-compatibility-inputs
       LD_LIBRARY_PATH: ${{ github.workspace }}/build/src
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -446,21 +452,18 @@ jobs:
       - name: Run Check Compatibility
         run: BUILD_DIR=./build bash ./scripts/check_compatibility.sh
 
-  # One py3-none wheel has to work on every supported CPython and on both numpy majors.
+  # One py3-none wheel has to work on every supported CPython and on both numpy majors. Main PRs
+  # run one primary environment; version branches and manual runs keep the full matrix.
   test-python-x86:
     name: Test Python X86 (py${{ matrix.python }}, numpy ${{ matrix.numpy }})
     needs: [changes, build-python-x86]
-    if: (github.event_name != 'pull_request' || github.base_ref != 'main') && (needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true')
+    # An explicit status function replaces the implicit success() check, which would otherwise
+    # skip this job when the intentionally skipped Community format job is an ancestor.
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.build-python-x86.result == 'success' && (needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true') }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - {python: '3.10', numpy: '1.26.*'}
-          - {python: '3.11', numpy: '2.*'}
-          - {python: '3.12', numpy: '2.*', openmp: true}
-          - {python: '3.13', numpy: '2.*'}
-          - {python: '3.14', numpy: '2.*'}
+      matrix: ${{ fromJSON(github.event_name == 'pull_request' && github.base_ref == 'main' && '{"include":[{"python":"3.12","numpy":"2.*"}]}' || '{"include":[{"python":"3.10","numpy":"1.26.*"},{"python":"3.11","numpy":"2.*"},{"python":"3.12","numpy":"2.*","openmp":true},{"python":"3.13","numpy":"2.*"},{"python":"3.14","numpy":"2.*"}]}') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -517,7 +520,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
     steps:
       - uses: actions/checkout@v4
         with:
@@ -576,6 +580,9 @@ jobs:
     if: inputs.run-lite
     name: Lite ${{ matrix.mode }}
     runs-on: ubuntu-24.04
+    # Lite needs GCC/gcov, LLVM 20 format/tidy, CMake/Ninja, Python and Git; no BLAS/MKL.
+    # Docker Hub alternative: vsaglib/vsag:ci-main-base
+    container: ghcr.io/antgroup/vsag:ci-main-base
     strategy:
       fail-fast: false
       matrix:
@@ -637,7 +644,8 @@ jobs:
       group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -682,7 +690,8 @@ jobs:
       group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/tsan-build-and-test-test-tsan
