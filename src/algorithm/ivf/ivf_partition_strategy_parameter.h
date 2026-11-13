@@ -27,6 +27,7 @@ namespace vsag {
 enum class IVFNearestPartitionTrainerType {
     RandomTrainer = 0,
     KMeansTrainer = 1,
+    EMeansTrainer = 2,
 };
 
 enum class IVFPartitionStrategyType {
@@ -37,6 +38,8 @@ enum class IVFPartitionStrategyType {
 // Historical kmeans training iteration counts, kept as defaults for backward compatibility.
 constexpr int32_t DEFAULT_IVF_KMEANS_ITER_COUNT = 25;
 constexpr int32_t DEFAULT_GNO_IMI_KMEANS_ITER_COUNT = 30;
+// Passes over the training data used by e-means (ivf_train_type == "e_means").
+constexpr int32_t DEFAULT_IVF_E_MEANS_EPOCHS = 3;
 
 class IVFPartitionStrategyParameters : public Parameter {
 public:
@@ -73,6 +76,8 @@ public:
     // Unset (-1) means "use the per-strategy default", which keeps the historical values:
     // 25 for the single-level IVF strategy and 30 for GNO-IMI.
     int32_t kmeans_iter_count{-1};
+    // Epochs used by the e-means centroid training (ivf_train_type == "e_means").
+    int32_t e_means_epochs{DEFAULT_IVF_E_MEANS_EPOCHS};
     int32_t gpu_device_id{0};
     uint64_t gpu_memory_budget{0};       // 0: derive from free device memory
     uint64_t gpu_min_work_threshold{0};  // 0: use the calibrated default

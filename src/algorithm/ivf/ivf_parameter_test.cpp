@@ -1047,3 +1047,56 @@ TEST_CASE("IVF maps SAQ parameters", "[ut][IVFParameter][SAQ]") {
     REQUIRE(quantization["saq_segment_count"].GetUint64() == 2);
     REQUIRE_FALSE(quantization["saq_random_rotation"].GetBool());
 }
+
+TEST_CASE("IVF e_means training parameters", "[ut][IVFParameter]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 64;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    SECTION("external params map to the partition strategy") {
+        auto external_param = vsag::JsonType::Parse(R"({
+            "ivf_train_type": "e_means",
+            "e_means_epochs": 5
+        })");
+        auto mapped = std::dynamic_pointer_cast<vsag::IVFParameter>(
+            vsag::IVF::CheckAndMappingExternalParam(external_param, common_param));
+        REQUIRE(mapped != nullptr);
+        auto param = mapped->ivf_partition_strategy_parameter;
+        REQUIRE(param->partition_train_type == vsag::IVFNearestPartitionTrainerType::EMeansTrainer);
+        REQUIRE(param->e_means_epochs == 5);
+
+        auto reloaded = std::make_shared<vsag::IVFPartitionStrategyParameters>();
+        reloaded->FromJson(param->ToJson());
+        REQUIRE(reloaded->partition_train_type ==
+                vsag::IVFNearestPartitionTrainerType::EMeansTrainer);
+        REQUIRE(reloaded->e_means_epochs == 5);
+    }
+
+    SECTION("epochs default and validation") {
+        auto param = std::make_shared<vsag::IVFPartitionStrategyParameters>();
+        param->FromJson(vsag::JsonType::Parse(R"({
+            "ivf_train_type": "e_means",
+            "partition_strategy_type": "ivf"
+        })"));
+        REQUIRE(param->e_means_epochs == vsag::DEFAULT_IVF_E_MEANS_EPOCHS);
+
+        auto bad = std::make_shared<vsag::IVFPartitionStrategyParameters>();
+        REQUIRE_THROWS(bad->FromJson(vsag::JsonType::Parse(R"({
+            "ivf_train_type": "e_means",
+            "partition_strategy_type": "ivf",
+            "e_means_epochs": 0
+        })")));
+    }
+
+    SECTION("e_means is rejected for gno_imi") {
+        auto param = std::make_shared<vsag::IVFPartitionStrategyParameters>();
+        REQUIRE_THROWS(param->FromJson(vsag::JsonType::Parse(R"({
+            "ivf_train_type": "e_means",
+            "partition_strategy_type": "gno_imi",
+            "gno_imi": {
+                "first_order_buckets_count": 4,
+                "second_order_buckets_count": 4
+            }
+        })")));
+    }
+}

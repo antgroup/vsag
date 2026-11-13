@@ -73,7 +73,8 @@ auto result = index->KnnSearch(
 | `buckets_count` | int | `10` | 倒排列表数量（`ivf` 策略下生效） |
 | `first_order_buckets_count` | int | `10` | 第一级桶数（`gno_imi` 策略下生效） |
 | `second_order_buckets_count` | int | `10` | 第二级桶数（`gno_imi` 策略下生效） |
-| `ivf_train_type` | string | `"kmeans"` | 中心训练方式：`kmeans` 或 `random` |
+| `ivf_train_type` | string | `"kmeans"` | 中心训练方式：`kmeans`、`e_means`（mini-batch EMA 聚类，[arXiv:2611.09501](https://arxiv.org/abs/2611.09501)，仅 `partition_strategy_type: "ivf"` 支持）或 `random` |
+| `e_means_epochs` | int | `3` | 训练采样的遍历轮数（`ivf_train_type: "e_means"` 时生效）。 |
 | `kmeans_iter_count` | int | `25`（`ivf`）、`30`（`gno_imi`） | KMeans 质心训练的迭代次数（`ivf_train_type: "kmeans"` 时生效）。越大桶划分质量越好，构建越慢。 |
 | `route_max_degree` | int | `64` | 路由 HGraph 的最大度数（`ivf` 策略下生效） |
 | `route_ef_construction` | int | `300` | 路由 HGraph 的构建搜索宽度（`ivf` 策略下生效） |
