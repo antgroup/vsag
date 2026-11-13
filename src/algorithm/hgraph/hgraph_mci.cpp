@@ -36,6 +36,7 @@
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/odescent/odescent_graph_parameter.h"
 #include "index_common_param.h"
+#include "search_metrics_internal.h"
 #include "simd/fp32_simd.h"
 #include "utils/search_lock.h"
 
@@ -626,6 +627,36 @@ HGraph::MCIHybridSearchResult::MakeStatistics(const SearchStatistics& stats) con
     json["hybrid_dist_computations"].SetUint64(this->hybrid_stats.dist_computations);
     json["hybrid_mci_stopped_early"].SetBool(this->hybrid_stats.mci_stopped_early);
     return json;
+}
+
+void
+HGraph::MCIHybridSearchResult::AttachStatistics(const DatasetPtr& dataset,
+                                                const SearchStatistics& stats) const {
+    SearchMetrics metrics;
+    auto add = [&](const char* key, MetricValue value) {
+        CHECK_ARGUMENT(metrics.AddExtension(key, std::move(value)),
+                       "duplicate HGraph search metric extension");
+    };
+    add("mci_hybrid_route", this->route);
+    add("mci_hybrid_valid_ratio", static_cast<double>(this->valid_ratio));
+    add("mci_hybrid_threshold", static_cast<double>(this->threshold));
+    add("mci_seed_count", this->seed_count);
+    add("mci_seed_ratio", static_cast<double>(this->seed_ratio));
+    add("mci_raw_float_csr", this->used_precise_float_csr);
+    add("mci_bitmap_fast_path", this->used_bitmap_fast_path);
+    add("hybrid_expanded_nodes", this->hybrid_stats.expanded_nodes);
+    add("hybrid_expansion_skipped", this->hybrid_stats.expansion_skipped);
+    add("hybrid_seed_budget", this->hybrid_seed_budget);
+    add("hybrid_seeded_entries", this->hybrid_stats.seeded_entries);
+    add("hybrid_sparse_neighbors_visited", this->hybrid_stats.sparse_neighbors_visited);
+    add("hybrid_mci_members_considered", this->hybrid_stats.mci_members_considered);
+    add("hybrid_mci_members_satisfied", this->hybrid_stats.mci_members_satisfied);
+    add("hybrid_mci_cliques_expanded", this->hybrid_stats.mci_cliques_expanded);
+    add("hybrid_dist_computations", this->hybrid_stats.dist_computations);
+    add("hybrid_mci_stopped_early", this->hybrid_stats.mci_stopped_early);
+    if (not AttachSearchMetrics(dataset, std::move(metrics).Snapshot(stats))) {
+        dataset->Statistics(MakeStatistics(stats).Dump());
+    }
 }
 
 HGraph::MCIHybridSearchResult

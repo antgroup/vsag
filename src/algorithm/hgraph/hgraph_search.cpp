@@ -1387,7 +1387,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                 }
                 search_result->Pop();
             }
-            dataset_results->Statistics(mci_result.MakeStatistics(stats).Dump());
+            mci_result.AttachStatistics(dataset_results, stats);
         } else {
             int64_t offset = q_idx * k;
             for (int64_t j = count - 1; j >= 0; --j) {

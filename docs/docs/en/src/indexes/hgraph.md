@@ -401,6 +401,10 @@ auto result = index->KnnSearch(
     query, topk, R"({"hgraph": {"ef_search": 200}})").value();
 ```
 
+Nonempty single-query KNN results expose a typed statistics snapshot through
+`GetSearchMetrics()`. `GetStatistics()` generates the legacy JSON representation on its
+first call and caches it for subsequent reads.
+
 ### Brute-force fallback under highly selective filters (`brute_force_threshold`)
 
 Graph traversal is the right strategy when most candidates pass the filter — the

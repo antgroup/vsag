@@ -1089,6 +1089,9 @@ private:
         [[nodiscard]] JsonType
         MakeStatistics(const SearchStatistics& stats) const;
 
+        void
+        AttachStatistics(const DatasetPtr& dataset, const SearchStatistics& stats) const;
+
         DistHeapPtr result{nullptr};
         float valid_ratio{1.0F};
         float threshold{0.0F};
