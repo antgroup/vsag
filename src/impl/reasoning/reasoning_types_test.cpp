@@ -34,6 +34,10 @@ TEST_CASE("ReasoningTermination ToString", "[reasoning]") {
             "lower_bound_reached");
     REQUIRE(std::string(ToString(ReasoningTermination::kHopsLimitReached)) == "hops_limit_reached");
     REQUIRE(std::string(ToString(ReasoningTermination::kTimeout)) == "timeout");
+    REQUIRE(std::string(ToString(ReasoningTermination::kEmptyTraversalLimitReached)) ==
+            "empty_traversal_limit_reached");
+    REQUIRE(std::string(ToString(ReasoningTermination::kUnrewardedHopsLimitReached)) ==
+            "unrewarded_hops_limit_reached");
 }
 
 TEST_CASE("ReasoningEvent ToString", "[reasoning]") {
