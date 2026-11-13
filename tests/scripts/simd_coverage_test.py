@@ -238,27 +238,40 @@ class ComparisonTest(unittest.TestCase):
             self.assertIn("not full-project", (reports / "summary.md").read_text())
 
     def test_dependency_changes_stop_before_running_base_code(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            def git(*args):
-                return coverage.git(root, *args).decode().strip()
-            git("init", "-q")
-            git("config", "user.name", "Test")
-            git("config", "user.email", "test@example.com")
-            dependency = root / "extern/dependency.cmake"
-            dependency.parent.mkdir()
-            dependency.write_text("before\n")
-            git("add", ".")
-            git("commit", "-qm", "base")
-            base = git("rev-parse", "HEAD")
-            dependency.write_text("after\n")
-            git("add", ".")
-            git("commit", "-qm", "head")
-            result = subprocess.run(["bash", str(ROOT / "scripts/coverage/run_simd_coverage.sh"),
-                                     base, git("rev-parse", "HEAD")], cwd=root, capture_output=True)
-            self.assertEqual(result.returncode, 1)
-            self.assertFalse((root / "simd-base").exists())
-            self.assertIn("dependency definitions differ", (root / "simd-coverage/summary.md").read_text())
+        # OpenBLAS changes must not hide simultaneous shared-source changes.
+        for path in ("extern/fmt/fmt.cmake", ".github/actions/prepare-fetchcontent/action.yml"):
+            for operation in ("modify", "delete", "add"):
+                with self.subTest(path=path, operation=operation), tempfile.TemporaryDirectory() as temp:
+                    root = Path(temp)
+                    def git(*args):
+                        return coverage.git(root, *args).decode().strip()
+                    git("init", "-q")
+                    git("config", "user.name", "Test")
+                    git("config", "user.email", "test@example.com")
+                    openblas = root / "extern/openblas/openblas.cmake"
+                    openblas.parent.mkdir(parents=True)
+                    openblas.write_text("before\n")
+                    dependency = root / path
+                    dependency.parent.mkdir(parents=True, exist_ok=True)
+                    if operation != "add":
+                        dependency.write_text("before\n")
+                    git("add", ".")
+                    git("commit", "-qm", "base")
+                    base = git("rev-parse", "HEAD")
+                    openblas.write_text("after\n")
+                    if operation == "delete":
+                        dependency.unlink()
+                    else:
+                        dependency.write_text("after\n")
+                    git("add", "-A")
+                    git("commit", "-qm", "head")
+                    result = subprocess.run(["bash", str(ROOT / "scripts/coverage/run_simd_coverage.sh"),
+                                             base, git("rev-parse", "HEAD")], cwd=root,
+                                            capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 1)
+                    self.assertFalse((root / "simd-base").exists())
+                    self.assertIn("dependency definitions differ", result.stderr)
+                    self.assertIn("dependency definitions differ", (root / "simd-coverage/summary.md").read_text())
 
     def test_removed_unreferenced_pybind11_does_not_block_comparison(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -463,7 +476,10 @@ class ComparisonTest(unittest.TestCase):
             source = root / SOURCE
             source.parent.mkdir(parents=True)
             source.write_text("before\n")
-            (root / "Makefile").write_text("DEBUG_BUILD_DIR=./build/\ncov:\n\tpython3 fixture.py\n")
+            openblas = root / "extern/openblas/openblas.cmake"
+            openblas.parent.mkdir(parents=True)
+            openblas.write_text("bundled build before\n")
+            (root / "Makefile").write_text("DEBUG_BUILD_DIR=./build/\nVSAG_CMAKE_ARGS=$(EXTRA_DEFINED)\ncov:\n\tpython3 fixture.py\n")
             (root / "fixture.py").write_text(
                 "import json\nfrom pathlib import Path\n"
                 "root = Path.cwd()\n"
@@ -480,8 +496,16 @@ class ComparisonTest(unittest.TestCase):
             cmake = tools / "cmake"
             cmake.write_text("#!/bin/sh\ncase \"$*\" in\n"
                              "  *--build*) [ \"$*\" = \"--build ./build/ --target unittests_simd --parallel 4\" ] || exit 91; python3 fixture.py ;;\n"
+                             "  *) case \"$*\" in *-DVSAG_USE_SYSTEM_OPENBLAS=ON*) ;; *) exit 92 ;; esac ;;\n"
                              "esac\n")
             cmake.chmod(0o755)
+            # The fixture executable exits immediately; validate the production
+            # timeout/filter/seed arguments without requiring GNU timeout on macOS.
+            timeout = tools / "timeout"
+            timeout.write_text("#!/bin/sh\n"
+                               "[ \"$*\" = \"15m ./build/tests/unittests_simd [simd]~[!benchmark] --rng-seed 424242 --order lex\" ] || exit 93\n"
+                               "shift\nexec \"$@\"\n")
+            timeout.chmod(0o755)
             (scripts / "collect_cpp_coverage.sh").write_text(
                 "mkdir coverage\n"
                 f"printf 'SF:{SOURCE}\\nDA:1,1\\nend_of_record\\n' > coverage/coverage.info\n")
@@ -489,6 +513,7 @@ class ComparisonTest(unittest.TestCase):
             git("commit", "-qm", "base")
             base = git("rev-parse", "HEAD")
             source.write_text("after\n")
+            openblas.write_text("bundled build after\n")
             git("add", ".")
             git("commit", "-qm", "head")
             head = git("rev-parse", "HEAD")

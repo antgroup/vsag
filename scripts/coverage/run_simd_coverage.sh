@@ -26,7 +26,13 @@ fi
 # those pins change, reusing it for the base would measure the wrong dependency.
 # Transitional: extern/pybind11/pybind11.cmake was removed unreferenced, so no build consumes it.
 # Drop this exclude once no supported base still contains it.
-if git diff --quiet "$base" "$head" -- extern ':(exclude)extern/pybind11/pybind11.cmake' .github/actions/prepare-fetchcontent; then
+# OpenBLAS is supplied by the same container for both revisions (strict system
+# mode below), not by the shared FetchContent checkout. Its bundled build recipe
+# cannot change the shared sources. Keep all other extern paths guarded by default.
+if git diff --quiet "$base" "$head" -- extern \
+    ':(exclude)extern/pybind11/pybind11.cmake' \
+    ':(exclude)extern/openblas/openblas.cmake' \
+    .github/actions/prepare-fetchcontent; then
     :
 else
     diff_status=$?
@@ -35,6 +41,7 @@ else
     else
         echo 'SIMD coverage unavailable: Git dependency comparison failed.' > simd-coverage/summary.md
     fi
+    cat simd-coverage/summary.md >&2
     exit "$diff_status"
 fi
 for role in base head; do
