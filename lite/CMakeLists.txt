@@ -47,6 +47,13 @@ if(ENABLE_RABITQ_LITE_BACKEND)
     list(APPEND VSAG_LITE_SOURCES
         "${VSAG_ROOT}/src/lite/rabitq_backend.cpp"
         "${VSAG_ROOT}/src/lite/rabitq_filter_ip.cpp")
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        # Match the scalar reference's separately rounded multiply and add.
+        set_source_files_properties(
+            "${VSAG_ROOT}/src/lite/rabitq_filter_ip.cpp"
+            "${VSAG_ROOT}/src/lite/rabitq_backend_test.cpp"
+            PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
+    endif()
     if(VSAG_LITE_HAS_X86_SIMD)
         list(APPEND VSAG_LITE_SOURCES
             "${VSAG_ROOT}/src/lite/rabitq_filter_ip_avx2.cpp"
@@ -100,7 +107,9 @@ if(ENABLE_TESTS)
     add_executable(lite_graph_tests "${VSAG_ROOT}/src/lite/graph_backend_test.cpp")
     add_executable(lite_graph_allocation_tests "${VSAG_ROOT}/src/lite/graph_allocation_test.cpp")
     target_include_directories(lite_graph_allocation_tests PRIVATE "${VSAG_ROOT}/src")
-    target_link_libraries(lite_graph_allocation_tests PRIVATE vsag::lite Catch2::Catch2WithMain)
+    # Link the production objects into the executable so its replacement
+    # operator new can inject failures on platforms without shared-library interposition.
+    target_link_libraries(lite_graph_allocation_tests PRIVATE vsag_lite_static Catch2::Catch2WithMain)
     if(ENABLE_RABITQ_LITE_BACKEND)
         target_compile_definitions(lite_graph_allocation_tests PRIVATE VSAG_LITE_HAS_RABITQ_BACKEND)
     endif()

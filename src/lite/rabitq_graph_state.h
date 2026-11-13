@@ -1946,71 +1946,80 @@ private:
         std::sort(affected_nodes.begin(), affected_nodes.end());
         affected_nodes.erase(std::unique(affected_nodes.begin(), affected_nodes.end()),
                              affected_nodes.end());
+        std::vector<uint64_t> displaced_targets;
         for (const uint64_t source : affected_nodes) {
             if (source >= Size()) {
                 continue;
             }
-            // Preserve valid links to limit topology drift; rank only candidates that can
-            // refill the degree lost by the mutation.
-            auto& repaired = adjacency_[source];
-            if (repaired.size() >= max_degree_) {
-                continue;
-            }
-            remember_row(source);
-            const auto old_neighbors = repaired;
+            const auto old_neighbors = adjacency_[source];
+            auto candidates = old_neighbors;
+            candidates.insert(
+                candidates.end(), additional_candidates.begin(), additional_candidates.end());
+            std::sort(candidates.begin(), candidates.end());
+            candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
             const auto query = decode_query(source);
             const float query_norm = codes_.At(source).metadata.norm;
             const float query_sum = std::accumulate(query.begin(), query.end(), 0.0F);
             std::vector<Candidate> ranked;
-            ranked.reserve(additional_candidates.size());
-            for (const uint64_t candidate : additional_candidates) {
-                if (candidate < Size() and candidate != source and
-                    std::find(repaired.begin(), repaired.end(), candidate) == repaired.end()) {
+            ranked.reserve(candidates.size());
+            for (const uint64_t candidate : candidates) {
+                if (candidate < Size() and candidate != source) {
                     ranked.push_back({candidate, 0.0F});
                 }
             }
             score_mutation_candidates(query, query_norm, query_sum, codes_, ranked);
             std::sort(ranked.begin(), ranked.end(), better);
-            const uint64_t needed = max_degree_ - repaired.size();
-            const uint64_t retained = std::min(needed, ranked.size());
-            repaired.reserve(repaired.size() + retained);
-            if (ranked.size() > retained and retained > 0) {
-                uint64_t chosen = 0;
-                for (const auto& candidate : ranked) {
-                    if (chosen == retained) {
+            std::vector<uint64_t> selected;
+            selected.reserve(max_degree_);
+            // Reuse the current encoded geometry; this is not exact FP32 pruning.
+            for (const auto& candidate : ranked) {
+                bool diverse = true;
+                for (const uint64_t neighbor : selected) {
+                    if (one_bit_code_distance(codes_.At(neighbor),
+                                              codes_.At(candidate.id),
+                                              model_.dim) < candidate.distance) {
+                        diverse = false;
                         break;
                     }
-                    const auto code = codes_.At(candidate.id);
-                    bool diverse = true;
-                    for (const uint64_t selected : repaired) {
-                        if (one_bit_code_distance(codes_.At(selected), code, model_.dim) <
-                            candidate.distance) {
-                            diverse = false;
-                            break;
-                        }
-                    }
-                    if (diverse) {
-                        repaired.push_back(candidate.id);
-                        ++chosen;
-                    }
                 }
-                // Preserve the degree-fill contract if every remaining candidate is occluded.
-                for (const auto& candidate : ranked) {
-                    if (chosen == retained) {
+                if (diverse) {
+                    selected.push_back(candidate.id);
+                    if (selected.size() == max_degree_) {
                         break;
                     }
-                    if (std::find(repaired.begin(), repaired.end(), candidate.id) ==
-                        repaired.end()) {
-                        repaired.push_back(candidate.id);
-                        ++chosen;
-                    }
-                }
-            } else {
-                for (uint64_t i = 0; i < retained; ++i) {
-                    repaired.push_back(ranked[i].id);
                 }
             }
-            sync_incoming(source, old_neighbors);
+            for (const auto& candidate : ranked) {
+                if (selected.size() == max_degree_) {
+                    break;
+                }
+                if (std::find(selected.begin(), selected.end(), candidate.id) == selected.end()) {
+                    selected.push_back(candidate.id);
+                }
+            }
+            for (const uint64_t target : old_neighbors) {
+                if (std::find(selected.begin(), selected.end(), target) == selected.end()) {
+                    displaced_targets.push_back(target);
+                }
+            }
+            replace_neighbors(source, selected);
+        }
+        // Protect only targets displaced by this new reselection. Existing Add/
+        // Remove guard flags retain their meanings; no new persistent state.
+        if (incoming_protection_ != IncomingProtection::NONE) {
+            std::sort(displaced_targets.begin(), displaced_targets.end());
+            displaced_targets.erase(std::unique(displaced_targets.begin(), displaced_targets.end()),
+                                    displaced_targets.end());
+            if (use_incoming_adjacency_) {
+                displaced_targets.erase(
+                    std::remove_if(displaced_targets.begin(),
+                                   displaced_targets.end(),
+                                   [&](uint64_t target) { return not incoming_[target].empty(); }),
+                    displaced_targets.end());
+            }
+            if (not displaced_targets.empty()) {
+                protect_incoming(displaced_targets);
+            }
         }
     }
 
