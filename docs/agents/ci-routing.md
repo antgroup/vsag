@@ -339,6 +339,14 @@ and local module builds are unchanged. Adding `[simd]` tests outside the module
 requires updating the coverage inventory guard and verifying aggregate/module
 inventory and SIMD line-coverage equivalence.
 
+The dependency preflight rejects changes to shared dependency definitions and
+`prepare-fetchcontent` before reusing prepared sources for base and head. It
+excludes the bundled OpenBLAS recipe because both builds require system OpenBLAS
+from the same container (`VSAG_USE_SYSTEM_OPENBLAS=ON`). This exception does not
+skip either build or coverage comparison; changes to other dependency definitions
+still fail the preflight, including when combined with OpenBLAS changes. The
+existing exception for the removed, unreferenced pybind11 recipe is unchanged.
+
 Branch Docs is distinct from PR Docs. The 2026-11-02 ruleset audit found main
 requires DCO, Mergify Merge Protections and PR CI Gate; version rulesets include
 Format Check. Mergify checks issue links directly from labels/body. Recheck
