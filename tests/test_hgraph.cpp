@@ -6885,3 +6885,149 @@ TEST_CASE("HGraph concurrent Add with force-remove flag does not race in codes s
     REQUIRE(add_failures.load() == 0);
     REQUIRE(index->GetNumElements() == kVectorCount);
 }
+
+TEST_CASE("(PR) HGraph iterator search via SearchWithRequest with k>1 paging",
+          "[ft][hgraph][iterator][search_with_request][pr]") {
+    using namespace fixtures;
+    constexpr int64_t kDim = 16;
+    constexpr uint64_t kBaseCount = 200;
+    constexpr int64_t kTopK = 10;
+    constexpr int64_t kPageK = 3;
+    const std::string kSearchParam = R"({
+        "hgraph": {
+            "ef_search": 80,
+            "parallelism": 1,
+            "enable_reorder": false,
+            "brute_force_threshold": 0.0
+        }
+    })";
+
+    HGraphTestIndex::HGraphBuildParam build_param("l2", kDim, "fp32");
+    auto build_str = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, build_str, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(kDim, kBaseCount, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(kDim)
+        ->Float32Vectors(dataset->query_->GetFloat32Vectors())
+        ->Owner(false);
+
+    // Baseline: standard KnnSearch via SearchWithRequest.
+    vsag::SearchRequest baseline_req;
+    baseline_req.topk_ = kTopK;
+    baseline_req.params_str_ = kSearchParam;
+    baseline_req.query_ = query;
+    auto baseline_result = index->SearchWithRequest(baseline_req);
+    REQUIRE(baseline_result.has_value());
+    REQUIRE(baseline_result.value()->GetDim() == kTopK);
+    std::vector<int64_t> baseline_ids(baseline_result.value()->GetIds(),
+                                      baseline_result.value()->GetIds() + kTopK);
+
+    // Iterator search via SearchWithRequest with kPageK > 1.
+    vsag::IteratorContext* iter_ctx = nullptr;
+    std::vector<int64_t> pages_ids;
+
+    while (pages_ids.size() < static_cast<size_t>(kTopK)) {
+        bool is_last = false;
+        if (pages_ids.size() + kPageK >= static_cast<size_t>(kTopK)) {
+            is_last = true;
+        }
+
+        vsag::SearchRequest req;
+        req.topk_ = kPageK;
+        req.params_str_ = kSearchParam;
+        req.query_ = query;
+        req.enable_iterator_search_ = true;
+        req.p_iter_ctx_ = &iter_ctx;
+        req.is_last_search_ = is_last;
+
+        auto page = index->SearchWithRequest(req);
+        REQUIRE(page.has_value());
+
+        int64_t dim = page.value()->GetDim();
+        if (is_last) {
+            REQUIRE(page.value()->GetDim() > 0);
+        }
+        REQUIRE(dim > 0);
+
+        auto* ids = page.value()->GetIds();
+        for (int64_t i = 0; i < dim; ++i) {
+            pages_ids.push_back(ids[i]);
+        }
+
+        if (pages_ids.size() >= static_cast<size_t>(kTopK)) {
+            break;
+        }
+    }
+
+    if (pages_ids.size() > static_cast<size_t>(kTopK)) {
+        pages_ids.resize(kTopK);
+    }
+
+    // Verify: no duplicate IDs across pages.
+    std::set<int64_t> unique_ids(pages_ids.begin(), pages_ids.end());
+    REQUIRE(unique_ids.size() == pages_ids.size());
+
+    // Verify: each returned ID is also in the baseline full KNN result.
+    std::set<int64_t> baseline_set(baseline_ids.begin(), baseline_ids.end());
+    for (auto id : pages_ids) {
+        REQUIRE(baseline_set.count(id) > 0);
+    }
+
+    // is_last_search=true drain test: first accumulate discard heap via regular
+    // iterator searches, then drain with is_last.
+    delete iter_ctx;
+    iter_ctx = nullptr;
+    {
+        // Do a few regular page fetches to fill the discard heap.
+        for (int i = 0; i < 3; ++i) {
+            vsag::SearchRequest fill_req;
+            fill_req.topk_ = 1;
+            fill_req.params_str_ = kSearchParam;
+            fill_req.query_ = query;
+            fill_req.enable_iterator_search_ = true;
+            fill_req.p_iter_ctx_ = &iter_ctx;
+            fill_req.is_last_search_ = false;
+
+            auto page = index->SearchWithRequest(fill_req);
+            REQUIRE(page.has_value());
+            REQUIRE(page.value()->GetDim() > 0);
+        }
+
+        // Now drain with is_last=true — should return accumulated discard heap.
+        vsag::SearchRequest drain_req;
+        drain_req.topk_ = 100;  // large enough to get all discarded
+        drain_req.params_str_ = kSearchParam;
+        drain_req.query_ = query;
+        drain_req.enable_iterator_search_ = true;
+        drain_req.p_iter_ctx_ = &iter_ctx;
+        drain_req.is_last_search_ = true;
+
+        auto drain_result = index->SearchWithRequest(drain_req);
+        REQUIRE(drain_result.has_value());
+        // After a few regular searches with ef_search=80 and kBaseCount=200,
+        // the discard heap should have accumulated many candidates.
+        REQUIRE(drain_result.value()->GetDim() > 0);
+    }
+
+    // is_last_search=true with no prior discard: should return empty.
+    {
+        vsag::IteratorContext* fresh_ctx = nullptr;
+        vsag::SearchRequest direct_drain_req;
+        direct_drain_req.topk_ = 1;
+        direct_drain_req.params_str_ = kSearchParam;
+        direct_drain_req.query_ = query;
+        direct_drain_req.enable_iterator_search_ = true;
+        direct_drain_req.p_iter_ctx_ = &fresh_ctx;
+        direct_drain_req.is_last_search_ = true;
+
+        auto result = index->SearchWithRequest(direct_drain_req);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 0);
+        delete fresh_ctx;
+    }
+
+    delete iter_ctx;
+}

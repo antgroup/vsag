@@ -218,6 +218,30 @@ public:
      */
     bool is_last_search_{false};
 
+    // The iterator search fields (enable_iterator_search_, p_iter_ctx_, is_last_search_)
+    // are consumed by HGraph::SearchWithRequest to page through all results in order.
+    //
+    // Example usage:
+    //   vsag::IteratorContext* ctx = nullptr;
+    //   while (true) {
+    //       vsag::SearchRequest req;
+    //       req.topk_ = k;
+    //       req.params_str_ = params;
+    //       req.query_ = query;
+    //       req.enable_iterator_search_ = true;
+    //       req.p_iter_ctx_         = &ctx;
+    //       req.is_last_search_     = false;
+    //       auto page = index->SearchWithRequest(req);
+    //       // ... consume page
+    //       if (page.value()->GetDim() < k) break; // exhausted
+    //   }
+    //   // Optional: drain remaining candidates
+    //   // req.is_last_search_ = true; auto tail = index->SearchWithRequest(req);
+    //   delete ctx;
+    //
+    // Only HGraph supports iterator search; single-query KNN only.
+    // Non-HGraph indexes return UNSUPPORTED_INDEX_OPERATION.
+
     /**
      * @brief Expected labels for reasoning analysis
      * @details List of expected vector IDs that should be returned in the search result.
