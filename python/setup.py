@@ -38,8 +38,12 @@ class CMakeBuild(build_ext):
             f"-DMKL_STATIC_LINK={mkl_static_link}",
             "-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -s",
         ]
+        if os.environ.get("VSAG_ENABLE_CCACHE", "OFF").strip().upper() == "ON":
+            cmake_args.append("-DENABLE_CCACHE=ON")
 
         jobs = os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL", str(os.cpu_count() or 4))
+        # Third-party builds (OpenBLAS, ...) use the same parallelism as the main build.
+        cmake_args.append(f"-DNUM_BUILDING_JOBS={jobs}")
         env = os.environ.copy()
         build_temp = self.build_temp
         os.makedirs(build_temp, exist_ok=True)

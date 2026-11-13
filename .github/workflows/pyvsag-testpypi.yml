@@ -62,13 +62,25 @@ jobs:
           persist-credentials: false
       - name: Prepare build environment
         run: bash ./scripts/python/prepare_python_build.sh
+      # The compiler cache is mounted into the cibuildwheel container; every run saves its own
+      # entry and starts from the newest one, so nightly builds only recompile what changed.
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: pyvsag-ccache-${{ matrix.arch }}-${{ needs.resolve-source.outputs.sha }}
+          restore-keys: pyvsag-ccache-${{ matrix.arch }}-
+      - name: Create ccache directory
+        run: mkdir -p "${{ runner.temp }}/ccache"
       - name: Build wheel
         uses: pypa/cibuildwheel@v3.3.1
         with:
           package-dir: python
         env:
           CIBW_ARCHS: ${{ matrix.arch }}
-          CIBW_ENVIRONMENT: ${{ matrix.arch == 'x86_64' && 'VSAG_OPENBLAS_TARGET=GENERIC' || '' }}
+          CIBW_CONTAINER_ENGINE: "docker; create_args: -v ${{ runner.temp }}/ccache:/ccache"
+          CIBW_BEFORE_ALL: yum install -y gcc gcc-c++ ca-certificates epel-release && yum install -y ccache
+          CIBW_ENVIRONMENT: ${{ format('VSAG_ENABLE_CCACHE=ON CCACHE_DIR=/ccache CCACHE_MAXSIZE=2G CCACHE_COMPILERCHECK=content {0}', matrix.arch == 'x86_64' && 'VSAG_OPENBLAS_TARGET=GENERIC' || '') }}
           CIBW_TEST_COMMAND: pip install numpy pytest && python /project/tests/python/run_test.py
       - uses: actions/upload-artifact@v5
         with:
