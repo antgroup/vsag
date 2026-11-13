@@ -126,10 +126,11 @@ IVFPartitionStrategyParameters::FromJson(const JsonType& json) {
         this->e_means_epochs = static_cast<int32_t>(json[IVF_E_MEANS_EPOCHS_KEY].GetInt());
         CHECK_ARGUMENT(this->e_means_epochs > 0, "e_means_epochs must be positive");
     }
-    CHECK_ARGUMENT(
-        not(this->partition_train_type == IVFNearestPartitionTrainerType::EMeansTrainer &&
-            this->partition_strategy_type == IVFPartitionStrategyType::GNO_IMI),
-        "ivf_train_type e_means is only supported with partition_strategy_type ivf");
+    const bool e_means_with_gno_imi =
+        this->partition_train_type == IVFNearestPartitionTrainerType::EMeansTrainer &&
+        this->partition_strategy_type == IVFPartitionStrategyType::GNO_IMI;
+    CHECK_ARGUMENT(not e_means_with_gno_imi,
+                   "ivf_train_type e_means is only supported with partition_strategy_type ivf");
 
     this->gnoimi_param = std::make_shared<GNOIMIParameter>();
     if (this->partition_strategy_type == IVFPartitionStrategyType::GNO_IMI) {
