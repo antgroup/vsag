@@ -111,7 +111,7 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 | `saq_random_rotation` | bool | `true` | Apply an independent orthogonal rotation inside each SAQ segment. |
 | `rabitq_fused_datacell` | bool | `false` | Fuse the bottom HGraph node and RaBitQ split codes into one in-memory record. Requires L2/IP, flat in-memory graph storage, RaBitQ x+y split codes with x in `[1, 4]`, and the other constraints described in [RaBitQ x+y split](../quantization/rabitq_split.md). |
 | `train_sample_count` | int | `65536` | Maximum number of vectors sampled for quantizer training; must be at least `512` when set explicitly. |
-| `build_thread_count` | int | `100` | Threads used to parallelise build |
+| `build_thread_count` | int | `1` | Threads used to parallelise build; also caps unfinished NSW insertion tasks |
 | `support_duplicate` | bool | `false` | Group duplicate vectors while retaining their individual labels |
 | `deduplicate_storage` | bool | `false` | Share vector storage between duplicates; requires `support_duplicate: true` |
 | `duplicate_distance_threshold` | float | `0.0` | Duplicate-detection distance threshold. When greater than `0`, deduplicate by the nearest candidate distance; when `0`, compare codes with the nearest candidate first, then check the remaining returned build candidates until a match is found |
@@ -128,6 +128,12 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 | `resize_increase_count_bit` | int | `10` | `log2` of the slot-growth batch. Valid range is `1` to `31`; `1` grows in 2-slot batches and `10` in 1,024-slot batches. Smaller values reduce preallocation but can increase reallocations. |
 
 `sq8_local` and `sq4_local` support float32/float16/bfloat16 input with L2/IP/cosine base and precise stores (including RaBitQ + local SQ4/SQ8 reranking). See [layout, numeric limits and Tune compatibility](../quantization/sq.md#local-sq4--sq8-float32-l2-ip-and-cosine).
+
+For NSW graph insertion, `build_thread_count` bounds the number of unfinished graph-insertion
+and probe tasks even when the `Resource` supplies a larger thread pool. The default of `1`
+therefore serializes this graph-insertion phase on a supplied pool; set it explicitly to enable
+more concurrent graph insertions. Code-preparation phases can have different concurrency.
+`EstimateBuildMemory` charges per-worker construction probe scratch using this same bound.
 
 `use_reverse_edges` is intended for workloads that need fast incoming-neighbor inspection, graph
 analysis, or future graph-maintenance algorithms. It is disabled by default because maintaining

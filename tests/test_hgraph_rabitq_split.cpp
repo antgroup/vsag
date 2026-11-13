@@ -426,6 +426,36 @@ TEST_CASE("HGraph PiPNN publishes fused RaBitQ codes during batch build",
     REQUIRE(result.value()->GetIds()[0] == labels[0]);
 }
 
+TEST_CASE("HGraph fused RaBitQ EstimateMemory uses captured layout blocks",
+          "[ft][rabitq_split][hgraph][fused][memory]") {
+    using namespace fixtures;
+    const auto origin_size = vsag::Options::Instance().block_size_limit();
+    constexpr uint64_t mib = 1024 * 1024;
+    vsag::Options::Instance().set_block_size_limit(8 * mib);
+    auto param =
+        HGraphRaBitQSplitTestIndex::GenerateBuildParam("l2", 64, "memory_io", "", 1, 7, true);
+    auto param_json = vsag::JsonType::Parse(param);
+    param_json["index_param"]["graph_io_type"].SetString("memory_io");
+    param_json["index_param"]["graph_storage_type"].SetString("flat");
+    param_json["index_param"]["graph_type"].SetString("nsw");
+    param_json["index_param"]["reorder_source"].SetString("base");
+    param_json["index_param"]["rabitq_fused_datacell"].SetBool(true);
+    param_json["index_param"]["rabitq_use_fht"].SetBool(true);
+    param_json["index_param"]["store_raw_vector"].SetBool(false);
+    param_json["index_param"]["use_mci"].SetBool(false);
+    param_json["index_param"]["build_thread_count"].SetInt(1);
+    auto index = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, param_json.Dump(), true);
+
+    // AlignedBlockLayout caps its captured limit at 2 MiB. Later option changes must not alter
+    // the estimate, and a small fused store still occupies one complete block.
+    const auto retained = index->EstimateMemory(1);
+    vsag::Options::Instance().set_block_size_limit(16 * mib);
+    REQUIRE(index->EstimateMemory(1) == retained);
+    vsag::Options::Instance().set_block_size_limit(origin_size);
+    REQUIRE(retained >= 2 * mib);
+    REQUIRE(retained < 3 * mib);
+}
+
 TEST_CASE("HGraph fused RaBitQ rejects ExportModel",
           "[ft][rabitq_split][hgraph][fused][export_model]") {
     using namespace fixtures;

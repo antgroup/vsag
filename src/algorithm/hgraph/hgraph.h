@@ -156,6 +156,50 @@ public:
     uint64_t
     EstimateMemory(uint64_t num_elements) const override;
 
+    /**
+      * @brief Return the estimated memory required while building the index.
+      *
+      * For configurations that declare SUPPORT_ESTIMATE_BUILD_MEMORY the estimate is the
+      * retained footprint of the built index (the EstimateMemory() result for the built element
+      * count, including a separate in-memory raw-vector store when one exists) plus the
+      * build-only temporaries that exist while an in-memory NSW graph is constructed:
+      *
+      *   1. HGraph's outer quantizer training sample, but only when sample_train_data()
+      *      actually samples, i.e. when the element count exceeds
+      *      max(512, train_sample_count); the sampler then holds a staging buffer and the
+      *      returned dataset at the same time (two float32 copies of the sample) plus its
+      *      id and index arrays, while for smaller inputs it returns the caller's dataset
+      *      without copying;
+      *   2. the SQ8/SQ8-uniform quantizer's independent ScalarQuantizationTrainer copy of
+      *      min(train_count, 100000) float32 rows, including when the outer sampler does
+      *      not copy;
+      *   3. the per-worker construction probe scratch: one pool visited list over the graph's
+      *      nodes, a result heap bounded by ef_construction, an unbounded candidate heap
+      *      conservatively bounded by N visited nodes, including vector-growth capacity, and
+      *      two degree-sized inner-ID vectors plus two degree-sized distance vectors;
+      *   4. one temporary encode row per worker, used by InsertVector() before the code is
+      *      written into the persistent flatten storage;
+      *   5. the per-element build bookkeeping prepare_add_batch() retains until insertion
+      *      completes: one AddRow per accepted input and one pending_code_writes_ entry per
+      *      element, each charged at twice its final size because both containers grow by
+      *      reallocation where the old and the new storage coexist;
+      *   6. for parallel add, one future per element and a 512-byte-per-task allowance for
+      *      the packaged-task state and type-erased scheduler wrappers retained until the
+      *      batch completes.
+      *
+      * The estimate deliberately excludes memory held by the caller for the input data vectors.
+      * Only the persistent flatten storage (base, precise and separate raw-vector), graph,
+      * label and extra-info structures that EstimateMemory() already models are counted for
+      * the retained part.
+      *
+      * @param num_elements denotes the amount of data used to build the index.
+      * @return estimated memory required during building.
+      * @throws VsagException with ErrorType::UNSUPPORTED_INDEX_OPERATION when the current
+      *         configuration cannot produce a meaningful estimate.
+      */
+    [[nodiscard]] uint64_t
+    EstimateBuildMemory(uint64_t num_elements) const override;
+
     void
     GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const override;
 
@@ -961,6 +1005,12 @@ private:
         return support_force_remove_;
     }
 
+    /// True when the current configuration can produce a meaningful build memory estimate:
+    /// in-memory NSW graph build with an estimable base quantization, without an imported build
+    /// cache, in-build MCI clique maintenance, or duplicate-storage temporary codes.
+    [[nodiscard]] bool
+    can_estimate_build_memory() const;
+
     /// True when duplicate logical ids share physical vector storage slots.
     [[nodiscard]] bool
     using_dedup_storage() const {
@@ -1000,7 +1050,8 @@ private:
     //   (3) build route graphs via ODescent over the sampled level ids.
     bool
     has_loaded_cache() const {
-        return this->cache_ != nullptr && not this->cache_->neighbors_.empty();
+        return this->cache_is_imported_ && this->cache_ != nullptr &&
+               not this->cache_->neighbors_.empty();
     }
 
     /// Build from imported cache: warm-start, refine, and rebuild route graphs.
@@ -1360,6 +1411,8 @@ private:
     bool persist_source_id_{false};  // whether to persist source_id in serialization
 
     std::unique_ptr<BuildCache> cache_{nullptr};  // neighbor cache for warm-start build
+    // ExportCache() also fills cache_, but only an imported cache selects build_with_cache().
+    mutable bool cache_is_imported_{false};
 
     float build_cache_hit_rate_{-1.0F};     // cache hit rate from last cache-based build
     uint64_t build_cache_hit_nodes_{0};     // number of nodes with cache hit

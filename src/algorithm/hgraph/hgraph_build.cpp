@@ -14,17 +14,21 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <future>
 #include <limits>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 #include "datacell/flatten_build_utils.h"
 #include "datacell/flatten_datacell_parameter.h"
+#include "datacell/graph_datacell_parameter.h"
 #include "datacell/hgraph_rabitq_fused_datacell.h"
 #include "datacell/rabitq_split_datacell.h"
 #include "dataset_impl.h"
@@ -37,6 +41,8 @@
 #include "impl/pipnn/pipnn_graph_builder.h"
 #include "impl/pruning_strategy.h"
 #include "impl/searcher/basic_searcher.h"
+#include "io/common/io_parameter.h"
+#include "io/memory_block_io/memory_block_io_parameter.h"
 #include "io/memory_io/memory_io_parameter.h"
 #include "io/user_defined_io/user_defined_io_parameter.h"
 #include "pipnn_storage_build.h"
@@ -939,6 +945,10 @@ HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, cons
         this->insert_one_logical_point(vector_data, row, context);
     };
 
+    // A supplied pool may have more workers than build_thread_count_. Keep no more unfinished
+    // tasks than the configured limit so construction scratch is bounded for any pool.
+    const uint64_t max_in_flight = std::max<uint64_t>(this->build_thread_count_, 1);
+    uint64_t next_future_to_drain = 0;
     for (const auto& row : batch.rows) {
         const auto* extra_info =
             extra_infos == nullptr ? nullptr : extra_infos + row.input_idx * extra_info_size_;
@@ -947,6 +957,10 @@ HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, cons
             cur_attr_set = attr_sets + row.input_idx;
         }
         if (effective_parallel) {
+            if (futures.size() - next_future_to_drain >= max_in_flight) {
+                futures[next_future_to_drain].wait();
+                ++next_future_to_drain;
+            }
             auto future = this->thread_pool_->GeneralEnqueue(
                 add_func, get_data(data, row.input_idx), row, extra_info, cur_attr_set);
             futures.emplace_back(std::move(future));
@@ -1442,6 +1456,92 @@ HGraph::resize(uint64_t new_size) {
         this->cal_memory_usage();
     }
 }
+
+bool
+HGraph::can_estimate_build_memory() const {
+    if (this->graph_type_ != GRAPH_TYPE_VALUE_NSW) {
+        // The first version estimates the in-memory NSW build path only.
+        return false;
+    }
+    if (this->has_loaded_cache()) {
+        // An imported build cache switches Build() onto the warm-start/refine path, which has
+        // different temporaries than a cold in-memory build.
+        return false;
+    }
+    if (this->mci_parameters_.enabled) {
+        // MCI clique maintenance runs inside the build and adds its own peak storage.
+        return false;
+    }
+    if (this->using_dedup_storage()) {
+        // Duplicate storage keeps a full temporary code flatten of its own during the first
+        // build, which the in-memory NSW model below does not account for.
+        return false;
+    }
+    if (this->use_attribute_filter_) {
+        // Attribute posting lists grow with the number and distribution of indexed values and
+        // are not represented by the vector/graph terms in EstimateMemory().
+        return false;
+    }
+    const auto hgraph_param = std::dynamic_pointer_cast<HGraphParameter>(this->create_param_ptr_);
+    if (hgraph_param == nullptr) {
+        return false;
+    }
+    if (hgraph_param->bottom_graph_param != nullptr and
+        hgraph_param->bottom_graph_param->use_reverse_edges_) {
+        // ReverseEdge maps and incoming-neighbor vectors are not represented by the forward
+        // graph terms in EstimateMemory(), so reverse-edge builds remain outside this model.
+        return false;
+    }
+    if (hgraph_param->base_codes_param == nullptr or
+        hgraph_param->base_codes_param->io_parameter == nullptr) {
+        return false;
+    }
+    const auto base_io_kind = hgraph_param->base_codes_param->io_parameter->Kind();
+    const bool base_codes_in_memory =
+        base_io_kind == IOKind::MEMORY or base_io_kind == IOKind::BLOCK_MEMORY;
+    if (not base_codes_in_memory) {
+        // File / mmap backed base code stores cannot be accounted as an in-memory peak.
+        return false;
+    }
+    const auto graph_param =
+        std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_param->bottom_graph_param);
+    if (not this->bottom_graph_->InMemory() and graph_param != nullptr and
+        graph_param->io_parameter_ != nullptr and graph_param->io_parameter_->enable_read_cache_) {
+        // Construction probes can retain up to the configured OptionalPageCache budget while
+        // reading a file-backed graph. That cache is not part of the in-memory model.
+        return false;
+    }
+    const auto quantizer_name = this->basic_flatten_codes_->GetQuantizerName();
+    const bool estimable_quantizer = quantizer_name == QUANTIZATION_TYPE_VALUE_FP32 or
+                                     quantizer_name == QUANTIZATION_TYPE_VALUE_SQ8 or
+                                     quantizer_name == QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM;
+    if (not estimable_quantizer) {
+        // The first version estimates in-memory NSW builds with fp32 / sq8 / sq8_uniform codes,
+        // i.e. the quantizers whose codes are written straight into the persistent flatten.
+        return false;
+    }
+    if (this->has_precise_reorder() and
+        this->high_precise_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32) {
+        // Precise reorder only carries a meaningful estimate for fp32 precise codes.
+        return false;
+    }
+    if (this->has_precise_reorder() and not this->build_by_base_ and
+        not this->high_precise_codes_->InMemory()) {
+        // Construction probes read precise codes in degree-sized batches. File-backed stores
+        // allocate an id_count * code_size buffer per worker even when their read cache is off;
+        // neither that scratch nor an enabled cache belongs to this in-memory model.
+        return false;
+    }
+    if (this->create_new_raw_vector_ and this->raw_vector_ != nullptr and
+        not this->raw_vector_->InMemory()) {
+        // A separate raw-vector store backed by file IO has write buffers the in-memory
+        // model cannot account for. In-memory separate raw stores are counted by
+        // EstimateMemory() and stay eligible.
+        return false;
+    }
+    return true;
+}
+
 void
 HGraph::InitFeatures() {
     // Common Init
@@ -1488,6 +1588,13 @@ HGraph::InitFeatures() {
                                             IndexFeature::SUPPORT_CLONE,
                                             IndexFeature::SUPPORT_EXPORT_MODEL,
                                             IndexFeature::SUPPORT_TUNE});
+
+    // Build-time memory estimation: only declared for configurations that can produce a
+    // meaningful EstimateBuildMemory() result (in-memory NSW build, estimable quantization,
+    // no imported cache, no in-build MCI maintenance, and any separate raw-vector store
+    // in memory, where EstimateMemory() counts it).
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ESTIMATE_BUILD_MEMORY,
+                                          this->can_estimate_build_memory());
 
     // About Train
     auto name = this->basic_flatten_codes_->GetQuantizerName();
@@ -1574,6 +1681,197 @@ HGraph::InitFeatures() {
     }
 }
 
+uint64_t
+HGraph::EstimateBuildMemory(uint64_t num_elements) const {
+    if (this->index_feature_list_ == nullptr or
+        not this->index_feature_list_->CheckFeature(IndexFeature::SUPPORT_ESTIMATE_BUILD_MEMORY) or
+        not this->can_estimate_build_memory()) {
+        // InitFeatures() computes the feature bit at construction time, and Tune() and
+        // ImportCache() refresh it after changing the active build configuration. Recheck the
+        // live eligibility as well so the feature bit never makes this method describe a build
+        // path Build() would not take.
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "HGraph doesn't support EstimateBuildMemory for the current build "
+                            "configuration");
+    }
+    if (num_elements == 0) {
+        // A build of zero elements allocates no codes, no graph and no training sample.
+        return 0;
+    }
+
+    // Peak build memory = the retained footprint Build() leaves behind + the build-only
+    // temporaries. EstimateMemory() models retained components using their backend allocation
+    // granularity: contiguous stores use their exact sizes and blocked stores use block rounding.
+    const auto hgraph_param = std::dynamic_pointer_cast<HGraphParameter>(this->create_param_ptr_);
+    const auto bottom_graph_param =
+        std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_param->bottom_graph_param);
+    const uint64_t init_capacity =
+        bottom_graph_param == nullptr ? 0 : bottom_graph_param->init_max_capacity_;
+    // Construction reserves the initial capacity and resize() never shrinks it, so a smaller
+    // build still retains stores and capacity-sized scratch for all of those rows.
+    const uint64_t retained_rows = std::max<uint64_t>(num_elements, init_capacity);
+    uint64_t final_memory = this->EstimateMemory(retained_rows);
+    const uint64_t element_count =
+        next_multiple_of_power_of_two(retained_rows, this->resize_increase_count_bit_);
+    auto block_memory_ceil = [](uint64_t memory, uint64_t size) -> uint64_t {
+        return static_cast<uint64_t>(
+            std::ceil(static_cast<double>(memory) / static_cast<double>(size)) *
+            static_cast<double>(size));
+    };
+    if (has_precise_reorder() and this->high_precise_codes_->InMemory() and this->ignore_reorder_) {
+        // EstimateMemory() omits precise codes that search is told to ignore, but Build still
+        // resizes and populates them. Restore their retained footprint for the build estimate.
+        const uint64_t precise_memory = this->high_precise_codes_->code_size_ * element_count;
+        const auto precise_io = hgraph_param->precise_codes_param == nullptr
+                                    ? IOParamPtr{}
+                                    : hgraph_param->precise_codes_param->io_parameter;
+        const bool precise_is_contiguous =
+            precise_io != nullptr and precise_io->Kind() == IOKind::MEMORY;
+        const auto block_io = std::dynamic_pointer_cast<MemoryBlockIOParameter>(precise_io);
+        const auto block_size =
+            block_io == nullptr
+                ? MemoryBlockIOParameter::NearestPowerOfTwo(Options::Instance().block_size_limit())
+                : block_io->block_size_;
+        final_memory +=
+            precise_is_contiguous ? precise_memory : block_memory_ceil(precise_memory, block_size);
+    }
+    uint64_t build_memory = 0;
+
+    // (1) HGraph's outer training sample. sample_train_data() only copies when the input is
+    //     larger than the sample budget: for num_elements <= max(512, train_sample_count)
+    //     it returns the caller's dataset as-is and allocates none of these buffers, so
+    //     caller-owned input memory stays excluded. When sampling does happen, the staging
+    //     buffer and the returned dataset coexist, so the peak is two float32 copies of the
+    //     sample plus its id and index arrays.
+    constexpr uint64_t kMinTrainSampleCount = 512;
+    const uint64_t max_train_sample_count =
+        std::max<uint64_t>(kMinTrainSampleCount, static_cast<uint64_t>(this->train_sample_count_));
+    const uint64_t train_sample_count = std::min<uint64_t>(num_elements, max_train_sample_count);
+    if (train_sample_count < num_elements) {
+        build_memory += train_sample_count * static_cast<uint64_t>(this->dim_) * sizeof(float) * 2;
+        build_memory += train_sample_count * (sizeof(int64_t) + sizeof(int64_t));
+    }
+
+    // (2) The SQ8 quantizers train through ScalarQuantizationTrainer, which unconditionally
+    //     copies min(train_count, 100000) rows into a default-allocator std::vector. This is
+    //     independent of HGraph's outer sampler: in particular, it also happens when that
+    //     sampler returns the caller's dataset without copying. FP32 training has no such copy.
+    const auto quantizer_name = this->basic_flatten_codes_->GetQuantizerName();
+    if (quantizer_name == QUANTIZATION_TYPE_VALUE_SQ8 or
+        quantizer_name == QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM) {
+        constexpr uint64_t kScalarQuantizerMaxTrainSampleCount = 100000;
+        const uint64_t quantizer_train_sample_count =
+            std::min<uint64_t>(train_sample_count, kScalarQuantizerMaxTrainSampleCount);
+        build_memory +=
+            quantizer_train_sample_count * static_cast<uint64_t>(this->dim_) * sizeof(float);
+    }
+    if (quantizer_name == QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM) {
+        // TrainUniform() keeps its upper(dim) and lower(dim) float vectors alive alongside the
+        // sampled rows. Both use the default heap and are invisible to the recording allocator.
+        build_memory += 2 * static_cast<uint64_t>(this->dim_) * sizeof(float);
+    }
+
+    // Workers that may hold construction scratch at the same time. insert_add_batch() keeps at
+    // most build_thread_count_ unfinished tasks even when the supplied pool has more workers.
+    // Without a pool, insertion runs on the calling thread.
+    const uint64_t build_threads =
+        this->thread_pool_ == nullptr
+            ? 1
+            : std::min<uint64_t>(std::max<uint64_t>(this->build_thread_count_, 1),
+                                 static_cast<uint64_t>(num_elements));
+
+    // (3) Per-worker construction scratch. Each NSW insertion probe takes one visited list from
+    //     the pool: one tag word plus one bit word per 64 nodes held by the graph. The search's
+    //     result heap is trimmed after exceeding ef_construct, but its unbounded candidate heap
+    //     is not. A visited node is discovered at most once per probe, so candidate_set has a hard
+    //     logical upper bound of N entries even for non-finite distances. StandardHeap::Pop()
+    //     does not shrink its vector. Charge three logical capacities per heap: up to two for the
+    //     geometrically grown allocation and one for the previous buffer during reallocation.
+    const uint64_t visited_list_bytes =
+        (element_count + 63) / 64 * (sizeof(uint64_t) + sizeof(uint16_t));
+    const uint64_t result_heap_entries = std::min<uint64_t>(num_elements, this->ef_construct_ + 1);
+    constexpr uint64_t kHeapGrowthCapacityFactor = 3;
+    const uint64_t probe_heap_bytes = kHeapGrowthCapacityFactor *
+                                      (num_elements + result_heap_entries) *
+                                      sizeof(std::pair<float, InnerIdType>);
+    // BasicSearcher::search_impl also keeps two InnerIdType vectors and two float vectors at
+    // MaximumDegree() entries each for neighbor collection and batch distance evaluation.
+    const uint64_t probe_vector_bytes =
+        2 * static_cast<uint64_t>(this->bottom_graph_->MaximumDegree()) *
+        (sizeof(InnerIdType) + sizeof(float));
+    build_memory += build_threads * (visited_list_bytes + probe_heap_bytes + probe_vector_bytes);
+
+    // (4) Per-worker encode scratch: InsertVector() encodes one code row in a temporary buffer
+    //     before writing it into the persistent flatten storage.
+    build_memory += build_threads * static_cast<uint64_t>(this->basic_flatten_codes_->code_size_);
+
+    // (5) Per-element build bookkeeping, retained by the allocator for the whole insertion
+    //     phase and independent of the worker count: prepare_add_batch() keeps one AddRow per
+    //     accepted input in the batch's row vector and one entry per element in
+    //     pending_code_writes_ until insertion completes. Both containers grow by
+    //     reallocation, where the old and the new storage coexist, so each term is charged
+    //     at twice its final per-element size to cover the growth transient.
+    build_memory += 2 * num_elements * sizeof(AddRow);
+    build_memory += 2 * num_elements * sizeof(std::pair<const InnerIdType, uint8_t>);
+
+    if (this->thread_pool_ != nullptr) {
+        // (6) insert_add_batch() reserves one future per row and calls GeneralEnqueue for every
+        //     accepted row. Each future retains its packaged-task state until the whole batch is
+        //     joined. The standard library does not expose the size of that state or its
+        //     type-erased queue wrappers, so include a conservative per-task allowance as well
+        //     as the concrete future vector storage.
+        constexpr uint64_t kParallelTaskStateBytes = 512;
+        const uint64_t future_bytes = static_cast<uint64_t>(sizeof(std::future<void>));
+        build_memory += num_elements * (kParallelTaskStateBytes + future_bytes);
+    }
+
+    // (7) MemoryIO grows through Allocator::Reallocate(), whose copy-based growth can keep the
+    //     old and new contiguous stores alive together. HGraph::resize() grows the bottom graph
+    //     and code stores sequentially, so only the largest previous store is needed beyond the
+    //     final footprint. BlockMemoryIO grows by adding independent blocks and has no transient.
+    const uint64_t resize_batch_size = uint64_t{1} << this->resize_increase_count_bit_;
+    const uint64_t current_capacity = this->max_capacity_.load();
+    const bool grows_code_stores = current_capacity < element_count;
+    const uint64_t previous_element_count =
+        grows_code_stores
+            ? std::max<uint64_t>(
+                  current_capacity,
+                  element_count > resize_batch_size ? element_count - resize_batch_size : 0)
+            : 0;
+    uint64_t resize_transient = 0;
+    auto account_contiguous_store = [&](const FlattenInterfacePtr& codes,
+                                        const FlattenInterfaceParamPtr& codes_param) {
+        if (not grows_code_stores or codes == nullptr or codes_param == nullptr or
+            codes_param->io_parameter == nullptr or
+            codes_param->io_parameter->Kind() != IOKind::MEMORY) {
+            return;
+        }
+        const uint64_t previous_store_bytes =
+            std::max<uint64_t>(previous_element_count * codes->code_size_, 1);
+        resize_transient = std::max(resize_transient, previous_store_bytes);
+    };
+    account_contiguous_store(this->basic_flatten_codes_, hgraph_param->base_codes_param);
+    if (has_precise_reorder()) {
+        account_contiguous_store(this->high_precise_codes_, hgraph_param->precise_codes_param);
+    }
+    if (this->create_new_raw_vector_) {
+        account_contiguous_store(this->raw_vector_, hgraph_param->raw_vector_param);
+    }
+    const auto graph_param =
+        std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_param->bottom_graph_param);
+    if (grows_code_stores and graph_param != nullptr and graph_param->io_parameter_ != nullptr and
+        graph_param->io_parameter_->Kind() == IOKind::MEMORY) {
+        const uint64_t graph_record_size =
+            (static_cast<uint64_t>(this->bottom_graph_->maximum_degree_) + 1) * sizeof(InnerIdType);
+        const uint64_t previous_graph_bytes =
+            std::max<uint64_t>(previous_element_count * graph_record_size, 1);
+        resize_transient = std::max(resize_transient, previous_graph_bytes);
+    }
+    build_memory += resize_transient;
+
+    return final_memory + build_memory;
+}
+
 void
 HGraph::elp_optimize() {
     InnerSearchParam param;
@@ -1652,6 +1950,11 @@ HGraph::ExportCache(std::ostream& out_stream) const {
     this->check_fused_mutation_supported("ExportCache");
     IOStreamWriter writer(out_stream);
     this->fullfill_cache();
+    // fullfill_cache() replaces any imported state with an exported snapshot. Exported storage
+    // does not select build_with_cache(), so a cold-build index remains eligible for estimation.
+    this->cache_is_imported_ = false;
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ESTIMATE_BUILD_MEMORY,
+                                          this->can_estimate_build_memory());
     this->cache_->Serialize(writer);
 }
 
@@ -1660,6 +1963,13 @@ HGraph::ImportCache(std::istream& in_stream) {
     this->check_fused_mutation_supported("ImportCache");
     IOStreamReader reader(in_stream);
     this->cache_->Deserialize(reader);
+    this->cache_is_imported_ = true;
+    // A nonempty imported cache switches Build() onto the warm-start/refine path, which the
+    // cold in-memory NSW estimate does not describe. Refresh the advertised feature so
+    // CheckFeature(SUPPORT_ESTIMATE_BUILD_MEMORY) stays in sync with what Build() will do;
+    // EstimateBuildMemory() independently rechecks the live eligibility.
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ESTIMATE_BUILD_MEMORY,
+                                          this->can_estimate_build_memory());
 }
 
 void
