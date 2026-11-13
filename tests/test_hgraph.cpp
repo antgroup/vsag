@@ -5687,6 +5687,11 @@ TEST_CASE("HGraph filtered search keeps bridges between filter-rejected nodes",
     // Approximate graphs can leave vectors unreachable even without a filter, so only vectors an
     // unfiltered search can reach are eligible. Try a few datasets until enough of the tail is
     // reachable.
+    auto thread_pool = vsag::Engine::CreateThreadPool(4);
+    REQUIRE(thread_pool.has_value());
+    auto allocator = vsag::Engine::CreateDefaultAllocator();
+    vsag::Resource resource(allocator, thread_pool.value());
+    vsag::Engine engine(&resource);
     vsag::IndexPtr index;
     std::set<int64_t> eligible;
     for (uint32_t seed = 3290; seed < 3390 && index == nullptr; ++seed) {
@@ -5699,7 +5704,7 @@ TEST_CASE("HGraph filtered search keeps bridges between filter-rejected nodes",
                 vectors[i * dim + d] = noise(rng);
             }
         }
-        auto candidate = vsag::Factory::CreateIndex("hgraph", build_param).value();
+        auto candidate = engine.CreateIndex("hgraph", build_param).value();
         auto base = vsag::Dataset::Make();
         base->NumElements(count)
             ->Dim(dim)
@@ -5747,7 +5752,7 @@ TEST_CASE("HGraph filtered search keeps bridges between filter-rejected nodes",
     SECTION("parallel search") {
         auto filter = std::make_shared<IdSetFilter3290>(eligible, static_cast<uint64_t>(count));
         auto result = index->KnnSearch(
-            query, k, R"({"hgraph":{"ef_search":50,"skip_ratio":1.0},"parallelism":2})", filter);
+            query, k, R"({"hgraph":{"ef_search":50,"skip_ratio":1.0,"parallelism":2}})", filter);
         REQUIRE(result.has_value());
         REQUIRE(result.value()->GetDim() == k);
         for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
@@ -5773,6 +5778,8 @@ TEST_CASE("HGraph filtered search keeps bridges between filter-rejected nodes",
         REQUIRE(result.value()->GetDim() == k);
         for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
             REQUIRE(eligible.count(result.value()->GetIds()[i]) == 1);
+            REQUIRE(result.value()->GetDistances()[i] ==
+                    static_cast<float>(result.value()->GetIds()[i]));
         }
     }
 }
