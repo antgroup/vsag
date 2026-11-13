@@ -208,7 +208,7 @@ Linux execution paths, not different correctness requirements.
   and aarch64 from `main` every night (03:17 Beijing time, cron `17 19 * * *`) and on manual
   dispatch, and can upload them to TestPyPI with the `TEST_PYPI_API_TOKEN` secret. Uploading is
   on by default: manual runs can set `publish: false` to only build, and the repository variable
-  `PYVSAG_NIGHTLY_PUBLISH=false` pauses the nightly upload. It never publishes to PyPI or a GitHub Release, and is not part
+  `PYVSAG_NIGHTLY_PUBLISH=false` pauses the nightly upload. The build mounts a ccache directory restored with `actions/cache` into the cibuildwheel container, so nightly builds only recompile changed files. It never publishes to PyPI or a GitHub Release, and is not part
   of PR CI.
 - macOS ASan builds and TSan no longer run for main-target PRs. Their main-push and
   manual workflows remain unchanged. Platform-specific and race regressions can thus
