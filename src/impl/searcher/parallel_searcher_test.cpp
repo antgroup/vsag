@@ -23,7 +23,8 @@
 
 using namespace vsag;
 
-TEST_CASE("ParallelSearcher matches BasicSearcher on a generic graph", "[ut][ParallelSearcher]") {
+TEST_CASE("ParallelSearcher matches BasicSearcher on a generic graph",
+          "[ut][ParallelSearcher][regression]") {
     constexpr uint32_t base_size = 200;
     constexpr uint64_t dim = 32;
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
@@ -49,8 +50,9 @@ TEST_CASE("ParallelSearcher matches BasicSearcher on a generic graph", "[ut][Par
 
     auto pool = std::make_shared<VisitedListPool>(
         2, allocator.get(), flatten->TotalCount(), allocator.get());
-    auto parallel =
-        std::make_shared<ParallelSearcher>(common, SafeThreadPool::FactoryDefaultThreadPool());
+    // Reserve enough workers for every requested parallelism in this regression.
+    auto executor = std::make_shared<SafeThreadPool>(std::make_shared<DefaultThreadPool>(8));
+    auto parallel = std::make_shared<ParallelSearcher>(common, executor);
     auto basic = std::make_shared<BasicSearcher>(common);
 
     InnerSearchParam search_param;
@@ -78,9 +80,27 @@ TEST_CASE("ParallelSearcher matches BasicSearcher on a generic graph", "[ut][Par
         return values;
     };
 
+    // Repeated batches exercise reuse of the worker completion counter (#3225).
+    // Compare each component explicitly so ARM failures retain the differing ID/distance.
     for (const auto& graph : {MakeRingGraph(base_size, 8), MakeIrregularGraph(base_size)}) {
-        REQUIRE(run_search(parallel, graph) == run_search(basic, graph));
+        const auto expected = run_search(basic, graph);
+        for (const int64_t threads : {1, 2, 4, 8}) {
+            search_param.parallel_search_thread_count = threads;
+            for (uint64_t repeat = 0; repeat < 16; ++repeat) {
+                CAPTURE(threads, repeat, graph->MaximumDegree());
+                const auto actual = run_search(parallel, graph);
+                REQUIRE(actual.size() == expected.size());
+                auto found = actual.begin();
+                for (const auto& value : expected) {
+                    CAPTURE(found->second, value.second, found->first, value.first);
+                    REQUIRE(found->second == value.second);
+                    REQUIRE(found->first == value.first);
+                    ++found;
+                }
+            }
+        }
     }
+    search_param.parallel_search_thread_count = 4;
 
     SECTION("a missing executor is valid only for serial search") {
         const auto graph = MakeRingGraph(base_size, 8);

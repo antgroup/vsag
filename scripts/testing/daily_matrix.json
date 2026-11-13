@@ -58,5 +58,19 @@
       "x86": 9,
       "arm": 1
     }
-  }
+  },
+  "quarantine": [
+    {
+      "key": "5374d7a799914e25f07f4b12d307b506b56d0f30702de13e1dcd5cbc562844fb",
+      "case": "(Daily) HGraph Duplicate",
+      "reason": "Repeated filtered-recall failure in runs 42792695081 and 42989404023; exact configuration temporarily excluded, not validated. Restore after root-cause fix and targeted replay.",
+      "tracking": "https://github.com/antgroup/vsag/issues/3225"
+    },
+    {
+      "key": "df2ccbce1f3092b1dc00a580b4e6e2176e55e694eca7ed7c222ae100d1618bb5",
+      "case": "(Daily) HGraph Duplicate",
+      "reason": "Cosine/1536/600-row filtered recall failed in run 43169422580 and on rebased main with the same seed (82.6% vs 84.15%); search-width diagnostic also failed. Exact atomic group temporarily excluded, not validated; restore after correctness fix and targeted replay.",
+      "tracking": "https://github.com/antgroup/vsag/issues/3225"
+    }
+  ]
 }

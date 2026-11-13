@@ -22,6 +22,7 @@ TestIndex::TestSerializeFile(const IndexPtr& index_from,
                              const TestDatasetPtr& dataset,
                              const std::string& search_param,
                              bool expected_success) {
+    fixtures::daily::Phase daily_phase("TestSerializeFile");
     if (not index_from->CheckFeature(vsag::SUPPORT_SERIALIZE_FILE) or
         not index_to->CheckFeature(vsag::SUPPORT_DESERIALIZE_FILE)) {
         return;
@@ -66,6 +67,7 @@ TestIndex::TestSerializeBinarySet(const IndexPtr& index_from,
                                   const TestDatasetPtr& dataset,
                                   const std::string& search_param,
                                   bool expected_success) {
+    fixtures::daily::Phase daily_phase("TestSerializeBinarySet");
     if (not index_from->CheckFeature(vsag::SUPPORT_SERIALIZE_BINARY_SET) or
         not index_to->CheckFeature(vsag::SUPPORT_DESERIALIZE_BINARY_SET)) {
         return;
@@ -104,6 +106,7 @@ TestIndex::TestSerializeReaderSet(const IndexPtr& index_from,
                                   const std::string& search_param,
                                   const std::string& index_name,
                                   bool expected_success) {
+    fixtures::daily::Phase daily_phase("TestSerializeReaderSet");
     if (not index_from->CheckFeature(vsag::SUPPORT_SERIALIZE_BINARY_SET) or
         not index_to->CheckFeature(vsag::SUPPORT_DESERIALIZE_READER_SET)) {
         return;
@@ -146,6 +149,7 @@ TestIndex::TestSerializeWriteFunc(const IndexPtr& index_from,
                                   const TestDatasetPtr& dataset,
                                   const std::string& search_param,
                                   bool expected_success) {
+    fixtures::daily::Phase daily_phase("TestSerializeWriteFunc");
     if (not index_from->CheckFeature(vsag::SUPPORT_SERIALIZE_WRITE_FUNC)) {
         return;
     }

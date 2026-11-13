@@ -161,11 +161,43 @@ def partition(units):
     return slots
 
 
+
+def quarantine_extensions(extension, rules):
+    """Explicit exact-configuration exceptions; never wildcard a case or mask core failures."""
+    keys = set()
+    for rule in rules:
+        if (set(rule) != {"key", "case", "reason", "tracking"}
+                or not isinstance(rule["key"], str) or not re.fullmatch(r"[0-9a-f]{64}", rule["key"])
+                or rule["key"] in keys or not isinstance(rule["case"], str)
+                or not rule["case"].startswith("(Daily) ")
+                or not isinstance(rule["reason"], str) or not rule["reason"].strip()
+                or not isinstance(rule["tracking"], str)
+                or not re.fullmatch(r"https://github.com/antgroup/vsag/issues/[0-9]+", rule["tracking"])):
+            raise PlanError("Invalid exact Daily quarantine")
+        keys.add(rule["key"])
+    retained, excluded = [], []
+    by_key = {rule["key"]: rule for rule in rules}
+    for unit in extension:
+        rule = by_key.get(unit["key"])
+        if rule is None:
+            retained.append(unit)
+            continue
+        if (unit.get("mode") != "rotation" or len(unit.get("tests", [])) != 1
+                or unit["tests"][0]["name"] != rule["case"]):
+            raise PlanError("Daily quarantine identity mismatch")
+        excluded.append({**rule, "configuration": unit.get("configuration"), "status": "not_validated"})
+    return retained, excluded
+
+
 def build_plan(ctx, environment, core, extension, inventory=None, core_only=False, full_coverage=False):
     validate_context(ctx)
     if not environment or not core:
         raise PlanError("Environment and daily core cannot be empty")
     history = load(HERE / "daily_timing_history.json")
+    quarantines = []
+    if not full_coverage:
+        extension, quarantines = quarantine_extensions(
+            extension, load(HERE / "daily_matrix.json").get("quarantine", []))
     units = core + extension
     if len({u["key"] for u in units}) != len(units):
         raise PlanError("Core/extension IDs overlap")
@@ -180,8 +212,15 @@ def build_plan(ctx, environment, core, extension, inventory=None, core_only=Fals
         if any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0
                for v in observations):
             raise PlanError("Invalid scheduling observation")
-        # Parent-group/timeout observations order work, never certify a new tuple's estimate.
-        u["order_seconds"] = max([u["estimate_seconds"] or 60.0] + observations)
+        exact = [s["seconds"] for s in history["samples"]
+                 if s["key"] == u["key"] and s["environment"] == environment
+                 and s["status"] in ("passed", "timeout")]
+        # A slow sibling/old unsplit parent must not flatten all measured tuple costs.
+        # Exact timeout observations remain lower bounds, not passing estimates.
+        costs = exact if exact else observations
+        if any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0 for v in costs):
+            raise PlanError("Invalid scheduling observation")
+        u["order_seconds"] = max([u["estimate_seconds"] or 60.0] + costs)
     architecture_scope = None
     if not full_coverage and environment.lower().endswith(("/linux/aarch64", "/linux/arm64")):
         # Keep one stable core smoke per source file/owner. Other existing core
@@ -217,6 +256,7 @@ def build_plan(ctx, environment, core, extension, inventory=None, core_only=Fals
     week = partition([] if core_only else extension)
     return sealed({"schema_version": 1, "kind": "daily-plan", "context": ctx,
                    "environment": environment, "architecture_scope": architecture_scope,
+                   "quarantines": quarantines,
                    "core": core, "rotation": week,
                    "inventory": inventory or {"exclusions": []},
                    "selected": core + week[ctx["slot"]],
