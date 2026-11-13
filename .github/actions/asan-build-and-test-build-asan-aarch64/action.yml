@@ -14,7 +14,7 @@ runs:
       run: |
         export CMAKE_GENERATOR="Ninja"
         python3 scripts/ci/monitor_build.py --output-dir "$RUNNER_TEMP/arm-build-diagnostics" -- \
-          make asan COMPILE_JOBS=3 VSAG_ENABLE_EXAMPLES=ON
+          make asan COMPILE_JOBS=3 DATACELL_COMPILE_JOBS=1 VSAG_ENABLE_EXAMPLES=ON
     - name: Upload ARM build diagnostics
       if: always()
       continue-on-error: true

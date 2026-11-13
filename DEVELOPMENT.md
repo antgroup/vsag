@@ -232,3 +232,7 @@ make test DEBUG_BUILD_DIR=build_clang20 EXTRA_DEFINED="-DCMAKE_C_COMPILER=clang-
 The Ubuntu dependency installer requires Ubuntu 24.04+ and installs GCC 13 and LLVM 20 (using apt.llvm.org if needed). Other distributions need a matching toolchain prepared manually. Compiler requirements concern source builds, not the glibc baseline of prebuilt packages. Existing manylinux release baselines and both libstdc++ ABI choices are preserved. Installing a package does not require a C++20 client compiler.
 
 Maintained CI container images use Ubuntu 26.04 with GCC 13 and LLVM 20. Ubuntu 24.04 remains a development and runtime compatibility target. Published packages retain their existing manylinux/glibc baselines; validate their Ubuntu 24.04 runtime compatibility separately from the Ubuntu 26.04 CI build.
+
+Datacell compilation follows `COMPILE_JOBS` by default. On memory-limited Ninja builders,
+use `make asan COMPILE_JOBS=3 DATACELL_COMPILE_JOBS=1` to cap both datacell object libraries
+together. See the [compile parallelism guide](docs/docs/en/src/development/building.md#datacell-compile-parallelism).

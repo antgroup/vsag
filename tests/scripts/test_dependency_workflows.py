@@ -583,5 +583,143 @@ class LeanPrChecksTest(unittest.TestCase):
                 module.main()
                 run.assert_called_once()
 
+class DatacellCompileJobsTest(unittest.TestCase):
+    """Generate and build the actual datacell CMake with dependency-free fixture sources."""
+
+    def setUp(self):
+        if not all(shutil.which(tool) for tool in ("cmake", "ninja", "c++")):
+            self.skipTest("CMake, Ninja and a C++ compiler are required")
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.source = self.root / "source"
+        self.build = self.root / "build"
+        datacell = self.source / "datacell"
+        datacell.mkdir(parents=True)
+        shutil.copyfile(ROOT / "src/datacell/CMakeLists.txt", datacell / "CMakeLists.txt")
+        for name in ("rabitq_split_datacell_factory_l2", "rabitq_split_datacell_factory_ip",
+                     "rabitq_split_datacell_factory_cosine", "flatten_datacell_factory_ip",
+                     "extra_info_interface"):
+            (datacell / (name + ".cpp")).write_text("int " + name + "() { return 0; }\n")
+        (self.source / "CMakeLists.txt").write_text(
+            "cmake_minimum_required(VERSION 3.18)\nproject(pool_fixture LANGUAGES CXX)\n"
+            f'include("{ROOT.as_posix()}/cmake/VSAGOptions.cmake")\n'
+            "foreach(dep IN ITEMS transform quantizer io attr coverage_config vsag_src_common)\n"
+            "  add_library(${dep} INTERFACE)\nendforeach()\nadd_subdirectory(datacell)\n"
+        )
+
+    def configure(self, value=None, generator="Ninja", asan=True):
+        command = ["cmake", "-S", str(self.source), "-B", str(self.build), "-G", generator,
+                   "-DENABLE_TESTS=OFF", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+                   "-DENABLE_ASAN=" + ("ON" if asan else "OFF")]
+        if value is not None:
+            command.append("-DVSAG_DATACELL_COMPILE_JOBS=" + str(value))
+        return subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+    def assert_configured(self, value=None, **kwargs):
+        result = self.configure(value, **kwargs)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        return (self.build / "build.ninja").read_text()
+
+    def test_default_has_no_extra_pool(self):
+        graph = self.assert_configured()
+        self.assertNotIn("pool = vsag_datacell_compile_pool", graph)
+        self.assertNotIn("depth = 1", (self.build / "CMakeFiles/rules.ninja").read_text())
+
+    def test_shared_cap_and_reset_leave_compile_commands_unchanged(self):
+        self.assert_configured()
+        baseline = (self.build / "compile_commands.json").read_text()
+        for value in (1, 2, 24):
+            with self.subTest(value=value):
+                graph = self.assert_configured(value)
+                # All five fixture objects, including both libraries, share one pool.
+                self.assertEqual(graph.count("pool = vsag_datacell_compile_pool"), 5)
+                self.assertIn(f"depth = {value}", (self.build / "CMakeFiles/rules.ninja").read_text())
+                self.assertEqual((self.build / "compile_commands.json").read_text(), baseline)
+        self.assertNotIn("pool = vsag_datacell_compile_pool", self.assert_configured(0))
+        self.assertEqual((self.build / "compile_commands.json").read_text(), baseline)
+
+    def test_explicit_cap_also_applies_without_asan(self):
+        self.assertEqual(self.assert_configured(1, asan=False).count("pool = vsag_datacell_compile_pool"), 5)
+
+    def test_invalid_limits_fail_configuration(self):
+        for value in ("", "-1", "1.5", "ON", "01", "1;2"):
+            with self.subTest(value=value):
+                result = self.configure(value)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("must be 0 or a positive integer", result.stdout)
+
+    def test_other_generators_do_not_silently_ignore_requested_cap(self):
+        result = self.configure(1, generator="Unix Makefiles")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requires Ninja", result.stdout)
+        result = self.configure(0, generator="Unix Makefiles")
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_make_forwards_limit_and_preserves_global_jobs(self):
+        for value in (0, 1, 4):
+            result = subprocess.run(
+                ["make", "-n", "asan", "COMPILE_JOBS=24", f"DATACELL_COMPILE_JOBS={value}"],
+                cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout)
+            self.assertIn(f"-DVSAG_DATACELL_COMPILE_JOBS={value}", result.stdout)
+            self.assertIn("--parallel 24", result.stdout)
+
+    def test_ninja_enforces_combined_cap_and_global_default(self):
+        # A compiler launcher records actual overlap across the two object libraries.
+        # The sleep makes scheduling observable even for these tiny fixture sources.
+        import sys
+        launcher = self.root / "launcher.py"
+        events = self.root / "events.jsonl"
+        launcher.write_text(textwrap.dedent("""\
+            import fcntl, json, os, subprocess, sys, time
+            def emit(kind):
+                with open(sys.argv[1], 'a') as out:
+                    fcntl.flock(out, fcntl.LOCK_EX)
+                    out.write(json.dumps([time.monotonic_ns(), os.getpid(), kind]) + '\\n')
+            emit('start')
+            time.sleep(0.2)
+            result = subprocess.run(sys.argv[2:])
+            emit('end')
+            sys.exit(result.returncode)
+        """))
+        for limit in (1, 2, 0):
+            self.assert_configured(limit)
+            result = subprocess.run(
+                ["cmake", "-S", str(self.source), "-B", str(self.build),
+                 f"-DCMAKE_CXX_COMPILER_LAUNCHER={sys.executable};{launcher};{events}"],
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout)
+            events.write_text("")
+            result = subprocess.run(
+                ["cmake", "--build", str(self.build), "--clean-first", "--parallel", "4"],
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout)
+            active = peak = starts = 0
+            for _, _, kind in sorted(json.loads(line) for line in events.read_text().splitlines()):
+                active += 1 if kind == "start" else -1
+                starts += kind == "start"
+                peak = max(peak, active)
+            self.assertEqual((starts, active), (5, 0))
+            self.assertLessEqual(peak, limit or 4)
+            self.assertGreaterEqual(peak, 1 if limit == 1 else 2)
+
+    def test_arm_asan_entrypoints_keep_low_cap(self):
+        files = (
+            ".github/actions/asan-build-and-test-build-asan-aarch64/action.yml",
+            ".github/actions/asan-build-and-test-build-asan-macos-arm64/action.yml",
+        )
+        for name in files:
+            self.assertIn("COMPILE_JOBS=3 DATACELL_COMPILE_JOBS=1", (ROOT / name).read_text())
+        daily = job_text(ROOT / ".github/workflows/daily_test.yml", "daily_build_asan_aarch64")
+        self.assertIn("COMPILE_JOBS=3 DATACELL_COMPILE_JOBS=1", daily)
+        community = job_text(ROOT / ".github/workflows/pr-ci-community.yml", "build-asan-macos-arm64")
+        self.assertIn("COMPILE_JOBS=3 DATACELL_COMPILE_JOBS=1", community)
+        team = (ROOT / ".github/workflows/pr-ci-team.yml").read_text()
+        self.assertNotIn("DATACELL_COMPILE_JOBS=1", team)
+
 if __name__ == "__main__":
     unittest.main()

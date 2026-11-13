@@ -196,7 +196,7 @@ jobs:
         uses: ./.github/actions/daily-execution-window
       - name: Make Asan
         timeout-minutes: ${{ fromJSON(steps.window.outputs.remaining_minutes) }}
-        run: export CMAKE_GENERATOR="Ninja"; make asan COMPILE_JOBS=3 VSAG_ENABLE_EXAMPLES=ON
+        run: export CMAKE_GENERATOR="Ninja"; make asan COMPILE_JOBS=3 DATACELL_COMPILE_JOBS=1 VSAG_ENABLE_EXAMPLES=ON
       - name: Clean
         run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
