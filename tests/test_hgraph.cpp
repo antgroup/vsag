@@ -6991,4 +6991,35 @@ TEST_CASE("HGraph filtered search keeps bridges between filter-rejected nodes",
             REQUIRE(few.count(result.value()->GetIds()[i]) == 1);
         }
     }
+    SECTION("parallel search") {
+        auto filter = std::make_shared<IdSetFilter3290>(eligible, static_cast<uint64_t>(count));
+        auto result = index->KnnSearch(
+            query, k, R"({"hgraph":{"ef_search":50,"skip_ratio":1.0},"parallelism":2})", filter);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == k);
+        for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+            REQUIRE(eligible.count(result.value()->GetIds()[i]) == 1);
+        }
+    }
+
+    SECTION("custom distance callback") {
+        vsag::SearchRequest request;
+        request.query_ = query;
+        request.topk_ = static_cast<int64_t>(k);
+        request.params_str_ = search_param;
+        request.enable_filter_ = true;
+        request.filter_ = std::make_shared<IdSetFilter3290>(eligible, static_cast<uint64_t>(count));
+        request.distance_batch_size_ = 4;
+        request.distance_batch_func_ = [](const int64_t* ids, uint64_t n, float* distances) {
+            for (uint64_t i = 0; i < n; ++i) {
+                distances[i] = static_cast<float>(ids[i]);
+            }
+        };
+        auto result = index->SearchWithRequest(request);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == k);
+        for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+            REQUIRE(eligible.count(result.value()->GetIds()[i]) == 1);
+        }
+    }
 }

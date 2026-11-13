@@ -794,7 +794,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 to_be_visited_id[i] = deferred_ids[deferred_pos + i];
             }
             deferred_pos += count;
-            flatten->Query(line_dists.data(), computer, to_be_visited_id.data(), count, ctx);
+            score_ids(to_be_visited_id.data(), count, line_dists.data());
             dist_cmp += count;
             for (uint32_t i = 0; i < count; ++i) {
                 candidate_set->Push(traversal_priority(line_dists[i]), to_be_visited_id[i]);
