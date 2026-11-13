@@ -517,10 +517,48 @@ For repeated daily or snapshot builds with stable source identifiers, see
 If your workload is partition-heavy (coarse-grained buckets scanned per query) or
 strongly I/O-bound on a SSD, compare against [IVF](ivf.md) before committing to HGraph.
 
+## FGIM merge (opt-in)
+
+Set `merge_strategy: "fgim"` in the destination HGraph parameters to use FGIM
+through the existing `Index::Merge(vector<MergeUnit>)` API. The default remains
+`"odescent"`. `fgim_refinement_iterations` is a non-negative integer (default 4);
+zero disables refinement. This is an iteration budget, not a guarantee of
+convergence. Setting this option alone keeps the default `odescent`
+strategy; VSAG reports a warning when the option is supplied for another strategy.
+The persistent k-NNG degree bound is the destination
+`max_degree`; CrossQuery uses `ceil(k / (number_of_sources - 1))` for both top-k
+and search width.
+
+The non-empty destination, if present, is the first source. At least two non-empty
+source graphs are required. Sources must have successful builds, homogeneous
+float32/L2/FP32 storage, and no concurrent mutation. This first implementation
+rejects deletion, duplicate tracking/storage, conjugate graphs, MCI, attributes,
+extra information and persisted source IDs. Set `support_duplicate: false` and
+`deduplicate_storage: false` explicitly.
+
+Existing destination labels are retained. Each MergeUnit callback maps external
+labels once; a null callback means identity mapping. Filtering through a false
+callback result and collisions in the resulting labels are rejected before
+destination data is changed. Source indexes are not modified.
+
+FGIM builds an initial k-NNG, refines it, selects bottom neighbors, adds reverse
+connections and rebuilds upper layers using existing HGraph insertion primitives.
+It does not concatenate old upper layers. Performance and recall depend on the
+data and degree/iteration settings; this option does not guarantee a speedup or
+full graph connectivity. Allocation or storage failures during publication do
+not provide transactional rollback.
+
+Refinement and reconstruction each use an additional FP32 vector buffer of
+`N * dimension * sizeof(float)` bytes. These buffers are released between stages;
+peak memory also includes the source indexes and intermediate neighbor lists.
+The destination graph must be writable; read-only `reader_io` graph storage is
+rejected before destination data is changed. Queries on the destination normally
+wait for its structural lock during Merge. Between the lock scopes around capacity
+growth, readers can still access the unchanged, previously published index.
+
 ## See also
 
 - [Creating an Index](../guide/create_index.md)
 - [Graph Enhancement](../advanced/enhance_graph.md)
 - [Optimizer (Tune)](../advanced/optimizer.md)
 - [Serialization](../advanced/serialization.md)
-
