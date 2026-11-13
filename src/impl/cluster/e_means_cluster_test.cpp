@@ -25,7 +25,7 @@ namespace {
 
 // Gaussian blobs around well-separated centers.
 std::vector<float>
-GenerateBlobs(uint32_t k, uint32_t dim, uint64_t count, std::vector<int>& truth) {
+generate_blobs(uint32_t k, uint32_t dim, uint64_t count, std::vector<int>& truth) {
     std::mt19937 gen(42);
     std::normal_distribution<float> noise(0.0F, 0.05F);
     std::uniform_real_distribution<float> center(-10.0F, 10.0F);
@@ -55,7 +55,7 @@ TEST_CASE("EMeans Separates Distinct Blobs", "[ut][EMeansCluster]") {
     const uint32_t dim = 32;
     const uint64_t count = 8192;
     std::vector<int> truth;
-    auto data = GenerateBlobs(blobs, dim, count, truth);
+    auto data = generate_blobs(blobs, dim, count, truth);
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
 
     bool pure = false;
@@ -87,7 +87,7 @@ TEST_CASE("EMeans Is Deterministic For A Fixed Seed", "[ut][EMeansCluster]") {
     const uint32_t dim = 16;
     const uint64_t count = 2048;
     std::vector<int> truth;
-    auto data = GenerateBlobs(k, dim, count, truth);
+    auto data = generate_blobs(k, dim, count, truth);
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
 
     vsag::EMeansCluster a(dim, allocator.get());
@@ -107,7 +107,7 @@ TEST_CASE("EMeans Leaves No Empty Cluster", "[ut][EMeansCluster]") {
     const uint32_t dim = 8;
     const uint64_t count = 8192;
     std::vector<int> truth;
-    auto data = GenerateBlobs(k, dim, count, truth);
+    auto data = generate_blobs(k, dim, count, truth);
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
 
     for (uint32_t seed = 1; seed <= 3; ++seed) {
@@ -164,7 +164,7 @@ TEST_CASE("EMeans Default Hyper-parameters", "[ut][EMeansCluster]") {
 
 TEST_CASE("EMeans Rejects Invalid Arguments", "[ut][EMeansCluster]") {
     const uint32_t dim = 4;
-    std::vector<float> data(10 * dim, 1.0F);
+    std::vector<float> data(10ULL * dim, 1.0F);
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
     vsag::EMeansCluster cluster(dim, allocator.get());
 

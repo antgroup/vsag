@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <numeric>
 #include <random>
 
@@ -31,7 +32,6 @@ constexpr double STEP_FLOOR_RATIO = 0.1;
 constexpr uint64_t REVIVAL_PERIOD = 5;
 constexpr double REVIVAL_THRESHOLD = 0.1;
 constexpr float SPLIT_EPS = 1.0F / 1024.0F;
-constexpr double PI = 3.14159265358979323846;
 
 // Table 2 of the paper (fitted on DEEP); batch law for n <= 2M.
 constexpr double BATCH_C = 0.035;
@@ -50,12 +50,12 @@ constexpr double STEP_T = -0.11;
 /// half of a donor's mass, with the two centroids perturbed in opposite
 /// directions.
 void
-ReviveDeadClusters(Vector<double>& counts,
-                   Vector<float>& sums,
-                   uint32_t k,
-                   uint64_t dim,
-                   Allocator* allocator,
-                   std::mt19937& gen) {
+revive_dead_clusters(Vector<double>& counts,
+                     Vector<float>& sums,
+                     uint32_t k,
+                     uint64_t dim,
+                     Allocator* allocator,
+                     std::mt19937& gen) {
     const double mean = std::accumulate(counts.begin(), counts.end(), 0.0) / k;
     Vector<double> weights(k, 0.0, allocator);
     for (uint32_t j = 0; j < k; ++j) {
@@ -75,7 +75,7 @@ ReviveDeadClusters(Vector<double>& counts,
         }
         const double half = counts[donor] / 2.0;
         for (uint64_t i = 0; i < dim; ++i) {
-            const float c = static_cast<float>(sums[donor * dim + i] / counts[donor]);
+            const auto c = static_cast<float>(sums[donor * dim + i] / counts[donor]);
             const float up = (i % 2 == 0) ? 1.0F + SPLIT_EPS : 1.0F - SPLIT_EPS;
             sums[j * dim + i] = static_cast<float>(half) * c * up;
             sums[donor * dim + i] = static_cast<float>(half) * c * (2.0F - up);
@@ -150,7 +150,7 @@ EMeansCluster::Run(uint32_t k,
         throw VsagException(ErrorType::INVALID_ARGUMENT, "peak_step must be at most 1");
     }
 
-    const uint64_t dim = static_cast<uint64_t>(dim_);
+    const auto dim = static_cast<uint64_t>(dim_);
     const uint64_t kk = k;
     if (batch_size == 0) {
         batch_size = DefaultBatchSize(count, k, epochs);
@@ -160,7 +160,7 @@ EMeansCluster::Run(uint32_t k,
         peak_step = DefaultPeakStep(count, k, epochs, batch_size);
     }
     const uint64_t batches_per_epoch = count / batch_size;
-    const uint64_t total_updates = static_cast<uint64_t>(epochs) * batches_per_epoch;
+    const auto total_updates = static_cast<uint64_t>(epochs) * batches_per_epoch;
 
     std::random_device rd;
     std::mt19937 gen(random_seed.has_value() ? *random_seed : rd());
@@ -194,7 +194,7 @@ EMeansCluster::Run(uint32_t k,
 
     auto read_centroids = [&]() {
         for (uint64_t j = 0; j < kk; ++j) {
-            const float inv = static_cast<float>(1.0 / counts[j]);
+            const auto inv = static_cast<float>(1.0 / counts[j]);
             for (uint64_t i = 0; i < dim; ++i) {
                 k_centroids_[j * dim + i] = sums[j * dim + i] * inv;
             }
@@ -210,9 +210,8 @@ EMeansCluster::Run(uint32_t k,
                 std::copy_n(datas + uint64_t(ids[i]) * dim, dim, batch.data() + i * dim);
             }
 
-            const double cosine =
-                0.5 *
-                (1.0 + std::cos(PI * static_cast<double>(t) / static_cast<double>(total_updates)));
+            const double cosine = 0.5 * (1.0 + std::cos(std::numbers::pi * static_cast<double>(t) /
+                                                        static_cast<double>(total_updates)));
             const double alpha = peak_step * (STEP_FLOOR_RATIO + (1.0 - STEP_FLOOR_RATIO) * cosine);
             const double gamma = 1.0 - alpha;
 
@@ -230,7 +229,7 @@ EMeansCluster::Run(uint32_t k,
             std::fill(batch_counts.begin(), batch_counts.end(), 0.0);
             const bool last_epoch = epoch == epochs - 1;
             for (uint64_t i = 0; i < batch_size; ++i) {
-                const uint64_t label = static_cast<uint64_t>(batch_labels[i]);
+                const auto label = static_cast<uint64_t>(batch_labels[i]);
                 batch_counts[label] += 1.0;
                 BlasFunction::Saxpy(
                     dim_, 1.0F, batch.data() + i * dim, 1, batch_sums.data() + label * dim, 1);
@@ -251,7 +250,7 @@ EMeansCluster::Run(uint32_t k,
                                 sums.data(),
                                 1);
             if ((t + 1) % REVIVAL_PERIOD == 0) {
-                ReviveDeadClusters(counts, sums, k, dim, allocator_, gen);
+                revive_dead_clusters(counts, sums, k, dim, allocator_, gen);
             }
         }
     }
@@ -265,7 +264,7 @@ EMeansCluster::Run(uint32_t k,
         if (last_labels[i] < 0) {
             continue;
         }
-        const uint64_t label = static_cast<uint64_t>(last_labels[i]);
+        const auto label = static_cast<uint64_t>(last_labels[i]);
         final_counts[label] += 1.0;
         BlasFunction::Saxpy(dim_, 1.0F, datas + i * dim, 1, final_sums.data() + label * dim, 1);
     }
@@ -273,7 +272,7 @@ EMeansCluster::Run(uint32_t k,
         if (final_counts[j] <= 0.0) {
             continue;
         }
-        const float inv = static_cast<float>(1.0 / final_counts[j]);
+        const auto inv = static_cast<float>(1.0 / final_counts[j]);
         for (uint64_t i = 0; i < dim; ++i) {
             k_centroids_[j * dim + i] = final_sums[j * dim + i] * inv;
         }
