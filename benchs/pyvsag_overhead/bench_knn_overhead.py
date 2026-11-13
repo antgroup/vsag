@@ -86,7 +86,7 @@ def summarize_latencies_ns(latencies_ns: Iterable[float]) -> Dict[str, float]:
 
 def create_index_params(dim: int) -> str:
     """Create the HGraph fp32/l2 parameters used by the Python HGraph tests."""
-    max_degree = max(1, int(dim / 4))
+    max_degree = max(4, int(dim / 4))
     return json.dumps(
         {
             "dtype": "float32",
@@ -183,6 +183,37 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     return args
 
 
+def _verify_cffi_library(pyvsag_module: object, requested_library: Path) -> Path:
+    loader_name = f"{getattr(pyvsag_module, '__name__', 'pyvsag')}._lib"
+    try:
+        loader_module = importlib.import_module(loader_name)
+    except Exception as exc:
+        raise BenchmarkError(
+            f"--library requires the cffi pyvsag backend; could not import {loader_name}: {exc}"
+        ) from exc
+
+    find_library = getattr(loader_module, "_find_library", None)
+    if (
+        not callable(find_library)
+        or getattr(loader_module, "ffi", None) is None
+        or getattr(loader_module, "lib", None) is None
+    ):
+        raise BenchmarkError(
+            "--library requires the cffi pyvsag backend; "
+            f"{loader_name} does not expose its cffi loader"
+        )
+
+    try:
+        loaded_library = Path(find_library()).expanduser().resolve()
+    except Exception as exc:
+        raise BenchmarkError(f"could not determine the library loaded by {loader_name}: {exc}") from exc
+    if loaded_library != requested_library:
+        raise BenchmarkError(
+            f"cffi loader reported library {loaded_library}, expected {requested_library}"
+        )
+    return loaded_library
+
+
 def _import_modules(library: Optional[Path]) -> Tuple[object, object, Optional[Path]]:
     try:
         numpy_module = importlib.import_module("numpy")
@@ -201,7 +232,59 @@ def _import_modules(library: Optional[Path]) -> Tuple[object, object, Optional[P
     except Exception as exc:
         library_hint = f" with PYVSAG_LIBRARY={resolved_library}" if resolved_library else ""
         raise BenchmarkError(f"failed to import pyvsag{library_hint}: {exc}") from exc
+    if resolved_library is not None:
+        resolved_library = _verify_cffi_library(pyvsag_module, resolved_library)
     return numpy_module, pyvsag_module, resolved_library
+
+
+def _validate_search_result(result_ids: object, phase: str, iteration: int) -> None:
+    if len(result_ids) == 0:
+        raise BenchmarkError(f"knn_search returned no result IDs during {phase} iteration {iteration}")
+    if any(int(result_id) < 0 for result_id in result_ids):
+        raise BenchmarkError(
+            f"knn_search returned -1 sentinel results during {phase} iteration {iteration}"
+        )
+
+
+def _measure_queries(
+    index: object,
+    query_vectors: object,
+    k: int,
+    search_params: str,
+    iterations: int,
+    warmup: int,
+) -> List[int]:
+    query_count = len(query_vectors)
+    for iteration in range(warmup):
+        query = query_vectors[iteration % query_count]
+        try:
+            result_ids, _ = index.knn_search(vector=query, k=k, parameters=search_params)
+        except Exception as exc:
+            raise BenchmarkError(f"knn_search failed during warmup iteration {iteration}: {exc}") from exc
+        _validate_search_result(result_ids, "warmup", iteration)
+
+    latencies_ns = []
+    gc_was_enabled = gc.isenabled()
+    if gc_was_enabled:
+        gc.disable()
+    try:
+        for iteration in range(iterations):
+            query = query_vectors[(warmup + iteration) % query_count]
+            started_ns = time.perf_counter_ns()
+            try:
+                result_ids, _ = index.knn_search(vector=query, k=k, parameters=search_params)
+            except Exception as exc:
+                raise BenchmarkError(
+                    f"knn_search failed during measured iteration {iteration}: {exc}"
+                ) from exc
+            finished_ns = time.perf_counter_ns()
+            _validate_search_result(result_ids, "measured", iteration)
+            latencies_ns.append(finished_ns - started_ns)
+    finally:
+        if gc_was_enabled:
+            gc.enable()
+
+    return latencies_ns
 
 
 def _run_benchmark(args: argparse.Namespace, numpy_module: object, pyvsag_module: object) -> Tuple[List[int], str, str, int]:
@@ -230,37 +313,19 @@ def _run_benchmark(args: argparse.Namespace, numpy_module: object, pyvsag_module
     if build_result is False:
         raise BenchmarkError("failed to build HGraph index: Index.build returned False")
 
-    try:
-        for iteration in range(args.warmup):
-            query = query_vectors[iteration % query_count]
-            index.knn_search(vector=query, k=args.k, parameters=search_params)
-    except Exception as exc:
-        raise BenchmarkError(f"knn_search failed during warmup iteration {iteration}: {exc}") from exc
-
-    latencies_ns = []
-    gc_was_enabled = gc.isenabled()
-    if gc_was_enabled:
-        gc.disable()
-    try:
-        for iteration in range(args.iterations):
-            query = query_vectors[(args.warmup + iteration) % query_count]
-            started_ns = time.perf_counter_ns()
-            try:
-                index.knn_search(vector=query, k=args.k, parameters=search_params)
-            except Exception as exc:
-                raise BenchmarkError(
-                    f"knn_search failed during measured iteration {iteration}: {exc}"
-                ) from exc
-            latencies_ns.append(time.perf_counter_ns() - started_ns)
-    finally:
-        if gc_was_enabled:
-            gc.enable()
-
+    latencies_ns = _measure_queries(
+        index, query_vectors, args.k, search_params, args.iterations, args.warmup
+    )
     return latencies_ns, index_params, search_params, query_count
 
 
 def run(args: argparse.Namespace) -> int:
     numpy_module, pyvsag_module, resolved_library = _import_modules(args.library)
+    module_file = str(getattr(pyvsag_module, "__file__", "unknown"))
+    library_file = str(resolved_library) if resolved_library else None
+    print(f"pyvsag module: {module_file}")
+    print(f"pyvsag library: {library_file or 'not separately reported by this backend'}")
+
     environment = _environment_info(numpy_module)
     latencies_ns, index_params, search_params, query_count = _run_benchmark(
         args, numpy_module, pyvsag_module
@@ -286,8 +351,8 @@ def run(args: argparse.Namespace) -> int:
         "environment": environment,
         "pyvsag": {
             "version": getattr(pyvsag_module, "__version__", "unknown"),
-            "module_file": getattr(pyvsag_module, "__file__", "unknown"),
-            "library": str(resolved_library) if resolved_library else None,
+            "module_file": module_file,
+            "library": library_file,
         },
         "statistics": stats,
         "samples_ns": latencies_ns,

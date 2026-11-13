@@ -43,7 +43,7 @@ python benchs/pyvsag_overhead/bench_knn_overhead.py \
   --json-out cffi-small.json
 ```
 
-`--library` resolves the path and sets `PYVSAG_LIBRARY` **before** importing `pyvsag`. Replace `REVISION` in the label with the actual #3296 commit. Use the same non-binding arguments for both implementations. For acceptance runs, use at least 200 iterations (1,000 or more is preferable for p99) and repeat each side at least three times; keep the host otherwise idle and record power/CPU policies where relevant.
+`--library` resolves the path and sets `PYVSAG_LIBRARY` **before** importing `pyvsag`; after import, the harness requires the cffi loader to confirm the same library and fails otherwise, and every run prints the imported module and reported library to stdout. Replace `REVISION` in the label with the actual #3296 commit. Use the same non-binding arguments for both implementations. For acceptance runs, use at least 200 iterations (1,000 or more is preferable for p99) and repeat each side at least three times; keep the host otherwise idle and record power/CPU policies where relevant. The query pool is capped at 256 distinct vectors, so `--iterations` above 256 reuses queries and produces correlated rather than independent latency samples.
 
 ## Suggested acceptance thresholds
 
@@ -79,7 +79,7 @@ The cffi row requires a compatible #3296 cffi Python package plus its exact `lib
 
 ## Unit test
 
-The percentile definition is linear interpolation over sorted samples (the same method as `numpy.percentile(..., method="linear")`). Its tests require only the Python standard library and pytest, not NumPy or pyvsag:
+The percentile definition is linear interpolation over sorted samples (the same method as `numpy.percentile(..., method="linear")`). The tests require only the Python standard library and pytest, not NumPy, cffi, pyvsag, or a compiled VSAG library; pure-Python fake bindings cover failure sentinels and loader verification, but do not execute a real benchmark:
 
 ```bash
 python -m pytest benchs/pyvsag_overhead/test_stats.py -q
