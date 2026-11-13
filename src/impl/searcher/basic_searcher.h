@@ -90,7 +90,8 @@ private:
           const FilterPtr& filter,
           FilterSearchSkipStrategy* skip_strategy,
           Vector<InnerIdType>& to_be_visited_id,
-          Vector<InnerIdType>& neighbors) const;
+          Vector<InnerIdType>& neighbors,
+          Vector<InnerIdType>* deferred_ids = nullptr) const;
 
     template <InnerSearchMode mode = KNN_SEARCH>
     DistHeapPtr
