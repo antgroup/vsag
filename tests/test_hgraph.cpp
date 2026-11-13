@@ -22,6 +22,7 @@
 #include <future>
 #include <limits>
 #include <random>
+#include <set>
 #include <sstream>
 #include <thread>
 #include <vector>
@@ -5639,25 +5640,25 @@ TEST_CASE("HGraph empty index distance validation", "[hgraph][distance_contract]
 }
 
 namespace {
-class TailOnlyFilter3290 : public vsag::Filter {
+class IdSetFilter3290 : public vsag::Filter {
 public:
-    TailOnlyFilter3290(int64_t first_valid, float valid_ratio)
-        : first_valid_(first_valid), valid_ratio_(valid_ratio) {
+    explicit IdSetFilter3290(std::set<int64_t> valid_ids, uint64_t total)
+        : valid_ids_(std::move(valid_ids)), total_(total) {
     }
 
     bool
     CheckValid(int64_t id) const override {
-        return id >= first_valid_;
+        return valid_ids_.count(id) > 0;
     }
 
     float
     ValidRatio() const override {
-        return valid_ratio_;
+        return static_cast<float>(valid_ids_.size()) / static_cast<float>(total_);
     }
 
 private:
-    int64_t first_valid_;
-    float valid_ratio_;
+    std::set<int64_t> valid_ids_;
+    uint64_t total_;
 };
 }  // namespace
 
@@ -5666,14 +5667,14 @@ TEST_CASE("HGraph filtered search keeps bridges between filter-rejected nodes",
     constexpr int64_t dim = 4;
     constexpr int64_t count = 400;
     constexpr int64_t first_valid = 360;
-    constexpr int64_t k = 5;
+    constexpr uint64_t k = 5;
     std::vector<int64_t> ids(count);
     for (int64_t i = 0; i < count; ++i) {
         ids[i] = i;
     }
 
-    // The only eligible vectors sit at the far end of a chain of rejected vectors, so a search
-    // that discards rejected neighbors can never reach them from the query side.
+    // The eligible vectors sit at the far end of a chain of rejected vectors, so a search that
+    // discards rejected neighbors can never reach them from the query side.
     auto build_param = R"({"dtype":"float32","metric_type":"l2","dim":4,
         "index_param":{"base_quantization_type":"fp32","max_degree":16,"ef_construction":100}})";
     auto search_param = R"({"hgraph":{"ef_search":50,"skip_ratio":1.0}})";
@@ -5683,10 +5684,12 @@ TEST_CASE("HGraph filtered search keeps bridges between filter-rejected nodes",
     auto query = vsag::Dataset::Make();
     query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
 
-    // Approximate graphs can leave vectors unreachable even without a filter; only a fully
-    // reachable graph can be expected to return every eligible vector, so try a few datasets.
+    // Approximate graphs can leave vectors unreachable even without a filter, so only vectors an
+    // unfiltered search can reach are eligible. Try a few datasets until enough of the tail is
+    // reachable.
     vsag::IndexPtr index;
-    for (uint32_t seed = 3290; seed < 3310 && index == nullptr; ++seed) {
+    std::set<int64_t> eligible;
+    for (uint32_t seed = 3290; seed < 3390 && index == nullptr; ++seed) {
         std::vector<float> vectors(count * dim, 0.0F);
         std::mt19937 rng(seed);
         std::uniform_real_distribution<float> noise(0.0F, 0.3F);
@@ -5704,31 +5707,41 @@ TEST_CASE("HGraph filtered search keeps bridges between filter-rejected nodes",
             ->Float32Vectors(vectors.data())
             ->Owner(false);
         REQUIRE(candidate->Build(base).has_value());
-        auto all_valid = std::make_shared<TailOnlyFilter3290>(0, 1.0F);
+        auto all_valid = std::make_shared<IdSetFilter3290>(
+            std::set<int64_t>(ids.begin(), ids.end()), static_cast<uint64_t>(count));
         auto result = candidate->KnnSearch(query, count, wide_search_param, all_valid);
         REQUIRE(result.has_value());
-        if (result.value()->GetDim() == count) {
+        std::set<int64_t> tail;
+        for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+            if (result.value()->GetIds()[i] >= first_valid) {
+                tail.insert(result.value()->GetIds()[i]);
+            }
+        }
+        if (tail.size() >= 2 * k) {
             index = candidate;
+            eligible = tail;
         }
     }
     REQUIRE(index != nullptr);
 
     SECTION("enough eligible vectors") {
-        auto filter = std::make_shared<TailOnlyFilter3290>(first_valid, 0.1F);
+        auto filter = std::make_shared<IdSetFilter3290>(eligible, static_cast<uint64_t>(count));
         auto result = index->KnnSearch(query, k, search_param, filter);
         REQUIRE(result.has_value());
         REQUIRE(result.value()->GetDim() == k);
-        for (int64_t i = 0; i < k; ++i) {
-            REQUIRE(result.value()->GetIds()[i] >= first_valid);
+        for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+            REQUIRE(eligible.count(result.value()->GetIds()[i]) == 1);
         }
     }
 
     SECTION("fewer eligible vectors than k") {
-        auto filter = std::make_shared<TailOnlyFilter3290>(count - 2, 0.005F);
+        std::set<int64_t> few(std::prev(eligible.end(), 2), eligible.end());
+        auto filter = std::make_shared<IdSetFilter3290>(few, static_cast<uint64_t>(count));
         auto result = index->KnnSearch(query, k, search_param, filter);
         REQUIRE(result.has_value());
         REQUIRE(result.value()->GetDim() == 2);
-        REQUIRE(result.value()->GetIds()[0] >= count - 2);
-        REQUIRE(result.value()->GetIds()[1] >= count - 2);
+        for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+            REQUIRE(few.count(result.value()->GetIds()[i]) == 1);
+        }
     }
 }
