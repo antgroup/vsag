@@ -103,7 +103,7 @@ PyramidAnalyzer::AnalyzeIndexBySearch(const SearchRequest& request) {
 
     auto query = request.query_;
     const auto query_num = query->GetNumElements();
-    const float* query_vectors = query->GetFloat32Vectors();
+    const void* query_vectors = pyramid_->get_data(query);
     if (query_num == 0) {
         return stats;
     }
@@ -113,7 +113,7 @@ PyramidAnalyzer::AnalyzeIndexBySearch(const SearchRequest& request) {
     CHECK_ARGUMENT(
         query->GetDim() == dim_,
         fmt::format("query.dim({}) must be equal to index.dim({})", query->GetDim(), dim_));
-    CHECK_ARGUMENT(query_vectors != nullptr, "query vectors is required");
+    CHECK_ARGUMENT(query_vectors != nullptr, "query vectors must match the index dtype");
     const auto query_count = static_cast<uint32_t>(query_num);
 
     auto parsed_param = PyramidSearchParameters::FromJson(request.params_str_);
@@ -166,9 +166,12 @@ PyramidAnalyzer::AnalyzeIndexBySearch(const SearchRequest& request) {
 
     Vector<float> query_datas(allocator_);
     query_datas.resize(static_cast<uint64_t>(query_count) * dim_);
-    std::memcpy(query_datas.data(),
-                query_vectors,
-                static_cast<uint64_t>(query_count) * dim_ * sizeof(float));
+    const auto row_bytes = static_cast<uint64_t>(dim_) * pyramid_->data_type_element_size();
+    for (uint64_t i = 0; i < query_count; ++i) {
+        std::memcpy(query_datas.data() + i * dim_,
+                    pyramid_->element_ptr(query_vectors, static_cast<int64_t>(i)),
+                    row_bytes);
+    }
 
     UnorderedSet<InnerIdType> deleted_ids(allocator_);
     for (const auto id : pyramid_->label_table_->GetAllDeletedIds()) {
@@ -207,6 +210,20 @@ PyramidAnalyzer::AnalyzeIndexBySearch(const SearchRequest& request) {
     }
 
     return stats;
+}
+
+DatasetPtr
+PyramidAnalyzer::make_query_dataset(const float* native_query) const {
+    auto query = Dataset::Make()->Dim(dim_)->NumElements(1)->Owner(false);
+    // Decoded samples retain the datacell's native representation. The float
+    // storage provides enough space for either float32 or packed half values.
+    if (pyramid_->data_type_ == DataTypes::DATA_TYPE_FP16 or
+        pyramid_->data_type_ == DataTypes::DATA_TYPE_BF16) {
+        query->Float16Vectors(reinterpret_cast<const uint16_t*>(native_query));
+    } else {
+        query->Float32Vectors(native_query);
+    }
+    return query;
 }
 
 JsonType
@@ -758,16 +775,12 @@ PyramidAnalyzer::calculate_quantization_result(
         }
 
         auto result_size = static_cast<uint32_t>(unique_result.size());
+        const auto query =
+            make_query_dataset(sample_datas.data() + static_cast<uint64_t>(i) * dim_);
         auto base_result =
-            pyramid_->CalcDistancesById(sample_datas.data() + static_cast<size_t>(i) * dim_,
-                                        unique_result.data(),
-                                        result_size,
-                                        false);
+            pyramid_->CalcDistancesById(query, unique_result.data(), result_size, false);
         auto precise_result =
-            pyramid_->CalcDistancesById(sample_datas.data() + static_cast<size_t>(i) * dim_,
-                                        unique_result.data(),
-                                        result_size,
-                                        true);
+            pyramid_->CalcDistancesById(query, unique_result.data(), result_size, true);
         if (base_result == nullptr || precise_result == nullptr) {
             continue;
         }
@@ -843,9 +856,7 @@ PyramidAnalyzer::calculate_search_result(
                 eta_ms);
         }
 
-        auto query = Dataset::Make();
-        query->Dim(dim_)->NumElements(1)->Owner(false)->Float32Vectors(
-            sample_datas.data() + static_cast<size_t>(i) * dim_);
+        auto query = make_query_dataset(sample_datas.data() + static_cast<uint64_t>(i) * dim_);
         if (query_paths != nullptr) {
             std::vector<std::string> atomic_paths;
             atomic_paths.reserve((*query_paths)[i].size());
@@ -1094,8 +1105,7 @@ PyramidAnalyzer::search_single_node(const IndexNode* node,
             ef_search = static_cast<uint64_t>(params["pyramid"]["pyramid"]["ef_search"].GetInt());
         }
 
-        auto query_dataset = Dataset::Make();
-        query_dataset->Dim(dim_)->NumElements(1)->Owner(false)->Float32Vectors(query);
+        auto query_dataset = make_query_dataset(query);
 
         InnerSearchParam inner_param;
         inner_param.topk = static_cast<int64_t>(topk_);
