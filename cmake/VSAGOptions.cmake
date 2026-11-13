@@ -48,6 +48,16 @@ option (DISABLE_AMX_FORCE "Force disable Intel AMX instructions" OFF)
 option (DISABLE_NEON_FORCE "Force disable neon instructions" OFF)
 option (DISABLE_SVE_FORCE "Force disable sve instructions" OFF)
 
+# Zero leaves scheduling to the build tool's global --parallel limit.
+set (VSAG_DATACELL_COMPILE_JOBS "0" CACHE STRING
+     "Shared Ninja compile limit for datacell and RaBitQ factories; 0 inherits global parallelism.")
+if (NOT "${VSAG_DATACELL_COMPILE_JOBS}" MATCHES "^(0|[1-9][0-9]*)$")
+    message (FATAL_ERROR "VSAG_DATACELL_COMPILE_JOBS must be 0 or a positive integer")
+endif ()
+if (NOT VSAG_DATACELL_COMPILE_JOBS STREQUAL "0" AND NOT CMAKE_GENERATOR MATCHES "Ninja")
+    message (FATAL_ERROR "VSAG_DATACELL_COMPILE_JOBS requires Ninja; use 0 and global --parallel for other generators")
+endif ()
+
 set (NUM_BUILDING_JOBS "4" CACHE STRING "Default compilation parallelism for third-party builds.")
 set (BUILD_INFO_DIR "${CMAKE_BINARY_DIR}/.vsag-build-info" CACHE PATH "Metadata directory for ExternalProject state.")
 set (DOWNLOAD_DIR "${CMAKE_BINARY_DIR}/.vsag-downloads" CACHE PATH "Download cache directory for ExternalProject archives.")

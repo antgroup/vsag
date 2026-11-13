@@ -259,7 +259,7 @@ class BuildMonitorTest(unittest.TestCase):
 
     def test_arm_action_retains_build_scope_and_always_uploads(self):
         text = (ROOT / '.github/actions/asan-build-and-test-build-asan-aarch64/action.yml').read_text()
-        self.assertIn('make asan COMPILE_JOBS=3 VSAG_ENABLE_EXAMPLES=ON', text)
+        self.assertIn('make asan COMPILE_JOBS=3 DATACELL_COMPILE_JOBS=1 VSAG_ENABLE_EXAMPLES=ON', text)
         self.assertIn('python3 scripts/ci/monitor_build.py', text)
         self.assertIn('name: Upload ARM build diagnostics\n      if: always()', text)
         self.assertIn('${{ github.run_attempt }}', text)

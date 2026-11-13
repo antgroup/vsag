@@ -235,6 +235,23 @@ An unset path preserves existing behavior; an explicitly empty or unreadable pat
 You can increase `COMPILE_JOBS` if your machine has enough memory, but the default is conservative
 to avoid out-of-memory failures in CI runners.
 
+### Datacell compile parallelism
+
+`COMPILE_JOBS` controls the whole build. `DATACELL_COMPILE_JOBS=0` (the default)
+adds no separate cap: datacell and RaBitQ factory files use that same global job budget.
+On memory-limited Ninja builders, set a positive limit shared by both object libraries:
+
+```bash
+make asan COMPILE_JOBS=24                         # all sources share 24 jobs
+make asan COMPILE_JOBS=3 DATACELL_COMPILE_JOBS=1   # ARM CI: at most one datacell compile
+```
+
+Direct CMake callers use `-DVSAG_DATACELL_COMPILE_JOBS=N`. The cap applies to all build
+modes, does not change compiler flags or test scope, and cannot exceed the global job limit.
+Positive values require Ninja; other generators use `0` and their global parallelism.
+The ARM Linux/macOS ASan jobs set `1` explicitly; other jobs inherit the global limit.
+Higher parallelism needs more memory. This scheduling option does not fix cache misses.
+
 ## C++ standard and compiler validation
 
 Full VSAG CPU implementation targets require C++20; installed public headers and the `vsag::vsag` target support C++17 clients. CUDA translation units, Node.js bindings, and standalone Lite stay on C++17. Linux development uses GCC 13 as the primary compiler and Clang 20 as the second compiler. Use separate build directories:

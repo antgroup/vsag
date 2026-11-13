@@ -252,6 +252,23 @@ CMake 优先使用带版本后缀的变量，再使用旧变量，并保留默�
 如果机器内存足够，可以适当调大 `COMPILE_JOBS`；默认值会比较保守，以避免 CI 里再次触发
 内存不足。
 
+### Datacell 编译并行度
+
+`COMPILE_JOBS` 控制整个项目的编译并行度。`DATACELL_COMPILE_JOBS=0`（默认值）
+不添加单独上限，datacell 和 RaBitQ factory 文件与其他文件共享总并行额度。
+使用 Ninja 且内存有限时，可设置正整数，让这两个对象库共用一个编译上限：
+
+```bash
+make asan COMPILE_JOBS=24                         # 所有源文件共享 24 路
+make asan COMPILE_JOBS=3 DATACELL_COMPILE_JOBS=1   # ARM CI：datacell 最多同时编译一个文件
+```
+
+直接调用 CMake 时使用 `-DVSAG_DATACELL_COMPILE_JOBS=N`。该上限适用于所有构建模式，
+不改变编译选项或测试范围，实际并行度仍受全局上限约束。
+正整数设置要求 Ninja；其他生成器使用 `0` 并通过全局并行度限制资源。
+ARM Linux/macOS ASan 任务显式设为 `1`，其他任务跟随全局并行度。
+提高并行度需要更多内存；这个调度选项不能解决缓存未命中问题。
+
 ## 工具链分层验证
 
 Linux 开发以 GCC 13 为主编译器、Clang 20 为第二编译器。分别使用独立目录执行 `make test DEBUG_BUILD_DIR=build_gcc13 EXTRA_DEFINED="-DCMAKE_C_COMPILER=gcc-13 -DCMAKE_CXX_COMPILER=g++-13"` 和 `make test DEBUG_BUILD_DIR=build_clang20 EXTRA_DEFINED="-DCMAKE_C_COMPILER=clang-20 -DCMAKE_CXX_COMPILER=clang++-20"`。
