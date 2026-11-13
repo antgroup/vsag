@@ -132,6 +132,9 @@ for rid, rdist in zip(result_ids, result_dists):
     print(f"{rid}: {rdist}")
 ```
 
+Optional: the [LangChain adapter](docs/docs/en/src/guide/langchain.md) installs
+with `pip install "pyvsag[langchain]"`.
+
 </details>
 
 <details>

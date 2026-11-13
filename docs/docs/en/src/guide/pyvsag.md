@@ -243,6 +243,22 @@ pyvsag.set_logger_debug()   # detailed debug output
 - A shallow `copy.copy(index)` shares the same native index; the native index is released when the
   last reference goes away.
 
+## LangChain Integration
+
+LangChain support is an optional extra and is not installed by `pip install pyvsag`:
+
+```bash
+pip install "pyvsag[langchain]"
+```
+
+```python
+from pyvsag.langchain import VSAGVectorStore
+```
+
+See [LangChain Integration](langchain.md) for usage, score semantics, and
+limitations. It requires CPython 3.10+ and
+`langchain-core>=0.3.77,<2`.
+
 ## Relationship with the C++ Library
 
 `pyvsag` wraps the same `vsag::Index` implementation as C++ and shares the underlying index
