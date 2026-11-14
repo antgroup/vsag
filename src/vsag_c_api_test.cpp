@@ -45,6 +45,26 @@ constexpr const char* index_param = R"(
     }
 )";
 constexpr const char* index_name = "hgraph";
+// Explicit build parameters for vsag_analyze_index, mirroring the fixture's build parameters
+// plus the top-level "type" key from which the analyzer infers the index name (the same shape
+// as tests/test_analyze_index.cpp). Only public HGraph parameters live under "index_param", so
+// the internal keys embedded in the serialized footer ("base_codes", "graph", ...) are never
+// forwarded to Factory::CreateIndex.
+constexpr const char* analyze_build_param = R"(
+    {
+        "type": "hgraph",
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 128,
+        "index_param": {
+            "base_quantization_type": "fp32",
+            "max_degree": 64,
+            "ef_construction": 200,
+            "build_thread_count": 1,
+            "alpha":1.2
+        }
+    }
+)";
 constexpr const char* search_parameters = R"({"hgraph": {"ef_search": 200}})";
 constexpr int64_t num_vectors = 500;
 constexpr int64_t dim = 128;
@@ -219,8 +239,11 @@ TEST_CASE("vsag_c_api build, search and serialize", "[vsag_c_api][ut]") {
     REQUIRE_OK(vsag_index_serialize_file(index.get(), path.data()));
 
     char* analysis = nullptr;
+    // "default" would forward the footer's index_param through CreateIndexFromMetadata, which
+    // also contains internal-only HGraph keys (base_codes, graph, ...) that HGraph rejects;
+    // reload with the same public build parameters the fixture used to build the index instead.
     REQUIRE_OK(vsag_analyze_index(
-        path.data(), "default", "", "auto", "", "", "", "default", 100, &analysis));
+        path.data(), analyze_build_param, "", "auto", "", "", "", "default", 100, &analysis));
     REQUIRE(analysis != nullptr);
     const std::string report(analysis);
     vsag_string_destroy(analysis);
