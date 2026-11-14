@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Pybind statistics tests for the maintained sparse SINDI indexes."""
+"""Statistics and CSR input tests for the maintained sparse SINDI indexes."""
 
 import json
 
@@ -154,3 +154,61 @@ def test_sindi_add_sparse_vectors():
         json.dumps({"sindi": {"n_candidate": 10}}),
     )
     assert ids[0, 0] == 7
+
+
+def _reversed_view(values):
+    """Keep the logical values while exposing them through a negative-stride view."""
+    return np.ascontiguousarray(values[::-1])[::-1]
+
+
+def _strided_view(values):
+    """Keep the logical values in every other element of a larger allocation."""
+    storage = np.empty(values.size * 2, dtype=values.dtype)
+    storage[::2] = values
+    storage[1::2] = 0
+    return storage[::2]
+
+
+@pytest.mark.parametrize(
+    "noncontiguous_view", [_reversed_view, _strided_view], ids=["reversed", "strided"]
+)
+def test_sindi_accepts_noncontiguous_csr(noncontiguous_view):
+    """Public sparse build and search copy CSR views before passing pointers to C."""
+    index = pyvsag.Index(
+        "sindi",
+        json.dumps(
+            {
+                "dim": 16,
+                "dtype": "sparse",
+                "metric_type": "ip",
+                "index_param": {
+                    "use_reorder": False,
+                    "doc_prune_ratio": 0.0,
+                    "window_size": 10000,
+                    "term_id_limit": 16,
+                },
+            }
+        ),
+    )
+    base_arrays = [
+        np.array([0, 2, 4], dtype=np.uint32),
+        np.array([0, 1, 1, 3], dtype=np.uint32),
+        np.array([1.0, 0.5, 0.9, 0.6], dtype=np.float32),
+    ]
+    base_views = [noncontiguous_view(array) for array in base_arrays]
+    assert all(not array.flags.c_contiguous for array in base_views)
+    index.build(*base_views, np.array([0, 1], dtype=np.int64))
+
+    query_arrays = [
+        np.array([0, 2], dtype=np.uint32),
+        np.array([0, 1], dtype=np.uint32),
+        np.array([1.0, 0.5], dtype=np.float32),
+    ]
+    query_views = [noncontiguous_view(array) for array in query_arrays]
+    assert all(not array.flags.c_contiguous for array in query_views)
+    ids, distances = index.knn_search(
+        *query_views, 1, json.dumps({"sindi": {"n_candidate": 3}})
+    )
+
+    np.testing.assert_array_equal(ids, [[0]])
+    np.testing.assert_allclose(distances, [[-0.25]], atol=1e-6)

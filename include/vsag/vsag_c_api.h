@@ -30,6 +30,7 @@
  *    to stay valid for the duration of the call they are passed to. Buffers attached to a
  *    dataset or a bitmap filter must stay valid for as long as that handle is used.
  *  - Pointers returned by getters stay valid until the handle they were read from is destroyed.
+ *    Owned strings returned by analysis must be released with vsag_string_destroy().
  *  - Signatures use fixed-width integers only; flags are int32_t (0 is false).
  *  - Index and search parameters are JSON strings, identical to the C++ API.
  *  - Thread safety follows the C++ library: an index can be searched concurrently. A dataset,
@@ -445,6 +446,34 @@ vsag_index_check_id_exist(const vsag_index_t* index, int64_t id, int32_t* out_ex
 
 vsag_error_t*
 vsag_index_get_min_max_id(const vsag_index_t* index, int64_t* out_min_id, int64_t* out_max_id);
+
+/* ---------------------------------------------------------------------------------------------
+ * Index analysis
+ * ------------------------------------------------------------------------------------------ */
+
+/**
+ * Analyzes a serialized index and returns its JSON report. All string arguments are required;
+ * use an empty string for an unused optional path. "default" reuses embedded index/search
+ * parameters, and query_data_type accepts "auto", "dense" or "sparse".
+ *
+ * On success, `*out_json` is an owned NUL-terminated string that the caller must release with
+ * vsag_string_destroy(). On failure, `*out_json` is NULL.
+ */
+vsag_error_t*
+vsag_analyze_index(const char* index_path,
+                   const char* build_parameter,
+                   const char* query_path,
+                   const char* query_data_type,
+                   const char* base_path,
+                   const char* groundtruth_path,
+                   const char* save_groundtruth_path,
+                   const char* search_parameter,
+                   int64_t topk,
+                   char** out_json);
+
+/** Releases a string returned by vsag_analyze_index(). Destroying NULL is a no-op. */
+void
+vsag_string_destroy(char* string);
 
 #ifdef __cplusplus
 }

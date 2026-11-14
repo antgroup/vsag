@@ -219,6 +219,28 @@ pyvsag.set_logger_debug()   # 输出详细调试信息
 - 使用 `multiprocessing` 时请选择 `spawn` 启动方式，不要在 `fork` 之间共享索引。
 - 对 `copy.copy(index)` 得到的浅拷贝与原对象共享同一个原生索引；最后一个引用消失时才释放原生索引。
 
+## 索引分析
+
+安装 wheel 后会同时获得索引分析 API 与 `pyvsag-analyze-index` 命令；运行时不需要 VSAG 源码、
+CMake 或 C++ 编译器。支持的索引类型、结果结构与查询文件格式请参考
+[索引分析文档](../resources/analyze_index.md)。
+
+```python
+import pyvsag
+
+report = pyvsag.analyze_index(index_path="index.bin")
+print(report["schema_version"])
+print(report["index"]["name"], report["static_analysis"]["statistics"])
+```
+
+```bash
+pyvsag-analyze-index --index_path index.bin > report.json
+```
+
+Python API 返回普通字典，可直接传给 `json.dumps()`。命令将相同的 JSON 文档写入 stdout，
+将诊断信息写入 stderr，并在分析失败时返回非零退出码。传入 `query_path=...`
+（或 `--query_path ...`）会额外执行动态 `AnalyzeIndexBySearch` 分析。
+
 ## 与 C++ 库的关系
 
 `pyvsag` 封装的是同一份 `vsag::Index` 实现，并与 C++ 共享底层索引二进制，因此行为和性能特征一致。
