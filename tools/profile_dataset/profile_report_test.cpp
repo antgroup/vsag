@@ -507,6 +507,31 @@ TEST_CASE("Ground truth with repeated ids or non-finite distances is reported",
     CHECK(has_signal(report, "ground_truth.non_finite_distances"));
 }
 
+TEST_CASE("Ground-truth ties are judged at the scale of the distances", "[profile][report]") {
+    TempDir dir;
+    // Query 0 against rows 0, 0.001 and 0.002: the stored neighbor 2 (squared distance 4e-6)
+    // is wrong, as the exact neighbor is row 0 at distance 0.
+    const auto path = dir.File("small_scale.hdf5");
+    {
+        H5::H5File file(path, H5F_ACC_TRUNC);
+        write_string_attribute(file, "distance", "euclidean");
+        write_matrix(file,
+                     "train",
+                     std::vector<float>{0.0F, 0.001F, 0.002F},
+                     3,
+                     1,
+                     H5::PredType::NATIVE_FLOAT);
+        write_matrix(file, "test", std::vector<float>{0.0F}, 1, 1, H5::PredType::NATIVE_FLOAT);
+        write_matrix(file, "neighbors", std::vector<int64_t>{2}, 1, 1, H5::PredType::NATIVE_INT64);
+        write_matrix(
+            file, "distances", std::vector<float>{0.002F}, 1, 1, H5::PredType::NATIVE_FLOAT);
+    }
+    const JsonType report = profile_dataset(small_options(path), nullptr);
+    CHECK(at(report, "ground_truth.id_recall_at_k") == 0.0);
+    CHECK(at(report, "ground_truth.distance_recall_at_k") == 0.0);
+    CHECK(has_signal(report, "ground_truth.mismatch"));
+}
+
 TEST_CASE("Auxiliary arrays must match the split row counts for eval_performance",
           "[profile][report]") {
     TempDir dir;
@@ -724,6 +749,37 @@ TEST_CASE("CLI writes reports, re-renders saved profiles and rejects bad input",
     REQUIRE(cli({"--from-profile", json, "--html", html_again, "-q"}) == EXIT_OK);
     CHECK_THAT(read_text(html_again),
                ContainsSubstring(report["determinism"]["metrics_sha256"].get<std::string>()));
+    // A saved AI analysis survives an offline re-render, and an explicit --output is written.
+    JsonType with_ai = report;
+    with_ai["ai_analysis"] = JsonType{
+        {"status", "ok"},
+        {"provider", "openai"},
+        {"model", "mock-model"},
+        {"analysis",
+         JsonType{
+             {"summary", "Saved summary"},
+             {"findings",
+              JsonType::array({JsonType{{"title", "Saved finding"},
+                                        {"severity", "notice"},
+                                        {"detail", "From an earlier run."},
+                                        {"evidence", JsonType::array({"splits.train.rows"})}}})},
+             {"recommendations", JsonType::array()},
+             {"uncertainties", JsonType::array()},
+             {"additional_measurements", JsonType::array()}}}};
+    const auto saved = dir.File("saved_ai.json");
+    {
+        std::ofstream file(saved);
+        file << with_ai.dump();
+    }
+    const auto saved_html = dir.File("saved_ai.html");
+    const auto copy = dir.File("copy.json");
+    REQUIRE(cli({"--from-profile", saved, "--html", saved_html, "-o", copy, "-q"}) == EXIT_OK);
+    CHECK_THAT(read_text(saved_html), ContainsSubstring("Saved finding"));
+    CHECK(JsonType::parse(read_text(copy))["ai_analysis"] == with_ai["ai_analysis"]);
+    const auto copy_only = dir.File("copy_only.json");
+    REQUIRE(cli({"--from-profile", json, "-o", copy_only, "--no-html", "-q"}) == EXIT_OK);
+    CHECK(JsonType::parse(read_text(copy_only)) == report);
+
     // Saved profiles may only name the train and test splits.
     JsonType hostile = report;
     hostile["splits"]["x\"><img src=x onerror=alert(1)>"] = report["splits"]["train"];

@@ -257,6 +257,12 @@ inspect_dataset(const std::string& path) {
             if (!metric_from_distance_attribute(info.distance_attribute, metric)) {
                 info.eval_compatibility_issues.push_back("unknown 'distance' attribute '" +
                                                          info.distance_attribute + "'");
+            } else if (info.distance_attribute != "euclidean" && info.distance_attribute != "ip" &&
+                       info.distance_attribute != "angular") {
+                // The l2 and cosine aliases are profiled, but EvalDataset::Load rejects them.
+                info.eval_compatibility_issues.push_back(
+                    "'distance' attribute '" + info.distance_attribute +
+                    "' is profiled, but eval_performance accepts only euclidean, ip or angular");
             } else if (info.kind == VectorKind::SPARSE && metric != Metric::IP) {
                 info.eval_compatibility_issues.emplace_back(
                     "sparse datasets support only distance='ip' in eval_performance");

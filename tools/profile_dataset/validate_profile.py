@@ -165,8 +165,10 @@ def main():
                 else float(np.sum(finite_values == 0) / np.sum(np.isfinite(finite_values))),
                 split["sparsity"]["zero_ratio"], 1e-9)
     if "duplicates" in split and split["duplicates"]["scope"] == "full":
-        canonical = np.where(data == 0, np.float32(0), data)
-        unique = np.unique(canonical.view(np.uint32), axis=0).shape[0]
+        # canonical_bits(): -0.0 equals 0.0 and every NaN sign or payload is one value.
+        bits = np.where(data == 0, np.float32(0), data).view(np.uint32)
+        bits = np.where(np.isnan(data), np.uint32(0x7FC00000), bits)
+        unique = np.unique(bits, axis=0).shape[0]
         check.equal("duplicates.duplicate_rows", rows - unique, split["duplicates"]["duplicate_rows"])
 
     # Reproduce the sample and the k-NN queries.

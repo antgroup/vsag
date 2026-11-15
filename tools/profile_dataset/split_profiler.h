@@ -291,7 +291,8 @@ private:
 };
 
 /// Groups 128-bit row hashes and reports exact duplicates: duplicate rows, group count, the
-/// largest group and up to five example groups (row ids). `rows` maps hash entries to ids.
+/// largest group and up to five example groups (row ids). `rows` maps hash entries to ids; an
+/// empty `rows` means entry i is row i.
 JsonType
 duplicate_report(const std::vector<uint64_t>& high,
                  const std::vector<uint64_t>& low,

@@ -40,7 +40,8 @@ The tool reads the [HDF5 dataset format](dataset_format.md) used by VSAG's evalu
 `/neighbors` and `/distances` (ground truth) and `/train_labels`, `/test_labels` and
 `/valid_ratios` are optional; when present they are checked as well. The metric comes from the
 `distance` attribute (`euclidean` → `l2`, `ip` → `ip`, `angular` → `cosine`) unless `--metric`
-overrides it. Sparse data supports `ip` and `cosine`. Differences from what `eval_performance`
+overrides it. The aliases `l2` and `cosine` are read as well, but they are listed as
+eval_performance issues, because the evaluator accepts only the three names above. Sparse data supports `ip` and `cosine`. Differences from what `eval_performance`
 accepts (for example missing ground truth, `uint8` storage, sparse streams stored as unsigned
 bytes, `/neighbors` or label arrays whose row counts differ from the splits, or a missing
 `distance` attribute) are listed under `input.eval_compatibility` and shown as warnings.
@@ -83,7 +84,7 @@ Common options:
 | `--disable` | | Any of `duplicates,knn,pca,clustering,hubness,quantization,ground_truth,labels` |
 | `--duplicate-memory-mb` | `4096` | Budget for exact duplicate detection (24 bytes per row); above it duplicates are checked on the sample |
 | `--threads`, `--chunk-mb` | all cores, `64` | Execution only; results do not depend on them |
-| `--from-profile` | | Re-render the HTML report or run the AI analysis from an existing JSON report |
+| `--from-profile` | | Re-render the HTML report or run the AI analysis from an existing JSON report; a saved AI analysis is kept unless a new one is requested, and `--output` writes a copy |
 
 Run `profile_dataset --help` for the full list, including the AI options below.
 

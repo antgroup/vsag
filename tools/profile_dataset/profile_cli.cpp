@@ -367,10 +367,14 @@ run_cli(int argc, char** argv, std::ostream& out, std::ostream& err, HttpTranspo
         const bool write_html = !parser.get<bool>("--no-html");
         auto json_path = parser.get<std::string>("--output");
         auto html_path = parser.get<std::string>("--html");
+        const bool explicit_output = !json_path.empty();
         JsonType report;
         if (!from_profile.empty()) {
             report = read_report(from_profile);
-            report.erase("ai_analysis");
+            // A saved analysis survives an offline re-render; only a new run replaces it.
+            if (ai.Enabled()) {
+                report.erase("ai_analysis");
+            }
             if (json_path.empty()) {
                 json_path = from_profile;
             }
@@ -399,6 +403,9 @@ run_cli(int argc, char** argv, std::ostream& out, std::ostream& err, HttpTranspo
         }
 
         std::string ai_status = "disabled";
+        if (!ai.Enabled() && report.contains("ai_analysis")) {
+            ai_status = report["ai_analysis"].value("status", "unknown") + " (saved)";
+        }
         if (ai.Enabled()) {
             std::unique_ptr<HttpTransport> owned;
             if (transport == nullptr) {
@@ -417,7 +424,7 @@ run_cli(int argc, char** argv, std::ostream& out, std::ostream& err, HttpTranspo
                            section.dump(2, ' ', false, JsonType::error_handler_t::replace) + "\n");
             }
         }
-        if (ai.Enabled() || from_profile.empty()) {
+        if (ai.Enabled() || from_profile.empty() || explicit_output) {
             write_file(json_path,
                        report.dump(2, ' ', false, JsonType::error_handler_t::replace) + "\n");
         }
