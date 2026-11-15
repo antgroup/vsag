@@ -20,6 +20,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <limits>
@@ -382,6 +383,78 @@ TEST_CASE("Term ids above 2^26 keep their document frequency across splits", "[p
     CHECK(at(report, "cross_split.postings_per_query.summary.p50") == 40.0);
 }
 
+namespace {
+
+/// Sparse file whose term ids straddle the dense frequency table bound of --chunk-mb 1
+/// (2^17 ids) and include a stray id just below 2^26.
+std::string
+make_stray_term_file(TempDir& dir) {
+    const uint32_t bound = 1U << 17U;
+    const uint32_t stray = (1U << 26U) - 1;
+    std::vector<SparseRecord> train(40, SparseRecord{{5, bound - 1}, {1.0F, 0.5F}});
+    train.push_back(SparseRecord{{bound, stray}, {1.0F, 0.5F}});
+    const std::vector<SparseRecord> test(
+        8, SparseRecord{{bound - 1, bound, stray}, {1.0F, 0.5F, 0.25F}});
+    const auto path = dir.File("stray_terms.hdf5");
+    H5::H5File file(path, H5F_ACC_TRUNC);
+    write_string_attribute(file, "type", "sparse");
+    write_string_attribute(file, "distance", "ip");
+    write_vector(file, "train", encode_sparse(train, nullptr), H5::PredType::NATIVE_INT8);
+    write_vector(file, "test", encode_sparse(test, nullptr), H5::PredType::NATIVE_INT8);
+    return path;
+}
+
+}  // namespace
+
+TEST_CASE("Document frequencies are exact on both sides of the dense table bound",
+          "[profile][report]") {
+    TempDir dir;
+    ProfileOptions options = small_options(make_stray_term_file(dir));
+    options.chunk_mb = 1;
+    const JsonType small_table = profile_dataset(options, nullptr);
+    options.chunk_mb = 64;
+    const JsonType large_table = profile_dataset(options, nullptr);
+    // 2^17 is counted in the hash map with --chunk-mb 1 and in the table with 64.
+    CHECK(small_table["determinism"]["metrics_sha256"] ==
+          large_table["determinism"]["metrics_sha256"]);
+    const JsonType& terms = small_table["splits"]["train"]["terms"];
+    CHECK(terms["max_term_id"] == (1U << 26U) - 1);
+    CHECK(terms["distinct_terms"] == 4);
+    CHECK(terms["postings"] == 82);
+    CHECK(at(small_table, "cross_split.query_term_coverage.value") == 1.0);
+}
+
+TEST_CASE("A stray large term id does not allocate a large frequency table", "[profile][report]") {
+#ifdef __linux__
+    TempDir dir;
+    ProfileOptions options = small_options(make_stray_term_file(dir));
+    options.chunk_mb = 1;
+    // A first run starts the thread pool and other one-time allocations.
+    (void)profile_dataset(options, nullptr);
+    // Reset the peak resident set (VmHWM), so run.peak_rss_bytes covers only the next profile.
+    {
+        std::ofstream clear("/proc/self/clear_refs");
+        clear << "5" << std::flush;
+        if (!clear) {
+            SKIP("cannot reset the peak resident set size");
+        }
+    }
+    uint64_t baseline = 0;
+    std::ifstream status("/proc/self/status");
+    for (std::string line; std::getline(status, line);) {
+        if (line.starts_with("VmRSS:")) {
+            baseline = std::stoull(line.substr(6)) * 1024ULL;
+        }
+    }
+    REQUIRE(baseline > 0);
+    const JsonType report = profile_dataset(options, nullptr);
+    // A table indexed up to the stray id 2^26 - 1 would hold 512 MiB of counters.
+    CHECK(report["run"]["peak_rss_bytes"].get<uint64_t>() < baseline + 128ULL * 1024ULL * 1024ULL);
+#else
+    SKIP("peak resident set size is read from /proc");
+#endif
+}
+
 TEST_CASE("Finite rows whose norm exceeds the float range keep their norm", "[profile][report]") {
     TempDir dir;
     const float big = std::numeric_limits<float>::max();
@@ -554,6 +627,42 @@ TEST_CASE("Auxiliary arrays must match the split row counts for eval_performance
     const std::string issues = compatibility["issues"].dump();
     CHECK_THAT(issues, ContainsSubstring("/neighbors has 1 rows but /test has 100"));
     CHECK_THAT(issues, ContainsSubstring("/train_labels has 10 entries but /train has 3000 rows"));
+}
+
+TEST_CASE("Label arrays that are not one-dimensional are reported, not fatal",
+          "[profile][report]") {
+    TempDir dir;
+    const auto path = dir.File("column_labels.hdf5");
+    make_dense_fixture(path);
+    {
+        H5::H5File file(path, H5F_ACC_RDWR);
+        file.unlink("train_labels");
+        file.unlink("test_labels");
+        // (N, 1) columns, as numpy writes a column vector, and a (2, 2) valid_ratios array.
+        write_matrix(file,
+                     "train_labels",
+                     std::vector<int64_t>(3000, 1),
+                     3000,
+                     1,
+                     H5::PredType::NATIVE_INT64);
+        write_matrix(
+            file, "test_labels", std::vector<int64_t>(100, 1), 100, 1, H5::PredType::NATIVE_INT64);
+        write_matrix(
+            file, "valid_ratios", std::vector<float>(4, 0.5F), 2, 2, H5::PredType::NATIVE_FLOAT);
+    }
+    // Used to fail after both passes, when the labels section read the arrays.
+    const JsonType report = profile_dataset(small_options(path), nullptr);
+    CHECK(report["splits"]["train"]["rows"] == 3000);
+    const std::string issues = report["input"]["eval_compatibility"]["issues"].dump();
+    CHECK_THAT(issues, ContainsSubstring("/train_labels must be one-dimensional"));
+    CHECK_THAT(issues, ContainsSubstring("/test_labels must be one-dimensional"));
+    CHECK_THAT(issues, ContainsSubstring("valid_ratios must be a non-empty one-dimensional"));
+    CHECK_THAT(at(report, "labels.train.skipped").get<std::string>(),
+               ContainsSubstring("has 2 dimensions"));
+    CHECK(find_path(report, "labels.test.skipped") != nullptr);
+    CHECK(find_path(report, "labels.valid_ratios.skipped") != nullptr);
+    CHECK_FALSE(report["labels"].contains("query_selectivity"));
+    CHECK_THAT(render_html_report(report), ContainsSubstring("label statistics need one label"));
 }
 
 TEST_CASE("Sparse records that repeat a term id are excluded from distance metrics",
@@ -817,4 +926,17 @@ TEST_CASE("CLI writes reports, re-renders saved profiles and rejects bad input",
     CHECK(cli({"-d", data, "--seed", "abc"}, &out, &err) == EXIT_FAILURE_INPUT);
     CHECK(cli({"--from-profile", data}, &out, &err) == EXIT_FAILURE_INPUT);
     CHECK_THAT(err, ContainsSubstring("not valid JSON"));
+
+    // Without a provider the analysis cannot succeed: rejected before any profiling.
+    const auto never = dir.File("never.json");
+    CHECK(cli({"-d", data, "-o", never, "--ai-required", "-q"}, &out, &err) == EXIT_FAILURE_INPUT);
+    CHECK_THAT(err, ContainsSubstring("--ai-required needs --ai-provider"));
+    CHECK_FALSE(std::filesystem::exists(never));
+    // --threads is range-checked before it reaches OpenMP: 2^32 would wrap to 0 threads.
+    for (const char* threads : {"4294967296", "4294967297", "4097"}) {
+        CHECK(cli({"-d", data, "-o", never, "--threads", threads, "-q"}, &out, &err) ==
+              EXIT_FAILURE_INPUT);
+        CHECK_THAT(err, ContainsSubstring("--threads must be in [0, 4096]"));
+    }
+    CHECK_FALSE(std::filesystem::exists(never));
 }

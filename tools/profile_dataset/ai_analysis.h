@@ -31,6 +31,8 @@ namespace vsag::dataset_profile {
 
 constexpr const char* AI_PROMPT_VERSION = "1";
 constexpr const char* DEFAULT_API_KEY_ENV = "VSAG_PROFILE_AI_API_KEY";
+constexpr double MAX_AI_TIMEOUT_SECONDS = 3600.0;
+constexpr uint64_t MAX_AI_RETRIES = 10;
 
 struct AiOptions {
     /// "none", "openai" (OpenAI-compatible Chat Completions) or "anthropic" (Messages API).
@@ -45,7 +47,10 @@ struct AiOptions {
     /// Header carrying the key: "Authorization" sends "Bearer <key>", any other name (for
     /// example Azure's "api-key") sends the raw key. Anthropic always uses x-api-key.
     std::string auth_header{"Authorization"};
+    /// Wall-clock limit of one attempt (at most 3600). The whole step, retry delays included,
+    /// ends within (max_retries + 1) x timeout_seconds.
     double timeout_seconds{60.0};
+    /// At most 10.
     uint64_t max_retries{1};
     double retry_delay_seconds{1.0};
     uint64_t max_output_tokens{2048};
@@ -72,14 +77,20 @@ struct HttpRequest {
     std::string url;
     std::vector<std::pair<std::string, std::string>> headers;
     std::string body;
+    /// Wall-clock limit for the whole exchange: connect, send and receive.
     double timeout_seconds{60.0};
+    /// The transfer stops as soon as the body would exceed this many bytes.
+    uint64_t max_response_bytes{1ULL << 20U};
 };
 
 struct HttpResponse {
     int status{0};
     std::string body;
-    /// Non-empty when no HTTP response was received (DNS, connect, TLS, timeout).
+    /// Non-empty when no complete HTTP response was received (DNS, connect, TLS, timeout, a
+    /// body above the size limit).
     std::string error;
+    /// The body exceeded HttpRequest::max_response_bytes and the transfer was stopped.
+    bool too_large{false};
 };
 
 /// Network seam: production uses cpp-httplib, tests inject failures and canned replies.
@@ -101,9 +112,11 @@ bool
 transport_supports_https();
 
 /// Flattens the allow-listed aggregate metrics of a report into {"dotted.key": value}.
-/// Numbers keep 6 significant digits and the result is bounded in size.
+/// Numbers keep 6 significant digits. The compact JSON never exceeds 48 KiB: percentiles,
+/// sample details and spectra are dropped first, then the most deeply nested keys.
+/// `dropped_keys`, when given, receives the number of keys left out.
 JsonType
-build_evidence(const JsonType& report, bool include_file_name);
+build_evidence(const JsonType& report, bool include_file_name, uint64_t* dropped_keys = nullptr);
 
 /// Provider-neutral prompt: {"system": ..., "user": ..., "response_schema": ...}.
 JsonType

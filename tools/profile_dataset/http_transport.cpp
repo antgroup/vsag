@@ -18,6 +18,9 @@
 #include <httplib.h>
 #pragma GCC diagnostic pop
 
+#include <algorithm>
+#include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <sstream>
 
@@ -155,12 +158,20 @@ public:
         try {
             httplib::Client client(endpoint.scheme + "://" + endpoint.host + ":" +
                                    std::to_string(endpoint.port));
-            const auto seconds = static_cast<time_t>(request.timeout_seconds);
+            double limit = request.timeout_seconds;
+            if (!(limit >= 0.001)) {
+                limit = 0.001;
+            }
+            limit = std::min(limit, MAX_AI_TIMEOUT_SECONDS);
+            const auto seconds = static_cast<time_t>(limit);
             const auto microseconds =
-                static_cast<time_t>((request.timeout_seconds - static_cast<double>(seconds)) * 1e6);
+                static_cast<time_t>((limit - static_cast<double>(seconds)) * 1e6);
             client.set_connection_timeout(seconds, microseconds);
             client.set_read_timeout(seconds, microseconds);
             client.set_write_timeout(seconds, microseconds);
+            // The timeouts above restart whenever a byte arrives, so a server that trickles its
+            // reply could keep them from firing; this limit covers the whole exchange.
+            client.set_max_timeout(static_cast<time_t>(std::ceil(limit * 1000.0)));
             configure_proxy(client, endpoint);
             httplib::Headers headers;
             std::string content_type = "application/json";
@@ -171,13 +182,47 @@ public:
                     headers.emplace(name, value);
                 }
             }
-            auto result = client.Post(endpoint.target, headers, request.body, content_type);
+            const auto start = std::chrono::steady_clock::now();
+            const auto deadline =
+                start + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                            std::chrono::duration<double>(limit));
+            std::string body;
+            bool late = false;
+            // The body is capped while it arrives, so an oversized reply is never buffered.
+            auto result = client.Post(endpoint.target,
+                                      headers,
+                                      request.body,
+                                      content_type,
+                                      [&](const char* data, size_t length) {
+                                          if (length > request.max_response_bytes - body.size()) {
+                                              response.too_large = true;
+                                              return false;
+                                          }
+                                          if (std::chrono::steady_clock::now() > deadline) {
+                                              late = true;
+                                              return false;
+                                          }
+                                          body.append(data, length);
+                                          return true;
+                                      });
+            if (response.too_large) {
+                response.error = "response body exceeds " +
+                                 std::to_string(request.max_response_bytes) +
+                                 " bytes; the transfer was stopped";
+                return response;
+            }
             if (!result) {
-                response.error = httplib::to_string(result.error());
+                if (late || std::chrono::steady_clock::now() >= deadline) {
+                    std::ostringstream message;
+                    message << "no complete response within " << limit << " s";
+                    response.error = message.str();
+                } else {
+                    response.error = httplib::to_string(result.error());
+                }
                 return response;
             }
             response.status = result->status;
-            response.body = result->body;
+            response.body = std::move(body);
         } catch (const std::exception& error) {
             response.error = error.what();
         }

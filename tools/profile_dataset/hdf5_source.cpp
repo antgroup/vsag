@@ -270,16 +270,25 @@ inspect_dataset(const std::string& path) {
         }
         info.has_train_labels = has("train_labels");
         info.has_test_labels = has("test_labels");
-        for (const auto& [name, rows, columns] :
-             {std::tuple{"train_labels", &info.train_label_rows, &info.train_label_columns},
-              std::tuple{"test_labels", &info.test_label_rows, &info.test_label_columns}}) {
+        for (const auto& [name, rows, rank] :
+             {std::tuple{"train_labels", &info.train_label_rows, &info.train_label_rank},
+              std::tuple{"test_labels", &info.test_label_rows, &info.test_label_rank}}) {
             if (has(name)) {
                 const auto shape = dataset_shape(file.openDataSet(name));
                 *rows = shape.empty() ? 0 : shape[0];
-                *columns = shape.size() > 1 ? shape[1] : 0;
+                *rank = shape.size();
             }
         }
         info.has_valid_ratios = has("valid_ratios");
+        if (info.has_valid_ratios) {
+            const auto shape = dataset_shape(file.openDataSet("valid_ratios"));
+            info.valid_ratios_rank = shape.size();
+            if (shape.size() != 1 || shape[0] == 0) {
+                info.eval_compatibility_issues.emplace_back(
+                    "valid_ratios must be a non-empty one-dimensional dataset for "
+                    "eval_performance");
+            }
+        }
         if (info.has_train_labels != info.has_test_labels) {
             info.eval_compatibility_issues.emplace_back(
                 "train_labels and test_labels must be provided together");

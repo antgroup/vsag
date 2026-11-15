@@ -34,6 +34,9 @@ constexpr uint64_t MAX_EVIDENCE_BYTES = 48ULL * 1024ULL;
 constexpr uint64_t MAX_ARRAY_ITEMS = 10;
 constexpr uint64_t MAX_STRING_LENGTH = 300;
 constexpr uint64_t MAX_REPLY_BYTES = 256ULL * 1024ULL;
+// The provider's JSON envelope around the reply, escapes included; larger bodies are cut off
+// while they arrive.
+constexpr uint64_t MAX_RESPONSE_BYTES = 4ULL * MAX_REPLY_BYTES;
 constexpr uint64_t MAX_ITEMS = 20;
 constexpr uint64_t MAX_EVIDENCE_PER_ITEM = 12;
 constexpr uint64_t MAX_TEXT = 2000;
@@ -545,6 +548,39 @@ evidence_priority(const std::string& key) {
     return 3;
 }
 
+/// Keeps the least nested keys (ties in key order) whose compact JSON fits in
+/// MAX_EVIDENCE_BYTES. Used when the evidence is still too large after the priority tiers.
+JsonType
+fit_evidence(const JsonType& evidence) {
+    struct Entry {
+        uint64_t depth;
+        std::string key;
+        uint64_t bytes;
+    };
+    std::vector<Entry> entries;
+    entries.reserve(evidence.size());
+    for (const auto& item : evidence.items()) {
+        const std::string& key = item.key();
+        // "key":value in compact form; commas are added below.
+        entries.push_back(Entry{static_cast<uint64_t>(std::count(key.begin(), key.end(), '.')),
+                                key,
+                                JsonType(key).dump().size() + 1 + item.value().dump().size()});
+    }
+    std::sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b) {
+        return a.depth != b.depth ? a.depth < b.depth : a.key < b.key;
+    });
+    JsonType kept = JsonType::object();
+    uint64_t used = 2;  // the braces
+    for (const auto& entry : entries) {
+        const uint64_t cost = entry.bytes + (kept.empty() ? 0 : 1);
+        if (used + cost <= MAX_EVIDENCE_BYTES) {
+            kept[entry.key] = evidence.at(entry.key);
+            used += cost;
+        }
+    }
+    return kept;
+}
+
 std::string
 lowercase(std::string text) {
     std::transform(
@@ -733,8 +769,11 @@ validate_ai_options(const AiOptions& options) {
     if (options.language != "en" && options.language != "zh") {
         throw ProfileError("unsupported AI language '" + options.language + "'; expected en or zh");
     }
-    if (!(options.timeout_seconds > 0.0)) {
-        throw ProfileError("--ai-timeout must be positive");
+    if (!(options.timeout_seconds > 0.0 && options.timeout_seconds <= MAX_AI_TIMEOUT_SECONDS)) {
+        throw ProfileError("--ai-timeout must be in (0, 3600] seconds");
+    }
+    if (options.max_retries > MAX_AI_RETRIES) {
+        throw ProfileError("--ai-retries must be at most " + std::to_string(MAX_AI_RETRIES));
     }
     if (options.api_key_env.empty()) {
         throw ProfileError("--ai-api-key-env must name an environment variable");
@@ -771,10 +810,11 @@ redact_strings(JsonType& node, const std::string& secret) {
 }
 
 JsonType
-build_evidence(const JsonType& report, bool include_file_name) {
+build_evidence(const JsonType& report, bool include_file_name, uint64_t* dropped_keys) {
     JsonType evidence = JsonType::object();
     std::vector<std::string> segments;
     flatten(report, segments, include_file_name, evidence);
+    const uint64_t flattened = evidence.size();
     for (int tier = 0; tier < 3 && evidence.dump().size() > MAX_EVIDENCE_BYTES; ++tier) {
         JsonType reduced = JsonType::object();
         for (const auto& item : evidence.items()) {
@@ -783,6 +823,12 @@ build_evidence(const JsonType& report, bool include_file_name) {
             }
         }
         evidence = reduced;
+    }
+    if (evidence.dump().size() > MAX_EVIDENCE_BYTES) {
+        evidence = fit_evidence(evidence);
+    }
+    if (dropped_keys != nullptr) {
+        *dropped_keys = flattened - evidence.size();
     }
     return evidence;
 }
@@ -976,7 +1022,8 @@ run_ai_analysis(const JsonType& report,
         if (!options.dry_run && options.model.empty()) {
             throw ProfileError("no AI model configured; set --ai-model or VSAG_PROFILE_AI_MODEL");
         }
-        const JsonType evidence = build_evidence(report, options.include_file_name);
+        uint64_t dropped_keys = 0;
+        const JsonType evidence = build_evidence(report, options.include_file_name, &dropped_keys);
         const JsonType prompt = build_prompt(evidence, options.language);
         JsonType body;
         if (options.provider == "anthropic") {
@@ -1000,6 +1047,7 @@ run_ai_analysis(const JsonType& report,
         section["request_sha256"] = sha256_hex(payload);
         section["request_bytes"] = payload.size();
         section["evidence_key_count"] = evidence.size();
+        section["evidence_dropped_keys"] = dropped_keys;
         if (!options.request_output.empty()) {
             std::ofstream file(options.request_output, std::ios::binary);
             if (!file) {
@@ -1018,7 +1066,7 @@ run_ai_analysis(const JsonType& report,
         HttpRequest request;
         request.url = url;
         request.body = payload;
-        request.timeout_seconds = options.timeout_seconds;
+        request.max_response_bytes = MAX_RESPONSE_BYTES;
         request.headers.emplace_back("Content-Type", "application/json");
         if (options.provider == "anthropic") {
             request.headers.emplace_back("x-api-key", key);
@@ -1030,22 +1078,40 @@ run_ai_analysis(const JsonType& report,
         }
         HttpResponse response;
         uint64_t attempts = 0;
+        // Each attempt is limited to the timeout, and all attempts together with the delays
+        // between them to (retries + 1) x timeout.
+        using Clock = std::chrono::steady_clock;
+        const auto deadline =
+            Clock::now() +
+            std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(
+                options.timeout_seconds * static_cast<double>(options.max_retries + 1)));
         for (;;) {
+            const double remaining = std::chrono::duration<double>(deadline - Clock::now()).count();
+            request.timeout_seconds = std::min(options.timeout_seconds, std::max(remaining, 0.001));
             ++attempts;
             response = transport.Post(request);
-            const bool retryable =
-                !response.error.empty() || response.status == 429 || response.status >= 500;
+            const bool retryable = (!response.error.empty() && !response.too_large) ||
+                                   response.status == 429 || response.status >= 500;
             if (!retryable || attempts > options.max_retries) {
                 break;
             }
-            std::this_thread::sleep_for(std::chrono::duration<double>(
-                options.retry_delay_seconds * static_cast<double>(attempts)));
+            const auto delay =
+                std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(
+                    options.retry_delay_seconds * static_cast<double>(attempts)));
+            if (Clock::now() + delay >= deadline) {
+                break;
+            }
+            std::this_thread::sleep_for(delay);
         }
         section["attempts"] = attempts;
         // Redact before anything is truncated, parsed or reported: a key cut by truncation would
         // no longer match and could leak in part.
         response.error = redact(response.error, key);
         response.body = redact(response.body, key);
+        if (response.too_large || response.body.size() > MAX_RESPONSE_BYTES) {
+            throw ProfileError("provider response exceeds " + std::to_string(MAX_RESPONSE_BYTES) +
+                               " bytes");
+        }
         if (!response.error.empty()) {
             throw ProfileError("provider unreachable: " + truncate(response.error, MAX_ERROR_TEXT));
         }

@@ -272,7 +272,10 @@ private:
     std::vector<uint64_t> hash_high_;
     std::vector<uint64_t> hash_low_;
     bool full_duplicates_{false};
-    /// Document frequencies of term ids below 2^26, indexed by id.
+    /// Term ids below this bound are counted in `term_frequency_`: --chunk-mb of 8-byte
+    /// counters, at most 2^26, so a few large ids cannot allocate a large table.
+    uint64_t dense_term_limit_{0};
+    /// Document frequencies of term ids below `dense_term_limit_`, indexed by id.
     std::vector<uint64_t> term_frequency_;
     /// Document frequencies of larger term ids.
     std::unordered_map<uint32_t, uint64_t> overflow_terms_;

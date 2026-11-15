@@ -22,8 +22,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <chrono>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
+#include <limits>
 #include <mutex>
 #include <sstream>
 #include <thread>
@@ -76,6 +79,19 @@ public:
             responses.erase(responses.begin());
         }
         return response;
+    }
+};
+
+/// Spends each attempt's whole time limit, as a provider that never answers would.
+class TimeoutTransport : public HttpTransport {
+public:
+    std::vector<double> timeouts;
+
+    HttpResponse
+    Post(const HttpRequest& request) override {
+        timeouts.push_back(request.timeout_seconds);
+        std::this_thread::sleep_for(std::chrono::duration<double>(request.timeout_seconds));
+        return HttpResponse{0, "", "timed out"};
     }
 };
 
@@ -166,7 +182,10 @@ read_text(const std::string& path) {
 }
 
 int
-cli(const std::vector<std::string>& arguments, std::string& out, std::string& err) {
+cli(const std::vector<std::string>& arguments,
+    std::string& out,
+    std::string& err,
+    HttpTransport* transport = nullptr) {
     std::vector<std::string> storage = {"profile_dataset"};
     storage.insert(storage.end(), arguments.begin(), arguments.end());
     std::vector<char*> argv;
@@ -176,11 +195,35 @@ cli(const std::vector<std::string>& arguments, std::string& out, std::string& er
     }
     std::ostringstream out_stream;
     std::ostringstream err_stream;
-    const int code = run_cli(static_cast<int>(argv.size()), argv.data(), out_stream, err_stream);
+    const int code =
+        run_cli(static_cast<int>(argv.size()), argv.data(), out_stream, err_stream, transport);
     out = out_stream.str();
     err = err_stream.str();
     return code;
 }
+
+/// Answers like a provider and records which output files existed when the request was sent,
+/// and whether a JSON report among them already held an AI analysis.
+class ObservingTransport : public HttpTransport {
+public:
+    std::vector<std::string> paths;
+    std::vector<bool> existed;
+    bool json_had_analysis{false};
+
+    HttpResponse
+    Post(const HttpRequest& /*request*/) override {
+        existed.clear();
+        for (const auto& path : paths) {
+            existed.push_back(std::filesystem::exists(path));
+            if (existed.back() && path.ends_with(".json")) {
+                json_had_analysis =
+                    json_had_analysis || JsonType::parse(read_text(path)).contains("ai_analysis");
+            }
+        }
+        return HttpResponse{
+            200, openai_envelope(valid_reply("splits.train.invalid_values.total")), ""};
+    }
+};
 
 }  // namespace
 
@@ -507,6 +550,96 @@ TEST_CASE("Provider failures degrade to warnings and never leak the key", "[prof
     CHECK(redact("unchanged", "") == "unchanged");
 }
 
+TEST_CASE("Oversized replies and silent providers are bounded", "[profile][ai]") {
+    ScopedEnv key(TEST_KEY_ENV, TEST_KEY);
+    std::ostringstream warnings;
+    AiOptions options = openai_options();
+    options.max_retries = 2;
+
+    // A body cut off by the transport is not retried: another attempt would be as large.
+    MockTransport oversized;
+    oversized.responses = {
+        HttpResponse{0, "", "response body exceeds 1048576 bytes; the transfer was stopped", true}};
+    JsonType section = run_ai_analysis(dense_report(), options, oversized, warnings);
+    CHECK(section["status"] == "failed");
+    REQUIRE(oversized.requests.size() == 1);
+    CHECK(oversized.requests[0].max_response_bytes == 1048576);
+    CHECK_THAT(section["message"].get<std::string>(), ContainsSubstring("exceeds 1048576 bytes"));
+    // A transport that ignores the limit is caught as well.
+    MockTransport unbounded;
+    unbounded.responses = {HttpResponse{200, std::string(2ULL << 20U, ' '), ""}};
+    section = run_ai_analysis(dense_report(), options, unbounded, warnings);
+    CHECK(section["status"] == "failed");
+    CHECK_THAT(section["message"].get<std::string>(), ContainsSubstring("exceeds 1048576 bytes"));
+
+    // Attempts and the delays between them share (retries + 1) x timeout = 0.6 s. After two
+    // 0.2 s attempts and a 0.1 s delay, a third attempt would follow a 0.2 s delay and end
+    // past that budget, so it is not made.
+    options.timeout_seconds = 0.2;
+    options.retry_delay_seconds = 0.1;
+    TimeoutTransport silent;
+    section = run_ai_analysis(dense_report(), options, silent, warnings);
+    CHECK(section["status"] == "failed");
+    CHECK(silent.timeouts.size() == 2);
+    for (const double timeout : silent.timeouts) {
+        CHECK(timeout > 0.0);
+        CHECK(timeout <= 0.2);
+    }
+
+    // Limits that cannot be honored are rejected.
+    AiOptions bad = openai_options();
+    for (const double timeout : {0.0,
+                                 -1.0,
+                                 3601.0,
+                                 std::numeric_limits<double>::infinity(),
+                                 std::numeric_limits<double>::quiet_NaN()}) {
+        bad.timeout_seconds = timeout;
+        CHECK_THROWS_WITH(validate_ai_options(bad),
+                          ContainsSubstring("--ai-timeout must be in (0, 3600]"));
+    }
+    bad.timeout_seconds = 60.0;
+    bad.max_retries = 11;
+    CHECK_THROWS_WITH(validate_ai_options(bad),
+                      ContainsSubstring("--ai-retries must be at most 10"));
+}
+
+TEST_CASE("Evidence stays within 48 KiB even when only top-priority keys remain", "[profile][ai]") {
+    JsonType report = dense_report();
+    // 8^4 nested known keys (about 190 KB) under a section that dense splits do not have: none
+    // is a percentile, sample or spectrum key, so the priority tiers cannot remove them, and all
+    // are nested deeper than the profiler's own keys.
+    const std::vector<std::string> keys = {
+        "mean", "max", "min", "std", "count", "total", "ratio", "value"};
+    for (const auto& a : keys) {
+        for (const auto& b : keys) {
+            for (const auto& c : keys) {
+                for (const auto& d : keys) {
+                    report["splits"]["train"]["terms"][a][b][c][d] = 0.5;
+                }
+            }
+        }
+    }
+    uint64_t dropped = 0;
+    const JsonType evidence = build_evidence(report, false, &dropped);
+    CHECK(evidence.dump().size() <= 48ULL * 1024ULL);
+    CHECK(dropped >= keys.size() * keys.size() * keys.size() * keys.size() / 2);
+    // The least nested keys are kept first.
+    for (const char* kept : {"config.metric", "input.vector_type", "splits.train.rows"}) {
+        INFO(kept);
+        CHECK(evidence.contains(kept));
+    }
+
+    ScopedEnv key(TEST_KEY_ENV, TEST_KEY);
+    AiOptions options = openai_options();
+    options.dry_run = true;
+    MockTransport unused;
+    std::ostringstream warnings;
+    const JsonType section = run_ai_analysis(report, options, unused, warnings);
+    CHECK(section["status"] == "dry_run");
+    CHECK(section["evidence_key_count"] == evidence.size());
+    CHECK(section["evidence_dropped_keys"] == dropped);
+}
+
 TEST_CASE("Dry runs build and save the request without sending it", "[profile][ai]") {
     ScopedEnv key(TEST_KEY_ENV, TEST_KEY);
     TempDir dir;
@@ -603,4 +736,115 @@ TEST_CASE("End to end: a local OpenAI-compatible provider, then an unavailable o
     required.emplace_back("--ai-required");
     CHECK(cli(required, out, err) == EXIT_AI_REQUIRED_FAILED);
     CHECK(JsonType::parse(read_text(json)).contains("splits"));
+}
+
+TEST_CASE("The HTTP transport caps the body as it arrives and bounds the exchange in time",
+          "[profile][ai]") {
+    httplib::Server server;
+    server.Post("/ok", [](const httplib::Request&, httplib::Response& response) {
+        response.set_content(R"({"ok": true})", "application/json");
+    });
+    server.Post("/big", [](const httplib::Request&, httplib::Response& response) {
+        response.set_content(std::string(2ULL << 20U, 'x'), "application/json");
+    });
+    server.Post("/slow", [](const httplib::Request&, httplib::Response& response) {
+        // One byte every 20 ms for up to 5 s: every byte restarts a per-read timeout.
+        response.set_chunked_content_provider(
+            "application/json", [](size_t offset, httplib::DataSink& sink) {
+                if (offset >= 250) {
+                    sink.done();
+                    return true;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                return sink.write(" ", 1);
+            });
+    });
+    const int port = server.bind_to_any_port("127.0.0.1");
+    REQUIRE(port > 0);
+    std::thread worker([&server] { server.listen_after_bind(); });
+    server.wait_until_ready();
+    const std::string base = "http://127.0.0.1:" + std::to_string(port);
+    const auto transport = make_http_transport();
+
+    HttpRequest request;
+    request.body = "{}";
+    request.timeout_seconds = 5.0;
+    request.max_response_bytes = 1ULL << 20U;
+    request.url = base + "/ok";
+    HttpResponse response = transport->Post(request);
+    CHECK(response.error.empty());
+    CHECK(response.status == 200);
+    CHECK(response.body == R"({"ok": true})");
+
+    request.url = base + "/big";
+    response = transport->Post(request);
+    CHECK(response.too_large);
+    CHECK(response.body.empty());
+    CHECK_THAT(response.error, ContainsSubstring("exceeds 1048576 bytes"));
+
+    request.url = base + "/slow";
+    request.timeout_seconds = 0.3;
+    const auto start = std::chrono::steady_clock::now();
+    response = transport->Post(request);
+    const double elapsed =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    CHECK_THAT(response.error, ContainsSubstring("no complete response within 0.3 s"));
+    CHECK(elapsed < 2.5);
+    server.stop();
+    worker.join();
+}
+
+TEST_CASE("Reports are on disk before the AI request, also for saved profiles",
+          "[profile][ai][cli]") {
+    ScopedEnv key(TEST_KEY_ENV, TEST_KEY);
+    TempDir dir;
+    const auto data = dir.File("data.hdf5");
+    make_dense_fixture(data);
+    const std::vector<std::string> ai = {"--ai-provider",
+                                         "openai",
+                                         "--ai-model",
+                                         "mock-model",
+                                         "--ai-api-key-env",
+                                         TEST_KEY_ENV,
+                                         "-q"};
+    auto with_ai = [&ai](std::vector<std::string> arguments) {
+        arguments.insert(arguments.end(), ai.begin(), ai.end());
+        return arguments;
+    };
+    std::string out;
+    std::string err;
+
+    const auto json = dir.File("report.json");
+    const auto html = dir.File("report.html");
+    ObservingTransport profiling;
+    profiling.paths = {json, html};
+    REQUIRE(cli(with_ai({"-d", data, "-o", json, "--html", html, "--sample-size", "300"}),
+                out,
+                err,
+                &profiling) == EXIT_OK);
+    CHECK(profiling.existed == std::vector<bool>{true, true});
+    CHECK_FALSE(profiling.json_had_analysis);
+
+    // A saved profile with explicit outputs: both are written, without the new analysis,
+    // before the request, then rewritten with it.
+    const auto copy = dir.File("copy.json");
+    const auto again = dir.File("again.html");
+    ObservingTransport saved;
+    saved.paths = {copy, again};
+    REQUIRE(cli(with_ai({"--from-profile", json, "-o", copy, "--html", again}), out, err, &saved) ==
+            EXIT_OK);
+    CHECK(saved.existed == std::vector<bool>{true, true});
+    CHECK_FALSE(saved.json_had_analysis);
+    CHECK(JsonType::parse(read_text(copy))["ai_analysis"]["status"] == "ok");
+    CHECK_THAT(read_text(again), ContainsSubstring("Drop invalid rows"));
+
+    // Without --output only the HTML is written first; the saved profile gets the analysis.
+    const auto in_place_html = dir.File("in_place.html");
+    ObservingTransport in_place;
+    in_place.paths = {in_place_html};
+    REQUIRE(cli(with_ai({"--from-profile", copy, "--html", in_place_html}), out, err, &in_place) ==
+            EXIT_OK);
+    CHECK(in_place.existed == std::vector<bool>{true});
+    CHECK(JsonType::parse(read_text(copy))["ai_analysis"]["status"] == "ok");
+    CHECK_THAT(read_text(in_place_html), ContainsSubstring("Drop invalid rows"));
 }

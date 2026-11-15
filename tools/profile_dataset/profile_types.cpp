@@ -123,6 +123,7 @@ validate_options(const ProfileOptions& options) {
     require_range("quantization-queries", options.quantization_queries, 1, 100000);
     require_range("quantization-k", options.quantization_k, 1, 1000);
     require_range("chunk-mb", options.chunk_mb, 1, 65536);
+    require_range("threads", options.threads, 0, 4096);
     require_range("duplicate-memory-mb", options.duplicate_memory_mb, 0, 1048576);
     const double threshold = options.near_duplicate_threshold;
     if (std::isnan(threshold) || threshold < 0.0 || threshold >= 1.0) {

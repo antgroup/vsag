@@ -60,12 +60,14 @@ struct DatasetInfo {
     uint64_t ground_truth_k{0};
     bool has_train_labels{false};
     bool has_test_labels{false};
-    /// Label array shapes: entries, and 0 or the second extent (eval_performance wants (N,)).
+    /// Label array shapes: first extent and number of dimensions. Only one-dimensional arrays
+    /// (one label per row, as eval_performance requires) are read; others are reported.
     uint64_t train_label_rows{0};
     uint64_t test_label_rows{0};
-    uint64_t train_label_columns{0};
-    uint64_t test_label_columns{0};
+    uint64_t train_label_rank{0};
+    uint64_t test_label_rank{0};
     bool has_valid_ratios{false};
+    uint64_t valid_ratios_rank{0};
     /// Differences from what `eval_performance` accepts; profiling continues regardless.
     std::vector<std::string> eval_compatibility_issues;
 

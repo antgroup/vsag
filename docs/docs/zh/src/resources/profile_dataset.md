@@ -73,7 +73,7 @@ profile_dataset: sift-128-euclidean.hdf5 (dense, metric l2)
 | `--pca-max-dim` | `2048` | 维度超过该值时跳过 PCA |
 | `--disable` | | 可关闭 `duplicates,knn,pca,clustering,hubness,quantization,ground_truth,labels` 中的任意项 |
 | `--duplicate-memory-mb` | `4096` | 精确重复检测的内存预算（每行 24 字节）；超出时改为在样本上检测 |
-| `--threads`、`--chunk-mb` | 全部核心、`64` | 只影响执行方式，不影响结果 |
+| `--threads`、`--chunk-mb` | 全部核心、`64` | 只影响执行方式，不影响结果（线程数最多 4096） |
 | `--from-profile` | | 基于已有 JSON 报告重新生成 HTML 或运行 AI 分析；除非请求新的分析，已保存的 AI 分析会保留，`--output` 会写出一份副本 |
 
 完整选项（包括下文的 AI 选项）见 `profile_dataset --help`。
@@ -181,7 +181,7 @@ recall@k 低于 0.95、查询分布偏移（范数 KS > 0.1 或分布外比例 >
   该目标以 `-fno-fast-math -ffp-contract=off` 编译，并通过位模式识别 NaN/Inf。因此结果与 `--threads`、`--chunk-mb` 无关，
   可以用 `determinism.metrics_sha256` 验证。
 - 内存有界：每行保存一个范数、一个非零元计数和一个有效标志（稠密数据为 13 字节），外加 16 字节的重复检测哈希（分组时为 24 字节，受
-  `--duplicate-memory-mb` 限制）。采样类计算受选项约束：样本为 `sample_size x dim` 个浮点数，k-NN 状态为 `knn_queries x k`，样本内分析最多使用
+  `--duplicate-memory-mb` 限制）。稀疏数据的文档频率中，小于 `--chunk-mb` MiB / 8（最多 2^26）的 term id 用 8 字节计数表统计，更大的 id 用哈希表统计，因此少数很大的 id 不会分配大表。采样类计算受选项约束：样本为 `sample_size x dim` 个浮点数，k-NN 状态为 `knn_queries x k`，样本内分析最多使用
   `sample_size` 行。工具从不为完整划分构建 `N x N` 的两两矩阵，完整划分只被流式读取两遍。
 
 ## HTML 报告
@@ -208,10 +208,10 @@ HTML 报告是单个文件，包含内联 CSS、内联 SVG 图表和少量内联
 | `--ai-api-key-env` | | `VSAG_PROFILE_AI_API_KEY` | 保存密钥的环境变量名 |
 | `--ai-auth-header` | | `Authorization` | 携带密钥的请求头；`Authorization` 发送 `Bearer <key>`，其他名称（例如 Azure OpenAI 的 `api-key`）直接发送密钥 |
 | `--ai-language` | `VSAG_PROFILE_AI_LANGUAGE` | `en` | 生成文本的语言：`en` 或 `zh` |
-| `--ai-timeout`、`--ai-retries` | | `60`、`1` | 单次请求超时（秒）；对传输错误、HTTP 429 与 5xx 的重试次数 |
+| `--ai-timeout`、`--ai-retries` | | `60`、`1` | 单次尝试的总时长上限（秒，含连接、发送与接收，最多 3600）；对传输错误、HTTP 429 与 5xx 的重试次数（最多 10）。所有尝试及其间隔合计不超过（重试次数 + 1）x 超时 |
 | `--ai-dry-run`、`--ai-request-out` | | | 只构建（并保存）完整请求体，不发送 |
 | `--ai-output` | | | 另外把 `ai_analysis` 部分写入单独文件 |
-| `--ai-required` | | 关闭 | AI 分析未成功时以退出码 3 结束（报告仍会写出） |
+| `--ai-required` | | 关闭 | AI 分析未成功时以退出码 3 结束（报告仍会写出）；需要同时指定 `--ai-provider` |
 
 API Key 只从 `--ai-api-key-env` 指定的环境变量读取；工具没有任何接收密钥的命令行选项，因此密钥不会进入 shell 历史或进程列表。密钥只出现在请求头中，
 并会从所有消息、报告和日志中脱敏。支持 `HTTPS_PROXY`、`HTTP_PROXY` 和 `NO_PROXY`。
@@ -239,7 +239,7 @@ export VSAG_PROFILE_AI_API_KEY=...        # 不要把密钥作为参数传入
 
 请求只包含一个扁平的证据对象，其中是白名单内的**聚合**指标（摘要、比例、计数和较短的谱；每个键路径都必须是工具会写出的字段，因此已保存报告中的未知字段永远不会被发送）、基于规则的观察结论、最终使用的度量以及采样配置。
 请求永远不包含向量、采样行、行号、PCA 坐标、逐维数组、直方图、term id、标签值、文件路径或认证信息。只有指定 `--ai-include-file-name`
-时才会包含文件名。证据大小与数据行数无关。报告会记录 `request_sha256`、证据字段数量和 `raw_vectors_sent: false`；`--ai-dry-run`
+时才会包含文件名。证据大小与数据行数无关，其紧凑 JSON 不超过 48 KiB：先去掉分位数、采样细节和谱，再去掉嵌套最深的字段（数量记录在 `evidence_dropped_keys`）。报告会记录 `request_sha256`、证据字段数量和 `raw_vectors_sent: false`；`--ai-dry-run`
 可以查看完整请求内容。
 
 ### 响应约定与校验
@@ -247,7 +247,7 @@ export VSAG_PROFILE_AI_API_KEY=...        # 不要把密钥作为参数传入
 模型必须返回一个 JSON 对象：`summary`、`findings`（title、severity、detail、evidence）、`recommendations`（title、category、
 hypothesis、rationale、validation、confidence、evidence）、`uncertainties` 和 `additional_measurements`。工具会拒绝证据字段缺失或不在请求中的条目、
 字段非法的条目，以及把配置表述为必然最优或有保证的建议；被拒绝的条目列在 `ai_analysis.rejected_items` 中。格式错误的回复得到
-`status: invalid_response`，服务不可达得到 `status: failed`。无论哪种情况，确定性的 JSON 与 HTML 报告都已在请求之前写出；工具会输出警告，
+`status: invalid_response`，服务不可达得到 `status: failed`；超过 1 MiB 的响应会在接收过程中被截断，同样得到 `status: failed`。无论哪种情况，确定性的 JSON 与 HTML 报告（使用 `--from-profile` 时为 HTML 报告和显式指定的 `--output` 副本）都已在请求之前写出；工具会输出警告，
 并以退出码 0 结束，除非设置了 `--ai-required`。模型输出在 HTML 报告中会被转义。
 
 ### 验证 AI 建议
