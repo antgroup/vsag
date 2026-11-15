@@ -323,23 +323,23 @@ row_count_issues(const DatasetInfo& info, uint64_t train_rows, uint64_t test_row
                          " rows but /test has " + std::to_string(test_rows) +
                          "; eval_performance requires one row per query");
     }
-    for (const auto& [name, present, rows, columns, split_rows, split] :
+    for (const auto& [name, present, rows, rank, split_rows, split] :
          {std::tuple{"train_labels",
                      info.has_train_labels,
                      info.train_label_rows,
-                     info.train_label_columns,
+                     info.train_label_rank,
                      train_rows,
                      "/train"},
           std::tuple{"test_labels",
                      info.has_test_labels,
                      info.test_label_rows,
-                     info.test_label_columns,
+                     info.test_label_rank,
                      test_rows,
                      "/test"}}) {
         if (!present) {
             continue;
         }
-        if (columns != 0) {
+        if (rank != 1) {
             issues.push_back(std::string("/") + name +
                              " must be one-dimensional (one label per row) for eval_performance");
         } else if (split_rows > 0 && rows != split_rows) {
@@ -360,8 +360,18 @@ labels_report(const DatasetInfo& info, const std::vector<std::string>& splits) {
          "(filtered-search selectivity)."}};
     std::map<int64_t, uint64_t> train_counts;
     uint64_t train_total = 0;
+    bool test_read = false;
     for (const auto& split : splits) {
         const std::string name = split + "_labels";
+        const uint64_t rank = split == "train" ? info.train_label_rank : info.test_label_rank;
+        if (rank != 1) {
+            // Listed under input.eval_compatibility; the rest of the profile is unaffected.
+            report[split] = JsonType{{"skipped",
+                                      "/" + name + " has " + std::to_string(rank) +
+                                          " dimensions; label statistics need one label per row"}};
+            continue;
+        }
+        test_read = test_read || split == "test";
         std::map<int64_t, uint64_t> counts;
         uint64_t total = 0;
         for_each_int64_chunk(
@@ -394,7 +404,7 @@ labels_report(const DatasetInfo& info, const std::vector<std::string>& splits) {
             train_total = total;
         }
     }
-    if (std::find(splits.begin(), splits.end(), "test") != splits.end() && train_total > 0) {
+    if (test_read && train_total > 0) {
         std::vector<double> selectivity;
         for_each_int64_chunk(
             info.path, "test_labels", 1 << 20, [&](uint64_t, const std::vector<int64_t>& values) {
@@ -414,7 +424,12 @@ labels_report(const DatasetInfo& info, const std::vector<std::string>& splits) {
                                                {"histogram", histogram_of_sorted(sorted, 20)},
                                                {"queries_without_matching_base_rows", empty}};
     }
-    if (info.has_valid_ratios) {
+    if (info.has_valid_ratios && info.valid_ratios_rank != 1) {
+        report["valid_ratios"] =
+            JsonType{{"skipped",
+                      "/valid_ratios has " + std::to_string(info.valid_ratios_rank) +
+                          " dimensions; one ratio per entry is expected"}};
+    } else if (info.has_valid_ratios) {
         std::vector<float> ratios = read_float_vector(info.path, "valid_ratios");
         std::vector<double> values(ratios.begin(), ratios.end());
         report["valid_ratios"] =

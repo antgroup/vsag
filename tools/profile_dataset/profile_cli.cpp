@@ -78,6 +78,11 @@ write_file(const std::string& path, const std::string& content) {
     }
 }
 
+std::string
+pretty_json(const JsonType& value) {
+    return value.dump(2, ' ', false, JsonType::error_handler_t::replace) + "\n";
+}
+
 JsonType
 read_report(const std::string& path) {
     std::ifstream file(path);
@@ -208,7 +213,7 @@ add_arguments(argparse::ArgumentParser& parser) {
     parser.add_argument("--threads")
         .default_value(defaults.threads)
         .scan<'u', uint64_t>()
-        .help("worker threads, 0 = all cores (results do not depend on it)");
+        .help("worker threads, 0 = all cores, at most 4096 (results do not depend on it)");
     parser.add_argument("--chunk-mb")
         .default_value(defaults.chunk_mb)
         .scan<'u', uint64_t>()
@@ -240,10 +245,11 @@ add_arguments(argparse::ArgumentParser& parser) {
     parser.add_argument("--ai-timeout")
         .default_value(ai_defaults.timeout_seconds)
         .scan<'g', double>()
-        .help("seconds per request");
+        .help("wall-clock seconds per attempt, at most 3600");
     parser.add_argument("--ai-retries")
         .default_value(ai_defaults.max_retries)
-        .scan<'u', uint64_t>();
+        .scan<'u', uint64_t>()
+        .help("retries after transport errors, HTTP 429 and 5xx, at most 10");
     parser.add_argument("--ai-max-tokens")
         .default_value(ai_defaults.max_output_tokens)
         .scan<'u', uint64_t>();
@@ -267,7 +273,9 @@ add_arguments(argparse::ArgumentParser& parser) {
     parser.add_argument("--ai-required")
         .default_value(false)
         .implicit_value(true)
-        .help("exit with code 3 when the AI analysis does not succeed (reports are still written)");
+        .help(
+            "exit with code 3 when the AI analysis does not succeed (needs --ai-provider; reports "
+            "are still written)");
 }
 
 std::string
@@ -361,13 +369,14 @@ run_cli(int argc, char** argv, std::ostream& out, std::ostream& err, HttpTranspo
         if (from_profile.empty() == options.data_path.empty()) {
             throw ProfileError("pass exactly one of --datapath or --from-profile");
         }
-        if (options.threads > 0) {
-            omp_set_num_threads(static_cast<int>(options.threads));
+        if (ai_required && !ai.Enabled()) {
+            throw ProfileError("--ai-required needs --ai-provider");
         }
         const bool write_html = !parser.get<bool>("--no-html");
         auto json_path = parser.get<std::string>("--output");
         auto html_path = parser.get<std::string>("--html");
-        const bool explicit_output = !json_path.empty();
+        // Without --output, a saved profile is rewritten only to store a new AI analysis.
+        const bool write_json = from_profile.empty() || !json_path.empty();
         JsonType report;
         if (!from_profile.empty()) {
             report = read_report(from_profile);
@@ -383,7 +392,11 @@ run_cli(int argc, char** argv, std::ostream& out, std::ostream& err, HttpTranspo
                 html_path = (path.parent_path() / path.stem()).string() + ".html";
             }
         } else {
+            // Range-checks --threads too, before the narrowing cast below.
             validate_options(options);
+            if (options.threads > 0) {
+                omp_set_num_threads(static_cast<int>(options.threads));
+            }
             if (json_path.empty()) {
                 json_path = default_path(options.data_path, ".profile.json");
             }
@@ -394,12 +407,13 @@ run_cli(int argc, char** argv, std::ostream& out, std::ostream& err, HttpTranspo
                 options.quiet ? ProgressFn()
                               : [&err](const std::string& message) { err << message << '\n'; };
             report = profile_dataset(options, progress);
-            // Deterministic reports first: they must exist even if the AI step hangs or fails.
-            write_file(json_path,
-                       report.dump(2, ' ', false, JsonType::error_handler_t::replace) + "\n");
-            if (write_html) {
-                write_file(html_path, render_html_report(report));
-            }
+        }
+        // Deterministic reports first: they must exist even if the AI step hangs or fails.
+        if (write_json) {
+            write_file(json_path, pretty_json(report));
+        }
+        if (write_html) {
+            write_file(html_path, render_html_report(report));
         }
 
         std::string ai_status = "disabled";
@@ -420,16 +434,13 @@ run_cli(int argc, char** argv, std::ostream& out, std::ostream& err, HttpTranspo
             ai_status = section.value("status", "failed");
             report["ai_analysis"] = section;
             if (!ai_output.empty()) {
-                write_file(ai_output,
-                           section.dump(2, ' ', false, JsonType::error_handler_t::replace) + "\n");
+                write_file(ai_output, pretty_json(section));
             }
-        }
-        if (ai.Enabled() || from_profile.empty() || explicit_output) {
-            write_file(json_path,
-                       report.dump(2, ' ', false, JsonType::error_handler_t::replace) + "\n");
-        }
-        if (write_html) {
-            write_file(html_path, render_html_report(report));
+            // Rewrite both reports with the section; a saved profile without --output gets it too.
+            write_file(json_path, pretty_json(report));
+            if (write_html) {
+                write_file(html_path, render_html_report(report));
+            }
         }
         if (!options.quiet) {
             const JsonType& input = report.at("input");
@@ -453,7 +464,7 @@ run_cli(int argc, char** argv, std::ostream& out, std::ostream& err, HttpTranspo
             }
             out << '\n';
         }
-        if (ai_required && ai.Enabled() && ai_status != "ok" && ai_status != "dry_run") {
+        if (ai_required && ai_status != "ok" && ai_status != "dry_run") {
             return EXIT_AI_REQUIRED_FAILED;
         }
         return EXIT_OK;

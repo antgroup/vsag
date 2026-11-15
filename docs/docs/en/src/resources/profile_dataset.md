@@ -83,7 +83,7 @@ Common options:
 | `--pca-max-dim` | `2048` | PCA is skipped above this dimensionality |
 | `--disable` | | Any of `duplicates,knn,pca,clustering,hubness,quantization,ground_truth,labels` |
 | `--duplicate-memory-mb` | `4096` | Budget for exact duplicate detection (24 bytes per row); above it duplicates are checked on the sample |
-| `--threads`, `--chunk-mb` | all cores, `64` | Execution only; results do not depend on them |
+| `--threads`, `--chunk-mb` | all cores, `64` | Execution only (at most 4096 threads); results do not depend on them |
 | `--from-profile` | | Re-render the HTML report or run the AI analysis from an existing JSON report; a saved AI analysis is kept unless a new one is requested, and `--output` writes a copy |
 
 Run `profile_dataset --help` for the full list, including the AI options below.
@@ -206,8 +206,11 @@ the AI output is checked against.
   `--chunk-mb`, which is checked by `determinism.metrics_sha256`.
 - Memory is bounded: per row the tool keeps a norm, a non-zero count and a validity flag
   (13 bytes for dense data) plus 16 bytes of duplicate hashes (24 while grouping, limited by
-  `--duplicate-memory-mb`). Sample-based work is bounded by the options: the sample is
-  `sample_size x dim` floats, the k-NN state is `knn_queries x k`, and within-sample analyses
+  `--duplicate-memory-mb`). Sparse document frequencies are counted in a table of 8-byte
+  counters for term ids below `--chunk-mb` MiB / 8 (at most 2^26 ids) and in a hash map for
+  larger ids, so a few large ids cannot allocate a large table. Sample-based work is bounded
+  by the options: the sample is `sample_size x dim` floats, the k-NN state is
+  `knn_queries x k`, and within-sample analyses
   use at most `sample_size` rows. No all-pairs `N x N` matrix is ever built for a split; the
   full split is only streamed, twice.
 
@@ -242,10 +245,10 @@ The AI analysis is disabled unless a provider is configured explicitly:
 | `--ai-api-key-env` | | `VSAG_PROFILE_AI_API_KEY` | Name of the environment variable that holds the key |
 | `--ai-auth-header` | | `Authorization` | Header for the key; `Authorization` sends `Bearer <key>`, other names (e.g. `api-key` for Azure OpenAI) send the raw key |
 | `--ai-language` | `VSAG_PROFILE_AI_LANGUAGE` | `en` | Language of the generated text: `en` or `zh` |
-| `--ai-timeout`, `--ai-retries` | | `60`, `1` | Per-request timeout in seconds; retries for transport errors, HTTP 429 and 5xx |
+| `--ai-timeout`, `--ai-retries` | | `60`, `1` | Wall-clock limit of one attempt in seconds (connect, send and receive; at most 3600); retries for transport errors, HTTP 429 and 5xx (at most 10). All attempts and the delays between them end within (retries + 1) x timeout |
 | `--ai-dry-run`, `--ai-request-out` | | | Build (and save) the exact request body without sending it |
 | `--ai-output` | | | Also write the `ai_analysis` section to a separate file |
-| `--ai-required` | | off | Exit with code 3 when the analysis does not succeed (the reports are still written) |
+| `--ai-required` | | off | Exit with code 3 when the analysis does not succeed (the reports are still written); needs `--ai-provider` |
 
 API keys are read only from the environment variable named by `--ai-api-key-env`; the tool
 has no option that takes a key, so keys do not end up in shell history or process lists. Keys
@@ -279,7 +282,9 @@ fields in a saved profile are never sent), the rule-based observations, the reso
 sampling configuration. It never contains vectors, sampled rows, row ids, PCA coordinates,
 per-dimension arrays, histograms, term ids, label values, file paths or credentials. The file
 name is included only with `--ai-include-file-name`. The evidence size does not depend on the
-number of rows. The report records `request_sha256`, the number of evidence keys and
+number of rows, and its compact JSON never exceeds 48 KiB: percentiles, sample details and
+spectra are dropped first, then the most deeply nested keys (`evidence_dropped_keys` counts
+them). The report records `request_sha256`, the number of evidence keys and
 `raw_vectors_sent: false`; `--ai-dry-run` shows the exact payload.
 
 ### Response contract and validation
@@ -290,8 +295,9 @@ evidence), `uncertainties` and `additional_measurements`. The tool rejects any i
 evidence keys are missing or not part of the request, items with invalid fields, and
 recommendations phrased as guaranteed or optimal settings; rejected items are listed in
 `ai_analysis.rejected_items`. Malformed replies yield `status: invalid_response`, unreachable
-providers yield `status: failed`. In every case the deterministic JSON and HTML reports were
-already written before the request; the tool prints a warning and exits with code 0 unless
+providers yield `status: failed`, and so do responses above 1 MiB, which are cut off while they
+arrive. In every case the deterministic JSON and HTML reports (with `--from-profile`, the HTML
+report and an explicit `--output` copy) were already written before the request; the tool prints a warning and exits with code 0 unless
 `--ai-required` is set. Model output is escaped in the HTML report.
 
 ### Validating AI recommendations

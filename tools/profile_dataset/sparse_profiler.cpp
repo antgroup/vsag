@@ -85,15 +85,6 @@ sindi_retained_fraction(std::vector<std::pair<float, uint32_t>>& terms, double r
     return static_cast<double>(kept) / static_cast<double>(terms.size());
 }
 
-double
-row_norm(const SparseBatch& batch, uint64_t r) {
-    double sum = 0.0;
-    for (uint64_t e = batch.offsets[r]; e < batch.offsets[r + 1]; ++e) {
-        sum += static_cast<double>(batch.values[e]) * static_cast<double>(batch.values[e]);
-    }
-    return std::sqrt(sum);
-}
-
 }  // namespace
 
 SparseSplitProfiler::SparseSplitProfiler(SplitContext context)
@@ -124,6 +115,8 @@ SparseSplitProfiler::prepare_sample() {
     plan_.rows = sample_without_replacement(rows_, options_.sample_size, rng);
     row_norms_.assign(rows_, 0.0);
     row_valid_.assign(rows_, 0);
+    dense_term_limit_ =
+        std::min<uint64_t>(DENSE_TERM_LIMIT, options_.chunk_mb * 1024ULL * 1024ULL / 8ULL);
     full_duplicates_ = options_.Enabled(SECTION_DUPLICATES) &&
                        rows_ * 24 <= options_.duplicate_memory_mb * 1024ULL * 1024ULL;
     if (full_duplicates_) {
@@ -281,14 +274,20 @@ SparseSplitProfiler::first_pass() {
                     if (e > batch.offsets[r] && batch.ids[e] == batch.ids[e - 1]) {
                         continue;
                     }
-                    const uint32_t id = batch.ids[e];
-                    if (id < DENSE_TERM_LIMIT) {
+                    const uint64_t id = batch.ids[e];
+                    if (id < dense_term_limit_) {
                         if (id >= term_frequency_.size()) {
-                            term_frequency_.resize(static_cast<uint64_t>(id) + 1, 0);
+                            // Grow geometrically, but never beyond the table's budget.
+                            if (id >= term_frequency_.capacity()) {
+                                term_frequency_.reserve(std::min<uint64_t>(
+                                    dense_term_limit_,
+                                    std::max<uint64_t>(id + 1, 2 * term_frequency_.capacity())));
+                            }
+                            term_frequency_.resize(id + 1, 0);
                         }
                         ++term_frequency_[id];
                     } else {
-                        ++overflow_terms_[id];
+                        ++overflow_terms_[static_cast<uint32_t>(id)];
                     }
                 }
             }
@@ -605,10 +604,11 @@ SparseSplitProfiler::second_pass(const SparseQuerySet* cross_queries) {
         norms.resize(batch.Rows());
         valid.resize(batch.Rows());
         for (uint64_t r = 0; r < batch.Rows(); ++r) {
-            norms[r] = row_norm(batch, r);
-            // Pass 1 validated the record count, so these row ids are in range.
-            valid[r] = row_valid_[batch.first_row + r] == 1 &&
-                               (context_.metric != Metric::COSINE || norms[r] > 0.0)
+            // Pass 1 validated the record count, so these row ids are in range, and stored each
+            // row's norm (NaN for rows with non-finite values, which are never valid).
+            const uint64_t row = batch.first_row + r;
+            norms[r] = row_norms_[row];
+            valid[r] = row_valid_[row] == 1 && (context_.metric != Metric::COSINE || norms[r] > 0.0)
                            ? 1
                            : 0;
         }
