@@ -578,20 +578,32 @@ move_extra_seats(const CostModel& model,
 }
 
 /// Typical difference between the cheapest and the dearest remembered cluster of a
-/// vector: the scale on which prices have to move, and so the scale of epsilon.
+/// vector: the scale on which prices have to move, and so the scale of epsilon. When
+/// no vector remembers clusters of different cost (one candidate each, say), the gap
+/// to the bound on the others sets the scale; only without any gap do the costs
+/// themselves, or at last 1, stand in.
 double
 cost_spread(const CandidateTable& table, uint64_t count) {
     double spread = 0.0;
+    double next_gap = 0.0;
+    uint64_t bounded = 0;
     double magnitude = 0.0;
     for (uint64_t row = 0; row < count; ++row) {
         const float* costs = table.costs.data() + row * table.width;
         const auto [low, high] = std::minmax_element(costs, costs + table.width);
         spread += static_cast<double>(*high) - static_cast<double>(*low);
         magnitude += std::abs(static_cast<double>(*low));
+        if (std::isfinite(table.bounds[row])) {
+            next_gap += std::max(0.0, table.bounds[row] - static_cast<double>(*low));
+            ++bounded;
+        }
     }
     spread /= static_cast<double>(count);
     if (spread > 0.0) {
         return spread;
+    }
+    if (next_gap > 0.0) {
+        return next_gap / static_cast<double>(bounded);
     }
     magnitude /= static_cast<double>(count);
     return magnitude > 0.0 ? magnitude : 1.0;

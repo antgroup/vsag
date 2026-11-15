@@ -617,6 +617,54 @@ TEST_CASE("BalancedKMeans keeps small L2 distances far from the origin",
     }
 }
 
+TEST_CASE("BalancedKMeans Assign keeps its accuracy with one candidate per vector",
+          "[ut][BalancedKMeansCluster]") {
+    // Every vector sits on a centroid, so with one remembered cluster each all remembered
+    // costs are 0, and epsilon fell back to 1 whatever the scale. At t = 1/1024 that is far
+    // above the gaps of t * t: the assignment ended at 20 t^2, while the same vectors scaled
+    // to t = 1 reach the optimal 10 t^2. Epsilon now follows the gaps, so scaling the data
+    // changes nothing, under the default budget (where the last vector takes the fallback
+    // seat, at both scales) and without one.
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    struct Outcome {
+        vsag::Vector<int32_t> labels;
+        double cost_in_t2;
+        uint64_t fallback;
+    };
+    const auto assign = [&](float t, double budget) {
+        const std::vector<float> centroids{0.0F, t, 2 * t, -3 * t, 1024 * t};
+        const std::vector<float> datas{0.0F, 0.0F, t, t};
+        vsag::BalancedKMeansCluster cluster(1, allocator.get());
+        double mean_cost = 0.0;
+        auto labels = cluster.Assign(centroids.data(),
+                                     5,
+                                     datas.data(),
+                                     4,
+                                     vsag::BalancedAssignMetric::L2SQR,
+                                     1,
+                                     &mean_cost,
+                                     budget);
+        // More clusters than vectors: every vector gets a cluster of its own.
+        std::vector<int32_t> holders(5, 0);
+        for (const auto label : labels) {
+            REQUIRE(++holders[static_cast<uint64_t>(label)] == 1);
+        }
+        const double t2 = static_cast<double>(t) * t;
+        return Outcome{
+            std::move(labels), mean_cost * 4.0 / t2, cluster.stats_.fallback_assignments};
+    };
+    for (const double budget : {1.0, std::numeric_limits<double>::infinity()}) {
+        const auto small = assign(1.0F / 1024.0F, budget);
+        const auto large = assign(1.0F, budget);
+        REQUIRE(small.labels == large.labels);
+        REQUIRE(small.fallback == large.fallback);
+        REQUIRE(std::abs(small.cost_in_t2 - large.cost_in_t2) < 1e-9);
+    }
+    const auto unlimited = assign(1.0F / 1024.0F, std::numeric_limits<double>::infinity());
+    REQUIRE(unlimited.fallback == 0);
+    REQUIRE(std::abs(unlimited.cost_in_t2 - 10.0) < 1e-6);
+}
+
 TEST_CASE("BalancedKMeans keeps its accuracy on tiny distances", "[ut][BalancedKMeansCluster]") {
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
 
@@ -672,9 +720,11 @@ TEST_CASE("BalancedKMeans keeps its accuracy on tiny distances", "[ut][BalancedK
 TEST_CASE("BalancedKMeans bids keep raising prices far above epsilon",
           "[ut][BalancedKMeansCluster]") {
     // Both vectors remember only the cluster at 0 and bound the other one by 1e16.
-    // The first bid lifts that price to about 1e16, where adding the initial epsilon
-    // of 0.25 is lost to rounding; such bids no longer raised the price, the two
-    // vectors evicted each other at one price, and the budget ran out.
+    // The first bid lifts that price to about 1e16. While epsilon fell back to 1 here,
+    // adding it was lost to rounding: such bids no longer raised the price, the two
+    // vectors evicted each other at one price, and the budget ran out. Epsilon now comes
+    // from the gap to that bound, and every bid also raises a price by a step the price
+    // can represent.
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
     const std::vector<float> centroids{0.0F, 1e8F};
     const std::vector<float> datas{0.0F, 0.0F};
