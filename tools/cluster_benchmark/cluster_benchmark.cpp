@@ -24,6 +24,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -407,7 +408,8 @@ read_queries(const std::string& path, uint64_t limit) {
         std::vector<float> all(dims[0] * dims[1]);
         dataset.read(all.data(), H5::PredType::NATIVE_FLOAT);
         queries.count = std::min<uint64_t>(dims[0], limit);
-        queries.data.assign(all.begin(), all.begin() + queries.count * queries.dim);
+        queries.data.assign(all.begin(),
+                            all.begin() + static_cast<std::ptrdiff_t>(queries.count * queries.dim));
     }
     {
         H5::DataSet dataset = file.openDataSet("/neighbors");
@@ -419,7 +421,9 @@ read_queries(const std::string& path, uint64_t limit) {
         queries.truth_width = dims[1];
         std::vector<int64_t> all(dims[0] * dims[1]);
         dataset.read(all.data(), H5::PredType::NATIVE_INT64);
-        queries.truth.assign(all.begin(), all.begin() + queries.count * queries.truth_width);
+        queries.truth.assign(
+            all.begin(),
+            all.begin() + static_cast<std::ptrdiff_t>(queries.count * queries.truth_width));
     }
     return queries;
 }
@@ -493,6 +497,7 @@ run_ivf(const std::string& path,
             std::atomic<uint64_t> next{0};
             const auto search_start = std::chrono::steady_clock::now();
             std::vector<std::thread> workers;
+            workers.reserve(threads);
             for (uint64_t t = 0; t < threads; ++t) {
                 workers.emplace_back([&]() {
                     for (uint64_t q = next++; q < queries.count; q = next++) {
@@ -541,10 +546,9 @@ run_ivf(const std::string& path,
     return 0;
 }
 
-}  // namespace
-
+/// The tool itself; main only turns an escaping exception into an exit code.
 int
-main(int argc, char** argv) {
+run(int argc, char** argv) {
     argparse::ArgumentParser parser("cluster_benchmark");
     parser.add_description(
         "Compare k-means and balanced k-means: cluster sizes, loss, training time and peak "
@@ -730,4 +734,18 @@ main(int argc, char** argv) {
         write_json(reports, json);
     }
     return 0;
+}
+
+}  // namespace
+
+int
+main(int argc, char** argv) {
+    try {
+        return run(argc, argv);
+    } catch (const std::exception& e) {
+        std::cerr << "cluster_benchmark failed: " << e.what() << "\n";
+    } catch (...) {
+        std::cerr << "cluster_benchmark failed with an exception of an unknown type\n";
+    }
+    return 2;
 }
