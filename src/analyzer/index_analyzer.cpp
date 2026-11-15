@@ -505,10 +505,15 @@ private:
 
         basic_info_ = metadata->Get(BASIC_INFO);
         if (not basic_info_.IsObject()) {
-            if (metadata->EmptyIndex() and options_.build_parameter != DEFAULT_BUILD_PARAM) {
+            if (options_.build_parameter != DEFAULT_BUILD_PARAM) {
                 warnings_.emplace_back(
-                    "serialized empty index has no basic_info metadata; loading metadata uses "
+                    "serialized index has no basic_info metadata; loading metadata uses "
                     "build_parameter");
+                return;
+            }
+            if (metadata->EmptyIndex()) {
+                // Empty index with no basic_info and default build parameters: treat as valid,
+                // metadata will be filled from build parameters later.
                 return;
             }
             throw std::runtime_error(
@@ -532,8 +537,14 @@ private:
         if (has_data_type) {
             data_type_ = static_cast<DataTypes>(basic_info_["data_type"].GetInt());
         }
+        // Prefer metric from explicit build parameters when basic_info lacks it,
+        // so that indices serialized without metric (e.g. BruteForce with cosine)
+        // still report the correct metric type.
         if (has_metric) {
             metric_type_ = static_cast<MetricType>(basic_info_["metric"].GetInt());
+        } else if (metadata_source_ == "build_parameter" and options_.build_parameter != DEFAULT_BUILD_PARAM) {
+            // metric_type_ was already set from build_parameter in ResolveIndexType();
+            // keep it rather than overwriting with analyzer default.
         }
         if (basic_info_.Contains(INDEX_PARAM)) {
             index_param_ = ParseJsonOrThrow(basic_info_[INDEX_PARAM].GetString(),
@@ -646,8 +657,10 @@ private:
         if (extra_info_size_ > 0) {
             build_param["extra_info_size"].SetInt64(extra_info_size_);
         }
-        if ((index_name_ == INDEX_BRUTE_FORCE or index_name_ == INDEX_WARP) and
-            index_param_.Contains(BASE_CODES_KEY)) {
+        if (index_name_ == INDEX_BRUTE_FORCE or index_name_ == INDEX_WARP) {
+            // Always strip internal keys (base_codes, type, etc.) that the BruteForce/Warp
+            // external parameter mapper does not accept. Use PrepareInternalBruteForceParam
+            // to isolate only the external-facing parameters.
             build_param[INDEX_PARAM].SetJson(PrepareInternalBruteForceParam(index_param_));
             std::vector<std::string> ignored_param_keys;
             const bool recover_metric =
@@ -790,7 +803,11 @@ private:
 
         std::string statistics;
         try {
-            if (options_.base_path.empty() or index_name_ != INDEX_SINDI) {
+            // SINDI and SINDI_V2 always use GetStats() for static analysis;
+            // AnalyzeIndexBySearch with null query (topk=0) is not supported
+            // by SINDI_V2 and may fail for SINDI depending on build parameters.
+            if (options_.base_path.empty() or
+                index_name_ != INDEX_SINDI and index_name_ != INDEX_SINDI_V2) {
                 statistics = index_->GetStats();
             } else {
                 if (not index_->CheckFeature(IndexFeature::SUPPORT_ANALYZE_INDEX_BY_SEARCH)) {
