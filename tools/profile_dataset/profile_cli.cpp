@@ -380,8 +380,9 @@ run_cli(int argc, char** argv, std::ostream& out, std::ostream& err, HttpTranspo
         JsonType report;
         if (!from_profile.empty()) {
             report = read_report(from_profile);
-            // A saved analysis survives an offline re-render; only a new run replaces it.
-            if (ai.Enabled()) {
+            // A saved analysis survives an offline re-render and a dry run; only a request that is
+            // actually sent replaces it.
+            if (ai.Enabled() && !ai.dry_run) {
                 report.erase("ai_analysis");
             }
             if (json_path.empty()) {
@@ -432,14 +433,23 @@ run_cli(int argc, char** argv, std::ostream& out, std::ostream& err, HttpTranspo
             }
             JsonType section = run_ai_analysis(report, ai, *transport, err);
             ai_status = section.value("status", "failed");
-            report["ai_analysis"] = section;
             if (!ai_output.empty()) {
                 write_file(ai_output, pretty_json(section));
             }
-            // Rewrite both reports with the section; a saved profile without --output gets it too.
-            write_file(json_path, pretty_json(report));
-            if (write_html) {
-                write_file(html_path, render_html_report(report));
+            if (ai.dry_run && report.contains("ai_analysis")) {
+                // A dry run sends nothing, so a saved analysis and the reports stay as they are.
+                ai_status += " (saved " + report["ai_analysis"].value("status", "unknown") +
+                             " analysis kept)";
+            } else {
+                report["ai_analysis"] = section;
+                // A new analysis is stored in a saved profile without --output too; a dry run
+                // never rewrites that file.
+                if (write_json || !ai.dry_run) {
+                    write_file(json_path, pretty_json(report));
+                }
+                if (write_html) {
+                    write_file(html_path, render_html_report(report));
+                }
             }
         }
         if (!options.quiet) {
@@ -455,7 +465,8 @@ run_cli(int argc, char** argv, std::ostream& out, std::ostream& err, HttpTranspo
                 << "\n";
             print_summary(report, out);
             out << "  AI analysis: " << ai_status;
-            if (report.contains("ai_analysis") && report["ai_analysis"].contains("analysis")) {
+            if (!ai.dry_run && report.contains("ai_analysis") &&
+                report["ai_analysis"].contains("analysis")) {
                 const JsonType& analysis = report["ai_analysis"]["analysis"];
                 out << " (" << analysis["findings"].size() << " findings, "
                     << analysis["recommendations"].size() << " recommendations, "
@@ -464,7 +475,7 @@ run_cli(int argc, char** argv, std::ostream& out, std::ostream& err, HttpTranspo
             }
             out << '\n';
         }
-        if (ai_required && ai_status != "ok" && ai_status != "dry_run") {
+        if (ai_required && ai_status != "ok" && !ai_status.starts_with("dry_run")) {
             return EXIT_AI_REQUIRED_FAILED;
         }
         return EXIT_OK;
