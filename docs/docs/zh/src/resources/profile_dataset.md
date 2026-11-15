@@ -139,7 +139,7 @@ wget http://ann-benchmarks.com/fashion-mnist-784-euclidean.hdf5 -O /tmp/data/fas
 | `pca` | 样本 | 样本协方差谱：解释方差（前 32 个）、累计曲线、解释 50/80/90/95/99% 方差所需主成分数、有效秩、参与比；维度超过 `--pca-max-dim` 时跳过 | 是否适合在 `tq_chain` 中加入 `pca` |
 | `clustering` | 样本 | k-means（k-means++ 初始化）：排序后的簇大小、大小变异系数、最大簇与平均簇之比、归一化熵、轮廓系数 | 粗粒度分区是否均衡，例如 IVF 分桶 |
 | `projection` | 样本 | 采样行的二维 PCA 坐标及其所属簇 | 仅用于 HTML 散点图，永远不会发送给 AI 服务 |
-| `quantization` | 样本 | 模拟 `fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`：相对精确检索的 recall@k、平均相对重建误差、编码大小（含元数据与对齐）。取值范围、向下取整编码与 0.999 上限截断遵循 `ScalarQuantizationTrainer` 与各量化器；与 VSAG 一致，fp16/bf16 与 uniform 量化器也会编码查询，uniform 量化器在 ip/cosine 下的得分使用存储的原始值之和 | 哪些编码需要 `use_reorder`；属于模型估计，需用 `eval_performance` 确认 |
+| `quantization` | 样本 | 模拟 `fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`：相对精确检索的 recall@k、平均相对重建误差、编码大小（含元数据与对齐）。取值范围、向下取整编码与 0.999 上限截断遵循 `ScalarQuantizationTrainer` 与各量化器，fp16 编码遵循 `generic::FloatToFP16`（截断尾数，指数限制在 [-14, 15]，因此 0 编码为 2^-14，65536 及以上的值会回绕）；与 VSAG 一致，fp16/bf16 与 uniform 量化器也会编码查询，uniform 量化器在 ip/cosine 下的得分使用存储的原始值之和 | 哪些编码需要 `use_reorder`；属于模型估计，需用 `eval_performance` 确认 |
 
 ### 稀疏划分
 
@@ -159,10 +159,10 @@ wget http://ann-benchmarks.com/fashion-mnist-784-euclidean.hdf5 -O /tmp/data/fas
 | 字段 | 范围 | 定义 |
 | --- | --- | --- |
 | `cross_split.norm_ks_statistic` | 全量 | train 与 test 范数分布的双样本 Kolmogorov-Smirnov 统计量 |
-| `cross_split.standardized_mean_shift` | 全量 | 每个维度的 \|mean_test - mean_train\| / std_train（稠密） |
+| `cross_split.standardized_mean_shift` | 全量 | 每个维度的 \|mean_test - mean_train\| / std_train（稠密）；在 train 中恒定的维度，若 test 均值相同则记为 0，否则计入 `shifted_constant_dimensions` |
 | `cross_split.out_of_distribution_ratio` | 样本 | 到 train 最近距离超过 train 行自身最近邻距离第 95 百分位的采样查询比例 |
 | `cross_split.query_term_coverage`、`postings_per_query`、`nonzeros_ks_statistic` | 样本 / 全量 | 仅稀疏数据：查询词项在 train 中出现的比例、穷举倒排扫描需要访问的条目数、条目数分布的 KS 统计量 |
-| `ground_truth` | 样本 | 采样查询的 `/neighbors`、`/distances` 与重新计算的精确近邻对比：id 召回率、距离召回率（重新计算距离后落在精确第 k 近邻距离之内的不重复存储 id 比例，因此容忍并列）、重复的存储 id、非有限的存储距离、有限存储距离与存储 id 重新计算的距离之间最匹配的距离约定（`euclidean` 为 `sqrt(L2Sqr)` 还是平方；`ip`/`angular` 为 `1 - 相似度` 还是相似度本身）、越界 id、未排序的行 |
+| `ground_truth` | 样本 | 采样查询的 `/neighbors`、`/distances` 与重新计算的精确近邻对比：id 召回率、距离召回率（重新计算距离后落在精确第 k 近邻距离之内的不重复存储 id 比例，因此容忍并列）、重复的存储 id、非有限的存储距离、有限存储距离与存储 id 重新计算的距离之间最匹配的距离约定（`euclidean` 为 `sqrt(L2Sqr)` 还是平方；`ip`/`angular` 为 `1 - 相似度` 还是相似度本身）、越界 id、未排序的行。同时存在两个标签数组时，每个查询还会只在与其标签相同的行中检索（即 `eval_performance` 的 `knn_filter` 模式）：`search_scope` 给出存储的近邻与哪种检索相符，`scope_distance_recall` 给出两种检索的距离召回率，上述召回率取相符的那种 |
 | `labels` | 全量 | 标签数量、最大标签占比、归一化熵、每个查询的过滤选择率、标签在底库中不存在的查询数、`valid_ratios` 摘要 |
 
 ### 基于规则的观察结论

@@ -26,6 +26,7 @@
 #include <memory>
 #include <set>
 #include <tuple>
+#include <unordered_map>
 
 #include "quantization_simulation.h"
 #include "sha256.h"
@@ -123,6 +124,8 @@ struct GroundTruthCheck {
     /// Pairs (cross query, stored id) sorted by id, and the matrix entry of each pair.
     RowDistanceProbe probe;
     std::vector<uint64_t> probe_entries;
+    /// Index into `rows` of each label-filtered query of the probe.
+    std::vector<uint64_t> filter_rows;
 };
 
 GroundTruthCheck
@@ -155,6 +158,126 @@ prepare_ground_truth_check(const DatasetInfo& info,
     }
     check.probe.distances.assign(pairs.size(), std::numeric_limits<double>::quiet_NaN());
     return check;
+}
+
+/// With one-dimensional train and test label arrays, eval_performance's knn_filter mode keeps
+/// only base rows whose label equals the query's, and expects /neighbors to be filtered alike.
+/// Arms the probe so that pass 2 over train also searches each checked query's label.
+void
+prepare_label_filter(const DatasetInfo& info, GroundTruthCheck& check) {
+    if (!info.has_train_labels || !info.has_test_labels || info.train_label_rank != 1 ||
+        info.test_label_rank != 1 || check.rows.empty() || check.k == 0) {
+        return;
+    }
+    std::unordered_map<uint64_t, uint64_t> wanted;
+    for (uint64_t i = 0; i < check.rows.size(); ++i) {
+        wanted.emplace(check.rows[i], i);
+    }
+    std::vector<int64_t> labels(check.rows.size(), 0);
+    std::vector<uint8_t> labeled(check.rows.size(), 0);
+    for_each_int64_chunk(
+        info.path, "test_labels", 1 << 20, [&](uint64_t begin, const std::vector<int64_t>& values) {
+            for (uint64_t r = 0; r < values.size(); ++r) {
+                const auto it = wanted.find(begin + r);
+                if (it != wanted.end()) {
+                    labels[it->second] = values[r];
+                    labeled[it->second] = 1;
+                }
+            }
+        });
+    RowDistanceProbe& probe = check.probe;
+    for (uint64_t i = 0; i < check.rows.size(); ++i) {
+        if (labeled[i] != 0) {
+            probe.filter_queries.push_back(check.positions[i]);
+            probe.filter_labels.push_back(labels[i]);
+            check.filter_rows.push_back(i);
+        }
+    }
+    if (!probe.filter_queries.empty()) {
+        probe.label_dataset = "train_labels";
+        probe.filter_k = check.k;
+    }
+}
+
+/// Judges the stored ids against the label-filtered search as well (see prepare_label_filter)
+/// and keeps the recalls of the search they match best; ties keep the unfiltered search.
+void
+add_label_filtered_scope(const GroundTruthCheck& check,
+                         const std::vector<double>& recomputed,
+                         uint64_t k,
+                         JsonType& report) {
+    const RowDistanceProbe& probe = check.probe;
+    // Pass 2 fills `filtered` and `labeled` only when it ran the filtered search.
+    if (probe.label_dataset.empty() || probe.filtered.size() != probe.filter_queries.size() ||
+        probe.labeled.size() != check.probe_entries.size()) {
+        return;
+    }
+    std::vector<int64_t> stored_label(check.neighbors.size(), 0);
+    std::vector<uint8_t> stored_labeled(check.neighbors.size(), 0);
+    for (uint64_t p = 0; p < check.probe_entries.size(); ++p) {
+        if (probe.labeled[p] != 0) {
+            stored_label[check.probe_entries[p]] = probe.labels[p];
+            stored_labeled[check.probe_entries[p]] = 1;
+        }
+    }
+    double id_recall = 0.0;
+    double distance_recall = 0.0;
+    uint64_t queries = 0;
+    for (uint64_t j = 0; j < probe.filter_queries.size(); ++j) {
+        const std::vector<Neighbor>& exact = probe.filtered[j];
+        // Fewer rows than k may carry the label; none means the query cannot be judged.
+        const uint64_t compared = std::min<uint64_t>(k, exact.size());
+        if (compared == 0) {
+            continue;
+        }
+        const uint64_t first = check.filter_rows[j] * check.k;
+        std::vector<int64_t> exact_ids;
+        exact_ids.reserve(compared);
+        for (uint64_t e = 0; e < compared; ++e) {
+            exact_ids.push_back(static_cast<int64_t>(exact[e].index));
+        }
+        std::sort(exact_ids.begin(), exact_ids.end());
+        std::vector<int64_t> stored(
+            check.neighbors.begin() + static_cast<int64_t>(first),
+            check.neighbors.begin() + static_cast<int64_t>(first + compared));
+        std::sort(stored.begin(), stored.end());
+        std::vector<int64_t> common;
+        std::set_intersection(exact_ids.begin(),
+                              exact_ids.end(),
+                              stored.begin(),
+                              stored.end(),
+                              std::back_inserter(common));
+        id_recall += static_cast<double>(common.size()) / static_cast<double>(compared);
+        const double kth = exact[compared - 1].distance;
+        const double tolerance =
+            RELATIVE_TIE_TOLERANCE * std::max(std::abs(kth), std::abs(exact.front().distance));
+        uint64_t within = 0;
+        std::set<int64_t> seen;
+        for (uint64_t e = first; e < first + compared; ++e) {
+            // A repeated id is one neighbor, and only rows with the query's label qualify.
+            if (!seen.insert(check.neighbors[e]).second || stored_labeled[e] == 0 ||
+                stored_label[e] != probe.filter_labels[j]) {
+                continue;
+            }
+            within += std::isfinite(recomputed[e]) && recomputed[e] <= kth + tolerance ? 1 : 0;
+        }
+        distance_recall += static_cast<double>(within) / static_cast<double>(compared);
+        ++queries;
+    }
+    report["label_filtered_queries"] = queries;
+    report["search_scope"] = "unfiltered";
+    if (queries == 0) {
+        return;
+    }
+    const double unfiltered = report["distance_recall_at_k"].get<double>();
+    const double filtered = distance_recall / static_cast<double>(queries);
+    report["scope_distance_recall"] =
+        JsonType{{"unfiltered", unfiltered}, {"label_filtered", filtered}};
+    if (filtered > unfiltered) {
+        report["search_scope"] = "label_filtered";
+        report["id_recall_at_k"] = id_recall / static_cast<double>(queries);
+        report["distance_recall_at_k"] = filtered;
+    }
 }
 
 /// Compares stored ground truth with the exact neighbors recomputed for sampled queries. The
@@ -288,6 +411,7 @@ ground_truth_report(const DatasetInfo& info,
     report["status"] = "checked";
     report["id_recall_at_k"] = id_recall / checked;
     report["distance_recall_at_k"] = distance_recall / checked;
+    add_label_filtered_scope(check, recomputed, k, report);
     report["recomputed_stored_ids"] = recomputed_entries;
     report["repeated_stored_ids"] = repeated_ids;
     report["non_finite_stored_distances"] = non_finite_stored;
@@ -605,6 +729,7 @@ profile_dataset(const ProfileOptions& options, const ProgressFn& progress) {
                     prepare_ground_truth_check(info,
                                                test->AnalysisRowIds(options.knn_queries),
                                                std::min<uint64_t>(options.knn_k, info.train.rows));
+                prepare_label_filter(info, truth);
             }
         }
         if (profile_train) {
@@ -618,15 +743,22 @@ profile_dataset(const ProfileOptions& options, const ProgressFn& progress) {
         if (both) {
             const auto train_norms = sorted_doubles(train->SortedNorms());
             const auto test_norms = sorted_doubles(test->SortedNorms());
-            std::vector<double> shift(train->DimensionMeans().size(), 0.0);
-            for (uint64_t d = 0; d < shift.size(); ++d) {
+            // A dimension that is constant in train has no scale: it shifts by 0 when its test
+            // mean is the same, and is counted separately when the mean moved.
+            std::vector<double> shift_sorted;
+            uint64_t shifted_constant = 0;
+            for (uint64_t d = 0; d < train->DimensionMeans().size(); ++d) {
                 const double spread = train->DimensionStds()[d];
-                shift[d] =
-                    spread > 0.0
-                        ? std::abs(test->DimensionMeans()[d] - train->DimensionMeans()[d]) / spread
-                        : 0.0;
+                const double delta =
+                    std::abs(test->DimensionMeans()[d] - train->DimensionMeans()[d]);
+                if (spread > 0.0) {
+                    shift_sorted.push_back(delta / spread);
+                } else if (delta == 0.0) {
+                    shift_sorted.push_back(0.0);
+                } else {
+                    ++shifted_constant;
+                }
             }
-            std::vector<double> shift_sorted = shift;
             JsonType cross_json = JsonType{
                 {"scope", "mixed"},
                 {"definition",
@@ -638,7 +770,9 @@ profile_dataset(const ProfileOptions& options, const ProgressFn& progress) {
                 {"norm_ks_statistic",
                  JsonType{{"scope", "full"}, {"value", ks_statistic(train_norms, test_norms)}}},
                 {"standardized_mean_shift",
-                 JsonType{{"scope", "full"}, {"summary", summarize_values(shift_sorted)}}}};
+                 JsonType{{"scope", "full"},
+                          {"summary", summarize_values(shift_sorted)},
+                          {"shifted_constant_dimensions", shifted_constant}}}};
             if (!train->CrossGeometric().empty() && !train->SelfFirstNeighborGeometric().empty()) {
                 std::vector<double> query_first;
                 for (const auto& distances : train->CrossGeometric()) {
@@ -756,6 +890,7 @@ profile_dataset(const ProfileOptions& options, const ProgressFn& progress) {
                 // the comparison to the k actually searched.
                 truth = prepare_ground_truth_check(
                     info, test->AnalysisRowIds(options.knn_queries), options.knn_k);
+                prepare_label_filter(info, truth);
             }
         }
         if (profile_train) {

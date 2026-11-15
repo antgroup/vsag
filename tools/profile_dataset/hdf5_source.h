@@ -111,6 +111,23 @@ private:
     std::vector<uint8_t> byte_buffer_;
 };
 
+/// Reads row ranges of a one-dimensional integer dataset, such as a label array, as int64.
+class Int64RangeReader {
+public:
+    Int64RangeReader(const std::string& path, const std::string& name);
+
+    /// Values of the rows in [begin, begin + count) that exist: `values` is shorter when the
+    /// dataset ends before begin + count.
+    void
+    Read(uint64_t begin, uint64_t count, std::vector<int64_t>& values);
+
+private:
+    H5::H5File file_;
+    H5::DataSet dataset_;
+    std::string name_;
+    uint64_t rows_{0};
+};
+
 /// A batch of parsed sparse records. Ids are sorted ascending per row (values follow), as
 /// `parse_sparse_vectors` in tools/eval/eval_dataset.cpp does.
 struct SparseBatch {

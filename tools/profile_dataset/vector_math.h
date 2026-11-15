@@ -86,7 +86,9 @@ canonical_bits(float value) {
     return float_bits(value);
 }
 
-/// Round-trips through IEEE binary16 with round-to-nearest-even (F16C behavior).
+/// Round-trips through fp16 the way VSAG's HalfPrecisionQuantizer encodes (generic::FloatToFP16)
+/// and decodes: the mantissa is truncated, and the exponent is clamped to [-14, 15], so zero and
+/// tiny values become +-2^-14 and values of 65536 or more wrap into [32768, 65536).
 float
 round_through_fp16(float value);
 

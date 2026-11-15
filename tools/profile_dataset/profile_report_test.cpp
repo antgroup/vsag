@@ -605,6 +605,149 @@ TEST_CASE("Ground-truth ties are judged at the scale of the distances", "[profil
     CHECK(has_signal(report, "ground_truth.mismatch"));
 }
 
+TEST_CASE("Label-filtered ground truth is judged against a label-filtered search",
+          "[profile][report]") {
+    TempDir dir;
+    const uint64_t rows = 300;
+    const uint64_t queries = 30;
+    const uint64_t dim = 4;
+    const uint64_t k = 10;
+    DeterministicRng rng(77);
+    std::vector<float> train(rows * dim);
+    std::vector<float> test(queries * dim);
+    for (auto& value : train) {
+        value = static_cast<float>(rng.UniformDouble());
+    }
+    for (auto& value : test) {
+        value = static_cast<float>(rng.UniformDouble());
+    }
+    std::vector<int64_t> train_labels(rows);
+    std::vector<int64_t> test_labels(queries);
+    for (uint64_t r = 0; r < rows; ++r) {
+        train_labels[r] = static_cast<int64_t>(r % 3);
+    }
+    for (uint64_t q = 0; q < queries; ++q) {
+        test_labels[q] = static_cast<int64_t>(q % 3);
+    }
+    for (const bool filtered : {false, true}) {
+        INFO(filtered);
+        // Exact neighbors, restricted to the query's label as knn_filter expects when filtered.
+        std::vector<int64_t> ids(queries * k);
+        std::vector<float> distances(queries * k);
+        for (uint64_t q = 0; q < queries; ++q) {
+            std::vector<std::pair<double, int64_t>> all;
+            for (uint64_t r = 0; r < rows; ++r) {
+                if (filtered && train_labels[r] != test_labels[q]) {
+                    continue;
+                }
+                double sum = 0.0;
+                for (uint64_t d = 0; d < dim; ++d) {
+                    const double diff = static_cast<double>(test[q * dim + d]) - train[r * dim + d];
+                    sum += diff * diff;
+                }
+                all.emplace_back(sum, static_cast<int64_t>(r));
+            }
+            std::sort(all.begin(), all.end());
+            for (uint64_t j = 0; j < k; ++j) {
+                ids[q * k + j] = all[j].second;
+                distances[q * k + j] = static_cast<float>(std::sqrt(all[j].first));
+            }
+        }
+        const auto path = dir.File(filtered ? "filtered.hdf5" : "unfiltered.hdf5");
+        {
+            H5::H5File file(path, H5F_ACC_TRUNC);
+            write_string_attribute(file, "distance", "euclidean");
+            write_matrix(file, "train", train, rows, dim, H5::PredType::NATIVE_FLOAT);
+            write_matrix(file, "test", test, queries, dim, H5::PredType::NATIVE_FLOAT);
+            write_matrix(file, "neighbors", ids, queries, k, H5::PredType::NATIVE_INT64);
+            write_matrix(file, "distances", distances, queries, k, H5::PredType::NATIVE_FLOAT);
+            write_vector(file, "train_labels", train_labels, H5::PredType::NATIVE_INT64);
+            write_vector(file, "test_labels", test_labels, H5::PredType::NATIVE_INT64);
+        }
+        const JsonType report = profile_dataset(small_options(path), nullptr);
+        CHECK(at(report, "ground_truth.search_scope") ==
+              (filtered ? "label_filtered" : "unfiltered"));
+        CHECK(at(report, "ground_truth.id_recall_at_k") == 1.0);
+        CHECK(at(report, "ground_truth.distance_recall_at_k") == 1.0);
+        CHECK(at(report, "ground_truth.label_filtered_queries") == queries);
+        CHECK_FALSE(has_signal(report, "ground_truth.mismatch"));
+        // The other search does not explain the stored neighbors.
+        CHECK(at(report,
+                 filtered ? "ground_truth.scope_distance_recall.unfiltered"
+                          : "ground_truth.scope_distance_recall.label_filtered")
+                  .get<double>() < 0.9);
+    }
+}
+
+TEST_CASE("Sparse label-filtered ground truth is recognized", "[profile][report]") {
+    TempDir dir;
+    DeterministicRng rng(78);
+    std::vector<SparseRecord> train;
+    std::vector<SparseRecord> test;
+    train.reserve(120);
+    test.reserve(12);
+    for (uint32_t r = 0; r < 120; ++r) {
+        train.push_back(SparseRecord{{r % 7, 7 + r % 5},
+                                     {static_cast<float>(0.1 + rng.UniformDouble()),
+                                      static_cast<float>(0.1 + rng.UniformDouble())}});
+    }
+    for (uint32_t q = 0; q < 12; ++q) {
+        test.push_back(SparseRecord{{q % 7, 7 + q % 5}, {1.0F, 0.5F}});
+    }
+    std::vector<int64_t> train_labels(train.size());
+    std::vector<int64_t> test_labels(test.size());
+    for (uint64_t r = 0; r < train.size(); ++r) {
+        train_labels[r] = static_cast<int64_t>(r % 2);
+    }
+    for (uint64_t q = 0; q < test.size(); ++q) {
+        test_labels[q] = static_cast<int64_t>(q % 2);
+    }
+    // Exact ip neighbors among the rows with the query's label; products in ascending id order.
+    const uint64_t k = 10;
+    std::vector<int64_t> ids(test.size() * k);
+    std::vector<float> distances(test.size() * k);
+    for (uint64_t q = 0; q < test.size(); ++q) {
+        std::vector<std::pair<double, int64_t>> all;
+        for (uint64_t r = 0; r < train.size(); ++r) {
+            if (train_labels[r] != test_labels[q]) {
+                continue;
+            }
+            double dot = 0.0;
+            for (uint64_t a = 0; a < test[q].ids.size(); ++a) {
+                for (uint64_t b = 0; b < train[r].ids.size(); ++b) {
+                    if (test[q].ids[a] == train[r].ids[b]) {
+                        dot += static_cast<double>(test[q].values[a]) *
+                               static_cast<double>(train[r].values[b]);
+                    }
+                }
+            }
+            all.emplace_back(1.0 - dot, static_cast<int64_t>(r));
+        }
+        std::sort(all.begin(), all.end());
+        for (uint64_t j = 0; j < k; ++j) {
+            ids[q * k + j] = all[j].second;
+            distances[q * k + j] = static_cast<float>(all[j].first);
+        }
+    }
+    const auto path = dir.File("sparse_filtered.hdf5");
+    {
+        H5::H5File file(path, H5F_ACC_TRUNC);
+        write_string_attribute(file, "type", "sparse");
+        write_string_attribute(file, "distance", "ip");
+        write_vector(file, "train", encode_sparse(train, nullptr), H5::PredType::NATIVE_INT8);
+        write_vector(file, "test", encode_sparse(test, nullptr), H5::PredType::NATIVE_INT8);
+        write_matrix(file, "neighbors", ids, test.size(), k, H5::PredType::NATIVE_INT64);
+        write_matrix(file, "distances", distances, test.size(), k, H5::PredType::NATIVE_FLOAT);
+        write_vector(file, "train_labels", train_labels, H5::PredType::NATIVE_INT64);
+        write_vector(file, "test_labels", test_labels, H5::PredType::NATIVE_INT64);
+    }
+    const JsonType report = profile_dataset(small_options(path), nullptr);
+    CHECK(at(report, "ground_truth.search_scope") == "label_filtered");
+    CHECK(at(report, "ground_truth.id_recall_at_k") == 1.0);
+    CHECK(at(report, "ground_truth.distance_recall_at_k") == 1.0);
+    CHECK_FALSE(has_signal(report, "ground_truth.mismatch"));
+}
+
 TEST_CASE("Auxiliary arrays must match the split row counts for eval_performance",
           "[profile][report]") {
     TempDir dir;
@@ -663,6 +806,38 @@ TEST_CASE("Label arrays that are not one-dimensional are reported, not fatal",
     CHECK(find_path(report, "labels.valid_ratios.skipped") != nullptr);
     CHECK_FALSE(report["labels"].contains("query_selectivity"));
     CHECK_THAT(render_html_report(report), ContainsSubstring("label statistics need one label"));
+}
+
+TEST_CASE("Mean shifts of dimensions that are constant in train are reported",
+          "[profile][report]") {
+    TempDir dir;
+    const auto path = dir.File("constant_shift.hdf5");
+    const uint64_t rows = 200;
+    const uint64_t queries = 20;
+    // Dimensions 0 and 1 are constant in train, (1, 0), and in test, (0, 1); dimension 2 varies.
+    std::vector<float> train(rows * 3);
+    std::vector<float> test(queries * 3);
+    for (uint64_t r = 0; r < rows; ++r) {
+        train[r * 3] = 1.0F;
+        train[r * 3 + 1] = 0.0F;
+        train[r * 3 + 2] = static_cast<float>(r % 17);
+    }
+    for (uint64_t q = 0; q < queries; ++q) {
+        test[q * 3] = 0.0F;
+        test[q * 3 + 1] = 1.0F;
+        test[q * 3 + 2] = static_cast<float>(q % 17);
+    }
+    {
+        H5::H5File file(path, H5F_ACC_TRUNC);
+        write_string_attribute(file, "distance", "euclidean");
+        write_matrix(file, "train", train, rows, 3, H5::PredType::NATIVE_FLOAT);
+        write_matrix(file, "test", test, queries, 3, H5::PredType::NATIVE_FLOAT);
+    }
+    const JsonType report = profile_dataset(small_options(path), nullptr);
+    const JsonType& shift = report["cross_split"]["standardized_mean_shift"];
+    CHECK(shift["shifted_constant_dimensions"] == 2);
+    CHECK(shift["summary"]["count"] == 1);
+    CHECK(has_signal(report, "cross_split.constant_dimension_shift"));
 }
 
 TEST_CASE("Sparse records that repeat a term id are excluded from distance metrics",

@@ -58,10 +58,10 @@ JSON 报告：input、config、splits、cross_split、ground_truth、labels、
 | `l2`、`ip`、`cosine` 能否互换？ | 单位范数比例、范数变异系数 | 归一化后三者排序一致；范数分散时 `ip` 变成 MIPS 问题 |
 | 数据是否浪费内存？ | 精确重复（全量）、近似重复（k-NN）、常数维度、稀疏度 | 重复项占据 top-k 结果和图的边 |
 | 近邻检索有多难？ | 相对对比度、LID（MLE）、TwoNN、距离集中度、枢纽度 | He、Kumar、Chang，ICML 2012；Levina、Bickel，NeurIPS 2004；Facco 等，Sci. Rep. 2017；Aumuller、Ceccarello，2019（LID 与 ANN 难度）；Radovanovic 等，JMLR 2010（枢纽度） |
-| 适合哪种量化与变换？ | 逐维范围、6-sigma 离群值、峰度、PCA 谱、模拟 fp16/bf16/sq8/sq4/sq8_uniform/sq4_uniform 的召回率 | 复现 `ScalarQuantizationTrainer`：逐维截断边界（8 位截断率 0.001，4 位 0.05），`sq8_uniform` 用全局 min/max，`sq4_uniform` 用最窄的截断边界，向下取整编码并按 0.999 截断；fp16/bf16 与 uniform 量化器也编码查询，uniform 的 ip/cosine 得分由编码乘积加存储的原始值之和得到，编码大小包含元数据与对齐 |
+| 适合哪种量化与变换？ | 逐维范围、6-sigma 离群值、峰度、PCA 谱、模拟 fp16/bf16/sq8/sq4/sq8_uniform/sq4_uniform 的召回率 | 复现 `ScalarQuantizationTrainer`：逐维截断边界（8 位截断率 0.001，4 位 0.05），`sq8_uniform` 用全局 min/max，`sq4_uniform` 用最窄的截断边界，向下取整编码并按 0.999 截断；fp16 编码与 `generic::FloatToFP16` 一致（截断尾数、限制指数）；fp16/bf16 与 uniform 量化器也编码查询，uniform 的 ip/cosine 得分由编码乘积加存储的原始值之和得到，编码大小包含元数据与对齐 |
 | 类 IVF 分区是否均衡？ | k-means 簇大小变异系数、最大/平均簇大小、轮廓系数 | 粗略代理；IVF 实际使用的分桶数多得多 |
-| 查询是否与底库相似？ | 范数 KS、标准化均值偏移、分布外比例、二维投影叠加 | 分布外查询需要用真实查询调参 |
-| 真值是否可信？ | 与重新计算近邻对比的 id 召回率；基于存储 id 重新计算距离得到的距离召回率与距离约定 | 错误的真值会悄无声息地污染所有召回率数字 |
+| 查询是否与底库相似？ | 范数 KS、标准化均值偏移（在 train 中恒定但均值发生变化的维度单独计数）、分布外比例、二维投影叠加 | 分布外查询需要用真实查询调参 |
+| 真值是否可信？ | 与重新计算近邻对比的 id 召回率（文件含标签数组时，还会与只在同标签行中检索的结果对比，即 `knn_filter`）；基于存储 id 重新计算距离得到的距离召回率与距离约定 | 错误的真值会悄无声息地污染所有召回率数字 |
 | 稀疏 / SINDI 参数 | `max_term_id`（决定 `term_id_limit`）、id 密度（`remap_term_ids`）、文档频率与 Zipf/Gini、SINDI `doc_prune_ratio` 质量规则下保留的词项、每个查询的倒排条目数 | 倒排链长度主导 SINDI 的计算量 |
 
 距离遵循 VSAG 约定（`l2` 为平方、`ip` 为 `1 - <x, y>`、`cosine` 为 `1 - cos`）。需要度量空间的估计量（LID、TwoNN、相对对比度、近似重复）

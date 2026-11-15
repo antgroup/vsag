@@ -18,6 +18,7 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <numeric>
 
 #include "deterministic_random.h"
@@ -165,6 +166,61 @@ dense_chunk_rows(uint64_t rows, uint64_t dim, uint64_t chunk_mb) {
     // A split smaller than one chunk is read as a single chunk from row 0, so the BLOCK_ROWS
     // partials, and therefore every result, are the same as without the cap.
     return std::max<uint64_t>(1, std::min(chunk, rows));
+}
+
+LabelFilteredSearch::LabelFilteredSearch(const std::string& path, RowDistanceProbe& probe)
+    : probe_(probe),
+      reader_(path, probe.label_dataset),
+      heaps_(probe.filter_queries.size(), TopK(probe.filter_k)) {
+    probe_.labels.assign(probe_.rows.size(), 0);
+    probe_.labeled.assign(probe_.rows.size(), 0);
+}
+
+const std::vector<int64_t>&
+LabelFilteredSearch::ReadLabels(uint64_t first_row, uint64_t count) {
+    reader_.Read(first_row, count, labels_);
+    return labels_;
+}
+
+void
+LabelFilteredSearch::Scan(const uint8_t* valid,
+                          uint64_t first_row,
+                          const std::function<double(uint64_t, uint64_t)>& distance) {
+    // Rows of the chunk grouped by label, for the labels that some query needs.
+    std::unordered_map<int64_t, std::vector<uint64_t>> rows_by_label;
+    for (const int64_t label : probe_.filter_labels) {
+        rows_by_label.emplace(label, std::vector<uint64_t>());
+    }
+    for (uint64_t r = 0; r < labels_.size(); ++r) {
+        if (valid[r] != 0) {
+            const auto it = rows_by_label.find(labels_[r]);
+            if (it != rows_by_label.end()) {
+                it->second.push_back(r);
+            }
+        }
+    }
+    const std::vector<uint64_t>& queries = probe_.filter_queries;
+    const std::vector<int64_t>& labels = probe_.filter_labels;
+    std::vector<TopK>& heaps = heaps_;
+    const auto signed_queries = static_cast<int64_t>(queries.size());
+    // clang-format off
+#pragma omp parallel for schedule(dynamic, 1) default(none) \
+    shared(queries, labels, heaps, signed_queries, rows_by_label, distance, first_row)
+    // clang-format on
+    for (int64_t j = 0; j < signed_queries; ++j) {
+        // Every query label was inserted above.
+        for (const uint64_t r : rows_by_label.find(labels[j])->second) {
+            heaps[j].Push(distance(queries[j], r), first_row + r);
+        }
+    }
+}
+
+void
+LabelFilteredSearch::Finish() {
+    probe_.filtered.clear();
+    for (const TopK& heap : heaps_) {
+        probe_.filtered.push_back(heap.Sorted());
+    }
 }
 
 DenseSplitProfiler::DenseSplitProfiler(SplitContext context)
@@ -685,6 +741,10 @@ DenseSplitProfiler::second_pass(const DenseQuerySet* cross_queries) {
     const std::vector<double>& dim_std = dim_std_;
     const std::vector<double>& dim_mean = dim_mean_;
     const std::vector<uint8_t>& row_valid = row_valid_;
+    std::unique_ptr<LabelFilteredSearch> filtered;
+    if (probe_ != nullptr && !probe_->label_dataset.empty() && cross.Size() > 0) {
+        filtered = std::make_unique<LabelFilteredSearch>(context_.info->path, *probe_);
+    }
     for (uint64_t begin = 0; begin < rows_; begin += chunk_rows_) {
         const uint64_t count = std::min(chunk_rows_, rows_ - begin);
         reader.ReadRows(begin, count, buffer.data());
@@ -735,6 +795,8 @@ DenseSplitProfiler::second_pass(const DenseQuerySet* cross_queries) {
             cross_search.Scan(buffer.data(), norms.data(), valid.data(), begin, count);
         }
         if (probe_ != nullptr && cross.Size() > 0) {
+            const std::vector<int64_t>* labels =
+                filtered ? &filtered->ReadLabels(begin, count) : nullptr;
             auto it = std::lower_bound(probe_->rows.begin(), probe_->rows.end(), begin);
             for (; it != probe_->rows.end() && *it < begin + count; ++it) {
                 const auto entry = static_cast<uint64_t>(it - probe_->rows.begin());
@@ -743,8 +805,21 @@ DenseSplitProfiler::second_pass(const DenseQuerySet* cross_queries) {
                     probe_->distances[entry] = dense_metric_distance(
                         cross, probe_->queries[entry], buffer.data() + r * dim_, norms[r], metric);
                 }
+                if (labels != nullptr && r < labels->size()) {
+                    probe_->labels[entry] = (*labels)[r];
+                    probe_->labeled[entry] = 1;
+                }
+            }
+            if (filtered) {
+                filtered->Scan(valid.data(), begin, [&](uint64_t q, uint64_t r) {
+                    return dense_metric_distance(
+                        cross, q, buffer.data() + r * dim_, norms[r], metric);
+                });
             }
         }
+    }
+    if (filtered) {
+        filtered->Finish();
     }
     uint64_t total_outliers = 0;
     std::vector<double> outlier_ratio(dim_);

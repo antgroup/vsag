@@ -271,11 +271,19 @@ TEST_CASE("IEEE classification and half-precision rounding", "[profile][math]") 
     CHECK(canonical_bits(-0.0F) == canonical_bits(0.0F));
     CHECK(canonical_bits(std::numeric_limits<float>::quiet_NaN()) ==
           canonical_bits(-std::numeric_limits<float>::quiet_NaN()));
+    // fp16 as VSAG's generic::FloatToFP16 encodes it: the mantissa is truncated and the
+    // exponent clamped to [-14, 15], so there are no subnormals, infinities or NaNs.
     CHECK(round_through_fp16(1.0F) == 1.0F);
     CHECK(round_through_fp16(65504.0F) == 65504.0F);
-    CHECK(std::isinf(round_through_fp16(65520.0F)));
+    CHECK(round_through_fp16(65520.0F) == 65504.0F);
+    CHECK(round_through_fp16(70000.0F) == 34976.0F);
+    CHECK(round_through_fp16(std::numeric_limits<float>::infinity()) == 32768.0F);
     CHECK(round_through_fp16(0.1F) == 0.0999755859375F);
-    CHECK(round_through_fp16(1e-8F) == 0.0F);
+    CHECK(round_through_fp16(1.0006F) == 1.0F);
+    CHECK(round_through_fp16(1.0014F) == 1.0009765625F);
+    CHECK(round_through_fp16(0.0F) == 0x1p-14F);
+    CHECK(round_through_fp16(-0.0F) == -0x1p-14F);
+    CHECK(round_through_fp16(1e-8F) == 0x1.578p-14F);
     CHECK(round_through_fp16(-2.0F) == -2.0F);
     CHECK(round_through_bf16(1.0F) == 1.0F);
     CHECK(round_through_bf16(3.14159F) == 3.140625F);
@@ -784,4 +792,11 @@ TEST_CASE("Quantization simulation mirrors VSAG range rules", "[profile][quantiz
     CHECK(ip["sq4_uniform_bounds"][1] == 10.0);
     CHECK(ip["schemes"]["sq4_uniform"]["recall_at_k"] == 0.0);
     CHECK(ip["schemes"]["fp16"]["recall_at_k"] == 1.0);
+    // fp16 truncates like generic::FloatToFP16: the query 1.0006 and row 0 (1.0004) both encode
+    // to 1.0, so the exact nearest row is found. Round-to-nearest-even would encode the query
+    // as 1.0009765625, the code of row 1 (1.0014), and miss it.
+    const std::vector<float> fp16_base = {1.0004F, 1.0014F};
+    const std::vector<float> fp16_query = {1.0006F};
+    const JsonType fp16 = simulate_quantization(fp16_base, 2, fp16_query, 1, 1, Metric::L2, 1);
+    CHECK(fp16["schemes"]["fp16"]["recall_at_k"] == 1.0);
 }

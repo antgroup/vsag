@@ -190,4 +190,15 @@ sparse_dot(const uint32_t* ids_a,
            const float* values_b,
            uint64_t length_b);
 
+/// Metric distance from sparse query `q` to row `r` of `batch`, with the products and order of
+/// SparseKnnSearch, so the same pair always gives a bit-identical distance. Rows that share no
+/// term with the query are at distance 1.
+double
+sparse_metric_distance(const SparseQuerySet& queries,
+                       uint64_t q,
+                       const SparseBatch& batch,
+                       uint64_t r,
+                       double row_norm,
+                       Metric metric);
+
 }  // namespace vsag::dataset_profile

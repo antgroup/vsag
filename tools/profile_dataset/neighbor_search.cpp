@@ -437,4 +437,24 @@ sparse_dot(const uint32_t* ids_a,
     return dot;
 }
 
+double
+sparse_metric_distance(const SparseQuerySet& queries,
+                       uint64_t q,
+                       const SparseBatch& batch,
+                       uint64_t r,
+                       double row_norm,
+                       Metric metric) {
+    const double dot = sparse_dot(queries.ids.data() + queries.offsets[q],
+                                  queries.values.data() + queries.offsets[q],
+                                  queries.offsets[q + 1] - queries.offsets[q],
+                                  batch.ids.data() + batch.offsets[r],
+                                  batch.values.data() + batch.offsets[r],
+                                  batch.offsets[r + 1] - batch.offsets[r]);
+    if (metric == Metric::COSINE) {
+        const double denominator = queries.norms[q] * row_norm;
+        return denominator > 0.0 ? 1.0 - dot / denominator : 1.0;
+    }
+    return 1.0 - dot;
+}
+
 }  // namespace vsag::dataset_profile

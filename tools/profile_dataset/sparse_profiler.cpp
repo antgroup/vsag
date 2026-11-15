@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <numeric>
 #include <unordered_map>
 
@@ -595,6 +596,10 @@ SparseSplitProfiler::second_pass(const SparseQuerySet* cross_queries) {
     SparseBatch batch;
     std::vector<double> norms;
     std::vector<uint8_t> valid;
+    std::unique_ptr<LabelFilteredSearch> filtered;
+    if (probe_ != nullptr && !probe_->label_dataset.empty() && cross.Size() > 0) {
+        filtered = std::make_unique<LabelFilteredSearch>(context_.info->path, *probe_);
+    }
     while (reader.NextBatch(BLOCK_ROWS, batch)) {
         for (const float value : batch.values) {
             if (is_finite_value(value)) {
@@ -619,29 +624,30 @@ SparseSplitProfiler::second_pass(const SparseQuerySet* cross_queries) {
             cross_search.Scan(batch, norms, valid);
         }
         if (probe_ != nullptr && cross.Size() > 0) {
-            // Same products in the same (ascending id) order as SparseKnnSearch.
+            const std::vector<int64_t>* labels =
+                filtered ? &filtered->ReadLabels(batch.first_row, batch.Rows()) : nullptr;
             auto it = std::lower_bound(probe_->rows.begin(), probe_->rows.end(), batch.first_row);
             for (; it != probe_->rows.end() && *it < batch.first_row + batch.Rows(); ++it) {
                 const auto entry = static_cast<uint64_t>(it - probe_->rows.begin());
                 const uint64_t r = *it - batch.first_row;
-                const uint64_t q = probe_->queries[entry];
-                if (valid[r] == 0) {
-                    continue;
+                if (valid[r] != 0) {
+                    probe_->distances[entry] = sparse_metric_distance(
+                        cross, probe_->queries[entry], batch, r, norms[r], context_.metric);
                 }
-                const double dot = sparse_dot(cross.ids.data() + cross.offsets[q],
-                                              cross.values.data() + cross.offsets[q],
-                                              cross.offsets[q + 1] - cross.offsets[q],
-                                              batch.ids.data() + batch.offsets[r],
-                                              batch.values.data() + batch.offsets[r],
-                                              batch.offsets[r + 1] - batch.offsets[r]);
-                double distance = 1.0 - dot;
-                if (context_.metric == Metric::COSINE) {
-                    const double denominator = cross.norms[q] * norms[r];
-                    distance = denominator > 0.0 ? 1.0 - dot / denominator : 1.0;
+                if (labels != nullptr && r < labels->size()) {
+                    probe_->labels[entry] = (*labels)[r];
+                    probe_->labeled[entry] = 1;
                 }
-                probe_->distances[entry] = distance;
+            }
+            if (filtered) {
+                filtered->Scan(valid.data(), batch.first_row, [&](uint64_t q, uint64_t r) {
+                    return sparse_metric_distance(cross, q, batch, r, norms[r], context_.metric);
+                });
             }
         }
+    }
+    if (filtered) {
+        filtered->Finish();
     }
     json_["values"]["histogram"] = histogram.ToJson();
     json_["values"]["histogram"]["clipped"] = value_clipped_;

@@ -52,10 +52,52 @@ struct SamplePlan {
 /// pass 2 with the k-NN kernels. The ground-truth check uses it to recompute the distances of
 /// stored neighbor ids. `rows` must be ascending; `distances` keeps NaN for rows that do not
 /// exist or are excluded from distance metrics (non-finite values, zero rows under cosine).
+///
+/// With `label_dataset` set (the scanned split's label array), pass 2 also reads the labels:
+/// `labels` and `labeled` receive the label of each probed row, and `filtered[j]` the
+/// `filter_k` nearest rows whose label equals `filter_labels[j]` for cross query
+/// `filter_queries[j]`, as eval_performance's knn_filter search restricts its results.
 struct RowDistanceProbe {
     std::vector<uint64_t> rows;
     std::vector<uint64_t> queries;
     std::vector<double> distances;
+
+    std::string label_dataset;
+    std::vector<int64_t> labels;
+    std::vector<uint8_t> labeled;
+    std::vector<uint64_t> filter_queries;
+    std::vector<int64_t> filter_labels;
+    uint64_t filter_k{0};
+    std::vector<std::vector<Neighbor>> filtered;
+};
+
+/// Pass-2 part of RowDistanceProbe::label_dataset: reads the labels of each chunk and keeps, per
+/// filter query, the k nearest valid rows that carry its label. Memory is O(chunk + queries x k).
+class LabelFilteredSearch {
+public:
+    LabelFilteredSearch(const std::string& path, RowDistanceProbe& probe);
+
+    /// Reads the labels of rows [first_row, first_row + count); rows past the end of the label
+    /// array have none. Returns them for the chunk's probed rows.
+    const std::vector<int64_t>&
+    ReadLabels(uint64_t first_row, uint64_t count);
+
+    /// Offers the valid rows of the chunk last passed to ReadLabels() to the queries with the
+    /// same label. `distance(q, r)` is the metric distance from cross query q to chunk row r.
+    void
+    Scan(const uint8_t* valid,
+         uint64_t first_row,
+         const std::function<double(uint64_t, uint64_t)>& distance);
+
+    /// Stores the neighbors in the probe.
+    void
+    Finish();
+
+private:
+    RowDistanceProbe& probe_;
+    Int64RangeReader reader_;
+    std::vector<int64_t> labels_;
+    std::vector<TopK> heaps_;
 };
 
 JsonType

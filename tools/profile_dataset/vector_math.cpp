@@ -148,50 +148,34 @@ float_from_bits(uint32_t bits) {
     return value;
 }
 
+/// generic::FloatToFP16 (src/simd/generic.cpp): the mantissa is truncated to 10 bits and the
+/// exponent clamped to [-14, 15], so there are no subnormals, infinities or NaNs.
 uint16_t
-float_to_half_bits(float value) {
-    uint32_t bits = float_bits(value);
-    const uint32_t sign = bits & 0x80000000U;
-    bits ^= sign;
-    uint32_t half = 0;
-    if (bits >= 0x47800000U) {
-        // 65536 or larger, Inf or NaN.
-        half = bits > 0x7F800000U ? 0x7E00U : 0x7C00U;
-    } else if (bits < 0x38800000U) {
-        // Result is subnormal or zero: align the mantissa with a magic addend so that the
-        // FPU performs the round-to-nearest-even step.
-        const float magic = float_from_bits(0x3F000000U);
-        const float aligned = float_from_bits(bits) + magic;
-        half = float_bits(aligned) - float_bits(magic);
-    } else {
-        const uint32_t mantissa_odd = (bits >> 13U) & 1U;
-        bits += 0xC8000FFFU;  // rebias the exponent (15 - 127) and add the rounding bias
-        bits += mantissa_odd;
-        half = bits >> 13U;
-    }
-    return static_cast<uint16_t>(half | (sign >> 16U));
+vsag_float_to_fp16(float value) {
+    const uint32_t bits = float_bits(value);
+    const uint32_t sign = (bits >> 31U) & 1U;
+    const int32_t exponent = std::clamp(static_cast<int32_t>((bits >> 23U) & 0xFFU) - 127, -14, 15);
+    const uint32_t mantissa = bits & 0x007FFFFFU;
+    return static_cast<uint16_t>((sign << 15U) | (static_cast<uint32_t>(exponent + 15) << 10U) |
+                                 (mantissa >> 13U));
 }
 
+/// generic::FP16ToFloat, the inverse for every code that vsag_float_to_fp16 produces.
 float
-half_bits_to_float(uint16_t half) {
-    const uint32_t sign = (static_cast<uint32_t>(half) & 0x8000U) << 16U;
-    const uint32_t exponent = (static_cast<uint32_t>(half) >> 10U) & 0x1FU;
-    const uint32_t mantissa = static_cast<uint32_t>(half) & 0x3FFU;
-    if (exponent == 0) {
-        const float magnitude = static_cast<float>(mantissa) * 5.9604644775390625e-8F;
-        return sign != 0 ? -magnitude : magnitude;
-    }
-    if (exponent == 31) {
-        return float_from_bits(sign | 0x7F800000U | (mantissa << 13U));
-    }
-    return float_from_bits(sign | ((exponent + 112U) << 23U) | (mantissa << 13U));
+vsag_fp16_to_float(uint16_t half) {
+    const uint32_t sign = (static_cast<uint32_t>(half) >> 15U) & 1U;
+    const int32_t exponent =
+        static_cast<int32_t>((static_cast<uint32_t>(half) >> 10U) & 0x1FU) - 15;
+    const uint32_t mantissa = (static_cast<uint32_t>(half) & 0x3FFU) << 13U;
+    return float_from_bits((sign << 31U) | (static_cast<uint32_t>(exponent + 127) << 23U) |
+                           mantissa);
 }
 
 }  // namespace
 
 float
 round_through_fp16(float value) {
-    return half_bits_to_float(float_to_half_bits(value));
+    return vsag_fp16_to_float(vsag_float_to_fp16(value));
 }
 
 float
