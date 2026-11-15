@@ -75,8 +75,11 @@ taskset -c 0-15 python3 tools/hamming_benchmark/bench_index.py \
 The script packs the 0/1 elements of the dataset MSB-first with `numpy.packbits`. Recall@k is
 tie-aware: a returned neighbor counts when its distance is not larger than the true k-th
 distance, taken from the `distances` dataset (ann-benchmarks stores it divided by the number of
-bits; the script scales it back) or computed by brute force when the file has none. FAISS
-`IndexBinaryHNSW(M)` keeps `2 * M` neighbors on its base layer, the counterpart of `max_degree`.
+bits; the script scales it back) or computed by brute force when the file has none. Missing
+neighbors (id -1, left by a failed or short search) count as misses, and a VSAG search that
+fails, for example with an `--ef` value the index rejects, stops the script with the error of
+the library. FAISS `IndexBinaryHNSW(M)` keeps `2 * M` neighbors on its base layer, the
+counterpart of `max_degree`.
 
 Pin the process to idle physical cores of one NUMA node so that the build threads and the
 memory they allocate stay on that node.
