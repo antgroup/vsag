@@ -200,6 +200,30 @@ TEST_CASE("Distance attribute aliases are profiled but flagged for eval_performa
         }
         CHECK(flagged == (attribute != "euclidean"));
     }
+    // A sparse file reports the alias and the sparse rule independently.
+    const std::vector<SparseRecord> records = {SparseRecord{{1, 4}, {0.5F, 0.25F}},
+                                               SparseRecord{{2}, {1.0F}}};
+    for (const std::string attribute : {"cosine", "l2", "angular", "ip"}) {
+        INFO(attribute);
+        const auto path = dir.File("sparse_" + attribute + ".hdf5");
+        {
+            H5::H5File file(path, H5F_ACC_TRUNC);
+            write_string_attribute(file, "type", "sparse");
+            write_string_attribute(file, "distance", attribute);
+            write_vector(file, "train", encode_sparse(records, nullptr), H5::PredType::NATIVE_INT8);
+        }
+        const DatasetInfo info = inspect_dataset(path);
+        bool alias = false;
+        bool sparse_rule = false;
+        for (const auto& issue : info.eval_compatibility_issues) {
+            alias =
+                alias || issue.find("accepts only euclidean, ip or angular") != std::string::npos;
+            sparse_rule = sparse_rule || issue.find("sparse datasets support only distance='ip'") !=
+                                             std::string::npos;
+        }
+        CHECK(alias == (attribute == "cosine" || attribute == "l2"));
+        CHECK(sparse_rule == (attribute != "ip"));
+    }
 }
 
 TEST_CASE("valid_ratios without both label arrays is flagged for eval_performance",

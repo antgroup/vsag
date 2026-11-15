@@ -209,7 +209,7 @@ HTML 报告是单个文件，包含内联 CSS、内联 SVG 图表和少量内联
 | `--ai-auth-header` | | `Authorization` | 携带密钥的请求头；`Authorization` 发送 `Bearer <key>`，其他名称（例如 Azure OpenAI 的 `api-key`）直接发送密钥 |
 | `--ai-language` | `VSAG_PROFILE_AI_LANGUAGE` | `en` | 生成文本的语言：`en` 或 `zh` |
 | `--ai-timeout`、`--ai-retries` | | `60`、`1` | 单次尝试的总时长上限（秒，含连接、发送与接收，最多 3600）；对传输错误、HTTP 429 与 5xx 的重试次数（最多 10）。所有尝试及其间隔合计不超过（重试次数 + 1）x 超时 |
-| `--ai-dry-run`、`--ai-request-out` | | | 只构建（并保存）完整请求体，不发送 |
+| `--ai-dry-run`、`--ai-request-out` | | | 只构建（并保存）完整请求体，不发送；与 `--from-profile` 一起使用时保留已保存的分析，也不会改写已保存的报告 |
 | `--ai-output` | | | 另外把 `ai_analysis` 部分写入单独文件 |
 | `--ai-required` | | 关闭 | AI 分析未成功时以退出码 3 结束（报告仍会写出）；需要同时指定 `--ai-provider` |
 

@@ -246,7 +246,7 @@ The AI analysis is disabled unless a provider is configured explicitly:
 | `--ai-auth-header` | | `Authorization` | Header for the key; `Authorization` sends `Bearer <key>`, other names (e.g. `api-key` for Azure OpenAI) send the raw key |
 | `--ai-language` | `VSAG_PROFILE_AI_LANGUAGE` | `en` | Language of the generated text: `en` or `zh` |
 | `--ai-timeout`, `--ai-retries` | | `60`, `1` | Wall-clock limit of one attempt in seconds (connect, send and receive; at most 3600); retries for transport errors, HTTP 429 and 5xx (at most 10). All attempts and the delays between them end within (retries + 1) x timeout |
-| `--ai-dry-run`, `--ai-request-out` | | | Build (and save) the exact request body without sending it |
+| `--ai-dry-run`, `--ai-request-out` | | | Build (and save) the exact request body without sending it; with `--from-profile`, a saved analysis is kept and the saved profile is not rewritten |
 | `--ai-output` | | | Also write the `ai_analysis` section to a separate file |
 | `--ai-required` | | off | Exit with code 3 when the analysis does not succeed (the reports are still written); needs `--ai-provider` |
 

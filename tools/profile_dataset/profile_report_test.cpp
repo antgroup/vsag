@@ -1060,6 +1060,33 @@ TEST_CASE("CLI writes reports, re-renders saved profiles and rejects bad input",
     REQUIRE(cli({"--from-profile", saved, "--html", saved_html, "-o", copy, "-q"}) == EXIT_OK);
     CHECK_THAT(read_text(saved_html), ContainsSubstring("Saved finding"));
     CHECK(JsonType::parse(read_text(copy))["ai_analysis"] == with_ai["ai_analysis"]);
+    // A dry run sends nothing: the saved analysis stays and the saved profile is not rewritten.
+    const std::string saved_text = read_text(saved);
+    const auto dry_html = dir.File("dry.html");
+    const auto dry_copy = dir.File("dry_copy.json");
+    const auto dry_request = dir.File("dry_request.json");
+    for (const bool with_copy : {false, true}) {
+        INFO(with_copy);
+        std::vector<std::string> arguments = {"--from-profile",
+                                              saved,
+                                              "--html",
+                                              dry_html,
+                                              "--ai-provider",
+                                              "openai",
+                                              "--ai-dry-run",
+                                              "--ai-request-out",
+                                              dry_request,
+                                              "-q"};
+        if (with_copy) {
+            arguments.emplace_back("-o");
+            arguments.push_back(dry_copy);
+        }
+        REQUIRE(cli(arguments, &out, &err) == EXIT_OK);
+        CHECK(read_text(saved) == saved_text);
+        CHECK_THAT(read_text(dry_html), ContainsSubstring("Saved finding"));
+        CHECK(std::filesystem::exists(dry_request));
+    }
+    CHECK(JsonType::parse(read_text(dry_copy))["ai_analysis"] == with_ai["ai_analysis"]);
     const auto copy_only = dir.File("copy_only.json");
     REQUIRE(cli({"--from-profile", json, "-o", copy_only, "--no-html", "-q"}) == EXIT_OK);
     CHECK(JsonType::parse(read_text(copy_only)) == report);
