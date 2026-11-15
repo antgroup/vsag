@@ -446,6 +446,16 @@ derive_signals(const JsonType& report) {
                "cross_split.standardized_mean_shift.summary.max"},
               "norm KS > 0.1 or out-of-distribution ratio > 0.1");
     }
+    if (s.Number("cross_split.standardized_mean_shift.shifted_constant_dimensions", value) &&
+        value > 0) {
+        s.Add("cross_split.constant_dimension_shift",
+              "warning",
+              format_number(value) +
+                  " dimensions are constant in the base data but have a different mean in the "
+                  "queries; tune and evaluate with real queries.",
+              {"cross_split.standardized_mean_shift.shifted_constant_dimensions"},
+              "standardized_mean_shift.shifted_constant_dimensions > 0");
+    }
     if (s.Number("ground_truth.distance_recall_at_k", value) && value < 0.99) {
         s.Add(
             "ground_truth.mismatch",

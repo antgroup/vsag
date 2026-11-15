@@ -202,6 +202,36 @@ TEST_CASE("Distance attribute aliases are profiled but flagged for eval_performa
     }
 }
 
+TEST_CASE("valid_ratios without both label arrays is flagged for eval_performance",
+          "[profile][reader]") {
+    TempDir dir;
+    for (const bool with_labels : {false, true}) {
+        INFO(with_labels);
+        const auto path = dir.File(with_labels ? "ratios_labels.hdf5" : "ratios_only.hdf5");
+        {
+            H5::H5File file(path, H5F_ACC_TRUNC);
+            write_string_attribute(file, "distance", "euclidean");
+            write_matrix(
+                file, "train", std::vector<float>(8, 1.0F), 4, 2, H5::PredType::NATIVE_FLOAT);
+            write_vector(
+                file, "valid_ratios", std::vector<float>{0.5F}, H5::PredType::NATIVE_FLOAT);
+            if (with_labels) {
+                write_vector(
+                    file, "train_labels", std::vector<int64_t>(4, 0), H5::PredType::NATIVE_INT64);
+                write_vector(
+                    file, "test_labels", std::vector<int64_t>(1, 0), H5::PredType::NATIVE_INT64);
+            }
+        }
+        const DatasetInfo info = inspect_dataset(path);
+        bool flagged = false;
+        for (const auto& issue : info.eval_compatibility_issues) {
+            flagged = flagged || issue.find("valid_ratios requires train_labels and test_labels") !=
+                                     std::string::npos;
+        }
+        CHECK(flagged == !with_labels);
+    }
+}
+
 TEST_CASE("Unsorted and repeated sparse ids are sorted and counted", "[profile][reader]") {
     TempDir dir;
     const auto path = dir.File("unsorted.hdf5");

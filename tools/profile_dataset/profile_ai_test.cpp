@@ -304,6 +304,25 @@ TEST_CASE("Keys hidden behind JSON escapes are redacted once decoded", "[profile
         run_ai_analysis(dense_report(), openai_options(), echo_rejected, warnings);
     CHECK(with_rejected["rejected_items"].size() == 1);
     CHECK(with_rejected.dump().find(TEST_KEY) == std::string::npos);
+    // A member name of a rejected item can carry the key as well once the reply is decoded.
+    JsonType named = JsonType::parse(valid_reply("splits.train.invalid_values.total"));
+    named["findings"].push_back(JsonType{{"title", "Named"},
+                                         {"severity", "notice"},
+                                         {"detail", "No evidence."},
+                                         {"evidence", JsonType::array()},
+                                         {"KEYNAME", 1}});
+    std::string named_text = named.dump();
+    // The JSON escape of 's', built from the backslash's code (92).
+    const std::string escaped_s = std::string(1, static_cast<char>(92)) + "u0073";
+    named_text.replace(named_text.find("KEYNAME"), 7, escaped_s + (TEST_KEY + 1));
+    MockTransport echo_named;
+    echo_named.responses = {HttpResponse{200, openai_envelope(named_text), ""}};
+    REQUIRE(echo_named.responses.front().body.find(TEST_KEY) == std::string::npos);
+    const JsonType with_named =
+        run_ai_analysis(dense_report(), openai_options(), echo_named, warnings);
+    REQUIRE(with_named["rejected_items"].size() == 1);
+    CHECK(with_named.dump().find(TEST_KEY) == std::string::npos);
+    CHECK(with_named["rejected_items"][0]["item"].contains("[REDACTED]"));
 }
 
 TEST_CASE("Model text and provider errors are shortened at UTF-8 boundaries", "[profile][ai]") {

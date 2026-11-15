@@ -74,8 +74,8 @@ top_k_ids(uint64_t base_rows, uint64_t query_rows, uint64_t k, const DistanceFn&
     for (int64_t q = 0; q < signed_queries; ++q) {
         TopK heap(k);
         for (uint64_t r = 0; r < base_rows; ++r) {
-            // Codes that overflow (fp16 above 65504) can give inf - inf; rank NaN last so the
-            // order stays total.
+            // Codes that overflow (bf16 near the float limit) can give inf - inf; rank NaN last
+            // so the order stays total.
             const double value = distance(static_cast<uint64_t>(q), r);
             heap.Push(std::isnan(value) ? std::numeric_limits<double>::infinity() : value, r);
         }

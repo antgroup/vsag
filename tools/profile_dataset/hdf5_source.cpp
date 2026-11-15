@@ -288,6 +288,10 @@ inspect_dataset(const std::string& path) {
                     "valid_ratios must be a non-empty one-dimensional dataset for "
                     "eval_performance");
             }
+            if (!info.has_train_labels || !info.has_test_labels) {
+                info.eval_compatibility_issues.emplace_back(
+                    "valid_ratios requires train_labels and test_labels in eval_performance");
+            }
         }
         if (info.has_train_labels != info.has_test_labels) {
             info.eval_compatibility_issues.emplace_back(
@@ -348,6 +352,39 @@ DenseSplitReader::ReadRows(uint64_t begin, uint64_t count, float* out) {
         }
     } catch (const H5::Exception& e) {
         rethrow_hdf5("cannot read dense rows", e);
+    }
+}
+
+Int64RangeReader::Int64RangeReader(const std::string& path, const std::string& name)
+    : file_(open_file(path)), name_(name) {
+    try {
+        dataset_ = file_.openDataSet(name);
+        const auto shape = dataset_shape(dataset_);
+        if (shape.size() != 1) {
+            throw ProfileError("'/" + name + "' must be one-dimensional");
+        }
+        rows_ = shape[0];
+    } catch (const H5::Exception& e) {
+        rethrow_hdf5("cannot open /" + name, e);
+    }
+}
+
+void
+Int64RangeReader::Read(uint64_t begin, uint64_t count, std::vector<int64_t>& values) {
+    const uint64_t available = begin < rows_ ? std::min(count, rows_ - begin) : 0;
+    values.resize(available);
+    if (available == 0) {
+        return;
+    }
+    try {
+        const hsize_t offset[1] = {begin};
+        const hsize_t extent[1] = {available};
+        H5::DataSpace file_space = dataset_.getSpace();
+        file_space.selectHyperslab(H5S_SELECT_SET, extent, offset);
+        H5::DataSpace memory_space(1, extent);
+        dataset_.read(values.data(), H5::PredType::NATIVE_INT64, memory_space, file_space);
+    } catch (const H5::Exception& e) {
+        rethrow_hdf5("cannot read /" + name_, e);
     }
 }
 

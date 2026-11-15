@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <initializer_list>
@@ -150,6 +151,8 @@ const std::set<std::string> REPORT_KEYS = {
     "knn_k",
     "knn_queries",
     "kth_neighbor_distance",
+    "label_filtered",
+    "label_filtered_queries",
     "largest_group",
     "largest_label_share",
     "length",
@@ -239,9 +242,12 @@ const std::set<std::string> REPORT_KEYS = {
     "sampled_rows",
     "schemes",
     "scope",
+    "scope_distance_recall",
+    "search_scope",
     "searched_rows",
     "seed",
     "severity",
+    "shifted_constant_dimensions",
     "silhouette",
     "silhouette_rows",
     "similarity",
@@ -278,6 +284,7 @@ const std::set<std::string> REPORT_KEYS = {
     "train",
     "two_nn",
     "two_nn_excluded_ratio",
+    "unfiltered",
     "unit_norm_ratio",
     "unit_norm_tolerance",
     "unsorted_rows",
@@ -322,6 +329,7 @@ const std::set<std::string> STRING_KEYS = {"best_matching_distance_convention",
                                            "profiled_splits",
                                            "query_source",
                                            "scope",
+                                           "search_scope",
                                            "severity",
                                            "status",
                                            "storage_type",
@@ -769,7 +777,8 @@ validate_ai_options(const AiOptions& options) {
     if (options.language != "en" && options.language != "zh") {
         throw ProfileError("unsupported AI language '" + options.language + "'; expected en or zh");
     }
-    if (!(options.timeout_seconds > 0.0 && options.timeout_seconds <= MAX_AI_TIMEOUT_SECONDS)) {
+    if (std::isnan(options.timeout_seconds) || options.timeout_seconds <= 0.0 ||
+        options.timeout_seconds > MAX_AI_TIMEOUT_SECONDS) {
         throw ProfileError("--ai-timeout must be in (0, 3600] seconds");
     }
     if (options.max_retries > MAX_AI_RETRIES) {
@@ -794,7 +803,8 @@ redact(const std::string& text, const std::string& secret) {
     return result;
 }
 
-/// Redacts `secret` in every string of a JSON value, including keys of rejected items.
+/// Redacts `secret` in every string of a JSON value, member names included: a rejected item
+/// keeps the provider's object, whose names may carry the key once decoded.
 void
 redact_strings(JsonType& node, const std::string& secret) {
     if (secret.empty()) {
@@ -802,10 +812,18 @@ redact_strings(JsonType& node, const std::string& secret) {
     }
     if (node.is_string()) {
         node = redact(node.get<std::string>(), secret);
-    } else if (node.is_structured()) {
+    } else if (node.is_array()) {
         for (auto& child : node) {
             redact_strings(child, secret);
         }
+    } else if (node.is_object()) {
+        JsonType redacted = JsonType::object();
+        for (const auto& item : node.items()) {
+            JsonType value = std::move(item.value());
+            redact_strings(value, secret);
+            redacted[redact(item.key(), secret)] = std::move(value);
+        }
+        node = std::move(redacted);
     }
 }
 
