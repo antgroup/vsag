@@ -38,6 +38,8 @@ namespace vsag::dataset_profile {
 namespace {
 
 constexpr double OOD_PERCENTILE = 0.95;
+/// Relative margin for genuinely tied neighbor distances in the ground-truth check.
+constexpr double RELATIVE_TIE_TOLERANCE = 1e-9;
 
 std::string
 utc_timestamp() {
@@ -247,9 +249,11 @@ ground_truth_report(const DatasetInfo& info,
                               std::back_inserter(common));
         id_recall += static_cast<double>(common.size()) / static_cast<double>(k);
         // A stored id is correct when its recomputed distance is within the exact k-th
-        // distance, which absorbs the order of ties.
+        // distance, which absorbs the order of ties. Both come from the same kernels, so the
+        // margin only covers rounding: it scales with the distances and is 0 when they are 0.
         const double kth = exact[k - 1].distance;
-        const double tolerance = 1e-5 * std::max(1.0, std::abs(kth));
+        const double tolerance =
+            RELATIVE_TIE_TOLERANCE * std::max(std::abs(kth), std::abs(exact.front().distance));
         uint64_t within = 0;
         std::set<int64_t> seen;
         for (uint64_t j = 0; j < k; ++j) {

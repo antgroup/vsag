@@ -566,6 +566,32 @@ TEST_CASE(
     CHECK(neighbors[0][0].distance == 2.0);
 }
 
+TEST_CASE("Duplicate examples keep only the five best groups", "[profile][duplicates]") {
+    // 20 rows in 9 hash groups. Sizes: g3 = 4, g1 = g6 = 3, g0 = g2 = g4 = g5 = 2, g7 = g8 = 1.
+    const std::vector<uint64_t> group = {0, 1, 2, 3, 4, 5, 6, 7, 8, 0,
+                                         1, 1, 2, 3, 3, 3, 4, 5, 6, 6};
+    std::vector<uint64_t> high(group.size());
+    for (uint64_t r = 0; r < group.size(); ++r) {
+        high[r] = 100 + group[r];
+    }
+    const std::vector<uint64_t> low(group.size(), 0);
+    const JsonType report = duplicate_report(high, low, {}, group.size());
+    CHECK(report["groups"] == 7);
+    CHECK(report["duplicate_rows"] == 11);
+    CHECK(report["largest_group"] == 4);
+    // Largest first, then the lowest first row: g3, g1, g6, g0, g2 (g4 and g5 are dropped).
+    REQUIRE(report["examples"].size() == 5);
+    CHECK(report["examples"][0]["rows"] == JsonType::array({3, 13, 14, 15}));
+    CHECK(report["examples"][1]["rows"] == JsonType::array({1, 10, 11}));
+    CHECK(report["examples"][2]["rows"] == JsonType::array({6, 18, 19}));
+    CHECK(report["examples"][3]["rows"] == JsonType::array({0, 9}));
+    CHECK(report["examples"][4]["rows"] == JsonType::array({2, 12}));
+    // An explicit identity row map gives the same report as the implicit one.
+    std::vector<uint64_t> rows(group.size());
+    std::iota(rows.begin(), rows.end(), 0);
+    CHECK(duplicate_report(high, low, rows, group.size()) == report);
+}
+
 TEST_CASE("Dense I/O chunks are capped by the split size", "[profile][reader]") {
     // 3 x 65536 float32 rows hold 768 KiB; a 4096-row chunk would allocate 1 GiB.
     CHECK(dense_chunk_rows(3, 65536, 1) == 3);

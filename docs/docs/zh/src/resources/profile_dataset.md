@@ -34,7 +34,7 @@ VSAG_ENABLE_TOOLS=ON make release
 | 多向量 | `type` 属性为 `multi_vector` | 暂不支持，工具会给出明确错误并退出。 |
 
 `/neighbors`、`/distances`（真值）以及 `/train_labels`、`/test_labels`、`/valid_ratios` 都是可选的；存在时也会被检查。
-距离度量取自 `distance` 属性（`euclidean` → `l2`，`ip` → `ip`，`angular` → `cosine`），可用 `--metric` 覆盖。稀疏数据支持
+距离度量取自 `distance` 属性（`euclidean` → `l2`，`ip` → `ip`，`angular` → `cosine`），可用 `--metric` 覆盖。也接受别名 `l2` 和 `cosine`，但会列为与 eval_performance 不兼容的问题，因为评测器只接受上述三个名称。稀疏数据支持
 `ip` 和 `cosine`。与 `eval_performance` 要求不一致之处（例如缺少真值、`uint8` 存储、以无符号字节存储的稀疏字节流、行数与划分不一致的
 `/neighbors` 或标签数组、缺少 `distance` 属性）会列在 `input.eval_compatibility` 中并作为警告展示。
 
@@ -74,7 +74,7 @@ profile_dataset: sift-128-euclidean.hdf5 (dense, metric l2)
 | `--disable` | | 可关闭 `duplicates,knn,pca,clustering,hubness,quantization,ground_truth,labels` 中的任意项 |
 | `--duplicate-memory-mb` | `4096` | 精确重复检测的内存预算（每行 24 字节）；超出时改为在样本上检测 |
 | `--threads`、`--chunk-mb` | 全部核心、`64` | 只影响执行方式，不影响结果 |
-| `--from-profile` | | 基于已有 JSON 报告重新生成 HTML 或运行 AI 分析 |
+| `--from-profile` | | 基于已有 JSON 报告重新生成 HTML 或运行 AI 分析；除非请求新的分析，已保存的 AI 分析会保留，`--output` 会写出一份副本 |
 
 完整选项（包括下文的 AI 选项）见 `profile_dataset --help`。
 

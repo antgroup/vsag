@@ -513,9 +513,7 @@ SparseSplitProfiler::first_pass() {
 
     if (options_.Enabled(SECTION_DUPLICATES)) {
         if (full_duplicates_) {
-            std::vector<uint64_t> ids(rows_);
-            std::iota(ids.begin(), ids.end(), 0);
-            JsonType report = duplicate_report(hash_high_, hash_low_, ids, rows_);
+            JsonType report = duplicate_report(hash_high_, hash_low_, {}, rows_);
             report["scope"] = "full";
             json_["duplicates"] = report;
             hash_high_.clear();

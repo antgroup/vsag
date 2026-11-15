@@ -38,6 +38,9 @@ constexpr uint64_t SILHOUETTE_ROWS = 2000;
 constexpr uint64_t CONTRAST_REFERENCE_ROWS = 1000;
 constexpr uint64_t PCA_RATIO_ITEMS = 32;
 constexpr uint64_t DUPLICATE_BYTES_PER_ROW = 24;
+/// Duplicate groups shown as examples, and rows listed per example group.
+constexpr uint64_t EXAMPLE_GROUPS = 5;
+constexpr uint64_t EXAMPLE_MEMBERS = 5;
 
 struct DimensionPartial {
     std::vector<Moments> moments;
@@ -561,9 +564,7 @@ DenseSplitProfiler::first_pass() {
     // Exact duplicates.
     if (options_.Enabled(SECTION_DUPLICATES)) {
         if (full_duplicates_) {
-            std::vector<uint64_t> ids(rows_);
-            std::iota(ids.begin(), ids.end(), 0);
-            JsonType report = duplicate_report(hash_high_, hash_low_, ids, rows_);
+            JsonType report = duplicate_report(hash_high_, hash_low_, {}, rows_);
             report["scope"] = "full";
             json_["duplicates"] = report;
             hash_high_.clear();
@@ -1225,6 +1226,9 @@ duplicate_report(const std::vector<uint64_t>& high,
                  const std::vector<uint64_t>& low,
                  const std::vector<uint64_t>& rows,
                  uint64_t population) {
+    // An empty `rows` means entry i is row i, so full-split detection needs no row-id array:
+    // the hashes and this order are the only arrays per row (24 bytes).
+    auto row_of = [&rows](uint64_t i) { return rows.empty() ? i : rows[i]; };
     std::vector<uint64_t> order(high.size());
     std::iota(order.begin(), order.end(), 0);
     std::sort(order.begin(), order.end(), [&](uint64_t a, uint64_t b) {
@@ -1234,12 +1238,17 @@ duplicate_report(const std::vector<uint64_t>& high,
         if (low[a] != low[b]) {
             return low[a] < low[b];
         }
-        return rows[a] < rows[b];
+        return row_of(a) < row_of(b);
     });
     uint64_t duplicate_rows = 0;
     uint64_t groups = 0;
     uint64_t largest = high.empty() ? 0 : 1;
+    // Only the best example groups are kept (largest first, then lowest first row), so memory
+    // does not grow with the number of duplicate groups.
     std::vector<std::pair<uint64_t, std::vector<uint64_t>>> examples;
+    auto better = [](const auto& a, const auto& b) {
+        return a.first != b.first ? a.first > b.first : a.second.front() < b.second.front();
+    };
     for (uint64_t i = 0; i < order.size();) {
         uint64_t j = i + 1;
         while (j < order.size() && high[order[j]] == high[order[i]] &&
@@ -1251,21 +1260,26 @@ duplicate_report(const std::vector<uint64_t>& high,
             duplicate_rows += size - 1;
             ++groups;
             largest = std::max(largest, size);
-            std::vector<uint64_t> members;
-            for (uint64_t m = i; m < j && members.size() < 5; ++m) {
-                members.push_back(rows[order[m]]);
+            const bool full = examples.size() == EXAMPLE_GROUPS;
+            if (!full || size > examples.back().first ||
+                (size == examples.back().first &&
+                 row_of(order[i]) < examples.back().second.front())) {
+                std::vector<uint64_t> members;
+                for (uint64_t m = i; m < j && members.size() < EXAMPLE_MEMBERS; ++m) {
+                    members.push_back(row_of(order[m]));
+                }
+                if (full) {
+                    examples.pop_back();
+                }
+                examples.emplace_back(size, std::move(members));
+                std::sort(examples.begin(), examples.end(), better);
             }
-            examples.emplace_back(size, members);
         }
         i = j;
     }
-    std::sort(examples.begin(), examples.end(), [](const auto& a, const auto& b) {
-        return a.first != b.first ? a.first > b.first : a.second.front() < b.second.front();
-    });
     JsonType example_json = JsonType::array();
-    for (uint64_t i = 0; i < std::min<uint64_t>(5, examples.size()); ++i) {
-        example_json.push_back(
-            JsonType{{"size", examples[i].first}, {"rows", indices_json(examples[i].second)}});
+    for (const auto& [size, members] : examples) {
+        example_json.push_back(JsonType{{"size", size}, {"rows", indices_json(members)}});
     }
     return JsonType{
         {"definition",

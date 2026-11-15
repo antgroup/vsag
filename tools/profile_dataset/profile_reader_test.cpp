@@ -180,6 +180,28 @@ TEST_CASE("Sparse streams stored as unsigned bytes are read unchanged", "[profil
     CHECK(batch.repeated == std::vector<uint8_t>({0, 0}));
 }
 
+TEST_CASE("Distance attribute aliases are profiled but flagged for eval_performance",
+          "[profile][reader]") {
+    TempDir dir;
+    for (const std::string attribute : {"l2", "cosine", "euclidean"}) {
+        INFO(attribute);
+        const auto path = dir.File(attribute + ".hdf5");
+        {
+            H5::H5File file(path, H5F_ACC_TRUNC);
+            write_string_attribute(file, "distance", attribute);
+            write_matrix(
+                file, "train", std::vector<float>(8, 1.0F), 4, 2, H5::PredType::NATIVE_FLOAT);
+        }
+        const DatasetInfo info = inspect_dataset(path);
+        bool flagged = false;
+        for (const auto& issue : info.eval_compatibility_issues) {
+            flagged =
+                flagged || issue.find("accepts only euclidean, ip or angular") != std::string::npos;
+        }
+        CHECK(flagged == (attribute != "euclidean"));
+    }
+}
+
 TEST_CASE("Unsorted and repeated sparse ids are sorted and counted", "[profile][reader]") {
     TempDir dir;
     const auto path = dir.File("unsorted.hdf5");

@@ -755,6 +755,21 @@ redact(const std::string& text, const std::string& secret) {
     return result;
 }
 
+/// Redacts `secret` in every string of a JSON value, including keys of rejected items.
+void
+redact_strings(JsonType& node, const std::string& secret) {
+    if (secret.empty()) {
+        return;
+    }
+    if (node.is_string()) {
+        node = redact(node.get<std::string>(), secret);
+    } else if (node.is_structured()) {
+        for (auto& child : node) {
+            redact_strings(child, secret);
+        }
+    }
+}
+
 JsonType
 build_evidence(const JsonType& report, bool include_file_name) {
     JsonType evidence = JsonType::object();
@@ -1040,7 +1055,9 @@ run_ai_analysis(const JsonType& report,
         }
         std::string text;
         try {
-            text = reply_text(options.provider, response.body);
+            // JSON escapes can hide a key from the redaction of the raw body; redact the
+            // decoded text as well.
+            text = redact(reply_text(options.provider, response.body), key);
         } catch (const std::exception&) {
             section["status"] = "invalid_response";
             throw ProfileError("provider response does not follow the " + options.provider +
@@ -1070,6 +1087,8 @@ run_ai_analysis(const JsonType& report,
     }
     section["latency_seconds"] =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    // Last line of defense for analysis, rejected items and validation errors.
+    redact_strings(section, key);
     return section;
 }
 

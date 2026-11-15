@@ -233,6 +233,36 @@ TEST_CASE("Evidence contains only allow-listed aggregate metrics", "[profile][ai
     CHECK(filtered.dump().find("private notes") == std::string::npos);
 }
 
+TEST_CASE("Keys hidden behind JSON escapes are redacted once decoded", "[profile][ai]") {
+    ScopedEnv key(TEST_KEY_ENV, TEST_KEY);
+    std::ostringstream warnings;
+    // The reply spells the key's first character as s, so the raw body never contains it.
+    std::string reply = valid_reply("splits.train.invalid_values.total", "KEYMARK was echoed");
+    reply.replace(reply.find("KEYMARK"), 7, std::string("\\u0073") + (TEST_KEY + 1));
+    MockTransport echo;
+    echo.responses = {HttpResponse{200, openai_envelope(reply), ""}};
+    REQUIRE(echo.responses.front().body.find(TEST_KEY) == std::string::npos);
+    const JsonType section = run_ai_analysis(dense_report(), openai_options(), echo, warnings);
+    REQUIRE(section["status"] == "ok");
+    CHECK(section.dump().find(TEST_KEY) == std::string::npos);
+    CHECK_THAT(section["analysis"]["summary"].get<std::string>(), ContainsSubstring("[REDACTED]"));
+    // Rejected items keep the model's raw item; they are redacted as well.
+    JsonType rejected = JsonType::parse(valid_reply("splits.train.invalid_values.total"));
+    rejected["findings"].push_back(JsonType{{"title", "Echo"},
+                                            {"severity", "unknown"},
+                                            {"detail", "KEYMARK"},
+                                            {"evidence", JsonType::array()}});
+    std::string rejected_text = rejected.dump();
+    rejected_text.replace(
+        rejected_text.find("KEYMARK"), 7, std::string("\\u0073") + (TEST_KEY + 1));
+    MockTransport echo_rejected;
+    echo_rejected.responses = {HttpResponse{200, openai_envelope(rejected_text), ""}};
+    const JsonType with_rejected =
+        run_ai_analysis(dense_report(), openai_options(), echo_rejected, warnings);
+    CHECK(with_rejected["rejected_items"].size() == 1);
+    CHECK(with_rejected.dump().find(TEST_KEY) == std::string::npos);
+}
+
 TEST_CASE("Model text and provider errors are shortened at UTF-8 boundaries", "[profile][ai]") {
     ScopedEnv key(TEST_KEY_ENV, TEST_KEY);
     std::ostringstream warnings;
