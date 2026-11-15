@@ -16,6 +16,7 @@
 
 #include <omp.h>
 
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <cmath>
@@ -443,6 +444,131 @@ TEST_CASE("Ground truth whose ids do not match its distances is reported", "[pro
         mismatch = mismatch || signal["id"] == "ground_truth.mismatch";
     }
     CHECK(mismatch);
+}
+
+namespace {
+
+bool
+has_signal(const JsonType& report, const std::string& id) {
+    const JsonType& signals = report["signals"];
+    return std::any_of(signals.begin(), signals.end(), [&id](const JsonType& signal) {
+        return signal["id"] == id;
+    });
+}
+
+/// Applies `edit` to the stored /neighbors and /distances of a dense fixture file.
+void
+edit_ground_truth(const std::string& path,
+                  const std::function<void(std::vector<int64_t>&, std::vector<float>&)>& edit) {
+    H5::H5File file(path, H5F_ACC_RDWR);
+    H5::DataSet neighbors = file.openDataSet("neighbors");
+    H5::DataSet distances = file.openDataSet("distances");
+    std::vector<int64_t> ids(100ULL * 10ULL);
+    std::vector<float> values(ids.size());
+    neighbors.read(ids.data(), H5::PredType::NATIVE_INT64);
+    distances.read(values.data(), H5::PredType::NATIVE_FLOAT);
+    edit(ids, values);
+    neighbors.write(ids.data(), H5::PredType::NATIVE_INT64);
+    distances.write(values.data(), H5::PredType::NATIVE_FLOAT);
+}
+
+}  // namespace
+
+TEST_CASE("Ground truth with repeated ids or non-finite distances is reported",
+          "[profile][report]") {
+    TempDir dir;
+    // Every row repeats its first id, with the first distance, in all ten slots.
+    const auto repeated = dir.File("repeated.hdf5");
+    make_dense_fixture(repeated);
+    edit_ground_truth(repeated, [](std::vector<int64_t>& ids, std::vector<float>& values) {
+        for (uint64_t q = 0; q < 100; ++q) {
+            for (uint64_t j = 1; j < 10; ++j) {
+                ids[q * 10 + j] = ids[q * 10];
+                values[q * 10 + j] = values[q * 10];
+            }
+        }
+    });
+    JsonType report = profile_dataset(small_options(repeated), nullptr);
+    CHECK(at(report, "ground_truth.repeated_stored_ids") == 900);
+    CHECK(at(report, "ground_truth.distance_recall_at_k").get<double>() < 0.11);
+    CHECK(has_signal(report, "ground_truth.repeated_ids"));
+    CHECK(has_signal(report, "ground_truth.mismatch"));
+
+    // Correct ids with NaN distances.
+    const auto invalid = dir.File("nan_distances.hdf5");
+    make_dense_fixture(invalid);
+    edit_ground_truth(invalid, [](std::vector<int64_t>&, std::vector<float>& values) {
+        std::fill(values.begin(), values.end(), std::numeric_limits<float>::quiet_NaN());
+    });
+    report = profile_dataset(small_options(invalid), nullptr);
+    CHECK(at(report, "ground_truth.non_finite_stored_distances") == 1000);
+    CHECK(at(report, "ground_truth.distance_recall_at_k") == 1.0);
+    CHECK(at(report, "ground_truth.best_convention_mean_relative_error").is_null());
+    CHECK(has_signal(report, "ground_truth.non_finite_distances"));
+}
+
+TEST_CASE("Auxiliary arrays must match the split row counts for eval_performance",
+          "[profile][report]") {
+    TempDir dir;
+    const auto path = dir.File("row_counts.hdf5");
+    make_dense_fixture(path);
+    {
+        H5::H5File file(path, H5F_ACC_RDWR);
+        file.unlink("neighbors");
+        file.unlink("distances");
+        file.unlink("train_labels");
+        const std::vector<int64_t> ids(10, 0);
+        const std::vector<float> distances(10, 0.0F);
+        write_matrix(file, "neighbors", ids, 1, 10, H5::PredType::NATIVE_INT64);
+        write_matrix(file, "distances", distances, 1, 10, H5::PredType::NATIVE_FLOAT);
+        write_vector(file, "train_labels", std::vector<int64_t>(10, 1), H5::PredType::NATIVE_INT64);
+    }
+    const JsonType report = profile_dataset(small_options(path), nullptr);
+    const JsonType& compatibility = report["input"]["eval_compatibility"];
+    CHECK(compatibility["compatible"] == false);
+    const std::string issues = compatibility["issues"].dump();
+    CHECK_THAT(issues, ContainsSubstring("/neighbors has 1 rows but /test has 100"));
+    CHECK_THAT(issues, ContainsSubstring("/train_labels has 10 entries but /train has 3000 rows"));
+}
+
+TEST_CASE("Sparse records that repeat a term id are excluded from distance metrics",
+          "[profile][report]") {
+    TempDir dir;
+    std::vector<SparseRecord> train;
+    train.reserve(31);
+    for (int i = 0; i < 30; ++i) {
+        train.push_back(SparseRecord{{7}, {1.0F + 0.01F * static_cast<float>(i)}});
+    }
+    train.push_back(SparseRecord{{7, 7}, {5.0F, 5.0F}});  // row 30 repeats term 7
+    const std::vector<SparseRecord> test(5, SparseRecord{{7}, {1.0F}});
+    // Ground truth over the valid rows: the largest values first.
+    std::vector<int64_t> neighbors;
+    std::vector<float> distances;
+    neighbors.reserve(test.size() * 10);
+    distances.reserve(test.size() * 10);
+    for (uint64_t q = 0; q < test.size(); ++q) {
+        for (int64_t j = 0; j < 10; ++j) {
+            const int64_t row = 29 - j;
+            neighbors.push_back(row);
+            distances.push_back(-0.01F * static_cast<float>(row));
+        }
+    }
+    const auto path = dir.File("repeated_terms.hdf5");
+    {
+        H5::H5File file(path, H5F_ACC_TRUNC);
+        write_string_attribute(file, "type", "sparse");
+        write_string_attribute(file, "distance", "ip");
+        write_vector(file, "train", encode_sparse(train, nullptr), H5::PredType::NATIVE_INT8);
+        write_vector(file, "test", encode_sparse(test, nullptr), H5::PredType::NATIVE_INT8);
+        write_matrix(file, "neighbors", neighbors, test.size(), 10, H5::PredType::NATIVE_INT64);
+        write_matrix(file, "distances", distances, test.size(), 10, H5::PredType::NATIVE_FLOAT);
+    }
+    const JsonType report = profile_dataset(small_options(path), nullptr);
+    CHECK(at(report, "splits.train.basic.rows_with_repeated_ids") == 1);
+    CHECK(at(report, "splits.train.pairwise_distances.sample.valid_sampled_rows") == 30);
+    // Row 30 would be every query's nearest neighbor if its repeated entries were scored.
+    CHECK(at(report, "ground_truth.id_recall_at_k") == 1.0);
+    CHECK(at(report, "ground_truth.distance_recall_at_k") == 1.0);
 }
 
 TEST_CASE("Tiny and degenerate splits produce valid reports", "[profile][report]") {

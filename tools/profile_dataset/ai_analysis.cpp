@@ -65,6 +65,266 @@ const std::set<std::string> DENIED_SEGMENTS = {"definition",
                                                "min_label",
                                                "max_label"};
 
+// Below splits, cross_split, ground_truth and labels, every path segment must be a key that the
+// profiler writes (array indices and percent keys aside). Fields added to a saved profile, even
+// inside known sections, therefore never reach a provider.
+const std::set<std::string> REPORT_KEYS = {
+    "1 - similarity",
+    "above",
+    "always_zero_dimensions",
+    "anisotropy",
+    "anti_hub_ratio",
+    "average_cosine_similarity",
+    "base_rows",
+    "basic",
+    "below",
+    "best_convention_mean_relative_error",
+    "best_matching_distance_convention",
+    "bf16",
+    "bin_width",
+    "bits_per_dim",
+    "by_ratio",
+    "checked_queries",
+    "clipped",
+    "clustering",
+    "clusters",
+    "code_bytes_per_vector",
+    "coefficient_of_variation",
+    "compared_k",
+    "compatible",
+    "components_for_variance",
+    "concentration_ratio",
+    "constant_dimensions",
+    "convention_mean_relative_errors",
+    "converged",
+    "cosine_similarity",
+    "count",
+    "counts",
+    "cumulative_explained_variance",
+    "density",
+    "dim",
+    "dimensions",
+    "distance_attribute",
+    "distance_recall_at_k",
+    "distinct_labels",
+    "distinct_terms",
+    "doc_prune_retained_term_fraction",
+    "document_frequency",
+    "duplicate_ratio",
+    "duplicate_rows",
+    "duplicates",
+    "effective_rank",
+    "empty_rows",
+    "encodes_query",
+    "euclidean (sqrt of l2sqr)",
+    "eval_compatibility",
+    "exact_duplicate_neighbor_ratio",
+    "excess_kurtosis",
+    "explained_variance_ratio",
+    "explicit_zero_values",
+    "first_neighbor_distance",
+    "float32_bytes",
+    "fp16",
+    "geometric_distance",
+    "gini",
+    "groups",
+    "heavy_tailed_dimension_ratio",
+    "high",
+    "hubness",
+    "hubness_k",
+    "id",
+    "id_recall_at_k",
+    "inertia",
+    "infinite",
+    "input",
+    "intrinsic_dimensionality",
+    "invalid_values",
+    "isolated_ratio",
+    "issues",
+    "iterations",
+    "k",
+    "kind",
+    "knn_k",
+    "knn_queries",
+    "kth_neighbor_distance",
+    "largest_group",
+    "largest_label_share",
+    "length",
+    "lid_mle",
+    "lid_to_dim_ratio",
+    "low",
+    "lower",
+    "lower_fence",
+    "max",
+    "max_nonzeros",
+    "max_occurrence",
+    "max_term_id",
+    "max_to_mean_size",
+    "mean",
+    "mean_abs_skewness",
+    "mean_relative_reconstruction_error",
+    "mean_vector_norm_ratio",
+    "median_distance_ratio",
+    "message",
+    "metric",
+    "metric_distance",
+    "min",
+    "min_term_id_limit",
+    "nan",
+    "near_duplicate_ratio",
+    "near_duplicate_threshold",
+    "nearest_neighbors",
+    "non_finite_stored_distances",
+    "negative similarity",
+    "negative_infinity",
+    "negative_values",
+    "nonzeros_ks_statistic",
+    "nonzeros_per_row",
+    "norm_ks_statistic",
+    "normalized_entropy",
+    "norms",
+    "offsets_present",
+    "out_of_distribution_ratio",
+    "out_of_range_ids",
+    "outlier_ratio_6_sigma",
+    "outliers",
+    "outliers_6_sigma",
+    "p01",
+    "p05",
+    "p25",
+    "p50",
+    "p75",
+    "p95",
+    "p99",
+    "pair_count",
+    "pairs",
+    "pairwise_distances",
+    "participation_ratio",
+    "pca",
+    "pca_top1_ratio",
+    "population",
+    "positive_infinity",
+    "postings",
+    "postings_per_query",
+    "profiled_splits",
+    "quantization",
+    "quantization_k",
+    "queries_with_fewer_than_k_overlaps",
+    "queries_with_fewer_than_k_overlaps_ratio",
+    "queries_without_matching_base_rows",
+    "query_first_neighbor_distance",
+    "query_rows",
+    "query_selectivity",
+    "query_source",
+    "query_term_coverage",
+    "range_ratio_max_to_median",
+    "ratio",
+    "reason",
+    "recall_at_k",
+    "recomputed_stored_ids",
+    "reference_rows",
+    "relative_contrast",
+    "relative_to_median_pairwise_distance",
+    "repeated_stored_ids",
+    "row_ratio",
+    "rows",
+    "rows_with_invalid",
+    "rows_with_repeated_ids",
+    "rows_with_unsorted_distances",
+    "sample",
+    "sample_size",
+    "sampled_rows",
+    "schemes",
+    "scope",
+    "searched_rows",
+    "seed",
+    "severity",
+    "silhouette",
+    "silhouette_rows",
+    "similarity",
+    "size",
+    "size_cv",
+    "sizes",
+    "skewness",
+    "skipped",
+    "sparsity",
+    "sq4",
+    "sq4_uniform",
+    "sq8",
+    "sq8_uniform",
+    "squared euclidean",
+    "standardized_mean_shift",
+    "status",
+    "std",
+    "std_ratio_max_to_median",
+    "storage_type",
+    "stored_entries",
+    "stored_k",
+    "stored_queries",
+    "stream_bytes",
+    "summary",
+    "term_id_density",
+    "terms",
+    "test",
+    "threshold",
+    "top1_ratio",
+    "top_1pct_occurrence_share",
+    "top_1pct_terms_posting_share",
+    "total",
+    "total_variance",
+    "train",
+    "two_nn",
+    "two_nn_excluded_ratio",
+    "unit_norm_ratio",
+    "unit_norm_tolerance",
+    "unsorted_rows",
+    "upper",
+    "upper_fence",
+    "used_rows",
+    "valid_ratios",
+    "valid_sampled_rows",
+    "value",
+    "values",
+    "variance_share_top_10pct_dimensions",
+    "vector_type",
+    "warnings",
+    "zero_norm_rows",
+    "zero_overlap_pair_ratio",
+    "zero_ratio",
+    "zero_rows",
+    "zipf_exponent",
+};
+
+// Aggregate arrays that may be sent, at most MAX_ARRAY_ITEMS items each. Any other array could
+// carry rows, coordinates or ids.
+const std::set<std::string> ARRAY_KEYS = {"cumulative_explained_variance",
+                                          "explained_variance_ratio",
+                                          "issues",
+                                          "profiled_splits",
+                                          "sizes",
+                                          "warnings"};
+
+// Objects whose keys are percent levels ("90", "50").
+const std::set<std::string> NUMBERED_KEYS = {"by_ratio", "components_for_variance"};
+
+// String values that may be sent: enumerations and fixed texts that the profiler writes.
+const std::set<std::string> STRING_KEYS = {"best_matching_distance_convention",
+                                           "distance_attribute",
+                                           "id",
+                                           "input",
+                                           "issues",
+                                           "kind",
+                                           "message",
+                                           "metric",
+                                           "profiled_splits",
+                                           "query_source",
+                                           "scope",
+                                           "severity",
+                                           "status",
+                                           "storage_type",
+                                           "vector_type",
+                                           "warnings"};
+
 const std::set<std::string> ALLOWED_INPUT = {
     "vector_type", "distance_attribute", "eval_compatibility", "warnings"};
 const std::set<std::string> ALLOWED_CONFIG = {"metric",
@@ -101,6 +361,28 @@ const std::set<std::string> CATEGORIES = {
 const std::set<std::string> CONFIDENCES = {"low", "medium", "high"};
 
 bool
+is_number_key(const std::string& segment) {
+    return !segment.empty() && segment.find_first_not_of("0123456789") == std::string::npos;
+}
+
+/// True when every segment after the root is a known report key, an index of an allowed array
+/// or a percent key.
+bool
+known_metric_path(const std::vector<std::string>& segments) {
+    for (uint64_t i = 1; i < segments.size(); ++i) {
+        if (is_number_key(segments[i])) {
+            if (ARRAY_KEYS.count(segments[i - 1]) == 0 &&
+                NUMBERED_KEYS.count(segments[i - 1]) == 0) {
+                return false;
+            }
+        } else if (REPORT_KEYS.count(segments[i]) == 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool
 denied(const std::vector<std::string>& segments, bool include_file_name) {
     if (segments.empty()) {
         return true;
@@ -124,7 +406,66 @@ denied(const std::vector<std::string>& segments, bool include_file_name) {
     if (root == "signals") {
         return segments.size() < 3 || ALLOWED_SIGNAL_FIELDS.count(segments[2]) == 0;
     }
-    return root != "splits" && root != "cross_split" && root != "ground_truth" && root != "labels";
+    if (root != "splits" && root != "cross_split" && root != "ground_truth" && root != "labels") {
+        return true;
+    }
+    return !known_metric_path(segments);
+}
+
+/// Replaces every byte that is not part of a well-formed UTF-8 sequence (RFC 3629) with U+FFFD, so
+/// model text, provider errors and file names can always be serialized as JSON.
+std::string
+sanitize_utf8(const std::string& text) {
+    std::string result;
+    result.reserve(text.size());
+    uint64_t i = 0;
+    while (i < text.size()) {
+        const auto lead = static_cast<unsigned char>(text[i]);
+        uint64_t length = 0;
+        unsigned char second_low = 0x80;
+        unsigned char second_high = 0xBF;
+        if (lead < 0x80) {
+            length = 1;
+        } else if (lead >= 0xC2 && lead <= 0xDF) {
+            length = 2;
+        } else if (lead >= 0xE0 && lead <= 0xEF) {
+            length = 3;
+            second_low = lead == 0xE0 ? 0xA0 : 0x80;   // no overlong forms
+            second_high = lead == 0xED ? 0x9F : 0xBF;  // no surrogates
+        } else if (lead >= 0xF0 && lead <= 0xF4) {
+            length = 4;
+            second_low = lead == 0xF0 ? 0x90 : 0x80;
+            second_high = lead == 0xF4 ? 0x8F : 0xBF;  // at most U+10FFFF
+        }
+        bool valid = length > 0 && i + length <= text.size();
+        for (uint64_t j = 1; valid && j < length; ++j) {
+            const auto byte = static_cast<unsigned char>(text[i + j]);
+            valid =
+                j == 1 ? byte >= second_low && byte <= second_high : byte >= 0x80 && byte <= 0xBF;
+        }
+        if (valid) {
+            result.append(text, i, length);
+            i += length;
+        } else {
+            result += "\xEF\xBF\xBD";
+            ++i;
+        }
+    }
+    return result;
+}
+
+/// The longest prefix of valid UTF-8 `text` with at most `limit` bytes that ends on a character
+/// boundary.
+std::string
+utf8_prefix(const std::string& text, uint64_t limit) {
+    if (text.size() <= limit) {
+        return text;
+    }
+    uint64_t end = limit;
+    while (end > 0 && (static_cast<unsigned char>(text[end]) & 0xC0U) == 0x80U) {
+        --end;
+    }
+    return text.substr(0, end);
 }
 
 std::string
@@ -153,6 +494,10 @@ flatten(const JsonType& node,
         return;
     }
     if (node.is_array()) {
+        const bool signal_list = segments.size() == 1 && segments.front() == "signals";
+        if (!signal_list && (segments.empty() || ARRAY_KEYS.count(segments.back()) == 0)) {
+            return;
+        }
         const uint64_t limit = std::min<uint64_t>(node.size(), MAX_ARRAY_ITEMS);
         for (uint64_t i = 0; i < limit; ++i) {
             segments.push_back(std::to_string(i));
@@ -170,11 +515,13 @@ flatten(const JsonType& node,
     } else if (node.is_number() || node.is_boolean() || node.is_null()) {
         out[key] = node;
     } else if (node.is_string()) {
-        std::string text = node.get<std::string>();
-        if (text.size() > MAX_STRING_LENGTH) {
-            text = text.substr(0, MAX_STRING_LENGTH);
+        const bool indexed = is_number_key(segments.back()) && segments.size() > 1;
+        const std::string& field = indexed ? segments[segments.size() - 2] : segments.back();
+        const bool file_name =
+            segments.size() == 2 && segments.front() == "input" && segments.back() == "file_name";
+        if (STRING_KEYS.count(field) > 0 || file_name) {
+            out[key] = utf8_prefix(sanitize_utf8(node.get<std::string>()), MAX_STRING_LENGTH);
         }
-        out[key] = text;
     }
 }
 
@@ -205,9 +552,11 @@ lowercase(std::string text) {
     return text;
 }
 
+/// Shortens text for messages and stored model output without splitting a UTF-8 character.
 std::string
 truncate(const std::string& text, uint64_t limit) {
-    return text.size() <= limit ? text : text.substr(0, limit) + "...";
+    const std::string clean = sanitize_utf8(text);
+    return clean.size() <= limit ? clean : utf8_prefix(clean, limit) + "...";
 }
 
 /// Extracts the JSON object from a reply that may be wrapped in a Markdown code fence or
@@ -714,7 +1063,7 @@ run_ai_analysis(const JsonType& report,
         if (section["status"] != "invalid_response") {
             section["status"] = "failed";
         }
-        section["message"] = redact(error.what(), key);
+        section["message"] = sanitize_utf8(redact(error.what(), key));
         warnings << "warning: AI analysis " << section["status"].get<std::string>() << ": "
                  << section["message"].get<std::string>()
                  << ". The deterministic JSON and HTML reports are generated without it." << '\n';

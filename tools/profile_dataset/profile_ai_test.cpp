@@ -216,6 +216,53 @@ TEST_CASE("Evidence contains only allow-listed aggregate metrics", "[profile][ai
     CHECK(build_evidence(report, true).contains("input.file_name"));
     // Evidence size does not grow with the row count: only aggregates are included.
     CHECK(evidence.size() < 1500);
+
+    // Fields that the profiler never writes stay local even inside known sections, as a saved
+    // profile passed to --from-profile may contain anything.
+    JsonType tampered = report;
+    tampered["splits"]["train"]["raw_vectors"] =
+        JsonType::array({JsonType::array({7.654321, 7.655321}), JsonType::array({1.5, 2.5})});
+    tampered["splits"]["train"]["norms"]["leak"] = 7.654321;
+    tampered["splits"]["train"]["norms"]["summary"]["rows"] = JsonType::array({7.654321});
+    tampered["splits"]["train"]["values"]["first_rows"] = "7.654321,7.655321";
+    tampered["cross_split"]["notes"] = "private notes";
+    tampered["ground_truth"]["neighbors"] = JsonType::array({1, 2, 3});
+    const JsonType filtered = build_evidence(tampered, false);
+    CHECK(filtered == evidence);
+    CHECK(filtered.dump().find("7.65432") == std::string::npos);
+    CHECK(filtered.dump().find("private notes") == std::string::npos);
+}
+
+TEST_CASE("Model text and provider errors are shortened at UTF-8 boundaries", "[profile][ai]") {
+    ScopedEnv key(TEST_KEY_ENV, TEST_KEY);
+    std::ostringstream warnings;
+    std::string chinese;
+    for (int i = 0; i < 667; ++i) {
+        chinese += "\xe4\xb8\xad";  // 2001 bytes, one more than the 2000-byte limit
+    }
+    JsonType reply = JsonType::parse(valid_reply("splits.train.invalid_values.total"));
+    reply["uncertainties"] = JsonType::array({chinese});
+    MockTransport transport;
+    transport.responses = {HttpResponse{200, openai_envelope(reply.dump()), ""}};
+    const JsonType section = run_ai_analysis(dense_report(), openai_options(), transport, warnings);
+    REQUIRE(section["status"] == "ok");
+    const std::string kept = section["analysis"]["uncertainties"][0].get<std::string>();
+    CHECK(kept == chinese.substr(0, 1998) + "...");
+    CHECK_NOTHROW(section.dump());
+
+    AiOptions options = openai_options();
+    options.max_retries = 0;
+    MockTransport cut;
+    cut.responses = {HttpResponse{500, std::string(299, 'x') + "\xe4\xb8\xad\xe4\xb8\xad", ""}};
+    const JsonType failed = run_ai_analysis(dense_report(), options, cut, warnings);
+    CHECK(failed["status"] == "failed");
+    CHECK_NOTHROW(failed.dump());
+    // Bytes that are not UTF-8 at all are replaced rather than breaking the report.
+    MockTransport binary;
+    binary.responses = {HttpResponse{502, std::string("\xff\xfe gateway"), ""}};
+    const JsonType replaced = run_ai_analysis(dense_report(), options, binary, warnings);
+    CHECK_NOTHROW(replaced.dump());
+    CHECK_THAT(replaced["message"].get<std::string>(), ContainsSubstring("\xef\xbf\xbd"));
 }
 
 TEST_CASE("Prompt carries rules, schema and language", "[profile][ai]") {

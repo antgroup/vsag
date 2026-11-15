@@ -35,8 +35,8 @@ VSAG_ENABLE_TOOLS=ON make release
 
 `/neighbors`、`/distances`（真值）以及 `/train_labels`、`/test_labels`、`/valid_ratios` 都是可选的；存在时也会被检查。
 距离度量取自 `distance` 属性（`euclidean` → `l2`，`ip` → `ip`，`angular` → `cosine`），可用 `--metric` 覆盖。稀疏数据支持
-`ip` 和 `cosine`。与 `eval_performance` 要求不一致之处（例如缺少真值、`uint8` 存储、缺少 `distance` 属性）会列在
-`input.eval_compatibility` 中并作为警告展示。
+`ip` 和 `cosine`。与 `eval_performance` 要求不一致之处（例如缺少真值、`uint8` 存储、以无符号字节存储的稀疏字节流、行数与划分不一致的
+`/neighbors` 或标签数组、缺少 `distance` 属性）会列在 `input.eval_compatibility` 中并作为警告展示。
 
 ## 快速开始（离线）
 
@@ -151,7 +151,7 @@ wget http://ann-benchmarks.com/fashion-mnist-784-euclidean.hdf5 -O /tmp/data/fas
 | `terms` | 全量 | 不同词项数、`max_term_id`、`min_term_id_limit`（SINDI 的 `term_id_limit` 至少应为该值）、term id 密度、倒排条目总数、文档频率摘要与 log10 直方图、Zipf 指数、Gini 系数、前 1% 词项的倒排占比、最高频词项，以及 `doc_prune_retained_term_fraction`：在 SINDI 质量规则下 `doc_prune_ratio` 取 0.1/0.2/0.3/0.5 时平均保留的词项比例 |
 | `duplicates` | 全量 | id 与取值完全相同的记录 |
 | `pairwise_distances` | 样本 | 随机采样点对的度量距离与余弦相似度；没有共同词项的点对比例 |
-| `nearest_neighbors` | 样本对全量 | 基于采样查询倒排索引的精确 k-NN；无共同词项的记录距离恰为 1，按行号进入 k-NN 列表（排在内积为负的记录之前）；含非有限值的记录被排除；重叠记录少于 k 个的查询数 |
+| `nearest_neighbors` | 样本对全量 | 基于采样查询倒排索引的精确 k-NN；无共同词项的记录距离恰为 1，按行号进入 k-NN 列表（排在内积为负的记录之前）；含非有限值或重复 term id 的记录被排除；重叠记录少于 k 个的查询数 |
 | `hubness` | 样本 | 与稠密数据相同 |
 
 ### 跨划分、真值与标签
@@ -162,7 +162,7 @@ wget http://ann-benchmarks.com/fashion-mnist-784-euclidean.hdf5 -O /tmp/data/fas
 | `cross_split.standardized_mean_shift` | 全量 | 每个维度的 \|mean_test - mean_train\| / std_train（稠密） |
 | `cross_split.out_of_distribution_ratio` | 样本 | 到 train 最近距离超过 train 行自身最近邻距离第 95 百分位的采样查询比例 |
 | `cross_split.query_term_coverage`、`postings_per_query`、`nonzeros_ks_statistic` | 样本 / 全量 | 仅稀疏数据：查询词项在 train 中出现的比例、穷举倒排扫描需要访问的条目数、条目数分布的 KS 统计量 |
-| `ground_truth` | 样本 | 采样查询的 `/neighbors`、`/distances` 与重新计算的精确近邻对比：id 召回率、距离召回率（重新计算距离后落在精确第 k 近邻距离之内的存储 id 比例，因此容忍并列）、存储距离与存储 id 重新计算的距离之间最匹配的距离约定（`euclidean` 为 `sqrt(L2Sqr)` 还是平方；`ip`/`angular` 为 `1 - 相似度` 还是相似度本身）、越界 id、未排序的行 |
+| `ground_truth` | 样本 | 采样查询的 `/neighbors`、`/distances` 与重新计算的精确近邻对比：id 召回率、距离召回率（重新计算距离后落在精确第 k 近邻距离之内的不重复存储 id 比例，因此容忍并列）、重复的存储 id、非有限的存储距离、有限存储距离与存储 id 重新计算的距离之间最匹配的距离约定（`euclidean` 为 `sqrt(L2Sqr)` 还是平方；`ip`/`angular` 为 `1 - 相似度` 还是相似度本身）、越界 id、未排序的行 |
 | `labels` | 全量 | 标签数量、最大标签占比、归一化熵、每个查询的过滤选择率、标签在底库中不存在的查询数、`valid_ratios` 摘要 |
 
 ### 基于规则的观察结论
@@ -237,7 +237,7 @@ export VSAG_PROFILE_AI_API_KEY=...        # 不要把密钥作为参数传入
 
 ### 隐私行为
 
-请求只包含一个扁平的证据对象，其中是白名单内的**聚合**指标（摘要、比例、计数和较短的谱）、基于规则的观察结论、最终使用的度量以及采样配置。
+请求只包含一个扁平的证据对象，其中是白名单内的**聚合**指标（摘要、比例、计数和较短的谱；每个键路径都必须是工具会写出的字段，因此已保存报告中的未知字段永远不会被发送）、基于规则的观察结论、最终使用的度量以及采样配置。
 请求永远不包含向量、采样行、行号、PCA 坐标、逐维数组、直方图、term id、标签值、文件路径或认证信息。只有指定 `--ai-include-file-name`
 时才会包含文件名。证据大小与数据行数无关。报告会记录 `request_sha256`、证据字段数量和 `raw_vectors_sent: false`；`--ai-dry-run`
 可以查看完整请求内容。

@@ -18,6 +18,7 @@
 #include <cstring>
 #include <filesystem>
 #include <numeric>
+#include <tuple>
 
 namespace vsag::dataset_profile {
 
@@ -135,6 +136,12 @@ inspect_sparse_split(const H5::H5File& file, SplitInfo& split, DatasetInfo& info
     }
     split.storage_type = "sparse byte stream";
     split.stored_bytes = shape[0];
+    if (dataset.getIntType().getSign() == H5T_SGN_NONE) {
+        info.eval_compatibility_issues.push_back(
+            "/" + split.name +
+            " stores unsigned bytes; eval_performance reads sparse streams as signed 8-bit "
+            "integers (ALPHA_I8), which saturates bytes above 127");
+    }
     const std::string offsets_name = split.name + "_offsets";
     if (file.nameExists(offsets_name)) {
         const auto offsets_shape = dataset_shape(file.openDataSet(offsets_name));
@@ -144,7 +151,6 @@ inspect_sparse_split(const H5::H5File& file, SplitInfo& split, DatasetInfo& info
         split.has_offsets = true;
         split.rows = offsets_shape[0] - 1;
     }
-    (void)info;
 }
 
 }  // namespace
@@ -258,6 +264,15 @@ inspect_dataset(const std::string& path) {
         }
         info.has_train_labels = has("train_labels");
         info.has_test_labels = has("test_labels");
+        for (const auto& [name, rows, columns] :
+             {std::tuple{"train_labels", &info.train_label_rows, &info.train_label_columns},
+              std::tuple{"test_labels", &info.test_label_rows, &info.test_label_columns}}) {
+            if (has(name)) {
+                const auto shape = dataset_shape(file.openDataSet(name));
+                *rows = shape.empty() ? 0 : shape[0];
+                *columns = shape.size() > 1 ? shape[1] : 0;
+            }
+        }
         info.has_valid_ratios = has("valid_ratios");
         if (info.has_train_labels != info.has_test_labels) {
             info.eval_compatibility_issues.emplace_back(
@@ -329,6 +344,7 @@ SparseBatch::Clear() {
     values.clear();
     unsorted_rows = 0;
     duplicate_id_rows = 0;
+    repeated.clear();
 }
 
 SparseSplitReader::SparseSplitReader(const std::string& path,
@@ -342,6 +358,7 @@ SparseSplitReader::SparseSplitReader(const std::string& path,
             throw ProfileError("sparse dataset '/" + name + "' must be one-dimensional");
         }
         total_bytes_ = shape[0];
+        byte_type_ = dataset_.getDataType();
     } catch (const H5::Exception& e) {
         rethrow_hdf5("cannot open sparse dataset /" + name, e);
     }
@@ -375,7 +392,9 @@ SparseSplitReader::ensure_available(uint64_t bytes) {
         H5::DataSpace file_space = dataset_.getSpace();
         file_space.selectHyperslab(H5S_SELECT_SET, extent, offset);
         H5::DataSpace memory_space(1, extent);
-        dataset_.read(buffer_.data() + unread, H5::PredType::NATIVE_CHAR, memory_space, file_space);
+        // The memory type equals the stored type, so HDF5 copies the bytes without conversion
+        // (NATIVE_CHAR would saturate uint8 bytes above 127 where char is signed).
+        dataset_.read(buffer_.data() + unread, byte_type_, memory_space, file_space);
     } catch (const H5::Exception& e) {
         rethrow_hdf5("cannot read sparse byte stream", e);
     }
@@ -422,6 +441,7 @@ SparseSplitReader::NextBatch(uint64_t max_rows, SparseBatch& batch) {
                 break;
             }
         }
+        bool repeated = false;
         if (ascending) {
             batch.ids.insert(batch.ids.end(), scratch_ids_.begin(), scratch_ids_.end());
             batch.values.insert(batch.values.end(), scratch_values_.begin(), scratch_values_.end());
@@ -432,7 +452,6 @@ SparseSplitReader::NextBatch(uint64_t max_rows, SparseBatch& batch) {
             std::stable_sort(order_.begin(), order_.end(), [this](uint32_t a, uint32_t b) {
                 return scratch_ids_[a] < scratch_ids_[b];
             });
-            bool repeated = false;
             for (uint32_t i = 0; i < length; ++i) {
                 const uint32_t id = scratch_ids_[order_[i]];
                 if (i > 0 && id == batch.ids.back()) {
@@ -446,6 +465,7 @@ SparseSplitReader::NextBatch(uint64_t max_rows, SparseBatch& batch) {
             }
         }
         batch.offsets.push_back(batch.ids.size());
+        batch.repeated.push_back(repeated ? 1 : 0);
         buffer_begin_ += record_bytes;
         ++next_row_;
     }

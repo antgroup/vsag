@@ -30,6 +30,7 @@
 #include "neighbor_search.h"
 #include "quantization_simulation.h"
 #include "sha256.h"
+#include "split_profiler.h"
 #include "statistics.h"
 #include "vector_math.h"
 
@@ -533,18 +534,45 @@ TEST_CASE(
     CHECK(neighbors[0][2].index == 1);
     CHECK(neighbors[0][2].distance == 2.0);
 
-    // With k above the number of valid rows, the invalid rows still never appear.
-    SparseKnnSearch padded(query, Metric::IP, 4);
-    padded.Scan(batch, norms, valid);
-    neighbors = padded.MetricNeighbors();
-    REQUIRE(neighbors[0].size() == 4);
-    uint64_t missing = 0;
+    // With k above the number of valid rows, lists hold only the actual neighbors.
+    SparseKnnSearch short_list(query, Metric::IP, 4);
+    short_list.Scan(batch, norms, valid);
+    neighbors = short_list.MetricNeighbors();
+    REQUIRE(neighbors[0].size() == 3);
     for (const auto& neighbor : neighbors[0]) {
         CHECK(neighbor.index != 3);
         CHECK(neighbor.index != 4);
-        missing += neighbor.index == NO_ROW ? 1 : 0;
+        CHECK(neighbor.index != NO_ROW);
     }
-    CHECK(missing == 1);
+
+    // Self search over {0: 1}, {0: -1} and an invalid row with k = 2: the only neighbor of
+    // row 0 is row 1 at distance 2, with no placeholder at distance 1.
+    SparseQuerySet self;
+    self.ids = {0};
+    self.values = {1.0F};
+    self.offsets = {0, 1};
+    self.norms = {1.0};
+    self.self_rows = {0};
+    SparseBatch three;
+    three.Clear();
+    three.ids = {0, 0, 0};
+    three.values = {1.0F, -1.0F, nan};
+    three.offsets = {0, 1, 2, 3};
+    SparseKnnSearch self_search(self, Metric::IP, 2);
+    self_search.Scan(three, {1.0, 1.0, std::nan("")}, {1, 1, 0});
+    neighbors = self_search.MetricNeighbors();
+    REQUIRE(neighbors[0].size() == 1);
+    CHECK(neighbors[0][0].index == 1);
+    CHECK(neighbors[0][0].distance == 2.0);
+}
+
+TEST_CASE("Dense I/O chunks are capped by the split size", "[profile][reader]") {
+    // 3 x 65536 float32 rows hold 768 KiB; a 4096-row chunk would allocate 1 GiB.
+    CHECK(dense_chunk_rows(3, 65536, 1) == 3);
+    CHECK(dense_chunk_rows(5000, 128, 1) == 4096);
+    CHECK(dense_chunk_rows(100000, 128, 64) == 100000);
+    CHECK(dense_chunk_rows(1000000, 128, 64) == 131072);
+    CHECK(dense_chunk_rows(0, 16, 64) == 1);
 }
 
 TEST_CASE("Intrinsic dimensionality estimators recover the dimension of a subspace",

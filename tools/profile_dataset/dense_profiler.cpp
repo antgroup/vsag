@@ -154,14 +154,22 @@ sample_json(const SamplePlan& plan, uint64_t used, const std::string& subset) {
                     {"subset", subset}};
 }
 
+uint64_t
+dense_chunk_rows(uint64_t rows, uint64_t dim, uint64_t chunk_mb) {
+    const uint64_t bytes_per_row = std::max<uint64_t>(dim * sizeof(float), 1);
+    const uint64_t target_rows = chunk_mb * 1024ULL * 1024ULL / bytes_per_row;
+    const uint64_t chunk = std::max<uint64_t>(1, target_rows / BLOCK_ROWS) * BLOCK_ROWS;
+    // A split smaller than one chunk is read as a single chunk from row 0, so the BLOCK_ROWS
+    // partials, and therefore every result, are the same as without the cap.
+    return std::max<uint64_t>(1, std::min(chunk, rows));
+}
+
 DenseSplitProfiler::DenseSplitProfiler(SplitContext context)
     : context_(std::move(context)), options_(*context_.options) {
     const SplitInfo& split = context_.info->Split(context_.name);
     rows_ = split.rows;
     dim_ = split.dim;
-    const uint64_t bytes_per_row = std::max<uint64_t>(dim_ * sizeof(float), 1);
-    const uint64_t target_rows = options_.chunk_mb * 1024ULL * 1024ULL / bytes_per_row;
-    chunk_rows_ = std::max<uint64_t>(1, target_rows / BLOCK_ROWS) * BLOCK_ROWS;
+    chunk_rows_ = dense_chunk_rows(rows_, dim_, options_.chunk_mb);
 }
 
 void

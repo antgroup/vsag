@@ -344,16 +344,12 @@ SparseKnnSearch::MetricNeighbors(std::vector<std::vector<uint8_t>>* shares_term)
         for (const uint64_t row : disjoint_rows_[q]) {
             merged.Push(1.0, row);
         }
+        // Only actual neighbors: fewer than k when fewer valid rows exist.
         result[q] = merged.Sorted();
-        while (result[q].size() < k_) {
-            result[q].push_back(Neighbor{1.0, NO_ROW});
-        }
-        std::sort(result[q].begin(), result[q].end(), neighbor_less);
         if (shares_term != nullptr) {
             const std::vector<uint64_t>& disjoint = disjoint_rows_[q];
             for (const auto& neighbor : result[q]) {
                 const bool shared =
-                    neighbor.index != NO_ROW &&
                     !std::binary_search(disjoint.begin(), disjoint.end(), neighbor.index);
                 (*shares_term)[q].push_back(shared ? 1 : 0);
             }

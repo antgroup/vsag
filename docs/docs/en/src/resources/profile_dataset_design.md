@@ -196,7 +196,7 @@ TwoNN only to about 5.0.
 
 | Asset | Boundary |
 | --- | --- |
-| Raw vectors and sampled rows | Never leave the process. The AI request is built from an allow list of aggregate report fields; per-row data (projection coordinates, duplicate and outlier examples), per-dimension arrays, histograms, term ids and label values are excluded by construction. Evidence size does not depend on N. |
+| Raw vectors and sampled rows | Never leave the process. The AI request is built from an allow list of aggregate report fields (every key path must be one the profiler writes, so a modified saved profile cannot add fields); per-row data (projection coordinates, duplicate and outlier examples), per-dimension arrays, histograms, term ids and label values are excluded by construction. Evidence size does not depend on N. |
 | File paths and names | Paths are never sent; the file name only with `--ai-include-file-name`. |
 | Credentials | Read only from an environment variable, sent only in a request header, redacted from every message; URLs with embedded credentials are rejected; reports store the endpoint without its query string. |
 | Untrusted model output | Validated against the request's evidence keys and a schema, HTML-escaped, and stored apart from the deterministic sections; it never changes metrics or signals. |

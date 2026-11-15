@@ -41,8 +41,9 @@ The tool reads the [HDF5 dataset format](dataset_format.md) used by VSAG's evalu
 `/valid_ratios` are optional; when present they are checked as well. The metric comes from the
 `distance` attribute (`euclidean` → `l2`, `ip` → `ip`, `angular` → `cosine`) unless `--metric`
 overrides it. Sparse data supports `ip` and `cosine`. Differences from what `eval_performance`
-accepts (for example missing ground truth, `uint8` storage or a missing `distance`
-attribute) are listed under `input.eval_compatibility` and shown as warnings.
+accepts (for example missing ground truth, `uint8` storage, sparse streams stored as unsigned
+bytes, `/neighbors` or label arrays whose row counts differ from the splits, or a missing
+`distance` attribute) are listed under `input.eval_compatibility` and shown as warnings.
 
 ## Quick start (offline)
 
@@ -165,7 +166,7 @@ Euclidean distance, or chord distance between normalized rows for `cosine`.
 | `terms` | full | Distinct terms, `max_term_id`, `min_term_id_limit` (SINDI `term_id_limit` must be at least this), term-id density, postings, document-frequency summary and log10 histogram, Zipf exponent, Gini, posting share of the top 1% terms, most frequent terms, and `doc_prune_retained_term_fraction`: the mean share of terms SINDI keeps for `doc_prune_ratio` 0.1/0.2/0.3/0.5 under its mass rule |
 | `duplicates` | full | Identical records (ids and values) |
 | `pairwise_distances` | sample | Metric distance and cosine similarity of random sampled pairs; share of pairs without a shared term |
-| `nearest_neighbors` | sample vs full | Exact k-NN through an inverted index over the sampled queries; records sharing no term have distance exactly 1 and take their place in the k-NN lists by row id (above records with a negative inner product); records with non-finite values are excluded; queries with fewer than k overlapping records |
+| `nearest_neighbors` | sample vs full | Exact k-NN through an inverted index over the sampled queries; records sharing no term have distance exactly 1 and take their place in the k-NN lists by row id (above records with a negative inner product); records with non-finite values or repeated term ids are excluded; queries with fewer than k overlapping records |
 | `hubness` | sample | As for dense data |
 
 ### Cross-split, ground truth and labels
@@ -176,7 +177,7 @@ Euclidean distance, or chord distance between normalized rows for `cosine`.
 | `cross_split.standardized_mean_shift` | full | Per-dimension \|mean_test - mean_train\| / std_train (dense) |
 | `cross_split.out_of_distribution_ratio` | sample | Share of sampled queries whose nearest-train distance exceeds the 95th percentile of train rows' own nearest-neighbor distances |
 | `cross_split.query_term_coverage`, `postings_per_query`, `nonzeros_ks_statistic` | sample / full | Sparse only: query terms present in train, postings an exhaustive inverted-index scan touches, KS of entry counts |
-| `ground_truth` | sample | Stored `/neighbors` and `/distances` of sampled queries against recomputed exact neighbors: id recall, distance recall (stored ids whose recomputed distance is within the exact k-th distance, so ties are tolerated), the distance convention that best matches the stored distances to the recomputed distances of the stored ids (`sqrt(L2Sqr)` versus squared for `euclidean`; `1 - similarity` versus similarity for `ip`/`angular`), out-of-range ids, unsorted rows |
+| `ground_truth` | sample | Stored `/neighbors` and `/distances` of sampled queries against recomputed exact neighbors: id recall, distance recall (distinct stored ids whose recomputed distance is within the exact k-th distance, so ties are tolerated), repeated stored ids, non-finite stored distances, the distance convention that best matches the finite stored distances to the recomputed distances of the stored ids (`sqrt(L2Sqr)` versus squared for `euclidean`; `1 - similarity` versus similarity for `ip`/`angular`), out-of-range ids, unsorted rows |
 | `labels` | full | Label counts, largest label share, normalized entropy, per-query filter selectivity, queries whose label no base row carries, `valid_ratios` summary |
 
 ### Rule-based observations
@@ -272,7 +273,8 @@ export VSAG_PROFILE_AI_API_KEY=...        # never pass the key as an argument
 ### Privacy behavior
 
 The request contains a flat evidence object of allow-listed **aggregate** metrics (summaries,
-ratios, counts and short spectra), the rule-based observations, the resolved metric and the
+ratios, counts and short spectra; every key path must be one the profiler writes, so unknown
+fields in a saved profile are never sent), the rule-based observations, the resolved metric and the
 sampling configuration. It never contains vectors, sampled rows, row ids, PCA coordinates,
 per-dimension arrays, histograms, term ids, label values, file paths or credentials. The file
 name is included only with `--ai-include-file-name`. The evidence size does not depend on the

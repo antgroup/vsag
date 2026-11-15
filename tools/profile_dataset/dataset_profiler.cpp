@@ -24,6 +24,8 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <set>
+#include <tuple>
 
 #include "quantization_simulation.h"
 #include "sha256.h"
@@ -168,9 +170,9 @@ ground_truth_report(const DatasetInfo& info,
         {"definition",
          "Stored /neighbors and /distances of sampled queries compared with exact neighbors "
          "recomputed under the profiled metric. The distance of every stored id is recomputed: "
-         "distance_recall_at_k counts stored ids within the exact k-th distance (so ties are "
-         "tolerated), and the convention errors compare stored distances with those recomputed "
-         "distances."},
+         "distance_recall_at_k counts distinct stored ids within the exact k-th distance (so ties "
+         "are tolerated), and the convention errors compare finite stored distances with those "
+         "recomputed distances."},
         {"stored_queries", info.ground_truth_rows},
         {"stored_k", info.ground_truth_k},
         {"checked_queries", check.rows.size()},
@@ -208,6 +210,9 @@ ground_truth_report(const DatasetInfo& info,
     const uint64_t stride = check.k;
     std::vector<double> convention_error(conventions.size(), 0.0);
     uint64_t recomputed_entries = 0;
+    uint64_t convention_entries = 0;
+    uint64_t repeated_ids = 0;
+    uint64_t non_finite_stored = 0;
     double id_recall = 0.0;
     double distance_recall = 0.0;
     uint64_t out_of_range = 0;
@@ -246,14 +251,26 @@ ground_truth_report(const DatasetInfo& info,
         const double kth = exact[k - 1].distance;
         const double tolerance = 1e-5 * std::max(1.0, std::abs(kth));
         uint64_t within = 0;
+        std::set<int64_t> seen;
         for (uint64_t j = 0; j < k; ++j) {
+            const double stored_distance = distances[i * stride + j];
+            const bool finite_stored = std::isfinite(stored_distance);
+            non_finite_stored += finite_stored ? 0 : 1;
+            // A repeated id is a single neighbor: its copies cannot fill other slots.
+            if (!seen.insert(stored[j]).second) {
+                ++repeated_ids;
+                continue;
+            }
             const double actual = recomputed[i * stride + j];
             if (!std::isfinite(actual)) {
                 continue;
             }
             within += actual <= kth + tolerance ? 1 : 0;
             ++recomputed_entries;
-            const double stored_distance = distances[i * stride + j];
+            if (!finite_stored) {
+                continue;
+            }
+            ++convention_entries;
             for (uint64_t c = 0; c < conventions.size(); ++c) {
                 const double expected = conventions[c].from_metric(actual);
                 convention_error[c] +=
@@ -268,11 +285,13 @@ ground_truth_report(const DatasetInfo& info,
     report["id_recall_at_k"] = id_recall / checked;
     report["distance_recall_at_k"] = distance_recall / checked;
     report["recomputed_stored_ids"] = recomputed_entries;
-    if (recomputed_entries > 0) {
+    report["repeated_stored_ids"] = repeated_ids;
+    report["non_finite_stored_distances"] = non_finite_stored;
+    if (convention_entries > 0) {
         const uint64_t best = static_cast<uint64_t>(
             std::min_element(convention_error.begin(), convention_error.end()) -
             convention_error.begin());
-        const auto entries = static_cast<double>(recomputed_entries);
+        const auto entries = static_cast<double>(convention_entries);
         JsonType errors = JsonType::object();
         for (uint64_t c = 0; c < conventions.size(); ++c) {
             errors[conventions[c].name] = convention_error[c] / entries;
@@ -288,6 +307,44 @@ ground_truth_report(const DatasetInfo& info,
     report["out_of_range_ids"] = out_of_range;
     report["rows_with_unsorted_distances"] = unsorted_rows;
     return report;
+}
+
+/// Row-count invariants that eval_performance (EvalDataset::Load) enforces between the
+/// auxiliary arrays and the vector splits. Unknown counts (0) are not checked.
+std::vector<std::string>
+row_count_issues(const DatasetInfo& info, uint64_t train_rows, uint64_t test_rows) {
+    std::vector<std::string> issues;
+    if (info.has_neighbors && test_rows > 0 && info.ground_truth_rows != test_rows) {
+        issues.push_back("/neighbors has " + std::to_string(info.ground_truth_rows) +
+                         " rows but /test has " + std::to_string(test_rows) +
+                         "; eval_performance requires one row per query");
+    }
+    for (const auto& [name, present, rows, columns, split_rows, split] :
+         {std::tuple{"train_labels",
+                     info.has_train_labels,
+                     info.train_label_rows,
+                     info.train_label_columns,
+                     train_rows,
+                     "/train"},
+          std::tuple{"test_labels",
+                     info.has_test_labels,
+                     info.test_label_rows,
+                     info.test_label_columns,
+                     test_rows,
+                     "/test"}}) {
+        if (!present) {
+            continue;
+        }
+        if (columns != 0) {
+            issues.push_back(std::string("/") + name +
+                             " must be one-dimensional (one label per row) for eval_performance");
+        } else if (split_rows > 0 && rows != split_rows) {
+            issues.push_back(std::string("/") + name + " has " + std::to_string(rows) +
+                             " entries but " + split + " has " + std::to_string(split_rows) +
+                             " rows");
+        }
+    }
+    return issues;
 }
 
 JsonType
@@ -410,7 +467,7 @@ metrics_digest(const JsonType& report) {
         deterministic.erase(section);
     }
     deterministic.erase("determinism");
-    return sha256_hex(deterministic.dump());
+    return sha256_hex(deterministic.dump(-1, ' ', false, JsonType::error_handler_t::replace));
 }
 
 JsonType
@@ -737,7 +794,9 @@ profile_dataset(const ProfileOptions& options, const ProgressFn& progress) {
             if (!train->CrossNeighbors().empty() && !train->SelfFirstNeighborDistance().empty()) {
                 std::vector<double> query_first;
                 for (const auto& neighbors : train->CrossNeighbors()) {
-                    query_first.push_back(neighbors.front().distance);
+                    if (!neighbors.empty()) {
+                        query_first.push_back(neighbors.front().distance);
+                    }
                 }
                 double threshold = 0.0;
                 const double ratio = fraction_above_percentile(
@@ -761,6 +820,20 @@ profile_dataset(const ProfileOptions& options, const ProgressFn& progress) {
                                                              train->Json()["rows"].get<uint64_t>());
             }
         }
+    }
+
+    // Row counts of sparse splits without offsets are known only now.
+    auto split_rows = [&](const std::string& name) -> uint64_t {
+        const SplitInfo& split = info.Split(name);
+        if (report["splits"].contains(name)) {
+            return report["splits"][name]["rows"].get<uint64_t>();
+        }
+        return split.present && (info.kind == VectorKind::DENSE || split.has_offsets) ? split.rows
+                                                                                      : 0;
+    };
+    for (const auto& issue : row_count_issues(info, split_rows("train"), split_rows("test"))) {
+        report["input"]["eval_compatibility"]["issues"].push_back(issue);
+        report["input"]["eval_compatibility"]["compatible"] = false;
     }
 
     if (options.Enabled(SECTION_LABELS) && info.has_train_labels) {

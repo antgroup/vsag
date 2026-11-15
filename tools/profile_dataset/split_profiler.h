@@ -61,6 +61,11 @@ struct RowDistanceProbe {
 JsonType
 sample_json(const SamplePlan& plan, uint64_t used, const std::string& subset);
 
+/// Rows per I/O chunk of a dense split: a multiple of BLOCK_ROWS sized from `chunk_mb`, capped
+/// to the split size so that small high-dimensional splits never allocate more than they hold.
+uint64_t
+dense_chunk_rows(uint64_t rows, uint64_t dim, uint64_t chunk_mb);
+
 /// Histogram range for a streamed value distribution: robust_range() applied to at most
 /// ~1M finite values taken with a fixed stride from `sample`.
 bool
@@ -262,6 +267,7 @@ private:
     SparseQuerySet sample_;
     /// Row norms in double precision: a finite float32 record can have a norm above FLT_MAX.
     std::vector<double> row_norms_;
+    /// 1: usable for distances; 2: finite values but a repeated term id; 0: non-finite values.
     std::vector<uint8_t> row_valid_;
     std::vector<uint64_t> hash_high_;
     std::vector<uint64_t> hash_low_;

@@ -214,7 +214,8 @@ SparseSplitProfiler::first_pass() {
                     partial.negative_values += value < 0.0F ? 1 : 0;
                     partial.zero_values += value == 0.0F ? 1 : 0;
                 }
-                row_valid[row] = valid ? 1 : 0;
+                // 1: usable for distances; 2: finite but repeats a term id; 0: non-finite.
+                row_valid[row] = !valid ? 0 : (batch.repeated[r] != 0 ? 2 : 1);
                 row_norms[row] = valid ? std::sqrt(norm) : std::numeric_limits<double>::quiet_NaN();
                 partial.invalid_rows += valid ? 0 : 1;
                 partial.empty_rows += begin == end ? 1 : 0;
@@ -328,7 +329,7 @@ SparseSplitProfiler::first_pass() {
     for (const uint64_t position : order) {
         const uint64_t row = plan_.rows[position];
         const bool usable =
-            row_valid_[row] != 0 && (context_.metric != Metric::COSINE || row_norms_[row] > 0.0);
+            row_valid_[row] == 1 && (context_.metric != Metric::COSINE || row_norms_[row] > 0.0);
         if (!usable) {
             continue;
         }
@@ -608,7 +609,7 @@ SparseSplitProfiler::second_pass(const SparseQuerySet* cross_queries) {
         for (uint64_t r = 0; r < batch.Rows(); ++r) {
             norms[r] = row_norm(batch, r);
             // Pass 1 validated the record count, so these row ids are in range.
-            valid[r] = row_valid_[batch.first_row + r] != 0 &&
+            valid[r] = row_valid_[batch.first_row + r] == 1 &&
                                (context_.metric != Metric::COSINE || norms[r] > 0.0)
                            ? 1
                            : 0;
@@ -739,6 +740,10 @@ SparseSplitProfiler::finalize() {
         std::vector<double> first;
         std::vector<double> kth;
         for (const auto& neighbors : self_neighbors_) {
+            // Lists are shorter than k, or empty, when fewer valid records exist.
+            if (neighbors.empty()) {
+                continue;
+            }
             first.push_back(neighbors.front().distance);
             kth.push_back(neighbors.back().distance);
         }
@@ -751,7 +756,8 @@ SparseSplitProfiler::finalize() {
             {"scope", "sample"},
             {"definition",
              "Exact k nearest neighbors of sampled records searched in the full split through an "
-             "inverted index; records sharing no term have distance 1."},
+             "inverted index; records sharing no term have distance 1, and records with "
+             "non-finite values or repeated term ids are excluded."},
             {"sample",
              sample_json(plan_, self_neighbors_.size(), "first knn_queries valid sampled rows")},
             {"k", self_neighbors_.front().size()},
