@@ -110,8 +110,10 @@ callback and are safe while other threads log.
 - **Modify:** `vsag_index_remove`, `vsag_index_update_ids`, `vsag_index_update_vector`.
 - **Search:** `vsag_index_knn_search`, `vsag_index_range_search`, `vsag_index_knn_search_float32`.
 - **Read:** `vsag_index_calc_distances_by_ids`, `vsag_index_get_vectors_by_ids`,
-  `vsag_index_get_num_elements`, `vsag_index_get_memory_usage`, `vsag_index_check_id_exist` and
-  `vsag_index_get_min_max_id`.
+  `vsag_index_get_num_elements`, `vsag_index_get_dim`, `vsag_index_get_memory_usage`,
+  `vsag_index_check_id_exist` and `vsag_index_get_min_max_id`. `vsag_index_get_dim` reports the
+  dimension of the stored vectors (bits for binary indexes); deserialization restores the saved
+  dimension, which may differ from the one the index was created with.
 - **Copy and reuse:** `vsag_index_clone`, `vsag_index_export_model`.
 - **Persistence:** `vsag_index_serialize_file`, `vsag_index_deserialize_file`, and, for hosts that
   keep index bytes in their own storage, `vsag_index_serialize_writer` and

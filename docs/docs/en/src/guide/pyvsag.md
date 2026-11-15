@@ -224,7 +224,9 @@ new_index.load("index.bin")
 ```
 
 `save` and `load` raise `RuntimeError` when the underlying serialization or deserialization fails,
-including when the file cannot be opened.
+including when the file cannot be opened. `load` restores the saved dimension; a `binary` index
+then sizes its queries by that dimension, even when the loading index was created with another
+`dim`.
 
 ## Index Operations
 

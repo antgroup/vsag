@@ -1123,6 +1123,21 @@ vsag_index_get_num_elements(const vsag_index_t* index, int64_t* out_num_elements
 }
 
 vsag_error_t*
+vsag_index_get_dim(const vsag_index_t* index, int64_t* out_dim) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        VSAG_REQUIRE(out_dim != nullptr, "out_dim is NULL");
+        vsag::IndexDetailInfo info;
+        auto detail = index->index->GetDetailDataByName(vsag::INDEX_DETAIL_NAME_DIM, info);
+        if (not detail.has_value()) {
+            return make_error(detail.error());
+        }
+        *out_dim = detail.value()->GetDataScalarInt64();
+        return nullptr;
+    });
+}
+
+vsag_error_t*
 vsag_index_get_memory_usage(const vsag_index_t* index, int64_t* out_memory_usage) {
     return guarded([&]() -> vsag_error_t* {
         VSAG_REQUIRE(index != nullptr, "index is NULL");

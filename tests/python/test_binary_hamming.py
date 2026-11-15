@@ -144,6 +144,30 @@ def test_binary_index_save_and_load(tmp_path):
     np.testing.assert_array_equal(before[1], after[1])
 
 
+@pytest.mark.parametrize("index_name", ["brute_force", "hgraph"])
+def test_binary_load_takes_the_saved_dim(tmp_path, index_name):
+    # Loading restores the saved dimension, so queries are sized by it, not by the dim the
+    # loading instance was created with.
+    dim = 256
+    rng = np.random.default_rng(11)
+    bits = _random_bits(rng, 100, dim)
+    ids = np.arange(100, dtype=np.int64)
+    params = _params if index_name == "brute_force" else _hgraph_params
+    index = pyvsag.Index(index_name, params(dim))
+    index.build(_pack(bits), ids, 100, dim)
+    path = str(tmp_path / ("binary_%s.index" % index_name))
+    index.save(path)
+
+    loaded = pyvsag.Index(index_name, params(8))
+    loaded.load(path)
+    result_ids, result_dists = loaded.knn_search(_pack(bits[5]), 1, SEARCH_PARAMS)
+    assert result_ids[0] == 5 and result_dists[0] == 0.0
+    distances = loaded.calc_distances_by_id(_pack(bits[5]), np.array([5, 6], dtype=np.int64))
+    np.testing.assert_array_equal(distances, _hamming(bits[[5, 6]], bits[5]).astype(np.float32))
+    with pytest.raises(ValueError, match=r"ceil\(dim / 8\) = 32 bytes"):
+        loaded.knn_search(np.zeros(1, dtype=np.uint8), 1, SEARCH_PARAMS)
+
+
 @pytest.mark.parametrize(
     "bad_vectors",
     [

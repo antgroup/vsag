@@ -46,6 +46,8 @@ public:
 extern const char* INDEX_DETAIL_NAME_NUM_ELEMENTS;
 extern const char* INDEX_DETAIL_NAME_LABEL_TABLE;
 extern const char* INDEX_DETAIL_DATA_TYPE;
+// Dimension of the stored vectors (bits for binary indexes); Deserialize restores the saved one.
+extern const char* INDEX_DETAIL_NAME_DIM;
 
 class DetailData {
 public:
