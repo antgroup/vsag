@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <atomic>
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <random>
 #include <sstream>
@@ -32,6 +34,7 @@
 #include "query_context.h"
 #include "storage/serialization.h"
 #include "unittest.h"
+#include "vsag/options.h"
 #include "vsag_exception.h"
 
 namespace vsag {
@@ -151,6 +154,127 @@ TEST_CASE("Binary FlattenDataCell scattered inserts and id ranges",
     // Ranges must lie inside the stored ids.
     REQUIRE_THROWS_AS(flatten->QueryRange(dists.data(), computer, count - 2, 3), VsagException);
     REQUIRE_THROWS_AS(flatten->QueryRange(dists.data(), computer, count, 1), VsagException);
+}
+
+namespace {
+
+// Records the allocations made through it, so that a test can tell whether a read copied codes.
+class RecordingAllocator : public Allocator {
+public:
+    std::string
+    Name() override {
+        return "RecordingAllocator";
+    }
+
+    void*
+    Allocate(uint64_t size) override {
+        allocations_.fetch_add(1, std::memory_order_relaxed);
+        uint64_t largest = largest_.load(std::memory_order_relaxed);
+        while (size > largest and
+               not largest_.compare_exchange_weak(largest, size, std::memory_order_relaxed)) {
+        }
+        return std::malloc(size);
+    }
+
+    void
+    Deallocate(void* data) override {
+        std::free(data);
+    }
+
+    void*
+    Reallocate(void* data, uint64_t size) override {
+        return std::realloc(data, size);
+    }
+
+    void
+    Reset() {
+        allocations_.store(0, std::memory_order_relaxed);
+        largest_.store(0, std::memory_order_relaxed);
+    }
+
+    [[nodiscard]] uint64_t
+    Allocations() const {
+        return allocations_.load(std::memory_order_relaxed);
+    }
+
+    [[nodiscard]] uint64_t
+    Largest() const {
+        return largest_.load(std::memory_order_relaxed);
+    }
+
+private:
+    std::atomic<uint64_t> allocations_{0};
+    std::atomic<uint64_t> largest_{0};
+};
+
+class BlockSizeLimitGuard {
+public:
+    explicit BlockSizeLimitGuard(uint64_t block_size_limit)
+        : old_block_size_limit_(Options::Instance().block_size_limit()) {
+        Options::Instance().set_block_size_limit(block_size_limit);
+    }
+
+    ~BlockSizeLimitGuard() {
+        Options::Instance().set_block_size_limit(old_block_size_limit_);
+    }
+
+    BlockSizeLimitGuard(const BlockSizeLimitGuard&) = delete;
+    BlockSizeLimitGuard&
+    operator=(const BlockSizeLimitGuard&) = delete;
+
+private:
+    uint64_t old_block_size_limit_;
+};
+
+}  // namespace
+
+TEST_CASE("Binary FlattenDataCell scans block memory ranges in place",
+          "[ut][FlattenDataCell][binary]") {
+    // The smallest block size Options accepts, so that a short range crosses blocks. A lease over
+    // a range that crosses a block copies the whole range.
+    constexpr uint64_t block_size = 256 * 1024;
+    BlockSizeLimitGuard guard(block_size);
+    auto allocator = std::make_shared<RecordingAllocator>();
+    fixtures::TempDir dir("binary_flatten_block_scan");
+    // 2 KiB rows fill the blocks exactly; 96-byte rows also cross piece and block boundaries.
+    const int64_t dim = GENERATE(16384, 768);
+    INFO("dim=" << dim);
+    auto flatten = FlattenInterface::MakeInstance(
+        binary_flatten_param(IO_TYPE_VALUE_BLOCK_MEMORY_IO, QUANTIZATION_TYPE_VALUE_BINARY, dir),
+        binary_common_param(dim, allocator));
+    const uint64_t row_bytes = BinaryVectorBytes(dim);
+    const auto count = static_cast<InnerIdType>(3 * block_size / row_bytes + 5);
+    std::mt19937_64 rng(static_cast<uint64_t>(dim) + 29);
+    std::vector<uint8_t> vectors(count * row_bytes);
+    for (auto& value : vectors) {
+        value = static_cast<uint8_t>(rng());
+    }
+    flatten->Train(vectors.data(), count);
+    flatten->BatchInsertVector(vectors.data(), count);
+    REQUIRE(flatten->TotalCount() == count);
+
+    std::vector<uint8_t> query(row_bytes);
+    for (auto& value : query) {
+        value = static_cast<uint8_t>(rng());
+    }
+    auto computer = flatten->FactoryComputer(query.data());
+    for (const InnerIdType begin : {InnerIdType{0}, InnerIdType{7}}) {
+        INFO("begin=" << begin);
+        std::vector<float> dists(count - begin, -1.0F);
+        allocator->Reset();
+        flatten->QueryRange(dists.data(), computer, begin, count - begin);
+        const auto allocations = allocator->Allocations();
+        const auto largest = allocator->Largest();
+        for (InnerIdType i = 0; i < count - begin; ++i) {
+            REQUIRE(dists[i] ==
+                    reference_hamming(query.data(), vectors.data() + (begin + i) * row_bytes, dim));
+        }
+        // At most a row that crosses a block is copied, never the range.
+        REQUIRE(largest <= row_bytes);
+        if (block_size % row_bytes == 0) {
+            REQUIRE(allocations == 0);
+        }
+    }
 }
 
 TEST_CASE("Binary FlattenDataCell stores packed bits exactly", "[ut][FlattenDataCell][binary]") {
