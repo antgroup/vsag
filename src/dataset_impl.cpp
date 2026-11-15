@@ -66,6 +66,22 @@ Dataset::GetInt64Metadata(const std::string& name) const {
     return nullptr;
 }
 
+DatasetPtr
+Dataset::BinaryVectors(const uint8_t* vectors) {
+    auto* accessor = dynamic_cast<BinaryDatasetAccessor*>(this);
+    if (accessor == nullptr) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "This Dataset implementation does not support binary vectors");
+    }
+    return accessor->SetBinaryVectorsInternal(vectors);
+}
+
+const uint8_t*
+Dataset::GetBinaryVectors() const {
+    const auto* accessor = dynamic_cast<const BinaryDatasetAccessor*>(this);
+    return accessor == nullptr ? nullptr : accessor->GetBinaryVectorsInternal();
+}
+
 bool
 Dataset::GetPaths(const std::string& hierarchy_name,
                   std::vector<std::vector<std::string>>& paths) const {
@@ -507,7 +523,7 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
             ids, [this](const int64_t* values) { allocator_->Deallocate(void_ptr(values)); });
         allocator_->Deallocate(void_ptr(DatasetImpl::GetDistances()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetInt8Vectors()));
-        allocator_->Deallocate(void_ptr(DatasetImpl::GetBinaryVectors()));
+        allocator_->Deallocate(void_ptr(DatasetImpl::GetBinaryVectorsInternal()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetFloat16Vectors()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetFloat32Vectors()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetExtraInfos()));
@@ -547,7 +563,7 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
         release_int64_metadata(ids, [](const int64_t* values) { delete[] values; });
         delete[] DatasetImpl::GetDistances();
         delete[] DatasetImpl::GetInt8Vectors();
-        delete[] DatasetImpl::GetBinaryVectors();
+        delete[] DatasetImpl::GetBinaryVectorsInternal();
         delete[] DatasetImpl::GetFloat16Vectors();
         delete[] DatasetImpl::GetFloat32Vectors();
         delete[] DatasetImpl::GetExtraInfos();
@@ -623,9 +639,9 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
         copy_dataset->Int8Vectors(
             allocate_and_copy(this->GetInt8Vectors(), num_elements * dim, allocator_ref));
     }
-    if (this->GetBinaryVectors() != nullptr) {
+    if (this->GetBinaryVectorsInternal() != nullptr) {
         copy_dataset->BinaryVectors(allocate_and_copy(
-            this->GetBinaryVectors(), num_elements * ((dim + 7) / 8), allocator_ref));
+            this->GetBinaryVectorsInternal(), num_elements * ((dim + 7) / 8), allocator_ref));
     }
     if (this->GetFloat32Vectors() != nullptr) {
         copy_dataset->Float32Vectors(

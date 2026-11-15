@@ -27,13 +27,16 @@
 #include <variant>
 #include <vector>
 
+#include "binary_dataset_internal.h"
 #include "search_metrics_internal.h"
 #include "vsag/allocator.h"
 #include "vsag/dataset.h"
 
 namespace vsag {
 
-class DatasetImpl : public Dataset, public SearchMetricsDatasetAccessor {
+class DatasetImpl : public Dataset,
+                    public SearchMetricsDatasetAccessor,
+                    public BinaryDatasetAccessor {
     using MultiPaths = std::vector<std::vector<std::string>>;
 
     using var = std::variant<int64_t,
@@ -166,13 +169,13 @@ public:
     }
 
     DatasetPtr
-    BinaryVectors(const uint8_t* vectors) override {
+    SetBinaryVectorsInternal(const uint8_t* vectors) override {
         this->data_[BINARY_VECTORS] = vectors;
         return shared_from_this();
     }
 
     const uint8_t*
-    GetBinaryVectors() const override {
+    GetBinaryVectorsInternal() const override {
         if (auto iter = this->data_.find(BINARY_VECTORS); iter != this->data_.end()) {
             return std::get<const uint8_t*>(iter->second);
         }
