@@ -141,9 +141,9 @@ public:
          const std::vector<double>& row_norms,
          const std::vector<uint8_t>& valid);
 
-    /// Ascending exact neighbors per query. If `shares_term` is given, it receives 1 for each
-    /// neighbor that shares at least one term with the query and 0 otherwise. Lists are padded
-    /// with {1, NO_ROW} only when fewer than k valid rows exist.
+    /// Ascending exact neighbors per query, fewer than k when fewer valid rows exist. If
+    /// `shares_term` is given, it receives 1 for each neighbor that shares at least one term with
+    /// the query and 0 otherwise.
     [[nodiscard]] std::vector<std::vector<Neighbor>>
     MetricNeighbors(std::vector<std::vector<uint8_t>>* shares_term = nullptr) const;
 

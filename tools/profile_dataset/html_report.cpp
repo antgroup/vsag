@@ -213,7 +213,7 @@ public:
         page << "</nav>" << body.str();
         // JSON may only contain <, > and & inside strings, where \u escapes are equivalent. Escaping
         // them keeps untrusted text (e.g. AI output) from closing the block or opening comments.
-        const std::string data = report_.dump(-1, ' ', true);
+        const std::string data = report_.dump(-1, ' ', true, JsonType::error_handler_t::replace);
         std::string safe_data;
         safe_data.reserve(data.size());
         for (const char character : data) {

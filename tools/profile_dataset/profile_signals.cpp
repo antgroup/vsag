@@ -474,6 +474,22 @@ derive_signals(const JsonType& report) {
               {"ground_truth.best_matching_distance_convention"},
               "best convention == squared euclidean");
     }
+    if (s.Number("ground_truth.repeated_stored_ids", value) && value > 0) {
+        s.Add("ground_truth.repeated_ids",
+              "critical",
+              format_number(value) +
+                  " stored neighbor entries repeat an id of the same query; recall measured "
+                  "against them would be wrong.",
+              {"ground_truth.repeated_stored_ids"},
+              "ground_truth.repeated_stored_ids > 0");
+    }
+    if (s.Number("ground_truth.non_finite_stored_distances", value) && value > 0) {
+        s.Add("ground_truth.non_finite_distances",
+              "critical",
+              format_number(value) + " stored /distances values are NaN or infinite.",
+              {"ground_truth.non_finite_stored_distances"},
+              "ground_truth.non_finite_stored_distances > 0");
+    }
     if (s.Number("ground_truth.out_of_range_ids", value) && value > 0) {
         s.Add("ground_truth.out_of_range_ids",
               "critical",

@@ -391,7 +391,8 @@ run_cli(int argc, char** argv, std::ostream& out, std::ostream& err, HttpTranspo
                               : [&err](const std::string& message) { err << message << '\n'; };
             report = profile_dataset(options, progress);
             // Deterministic reports first: they must exist even if the AI step hangs or fails.
-            write_file(json_path, report.dump(2) + "\n");
+            write_file(json_path,
+                       report.dump(2, ' ', false, JsonType::error_handler_t::replace) + "\n");
             if (write_html) {
                 write_file(html_path, render_html_report(report));
             }
@@ -412,11 +413,13 @@ run_cli(int argc, char** argv, std::ostream& out, std::ostream& err, HttpTranspo
             ai_status = section.value("status", "failed");
             report["ai_analysis"] = section;
             if (!ai_output.empty()) {
-                write_file(ai_output, section.dump(2) + "\n");
+                write_file(ai_output,
+                           section.dump(2, ' ', false, JsonType::error_handler_t::replace) + "\n");
             }
         }
         if (ai.Enabled() || from_profile.empty()) {
-            write_file(json_path, report.dump(2) + "\n");
+            write_file(json_path,
+                       report.dump(2, ' ', false, JsonType::error_handler_t::replace) + "\n");
         }
         if (write_html) {
             write_file(html_path, render_html_report(report));

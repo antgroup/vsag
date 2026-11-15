@@ -153,6 +153,33 @@ TEST_CASE("Empty sparse records parse as empty rows, also as the first record",
     CHECK_FALSE(reader.NextBatch(16, batch));
 }
 
+TEST_CASE("Sparse streams stored as unsigned bytes are read unchanged", "[profile][reader]") {
+    TempDir dir;
+    // Every float below has a byte of 0x80 or more (1.0F is 00 00 80 3F).
+    const std::vector<SparseRecord> records = {SparseRecord{{1, 200}, {1.0F, -2.5F}},
+                                               SparseRecord{{70000}, {0.75F}}};
+    const auto path = dir.File("unsigned.hdf5");
+    {
+        H5::H5File file(path, H5F_ACC_TRUNC);
+        write_string_attribute(file, "type", "sparse");
+        write_string_attribute(file, "distance", "ip");
+        write_vector(file, "train", encode_sparse(records, nullptr), H5::PredType::NATIVE_UINT8);
+    }
+    const DatasetInfo info = inspect_dataset(path);
+    bool flagged = false;
+    for (const auto& issue : info.eval_compatibility_issues) {
+        flagged = flagged || issue.find("unsigned bytes") != std::string::npos;
+    }
+    CHECK(flagged);
+    SparseSplitReader reader(path, "train", 1024);
+    SparseBatch batch;
+    REQUIRE(reader.NextBatch(16, batch));
+    REQUIRE(batch.Rows() == 2);
+    CHECK(batch.ids == std::vector<uint32_t>({1, 200, 70000}));
+    CHECK(batch.values == std::vector<float>({1.0F, -2.5F, 0.75F}));
+    CHECK(batch.repeated == std::vector<uint8_t>({0, 0}));
+}
+
 TEST_CASE("Unsorted and repeated sparse ids are sorted and counted", "[profile][reader]") {
     TempDir dir;
     const auto path = dir.File("unsorted.hdf5");
@@ -173,6 +200,7 @@ TEST_CASE("Unsorted and repeated sparse ids are sorted and counted", "[profile][
           std::vector<float>({0.1F, 0.3F, 0.5F}));
     CHECK(batch.unsorted_rows == 2);
     CHECK(batch.duplicate_id_rows == 1);
+    CHECK(batch.repeated == std::vector<uint8_t>({0, 1, 0}));
     CHECK(batch.offsets[3] == batch.offsets[2]);
     CHECK_FALSE(reader.NextBatch(10, batch));
 }

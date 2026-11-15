@@ -60,6 +60,11 @@ struct DatasetInfo {
     uint64_t ground_truth_k{0};
     bool has_train_labels{false};
     bool has_test_labels{false};
+    /// Label array shapes: entries, and 0 or the second extent (eval_performance wants (N,)).
+    uint64_t train_label_rows{0};
+    uint64_t test_label_rows{0};
+    uint64_t train_label_columns{0};
+    uint64_t test_label_columns{0};
     bool has_valid_ratios{false};
     /// Differences from what `eval_performance` accepts; profiling continues regardless.
     std::vector<std::string> eval_compatibility_issues;
@@ -115,6 +120,9 @@ struct SparseBatch {
     /// Rows whose stored ids were not strictly ascending / contained repeated ids.
     uint64_t unsorted_rows{0};
     uint64_t duplicate_id_rows{0};
+    /// Per row: 1 when the record repeats a term id. Inner products of such records depend on
+    /// how repeats are combined, so they are excluded from distance metrics.
+    std::vector<uint8_t> repeated;
 
     [[nodiscard]] uint64_t
     Rows() const {
@@ -146,6 +154,8 @@ private:
 
     H5::H5File file_;
     H5::DataSet dataset_;
+    /// The stored 1-byte type: reading with it copies bytes unchanged, whatever their signedness.
+    H5::DataType byte_type_;
     uint64_t total_bytes_{0};
     uint64_t chunk_bytes_{0};
     std::vector<char> buffer_;
