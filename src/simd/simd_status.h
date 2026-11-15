@@ -159,7 +159,9 @@ public:
     // SSE unit check it so that a CPU or VM hiding POPCNT never executes the instruction.
     static inline bool
     SupportPOPCNT() {
-        Init();
+        if (!Init()) {
+            return false;
+        }
         bool ret = false;
 #if defined(ENABLE_SSE)
         ret = true;
