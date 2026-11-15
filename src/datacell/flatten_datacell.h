@@ -590,13 +590,29 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::QueryRange(float* result_dists,
                 ErrorType::READ_ERROR,
                 "invalid internal id range " + std::to_string(begin) + "+" + std::to_string(count));
         }
-        auto lease = this->layout_->AcquireRange(begin, count);
-        if (not lease) {
-            throw VsagException(ErrorType::READ_ERROR,
-                                "failed to acquire codes for range distance evaluation");
-        }
+        // A lease over a range that crosses a block of block memory is a copy of the whole
+        // range, so the range is scanned in pieces that end at multiples of
+        // BINARY_SCAN_PIECE_BYTES. Its blocks are powers of two of at least 256 KiB
+        // (Options::set_block_size_limit), so a piece never crosses one and is read in place;
+        // only a single row that crosses a block is copied, as on the per-id path. A row longer
+        // than a piece is scanned on its own.
+        constexpr uint64_t BINARY_SCAN_PIECE_BYTES = 64 * 1024;
         auto* comp = static_cast<Computer<QuantTmpl>*>(computer.get());
-        comp->ScanBatchDists(count, lease.Data(), result_dists);
+        const uint64_t code_size = this->code_size_;
+        for (InnerIdType done = 0; done < count;) {
+            const uint64_t offset = static_cast<uint64_t>(begin + done) * code_size;
+            const uint64_t piece_end =
+                (offset / BINARY_SCAN_PIECE_BYTES + 1) * BINARY_SCAN_PIECE_BYTES;
+            const auto rows = static_cast<InnerIdType>(std::min<uint64_t>(
+                std::max<uint64_t>((piece_end - offset) / code_size, 1), count - done));
+            auto lease = this->layout_->AcquireRange(begin + done, rows);
+            if (not lease) {
+                throw VsagException(ErrorType::READ_ERROR,
+                                    "failed to acquire codes for range distance evaluation");
+            }
+            comp->ScanBatchDists(rows, lease.Data(), result_dists + done);
+            done += rows;
+        }
         if (ctx != nullptr and ctx->stats != nullptr and ctx->track_distance_evaluations) {
             ctx->stats->AddDistance(ctx->distance_phase, backend_, static_cast<uint64_t>(count));
         }
