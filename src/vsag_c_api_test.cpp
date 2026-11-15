@@ -200,6 +200,9 @@ TEST_CASE("vsag_c_api build, search and serialize", "[vsag_c_api][ut]") {
     int64_t count = 0;
     REQUIRE_OK(vsag_index_get_num_elements(index.get(), &count));
     REQUIRE(count == num_vectors);
+    int64_t index_dim = 0;
+    REQUIRE_OK(vsag_index_get_dim(index.get(), &index_dim));
+    REQUIRE(index_dim == dim);
     int64_t memory = 0;
     REQUIRE_OK(vsag_index_get_memory_usage(index.get(), &memory));
     REQUIRE(memory > 0);
@@ -1087,4 +1090,56 @@ TEST_CASE("vsag_c_api binary vectors with the Hamming metric", "[vsag_c_api][ut]
 
     REQUIRE(code_of(vsag_dataset_set_binary_vectors(nullptr, query.data())) ==
             VSAG_INVALID_ARGUMENT);
+}
+
+TEST_CASE("vsag_c_api reports the dimension a deserialized index restores", "[vsag_c_api][ut]") {
+    constexpr int64_t bits = 100;
+    constexpr int64_t row_bytes = (bits + 7) / 8;
+    constexpr int64_t count = 50;
+    std::mt19937 rng(2873);
+    std::vector<uint8_t> rows(count * row_bytes);
+    for (auto& value : rows) {
+        value = static_cast<uint8_t>(rng());
+    }
+    std::vector<int64_t> ids(count);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = i;
+    }
+    const std::string name = GENERATE("brute_force", "hgraph");
+    INFO("index=" << name);
+    const std::string param =
+        name == "brute_force" ? binary_brute_force_param : binary_hgraph_param;
+    auto index = make_index(name.c_str(), param.c_str());
+    auto base = make_binary(rows.data(), count, bits, ids.data());
+    REQUIRE_OK(vsag_index_build(index.get(), base.get()));
+    int64_t index_dim = 0;
+    REQUIRE_OK(vsag_index_get_dim(index.get(), &index_dim));
+    REQUIRE(index_dim == bits);
+
+    // Loading restores the saved dimension, also into an index created with another one, so a
+    // binding that sizes queries by the dimension has to read it again after loading.
+    MemoryStorage storage;
+    REQUIRE_OK(vsag_index_serialize_writer(index.get(), write_to_memory, &storage));
+    std::string other_param = param;
+    const auto dim_at = other_param.find("\"dim\": 100");
+    REQUIRE(dim_at != std::string::npos);
+    other_param.replace(dim_at, std::string("\"dim\": 100").size(), "\"dim\": 8");
+    auto loaded = make_index(name.c_str(), other_param.c_str());
+    REQUIRE_OK(vsag_index_get_dim(loaded.get(), &index_dim));
+    REQUIRE(index_dim == 8);
+    REQUIRE_OK(
+        vsag_index_deserialize_reader(loaded.get(), read_from_memory, size_of_memory, &storage));
+    REQUIRE_OK(vsag_index_get_dim(loaded.get(), &index_dim));
+    REQUIRE(index_dim == bits);
+    auto query = make_binary(rows.data() + 3 * row_bytes, 1, bits);
+    vsag_search_result_t* raw = nullptr;
+    REQUIRE_OK(vsag_index_knn_search(
+        loaded.get(), query.get(), 1, binary_search_parameters, nullptr, &raw));
+    ResultPtr result(raw);
+    REQUIRE(vsag_search_result_count(raw) == 1);
+    REQUIRE(vsag_search_result_ids(raw)[0] == 3);
+    REQUIRE(vsag_search_result_distances(raw)[0] == 0.0F);
+
+    REQUIRE(code_of(vsag_index_get_dim(nullptr, &index_dim)) == VSAG_INVALID_ARGUMENT);
+    REQUIRE(code_of(vsag_index_get_dim(index.get(), nullptr)) == VSAG_INVALID_ARGUMENT);
 }

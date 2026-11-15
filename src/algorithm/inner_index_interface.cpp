@@ -1036,6 +1036,9 @@ InnerIndexInterface::GetIndexDetailInfos() const {
     infos.emplace_back(INDEX_DETAIL_DATA_TYPE,
                        "Data type of current index (e.g., float32, int8, sparse...)",
                        IndexDetailDataType::TYPE_SCALAR_STRING);
+    infos.emplace_back(INDEX_DETAIL_NAME_DIM,
+                       "Dimension of the vectors in current index (bits for binary indexes)",
+                       IndexDetailDataType::TYPE_SCALAR_INT64);
     return infos;
 }
 
@@ -1182,6 +1185,8 @@ InnerIndexInterface::get_detail_data_by_info(const IndexDetailInfo& info) const 
         data->SetData2DArrayInt64(label_tables);
     } else if (name == INDEX_DETAIL_DATA_TYPE) {
         data->SetDataScalarString(ToString(data_type_));
+    } else if (name == INDEX_DETAIL_NAME_DIM) {
+        data->SetDataScalarInt64(dim_);
     }
     return data;
 }

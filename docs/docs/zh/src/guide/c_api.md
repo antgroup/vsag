@@ -104,8 +104,9 @@ dataset 是对调用方内存的视图，既可描述底库数据，也可描述
 - **修改：** `vsag_index_remove`、`vsag_index_update_ids`、`vsag_index_update_vector`。
 - **搜索：** `vsag_index_knn_search`、`vsag_index_range_search`、`vsag_index_knn_search_float32`。
 - **读取：** `vsag_index_calc_distances_by_ids`、`vsag_index_get_vectors_by_ids`、
-  `vsag_index_get_num_elements`、`vsag_index_get_memory_usage`、`vsag_index_check_id_exist` 和
-  `vsag_index_get_min_max_id`。
+  `vsag_index_get_num_elements`、`vsag_index_get_dim`、`vsag_index_get_memory_usage`、
+  `vsag_index_check_id_exist` 和 `vsag_index_get_min_max_id`。`vsag_index_get_dim` 返回所存向量的
+  维度（二进制索引按 bit 计）；反序列化会恢复保存时的维度，它可能与创建索引时给定的维度不同。
 - **复制与复用：** `vsag_index_clone`、`vsag_index_export_model`。
 - **持久化：** `vsag_index_serialize_file`、`vsag_index_deserialize_file`；对于把索引字节放在自有
   存储中的宿主，还有 `vsag_index_serialize_writer` 和 `vsag_index_deserialize_reader`。

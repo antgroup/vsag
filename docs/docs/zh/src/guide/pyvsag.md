@@ -196,7 +196,8 @@ new_index = pyvsag.Index("hgraph", index_params)
 new_index.load("index.bin")
 ```
 
-底层序列化或反序列化失败（包括文件无法打开）时，`save` 与 `load` 会抛出 `RuntimeError`。
+底层序列化或反序列化失败（包括文件无法打开）时，`save` 与 `load` 会抛出 `RuntimeError`。`load` 会恢复
+保存时的维度；即使加载用的索引创建时给了另一个 `dim`，`binary` 索引此后也按恢复的维度检查查询长度。
 
 ## 索引操作
 

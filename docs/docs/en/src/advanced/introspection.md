@@ -123,6 +123,7 @@ Standard detail names exposed as constants in `include/vsag/index_detail_info.h`
 | `INDEX_DETAIL_NAME_NUM_ELEMENTS`    | `TYPE_SCALAR_INT64`    | Number of vectors currently in the index. |
 | `INDEX_DETAIL_NAME_LABEL_TABLE`     | `TYPE_2DArray_INT64`   | Per-vector label table (e.g. internal-to-user id mapping). |
 | `INDEX_DETAIL_DATA_TYPE`            | `TYPE_SCALAR_STRING`   | Underlying vector data type (e.g. `"float32"`). |
+| `INDEX_DETAIL_NAME_DIM`             | `TYPE_SCALAR_INT64`    | Dimension of the stored vectors (bits for binary indexes); `Deserialize` restores the saved one. |
 
 Individual indexes may expose additional names; iterate `GetIndexDetailInfos()` to discover them
 at runtime. A runnable example is available at `examples/cpp/317_feature_get_detail_data.cpp`.

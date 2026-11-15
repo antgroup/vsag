@@ -566,3 +566,8 @@ class Index:
     def load(self, filename):
         """Load the index from a file written by save."""
         _check(lib.vsag_index_deserialize_file(self._handle, os.fsencode(filename)), "load failed")
+        if self._dtype == "binary":
+            # Loading restores the saved dimension, which sizes every binary query.
+            dim = ffi.new("int64_t*")
+            _check(lib.vsag_index_get_dim(self._handle, dim), "load failed")
+            self._dim = int(dim[0])
