@@ -18,7 +18,9 @@ Builds VSAG ``brute_force`` (exact) and ``hgraph`` binary indexes on a Hamming d
 https://ann-benchmarks.com (``sift-256-hamming``, ``word2bits-800-hamming``) and, when the
 ``faiss`` package is installed, FAISS ``IndexBinaryFlat`` and ``IndexBinaryHNSW`` with the same
 graph degree for reference. Recall@k counts a returned id as correct when its Hamming distance is
-not larger than the true k-th distance, so ties at the k-th distance are not penalized.
+not larger than the true k-th distance, so ties at the k-th distance are not penalized; missing
+neighbors (id -1) count as misses, and a VSAG search that fails stops the script with the error
+of the library instead of being reported as a result.
 
 Each setting runs the queries ``--repeat`` times on one thread and reports the best pass. Pin the
 process to idle physical cores of one NUMA node (for example with ``taskset``) for stable numbers.
@@ -66,20 +68,42 @@ def exact_kth_distances(train, test, dim, k):
     return kth
 
 
-def tie_aware_recall(result_dists, kth):
-    return float(np.mean(result_dists <= kth[:, None]))
+def tie_aware_recall(result_ids, result_dists, kth):
+    """A returned neighbor counts when its distance is not larger than the true k-th distance.
+    Missing neighbors (id -1, left by a failed or short search) count as misses."""
+    found = (result_ids >= 0) & (result_dists >= 0)
+    return float(np.mean(found & (result_dists <= kth[:, None])))
 
 
 def run_queries(search, test, k, repeat):
-    """Runs all queries `repeat` times; returns the distances and the best queries per second."""
+    """Runs all queries `repeat` times; returns the ids, the distances and the best queries per
+    second. `search` returns the (ids, distances) of one query, with -1 in missing slots."""
+    ids = np.empty((len(test), k), dtype=np.int64)
     dists = np.empty((len(test), k), dtype=np.float32)
     best_qps = 0.0
     for _ in range(max(1, repeat)):
         start = time.perf_counter()
         for q, query in enumerate(test):
-            dists[q] = search(query)
+            ids[q], dists[q] = search(query)
         best_qps = max(best_qps, len(test) / (time.perf_counter() - start))
-    return dists, best_qps
+    return ids, dists, best_qps
+
+
+def check_vsag_searches(name, ef, result_ids, explain):
+    """pyvsag.Index.knn_search reports a failed search only as -1 ids and distances. A k-NN
+    search on a non-empty index always finds a neighbor, so a row without one is a failure:
+    stop with the library's error, which `explain(query_number)` raises, instead of reporting
+    failed searches as results."""
+    failed = np.flatnonzero((result_ids < 0).all(axis=1))
+    if len(failed) == 0:
+        return
+    reason = "no neighbor returned"
+    try:
+        explain(int(failed[0]))
+    except RuntimeError as error:
+        reason = str(error)
+    raise SystemExit(f"{name} (ef_search {ef}): {len(failed)} of {len(result_ids)} searches "
+                     f"failed: {reason}")
 
 
 def bench_vsag(dim, train, test, kth, args):
@@ -103,10 +127,14 @@ def bench_vsag(dim, train, test, kth, args):
         params = json.dumps({"hgraph": {"ef_search": ef}})
 
         def search(query, ef_params=params):
-            return index.knn_search(query, args.k, ef_params)[1]
+            return index.knn_search(query, args.k, ef_params)
 
-        dists, qps = run_queries(search, test, args.k, args.repeat)
-        rows.append(("vsag hgraph", ef, tie_aware_recall(dists, kth), qps, build))
+        def explain(q, ef_params=params):
+            index.knn_search_with_statistics(test[q], args.k, ef_params)
+
+        found, dists, qps = run_queries(search, test, args.k, args.repeat)
+        check_vsag_searches("vsag hgraph", ef, found, explain)
+        rows.append(("vsag hgraph", ef, tie_aware_recall(found, dists, kth), qps, build))
 
     if len(train) <= args.exact_limit:
         exact = pyvsag.Index("brute_force", json.dumps(base))
@@ -114,10 +142,12 @@ def bench_vsag(dim, train, test, kth, args):
         exact.build(train, ids, len(train), dim)
         build = time.perf_counter() - start
         subset = test[: args.exact_queries]
-        dists, qps = run_queries(lambda q: exact.knn_search(q, args.k, "{}")[1], subset, args.k,
-                                 args.repeat)
-        rows.append(("vsag brute_force", "-", tie_aware_recall(dists, kth[: len(subset)]), qps,
-                     build))
+        found, dists, qps = run_queries(lambda q: exact.knn_search(q, args.k, "{}"), subset,
+                                        args.k, args.repeat)
+        check_vsag_searches("vsag brute_force", "-", found,
+                            lambda q: exact.knn_search_with_statistics(subset[q], args.k, "{}"))
+        rows.append(("vsag brute_force", "-", tie_aware_recall(found, dists, kth[: len(subset)]),
+                     qps, build))
     return rows
 
 
@@ -135,20 +165,25 @@ def bench_faiss(dim, train, test, kth, args):
     hnsw.add(train)
     build = time.perf_counter() - start
     faiss.omp_set_num_threads(1)
+    def searcher(index):
+        # FAISS returns (distances, labels) of shape (1, k), with label -1 in missing slots.
+        def search(query):
+            distances, labels = index.search(query[None, :], args.k)
+            return labels[0], distances[0]
+
+        return search
+
     for ef in args.ef:
         hnsw.hnsw.efSearch = ef
-        dists, qps = run_queries(lambda q: hnsw.search(q[None, :], args.k)[0][0], test, args.k,
-                                 args.repeat)
-        rows.append(("faiss IndexBinaryHNSW", ef, tie_aware_recall(dists.astype(np.float32), kth),
-                     qps, build))
+        found, dists, qps = run_queries(searcher(hnsw), test, args.k, args.repeat)
+        rows.append(("faiss IndexBinaryHNSW", ef, tie_aware_recall(found, dists, kth), qps, build))
     if len(train) <= args.exact_limit:
         flat = faiss.IndexBinaryFlat(dim)
         flat.add(train)
         subset = test[: args.exact_queries]
-        dists, qps = run_queries(lambda q: flat.search(q[None, :], args.k)[0][0], subset, args.k,
-                                 args.repeat)
+        found, dists, qps = run_queries(searcher(flat), subset, args.k, args.repeat)
         rows.append(("faiss IndexBinaryFlat", "-",
-                     tie_aware_recall(dists.astype(np.float32), kth[: len(subset)]), qps, 0.0))
+                     tie_aware_recall(found, dists, kth[: len(subset)]), qps, 0.0))
     return rows
 
 

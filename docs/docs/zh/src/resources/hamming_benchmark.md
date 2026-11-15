@@ -71,8 +71,10 @@ taskset -c 0-15 python3 tools/hamming_benchmark/bench_index.py \
 
 脚本用 `numpy.packbits` 按 MSB-first 打包数据集中的 0/1 元素。Recall@k 对并列距离友好：只要返回的
 近邻距离不大于真实的第 k 个距离就算命中。第 k 个距离取自 `distances` 数据集（ann-benchmarks 存储的
-是除以 bit 数之后的值，脚本会换算回来）；文件中没有该数据集时用暴力计算得到。FAISS
-`IndexBinaryHNSW(M)` 在底层保留 `2 * M` 个邻居，对应 `hgraph` 的 `max_degree`。
+是除以 bit 数之后的值，脚本会换算回来）；文件中没有该数据集时用暴力计算得到。缺失的近邻（失败或结果
+不足 k 个的搜索留下的 id -1）算作未命中；VSAG 搜索失败时（例如索引不接受所给的 `--ef`），脚本会输出
+库返回的错误并退出。FAISS `IndexBinaryHNSW(M)` 在底层保留 `2 * M` 个邻居，对应 `hgraph` 的
+`max_degree`。
 
 请把进程绑定到同一 NUMA 节点上的空闲物理核，使构建线程及其分配的内存都留在该节点上。
 
