@@ -68,7 +68,13 @@ make_flatten_data_cell_hamming(const FlattenInterfaceParamPtr& param,
     if (io_type == IO_TYPE_VALUE_READER_IO) {
         return make_binary_flatten_data_cell<ReaderIO>(param, common_param);
     }
-    return nullptr;
+    if (io_type == IO_TYPE_VALUE_USER_DEFINED_IO) {
+        return make_binary_flatten_data_cell<UserDefinedIO>(param, common_param);
+    }
+    // Callers use the datacell without a null check, so an unknown IO type is an error here.
+    throw VsagException(
+        ErrorType::INVALID_ARGUMENT,
+        fmt::format("dtype {} does not support io type {}", DATATYPE_BINARY, io_type));
 }
 
 }  // namespace vsag

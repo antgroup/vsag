@@ -16,9 +16,12 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
+#include <mutex>
 #include <random>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -34,6 +37,7 @@
 #include "query_context.h"
 #include "storage/serialization.h"
 #include "unittest.h"
+#include "vsag/factory.h"
 #include "vsag/options.h"
 #include "vsag_exception.h"
 
@@ -102,6 +106,91 @@ TEST_CASE("Binary FlattenDataCell factory dispatches every IO type",
     check_binary_io_dispatch<UringIO>(IO_TYPE_VALUE_URING_IO, dir);
     check_binary_io_dispatch<MMapIO>(IO_TYPE_VALUE_MMAP_IO, dir);
     check_binary_io_dispatch<ReaderIO>(IO_TYPE_VALUE_READER_IO, dir);
+}
+
+TEST_CASE("Binary FlattenDataCell stores codes through user-defined IO",
+          "[ut][FlattenDataCell][binary]") {
+    struct Store {
+        std::mutex mutex;
+        std::vector<uint8_t> bytes;
+        uint64_t reads{0};
+        uint64_t writes{0};
+    };
+    auto store = std::make_shared<Store>();
+    auto storage = Factory::CreateUserDefinedIO(
+        [store](uint64_t offset, uint64_t len, void* destination) {
+            std::lock_guard<std::mutex> lock(store->mutex);
+            if (offset > store->bytes.size() or len > store->bytes.size() - offset) {
+                throw std::runtime_error("read out of bounds");
+            }
+            if (len > 0) {
+                std::memcpy(destination, store->bytes.data() + offset, len);
+            }
+            ++store->reads;
+        },
+        [store](uint64_t offset, uint64_t len, const void* source) {
+            std::lock_guard<std::mutex> lock(store->mutex);
+            if (offset + len > store->bytes.size()) {
+                store->bytes.resize(offset + len);
+            }
+            if (len > 0) {
+                std::memcpy(store->bytes.data() + offset, source, len);
+            }
+            ++store->writes;
+        },
+        [store](uint64_t size) {
+            std::lock_guard<std::mutex> lock(store->mutex);
+            store->bytes.resize(size);
+        },
+        0);
+    auto storages = std::make_shared<UserDefinedIOSet>();
+    storages->Set("binary_codes", storage.reader, storage.writer);
+
+    constexpr int64_t dim = 100;
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto common = binary_common_param(dim, allocator);
+    common.user_defined_ios_ = storages;
+    JsonType json;
+    json[IO_PARAMS_KEY][TYPE_KEY].SetString(IO_TYPE_VALUE_USER_DEFINED_IO);
+    json[IO_PARAMS_KEY][IO_USER_DEFINED_IO_KEY].SetString("binary_codes");
+    json[QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetString(QUANTIZATION_TYPE_VALUE_BINARY);
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(json);
+    auto flatten = FlattenInterface::MakeInstance(param, common);
+    using Cell = FlattenDataCell<BinaryQuantizer, FixedLayout<UserDefinedIO>>;
+    REQUIRE(std::dynamic_pointer_cast<Cell>(flatten) != nullptr);
+
+    const uint64_t row_bytes = BinaryVectorBytes(dim);
+    constexpr InnerIdType count = 50;
+    std::mt19937_64 rng(31);
+    std::vector<uint8_t> vectors(count * row_bytes);
+    for (auto& value : vectors) {
+        value = static_cast<uint8_t>(rng());
+    }
+    flatten->Train(vectors.data(), count);
+    flatten->BatchInsertVector(vectors.data(), count);
+    REQUIRE(flatten->TotalCount() == count);
+    REQUIRE(store->writes > 0);
+    std::vector<uint8_t> query(row_bytes);
+    for (auto& value : query) {
+        value = static_cast<uint8_t>(rng());
+    }
+    std::vector<InnerIdType> ids(count);
+    for (InnerIdType i = 0; i < count; ++i) {
+        ids[i] = i;
+    }
+    auto computer = flatten->FactoryComputer(query.data());
+    std::vector<float> dists(count, -1.0F);
+    flatten->Query(dists.data(), computer, ids.data(), count);
+    for (InnerIdType i = 0; i < count; ++i) {
+        REQUIRE(dists[i] == reference_hamming(query.data(), vectors.data() + i * row_bytes, dim));
+    }
+    REQUIRE(store->reads > 0);
+
+    // Without the storage set the cell cannot bind its IO, which is an error rather than a null
+    // datacell that an index would dereference.
+    REQUIRE_THROWS_AS(FlattenInterface::MakeInstance(param, binary_common_param(dim, allocator)),
+                      VsagException);
 }
 
 TEST_CASE("Binary FlattenDataCell scattered inserts and id ranges",

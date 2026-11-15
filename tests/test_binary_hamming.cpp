@@ -630,6 +630,14 @@ TEST_CASE("Binary vectors reject invalid configurations and inputs", "[ft][binar
         REQUIRE(explicit_binary.has_value());
     }
 
+    SECTION("user-defined IO without its storage is an error, not a null datacell") {
+        auto hgraph = vsag::Factory::CreateIndex(
+            "hgraph", create_parameters(dim, {{"base_io_type", "user_defined_io"}}));
+        REQUIRE_FALSE(hgraph.has_value());
+        REQUIRE(hgraph.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+        REQUIRE_THAT(hgraph.error().message, Catch::Matchers::ContainsSubstring("user_defined_io"));
+    }
+
     SECTION("datasets must carry binary vectors of the index dimension") {
         for (const auto* name : {"brute_force", "hgraph"}) {
             auto index = create_index(name, create_parameters(dim));
