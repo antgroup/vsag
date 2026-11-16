@@ -66,6 +66,9 @@ class EntryTests(unittest.TestCase):
         self.assertRegex(text, r'publish:\n(?:.*\n)*?\s+default: true')
         self.assertIn("vars.PYVSAG_NIGHTLY_PUBLISH != 'false'", text)
         self.assertNotRegex(text, r'^\s+arch:\s*\n\s+description', re.M)
+        # A nightly is skipped when the last successful nightly already built this main commit.
+        self.assertIn('event=schedule&status=success', text)
+        self.assertIn("needs.resolve-source.outputs.skip != 'true'", text)
         # The matrix context is not available in jobs.<id>.if; GitHub rejects the workflow.
         for condition in re.findall(r'^    if: (.*)$', text, re.M):
             self.assertNotIn('matrix', condition)
