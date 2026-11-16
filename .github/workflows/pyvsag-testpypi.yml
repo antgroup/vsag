@@ -81,36 +81,11 @@ jobs:
           ref: ${{ needs.resolve-source.outputs.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Prepare build environment
-        run: bash ./scripts/python/prepare_python_build.sh
-      # The compiler cache is mounted into the cibuildwheel container; every run saves its own
-      # entry and starts from the newest one, so nightly builds only recompile what changed.
-      - name: Restore ccache
-        uses: actions/cache@v4
+      - uses: ./.github/actions/python-wheel-build
         with:
-          path: ${{ runner.temp }}/ccache
-          key: pyvsag-ccache-${{ matrix.arch }}-${{ needs.resolve-source.outputs.sha }}
-          restore-keys: pyvsag-ccache-${{ matrix.arch }}-
-      - name: Create ccache directory
-        run: mkdir -p "${{ runner.temp }}/ccache"
-      - name: Build wheel
-        uses: pypa/cibuildwheel@v3.3.1
-        with:
-          package-dir: python
-        env:
-          CIBW_ARCHS: ${{ matrix.arch }}
-          CIBW_CONTAINER_ENGINE: "docker; create_args: -v ${{ runner.temp }}/ccache:/ccache"
-          CIBW_BEFORE_ALL: yum install -y gcc gcc-c++ ca-certificates epel-release && yum install -y ccache
-          CIBW_ENVIRONMENT: ${{ format('VSAG_USE_SYSTEM_DEPS=OFF VSAG_ENABLE_CCACHE=ON CCACHE_DIR=/ccache CCACHE_MAXSIZE=6G CCACHE_COMPRESS=1 CCACHE_COMPILERCHECK=content CCACHE_BASEDIR=/project CCACHE_NOHASHDIR=1 CCACHE_SLOPPINESS=time_macros,include_file_mtime,include_file_ctime CCACHE_LOGFILE=/tmp/ccache.log {0}', matrix.arch == 'x86_64' && 'VSAG_OPENBLAS_TARGET=GENERIC' || '') }}
-          CIBW_TEST_COMMAND: pip install numpy pytest && python /project/tests/python/run_test.py
-      - name: Check wheel libraries
-        run: python3 scripts/python/check_wheel_libs.py "wheelhouse/*.whl"
-      - uses: actions/upload-artifact@v5
-        with:
-          name: pyvsag-wheels-${{ matrix.arch }}
-          path: ./wheelhouse/*.whl
-          if-no-files-found: error
-          retention-days: 14
+          arch: ${{ matrix.arch }}
+          artifact: pyvsag-wheels-${{ matrix.arch }}
+          source-sha: ${{ needs.resolve-source.outputs.sha }}
 
   publish:
     name: Upload to TestPyPI

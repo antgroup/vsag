@@ -13,6 +13,8 @@ import sys
 import daily_plan as dp
 import daily_counts
 import daily_job_report
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ci"))
+import python_ci
 
 
 def summarize(results, allow_incomplete=False):
@@ -147,6 +149,7 @@ def markdown(report):
              "Compilation, lint, queueing and transfer count toward elapsed time, but not cumulative test consumption.", "",
              *extra_markdown(report.get("extra_coverage")),
              *daily_job_report.markdown(report.get("job_reports", [])),
+             *python_ci.markdown(report.get("python_reports", []), report.get("job_metrics", [])),
              "<details><summary>Mandatory test consumption by area (extras excluded)</summary>", "",
              "| Area | Legacy reference (min) | Cumulative actual (min) | Diagnostic |",
              "| --- | ---: | ---: | --- |"]
@@ -224,6 +227,7 @@ def main():
     p.add_argument("--expected-file")
     p.add_argument("--metrics")
     p.add_argument("--job-reports")
+    p.add_argument("--python-reports")
     p.add_argument("--extra-proposal")
     p.add_argument("--summary", required=True)
     p.add_argument("--json", required=True)
@@ -297,6 +301,12 @@ def main():
             if not report["job_reports"] or missing_reports:
                 report["coverage_gaps"].append("Per-job diagnostics are missing: " + str(missing_reports))
                 report["incomplete"] = True
+                report["status"] = "failed"
+        if args.python_reports:
+            try:
+                report["python_reports"] = python_ci.load_reports(args.python_reports, report["source_sha"])
+            except (ValueError, OSError, KeyError) as error:
+                report["failures"].append("Python matrix: " + str(error))
                 report["status"] = "failed"
         dp.write(args.json, report)
         Path(args.summary).write_text(markdown(report) + "\n")

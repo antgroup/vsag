@@ -1,0 +1,98 @@
+name: Build verified Linux Python wheel
+description: Shared TestPyPI build configuration; callers own source selection and publication.
+inputs:
+  arch:
+    description: Native Linux architecture
+    required: true
+  artifact:
+    description: Wheel artifact name (provenance is uploaded separately)
+    required: true
+  source-sha:
+    description: Exact caller checkout SHA
+    default: ${{ github.sha }}
+runs:
+  using: composite
+  steps:
+    - name: Verify source and native container engine
+      shell: bash
+      env:
+        SOURCE_SHA: ${{ inputs.source-sha }}
+        BUILD_ARCH: ${{ inputs.arch }}
+      run: |
+        set -euo pipefail
+        test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+        test "$(uname -s)" = Linux
+        test "$(uname -m)" = "$BUILD_ARCH"
+        docker info >/dev/null
+        test ! -d wheelhouse || test -z "$(ls -A wheelhouse)"
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - name: Validate Python CI contracts
+      shell: bash
+      run: python3 -m unittest tests.scripts.test_python_ci
+    - name: Prepare wheel version
+      shell: bash
+      run: bash scripts/python/prepare_python_build.sh
+    - name: Select weekly cache epoch
+      id: cache-epoch
+      shell: bash
+      run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+    - name: Restore trusted compiler cache
+      id: cache
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.temp }}/pyvsag-ccache
+        key: pyvsag-v2-Linux-${{ inputs.arch }}-${{ hashFiles('python/pyproject.toml', 'python/setup.py', 'scripts/deps/install_deps_centos.sh', 'extern/**/*.cmake', '.github/actions/python-wheel-build/action.yml') }}-${{ steps.cache-epoch.outputs.week }}
+        restore-keys: pyvsag-v2-Linux-${{ inputs.arch }}-${{ hashFiles('python/pyproject.toml', 'python/setup.py', 'scripts/deps/install_deps_centos.sh', 'extern/**/*.cmake', '.github/actions/python-wheel-build/action.yml') }}-
+    - name: Create cache directory
+      shell: bash
+      run: mkdir -p "${{ runner.temp }}/pyvsag-ccache" "$GITHUB_WORKSPACE/python-build-report"
+    - name: Build and repair wheel
+      uses: pypa/cibuildwheel@v3.3.1
+      with:
+        package-dir: python
+      env:
+        CIBW_ARCHS: ${{ inputs.arch }}
+        CIBW_CONTAINER_ENGINE: "docker; create_args: -v ${{ runner.temp }}/pyvsag-ccache:/ccache -v ${{ github.workspace }}/python-build-report:/ci-report"
+        CIBW_BEFORE_ALL: yum install -y gcc gcc-c++ ca-certificates epel-release && yum install -y ccache && (CCACHE_DIR=/ccache ccache -z || true)
+        CIBW_ENVIRONMENT: ${{ format('VSAG_USE_SYSTEM_DEPS=OFF VSAG_ENABLE_CCACHE=ON CCACHE_DIR=/ccache CCACHE_MAXSIZE=3G CCACHE_COMPRESS=1 CCACHE_COMPILERCHECK=content CCACHE_BASEDIR=/project CCACHE_NOHASHDIR=1 CCACHE_SLOPPINESS=time_macros,include_file_mtime,include_file_ctime CCACHE_LOGFILE=/tmp/ccache.log VSAG_CI_SOURCE_SHA={1} {0}', inputs.arch == 'x86_64' && 'VSAG_OPENBLAS_TARGET=GENERIC' || '', inputs.source-sha) }}
+        CIBW_BEFORE_TEST: bash /project/scripts/ci/collect_python_cache.sh /ci-report
+        CIBW_TEST_COMMAND: pip install numpy pytest && python /project/scripts/ci/python_ci.py test --output /ci-report/build-tests.json
+    - name: Check wheel libraries
+      shell: bash
+      run: python3 scripts/python/check_wheel_libs.py "wheelhouse/*.whl"
+    - name: Record wheel provenance
+      shell: bash
+      env:
+        SOURCE_SHA: ${{ inputs.source-sha }}
+        BUILD_ARCH: ${{ inputs.arch }}
+      run: python3 scripts/ci/python_ci.py manifest --source "$SOURCE_SHA" --arch "$BUILD_ARCH"
+    - uses: actions/upload-artifact@v5
+      with:
+        name: ${{ inputs.artifact }}
+        path: wheelhouse/*.whl
+        if-no-files-found: error
+        retention-days: 14
+        overwrite: true
+    - uses: actions/upload-artifact@v5
+      with:
+        name: provenance-${{ inputs.artifact }}
+        path: wheel-manifest.json
+        if-no-files-found: error
+        retention-days: 14
+        overwrite: true
+    - uses: actions/upload-artifact@v5
+      if: always()
+      with:
+        name: python-build-report-${{ github.job }}-${{ strategy.job-index }}-${{ github.run_id }}
+        path: python-build-report
+        if-no-files-found: warn
+        retention-days: 14
+        overwrite: true
+    - name: Save trusted compiler cache
+      if: ${{ success() && steps.cache.outputs.cache-hit != 'true' && github.workflow == 'Nightly CI' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.temp }}/pyvsag-ccache
+        key: ${{ steps.cache.outputs.cache-primary-key }}

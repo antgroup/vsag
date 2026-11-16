@@ -53,6 +53,7 @@ jobs:
       actions: read
       contents: read
     outputs:
+      python_matrix: ${{ steps.plan.outputs.python_matrix }}
       x86_shards: ${{ steps.plan.outputs.x86_shards }}
       x86_shard_count: ${{ steps.plan.outputs.x86_shard_count }}
       simd_options: ${{ steps.plan.outputs.simd_options }}
@@ -84,11 +85,13 @@ jobs:
           import json, os, sys
           sys.path.insert(0, 'scripts/testing')
           import daily_plan as p
+          sys.path.insert(0, 'scripts/ci')
+          import python_ci
           created = json.load(open('daily-run.json'))['created_at']
           ctx = p.context(os.environ['SOURCE_SHA'], created, os.environ['LOGICAL_DATE'] or None)
           p.write('daily-context/context.json', ctx)
-          p.write('daily-context/expected-lanes.json', ['daily_test_asan_aarch64-unittests', 'daily_test_asan_aarch64-functests', 'daily_test_asan_simd-unittests_simd', 'daily_test_asan_simd-sentinels', 'daily_test_tsan-functests', 'full-platform-test-asan-x86-unittests', 'full-platform-test-asan-x86-functests', 'full-platform-test-asan-macos-arm64-unittests', 'full-platform-test-asan-macos-arm64-functests', 'full-platform-test-asan-macos-arm64-examples', 'full-platform-test-example-x86-examples', 'full-platform-test-example-aarch64-examples', 'full-python-test-python-x86-pytest', 'full-python-test-python-aarch64-pytest', 'full-coverage-coverage-unittests', 'full-coverage-coverage-functests', 'full-compatibility-compatibility-compatibility'])
-          expected = p.load('daily-context/expected-lanes.json')
+          p.write('daily-context/expected-lanes.json', ['daily_test_asan_aarch64-unittests', 'daily_test_asan_aarch64-functests', 'daily_test_asan_simd-unittests_simd', 'daily_test_asan_simd-sentinels', 'daily_test_tsan-functests', 'full-platform-test-asan-x86-unittests', 'full-platform-test-asan-x86-functests', 'full-platform-test-asan-macos-arm64-unittests', 'full-platform-test-asan-macos-arm64-functests', 'full-platform-test-asan-macos-arm64-examples', 'full-platform-test-example-x86-examples', 'full-platform-test-example-aarch64-examples', 'full-coverage-coverage-unittests', 'full-coverage-coverage-functests', 'full-compatibility-compatibility-compatibility'])
+          expected = p.load('daily-context/expected-lanes.json') + python_ci.lanes()
           shard_count = p.policy()['x86_shards']
           expected += [f'daily_test_asan_x86-{binary}-shard{i}' for binary in ('unittests', 'functests') for i in range(shard_count)]
           expected += [f'daily-extra-x86-functests-shard{i}' for i in range(shard_count)]
@@ -96,6 +99,7 @@ jobs:
           mode = ctx['simd_mode']
           flags = {'generic': '-DDISABLE_SSE_FORCE=1', 'sse': '-DDISABLE_AVX_FORCE=1', 'avx': '-DDISABLE_AVX2_FORCE=1'}
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              print('python_matrix=' + json.dumps({'include': python_ci.environments()}), file=output)
               print('x86_shards=' + json.dumps(list(range(shard_count))), file=output)
               print('x86_shard_count=' + str(shard_count), file=output)
               print('simd_options=' + json.dumps([mode + ';' + flags[mode]]), file=output)
@@ -1001,24 +1005,24 @@ jobs:
 
   full-python-test-python-x86:
     timeout-minutes: 300
-    name: Test Python X86
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.daily-plan.outputs.python_matrix) }}
+    name: Python x86 ${{ matrix.key }}
     needs:
       - daily-plan
       - full-python-build-python-wheel-x86
     runs-on: ubuntu-24.04
-    concurrency:
-      group: test_python_x86-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     env:
       VSAG_DAILY_CONTEXT: ${{ github.workspace }}/daily-context/context.json
-      VSAG_DAILY_LANE: full-python-test-python-x86
-      VSAG_DAILY_ENVIRONMENT: full-python-test-python-x86
+      VSAG_DAILY_LANE: full-python-test-python-x86-${{ matrix.key }}
+      VSAG_DAILY_ENVIRONMENT: full-python-test-python-x86-${{ matrix.key }}
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: ${{ matrix.python }}
       - uses: actions/checkout@v4
       - name: Download frozen Nightly plan
         uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
@@ -1026,14 +1030,19 @@ jobs:
           name: daily-context-${{ github.run_id }}
           path: daily-context
       - name: Refresh execution window for this attempt
+        id: window
         uses: ./.github/actions/daily-execution-window
       - uses: ./.github/actions/python-build-and-test-test-python-x86
         id: execute
+        timeout-minutes: ${{ fromJSON(steps.window.outputs.remaining_minutes) }}
+        with:
+          numpy-version: ${{ matrix.numpy }}
+          mode: ${{ matrix.mode }}
       - name: Upload Nightly evidence
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: daily-results-full-python-test-python-x86-${{ github.run_id }}
+          name: daily-results-full-python-test-python-x86-${{ matrix.key }}-${{ github.run_id }}
           overwrite: true
           path: daily-results
           retention-days: 30
@@ -1049,25 +1058,25 @@ jobs:
     if: ${{ ((((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) && (true)) && needs.full-python-build-python-wheel-x86.result == 'success' }}
   full-python-test-python-aarch64:
     timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.daily-plan.outputs.python_matrix) }}
     if: ${{ ((((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) && (!false)) && needs.full-python-build-python-wheel-aarch64.result == 'success' }}
-    name: Test Python Aarch64
+    name: Python aarch64 ${{ matrix.key }}
     needs:
       - daily-plan
       - full-python-build-python-wheel-aarch64
     runs-on: ubuntu-24.04-arm
-    concurrency:
-      group: test_python_aarch64-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     env:
       VSAG_DAILY_CONTEXT: ${{ github.workspace }}/daily-context/context.json
-      VSAG_DAILY_LANE: full-python-test-python-aarch64
-      VSAG_DAILY_ENVIRONMENT: full-python-test-python-aarch64
+      VSAG_DAILY_LANE: full-python-test-python-aarch64-${{ matrix.key }}
+      VSAG_DAILY_ENVIRONMENT: full-python-test-python-aarch64-${{ matrix.key }}
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: ${{ matrix.python }}
       - uses: actions/checkout@v4
       - name: Download frozen Nightly plan
         uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
@@ -1075,14 +1084,19 @@ jobs:
           name: daily-context-${{ github.run_id }}
           path: daily-context
       - name: Refresh execution window for this attempt
+        id: window
         uses: ./.github/actions/daily-execution-window
       - uses: ./.github/actions/python-build-and-test-test-python-aarch64
         id: execute
+        timeout-minutes: ${{ fromJSON(steps.window.outputs.remaining_minutes) }}
+        with:
+          numpy-version: ${{ matrix.numpy }}
+          mode: ${{ matrix.mode }}
       - name: Upload Nightly evidence
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: daily-results-full-python-test-python-aarch64-${{ github.run_id }}
+          name: daily-results-full-python-test-python-aarch64-${{ matrix.key }}-${{ github.run_id }}
           overwrite: true
           path: daily-results
           retention-days: 30
@@ -1736,6 +1750,12 @@ jobs:
         with:
           pattern: daily-job-*-${{ github.run_id }}
           path: daily-job-collected
+      - name: Download Python environment reports
+        if: always()
+        uses: actions/download-artifact@v5
+        with:
+          pattern: python-report-full-python-test-python-*
+          path: python-collected
       - name: Collect workflow elapsed and job timings
         uses: actions/github-script@v7
         with:
@@ -1746,15 +1766,17 @@ jobs:
               {...context.repo, run_id: context.runId, filter: 'latest', per_page: 100});
             require('fs').writeFileSync('daily-job-metrics.json', JSON.stringify({
               started_at: run.data.run_started_at, observed_at: new Date().toISOString(),
-              jobs: jobs.map(({name, started_at, completed_at, conclusion}) =>
-                ({name, started_at, completed_at, conclusion}))
+              jobs: jobs.map(({name, started_at, completed_at, conclusion, steps}) =>
+                ({name, started_at, completed_at, conclusion,
+                  steps: (steps || []).map(({name, started_at, completed_at, conclusion}) =>
+                    ({name, started_at, completed_at, conclusion}))}))
             }));
       - name: Reconcile every expected lane
         if: always()
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: |
-          python3 scripts/testing/daily_report.py --collect daily-collected --metrics daily-job-metrics.json --extra-proposal daily-extra-proposal.json --job-reports daily-job-collected --expected-file daily-context/expected-lanes.json --summary "$GITHUB_STEP_SUMMARY" --json daily-summary.json
+          python3 scripts/testing/daily_report.py --collect daily-collected --metrics daily-job-metrics.json --extra-proposal daily-extra-proposal.json --job-reports daily-job-collected --python-reports python-collected --expected-file daily-context/expected-lanes.json --summary "$GITHUB_STEP_SUMMARY" --json daily-summary.json
       - uses: actions/upload-artifact@v5
         if: always()
         with:

@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 
@@ -21,6 +22,18 @@ def cache_statistics(text):
     return {"available": True, "hits": hits, "misses": values[required[2]],
             "cacheable_calls": calls, "hit_percent": 100 * hits / calls if calls else None,
             "counters": values}
+
+
+def legacy_cache_statistics(text):
+    # ccache -s from 3.x; never interpret a missing/unknown format as zero hits.
+    counters = {}
+    for label, key in (("cache hit (direct)", "cache_hit_direct"),
+                       ("cache hit (preprocessed)", "cache_hit_preprocessed"),
+                       ("cache miss", "cache_miss")):
+        match = re.search(r"(?m)^" + re.escape(label) + r"\s+(\d+)\s*$", text)
+        if match:
+            counters[key] = match[1]
+    return cache_statistics("\n".join(key + " " + value for key, value in counters.items()))
 
 
 def coverage_statistics(text):
@@ -70,6 +83,19 @@ def collect():
         cache = cache_statistics(result.stdout)
     except (OSError, subprocess.SubprocessError):
         pass
+    container_report = Path("python-build-report")
+    if container_report.is_dir():
+        # The host may use another cache; never attribute its counters to a container build.
+        cache = {"available": False, "reason": "Container ccache diagnostics unavailable"}
+        try:
+            machine = container_report / "ccache.tsv"
+            human = container_report / "ccache.txt"
+            if machine.is_file():
+                cache = cache_statistics(machine.read_text())
+            if not cache["available"] and human.is_file():
+                cache = legacy_cache_statistics(human.read_text())
+        except OSError as error:
+            cache = {"available": False, "reason": str(error)}
     coverage = {"available": False, "reason": "No scoped LCOV trace in this job"}
     path = Path("coverage/coverage.info")
     if path.is_file():

@@ -125,6 +125,8 @@ class DailyWorkflowTests(unittest.TestCase):
         expected = ast.literal_eval(re.search(r"expected-lanes.json', (\[.*\])\)", text).group(1))
         expected += [f'daily_test_asan_x86-{binary}-shard{i}'
                      for binary in ('unittests', 'functests') for i in range(json.loads((ROOT/'scripts/testing/daily_budget_policy.json').read_text())['x86_shards'])]
+        from scripts.ci import python_ci
+        expected += python_ci.lanes()
         self.assertEqual(len(expected), len(set(expected)))
         workflow = WORKFLOW.read_text()
         names = re.findall(r"(?m)^  ([a-z0-9_-]+):$", workflow.split("jobs:\n", 1)[1])

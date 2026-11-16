@@ -70,26 +70,26 @@ class MainPolicyTest(unittest.TestCase):
         for n in ("platforms", "python", "tsan", "lint"): needs[n]["result"] = "skipped"
         self.assertTrue(m.validate(needs))
 
-    def test_main_python_pause_preserves_other_selection_and_manual_checks(self):
+    def test_main_python_restored_preserves_other_selection_and_manual_checks(self):
         m = module("main_ci_policy")
         for heavy in ("true", "false"):
             policy = {"heavy": heavy, "lint": "full" if heavy == "true" else "none", "pattern": ""}
-            for event, ref, paused in (("push", "refs/heads/main", True),
-                                       ("push", "refs/heads/0.18", False),
-                                       ("workflow_dispatch", "refs/heads/main", False)):
+            for event, ref in (("push", "refs/heads/main"),
+                               ("push", "refs/heads/0.18"),
+                               ("workflow_dispatch", "refs/heads/main")):
                 with patch.object(m, "select", return_value=dict(policy)):
                     result = m.select_for_event("a" * 40, "b" * 40, event, ref)
-                self.assertEqual(result["python"], "false" if paused else heavy)
+                self.assertEqual(result["python"], heavy)
                 self.assertEqual({k: result[k] for k in policy}, policy)
-        # A missing diff still retains other heavy checks; the intentional pause remains.
+        # A missing diff must conservatively run Python as well.
         result = m.select_for_event("0" * 40, "a" * 40, "push", "refs/heads/main")
-        self.assertEqual((result["heavy"], result["lint"], result["python"]), ("true", "full", "false"))
+        self.assertEqual((result["heavy"], result["lint"], result["python"]), ("true", "full", "true"))
 
-    def test_paused_python_summary_requires_explicit_skip_and_other_success(self):
+    def test_docs_only_requires_explicit_skips(self):
         m = module("main_ci_summary")
-        needs = {"changes": {"result": "success", "outputs": {"heavy": "true", "python": "false", "lint": "full"}},
+        needs = {"changes": {"result": "success", "outputs": {"heavy": "false", "python": "false", "lint": "none"}},
                  "python": {"result": "skipped"}}
-        needs.update({n: {"result": "success"} for n in ("platforms", "tsan", "lint")})
+        needs.update({n: {"result": "skipped"} for n in ("platforms", "tsan", "lint")})
         self.assertTrue(m.validate(needs))
         for name in ("python", "platforms", "tsan", "lint"):
             for state in ("failure", "cancelled", "missing"):
@@ -104,8 +104,7 @@ class MainPolicyTest(unittest.TestCase):
             summary = Path(tmp, "summary.md")
             with patch.dict(os.environ, MAIN_NEEDS=json.dumps(needs), GITHUB_STEP_SUMMARY=str(summary)):
                 m.main()
-            self.assertIn("temporarily paused", summary.read_text())
-            self.assertIn("skipped is not validation success", summary.read_text())
+            self.assertIn("Docs-only pushes intentionally skip heavy checks", summary.read_text())
 
     def test_smoke_report_cannot_pass_empty_skipped_or_failed(self):
         m = module("platform_smoke")

@@ -32,7 +32,7 @@ def expression(text, values):
     text = text.removeprefix('${{').removesuffix('}}').strip()
     text = text.replace('always()', 'True').replace('cancelled()', 'False')
     # Evaluate this documented condition subset; never execute workflow shell code.
-    token = r"'(?:[^']|'')*'|\b(?:needs|github|inputs)\.[\w.-]+|\b(?:true|false)\b"
+    token = r"'(?:[^']|'')*'|\b(?:needs|github|inputs|steps)\.[\w.-]+|\b(?:true|false)\b"
     def value(match):
         word = match[0]
         if word.startswith("'"):
@@ -68,20 +68,25 @@ class EntryTests(unittest.TestCase):
         self.assertNotRegex(text, r'^\s+arch:\s*\n\s+description', re.M)
         # A nightly is skipped when the last successful nightly already built this main commit.
         self.assertIn('event=schedule&status=success', text)
-        self.assertIn('scripts/python/check_wheel_libs.py', text)
-        self.assertIn('VSAG_USE_SYSTEM_DEPS=OFF', text)
         self.assertIn("needs.resolve-source.outputs.skip != 'true'", text)
         # The matrix context is not available in jobs.<id>.if; GitHub rejects the workflow.
         for condition in re.findall(r'^    if: (.*)$', text, re.M):
             self.assertNotIn('matrix', condition)
         for arch in ('x86_64', 'aarch64'):
             self.assertIn('{arch: %s,' % arch, text)
+        # Callers share container construction, but retain their own source selection.
+        self.assertIn("uses: ./.github/actions/python-wheel-build", text)
+        self.assertIn("source-sha: ${{ needs.resolve-source.outputs.sha }}", text)
+        text = (ROOT / ".github/actions/python-wheel-build/action.yml").read_text()
+        self.assertIn('scripts/python/check_wheel_libs.py', text)
+        self.assertIn('VSAG_USE_SYSTEM_DEPS=OFF', text)
+        self.assertLess(text.index('name: Check wheel libraries'), text.index('name: Record wheel provenance'))
         # The ccache directory must be mounted into the container and enabled for the build.
-        self.assertIn('create_args: -v ${{ runner.temp }}/ccache:/ccache', text)
+        self.assertIn('create_args: -v ${{ runner.temp }}/pyvsag-ccache:/ccache', text)
         self.assertIn('VSAG_ENABLE_CCACHE=ON CCACHE_DIR=/ccache', text)
         self.assertIn('CCACHE_BASEDIR=/project CCACHE_NOHASHDIR=1', text)
-        # A full build needs more than 2 GB uncompressed; a smaller limit evicts entries mid-build.
-        self.assertIn('CCACHE_MAXSIZE=6G CCACHE_COMPRESS=1', text)
+        # Bound shared cache size; only the Nightly workflow publishes weekly snapshots.
+        self.assertIn('CCACHE_MAXSIZE=3G CCACHE_COMPRESS=1', text)
 
     def test_pypi_publish_action_uses_existing_ref(self):
         # pypa/gh-action-pypi-publish has no `v1` tag; the moving ref is the release/v1 branch.
@@ -116,19 +121,19 @@ class EntryTests(unittest.TestCase):
                 'needs.entry-scope.outputs.simd': 'false',
                 'needs.changes.result': 'skipped' if version else 'success',
                 'needs.changes.outputs.heavy': '' if version else str(heavy).lower(),
-                'needs.changes.outputs.python': '' if version else 'false',
+                'needs.changes.outputs.python': '' if version else str(heavy).lower(),
                 'needs.changes.outputs.lint': '' if version else ('full' if heavy else 'none')}
 
-    def test_main_keeps_smoke_and_omits_full_x86_and_python(self):
+    def test_main_keeps_smoke_and_python_x86_only(self):
         values = self.context()
         for name in ('platforms-build-asan-aarch64', 'platforms-build-asan-macos-arm64',
-                     'lint-clang-tidy-check'):
+                     'lint-clang-tidy-check', 'python-build-python-wheel-x86'):
             self.assertTrue(condition('main-ci.yml', name, values), name)
-        for name in ('platforms-build-asan-x86', 'python-build-python-wheel-x86', 'python-build-python-wheel-aarch64',
+        for name in ('platforms-build-asan-x86', 'python-build-python-wheel-aarch64',
                      'coverage-changes', 'compatibility-compatibility', 'simd-build-asan-simd'):
             self.assertFalse(condition('main-ci.yml', name, values), name)
 
-    def test_python_pause_covers_all_jobs_but_preserves_manual_and_version(self):
+    def test_python_main_x86_and_manual_version_scope(self):
         names = ('python-build-python-wheel-x86', 'python-build-python-wheel-aarch64',
                  'python-test-python-x86', 'python-test-python-aarch64', 'python-clean-up', 'python')
         for scope in ('main', 'version', 'manual', 'manual-full'):
@@ -139,7 +144,7 @@ class EntryTests(unittest.TestCase):
             for name in names:
                 values['needs.' + name + '.result'] = 'success'
             for name in names:
-                expected = scope in ('version', 'manual') or (scope == 'manual-full' and name in
+                expected = scope in ('version', 'manual') or (scope in ('main', 'manual-full') and name in
                     ('python-build-python-wheel-x86', 'python-test-python-x86', 'python-clean-up', 'python'))
                 self.assertEqual(condition('main-ci.yml', name, values), expected, (scope, name))
         self.assertIn('python: ${{ steps.policy.outputs.python }}', job('main-ci.yml', 'changes'))

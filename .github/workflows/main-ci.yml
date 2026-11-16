@@ -372,7 +372,7 @@ jobs:
           RESULTS: ${{ toJSON(needs) }}
           REQUIRED: ${{ (needs.entry-scope.outputs.profile == 'full-branch' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch')) && '["platforms-build-asan-aarch64", "platforms-build-asan-macos-arm64", "platforms-test-asan-aarch64", "platforms-test-asan-macos-arm64", "platforms-test-example-aarch64"]' || '["platforms-build-asan-x86", "platforms-build-asan-aarch64", "platforms-build-asan-macos-arm64", "platforms-test-asan-x86", "platforms-test-asan-aarch64", "platforms-test-asan-macos-arm64", "platforms-test-example-x86", "platforms-test-example-aarch64"]' }}
         run: python3 scripts/ci/check_job_results.py
-  # Main-push Python is paused until #3295 upgrades packaging; manual/version checks remain.
+  # Main validates the merged wheel on x86; broad environments belong to Nightly.
   python-build-python-wheel-x86:
     name: Python Wheel Build X86
     runs-on: ubuntu-24.04
@@ -420,7 +420,7 @@ jobs:
         run: rm -rf /opt/hostedtoolcache
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: ${{ github.ref == 'refs/heads/main' && '3.12' || '3.10' }}
       - uses: actions/checkout@v4
       - uses: ./.github/actions/python-build-and-test-test-python-x86
         id: execute
