@@ -25,6 +25,8 @@ set (ANALYZER_SRC
         sindi_analyzer.h
         analyzer.cpp
         analyzer.h
+        index_analyzer.cpp
+        index_analyzer.h
 )
 
 add_library (analyzer OBJECT ${ANALYZER_SRC})

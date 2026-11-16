@@ -23,9 +23,11 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <tuple>
+#include <unordered_set>
 
 #include "attr/argparse.h"
 #include "attr/executor/executor.h"
+#include "bruteforce_analyzer.h"
 #include "datacell/attribute_inverted_interface.h"
 #include "datacell/flatten_datacell.h"
 #include "datacell/flatten_datacell_parameter.h"
@@ -34,6 +36,7 @@
 #include "fmt/chrono.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/reasoning/reasoning_context.h"
+#include "index/index_impl.h"
 #include "index_common_param.h"
 #include "index_feature_list.h"
 #include "inner_string_params.h"
@@ -46,6 +49,7 @@
 #include "utils/search_threshold.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
+#include "vsag/resource.h"
 namespace vsag {
 
 namespace {
@@ -762,6 +766,8 @@ BruteForce::Serialize(StreamWriter& writer) const {
     // serialize footer (introduced since v0.15)
     JsonType basic_info;
     basic_info["dim"].SetInt(dim_);
+    basic_info["metric"].SetInt(static_cast<int64_t>(metric_));
+    basic_info["data_type"].SetInt(static_cast<int64_t>(data_type_));
     basic_info["total_count"].SetUint64(total_count_.load());
     basic_info["is_multi_vector"].SetBool(is_multi_vector_);
     basic_info["extra_info_size"].SetUint64(this->extra_info_size_);
@@ -1245,6 +1251,88 @@ build_default_brute_force_param(const JsonType& external_param, bool warp) {
     json[USE_ATTRIBUTE_FILTER_KEY].SetBool(false);
     json[ATTR_PARAMS_KEY][ATTR_HAS_BUCKETS_KEY].SetBool(true);
     return json;
+}
+
+namespace {
+
+BruteForceParameterPtr
+MakeAnalyzerBruteForceParameter(const JsonType& serialized_param,
+                                const IndexCommonParam& common_param,
+                                std::vector<std::string>* ignored_param_keys) {
+    const bool is_warp = serialized_param.Contains(WARP_MODE_MARKER);
+    if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
+        const auto* index_name = is_warp ? "WARP" : "BruteForce";
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("{} not support {} datatype", index_name, DATATYPE_INT8));
+    }
+    CHECK_ARGUMENT(serialized_param.Contains(BASE_CODES_KEY),
+                   "analyzer deserialization parameters must contain base_codes");
+
+    static const std::unordered_set<std::string> internal_param_keys{
+        TYPE_KEY,
+        USE_REORDER_KEY,
+        REORDER_SOURCE_KEY,
+        BUILD_THREAD_COUNT_KEY,
+        LABEL_REMAP_TYPE_KEY,
+        USE_ATTRIBUTE_FILTER_KEY,
+        PRECISE_CODES_KEY,
+        STORE_RAW_VECTOR_KEY,
+        RAW_VECTOR_KEY,
+        EXTRA_INFO_KEY,
+        ATTR_PARAMS_KEY,
+        TRAIN_SAMPLE_COUNT_KEY,
+        RESIZE_INCREASE_COUNT_BIT,
+        BASE_CODES_KEY,
+    };
+    for (const auto& [key, value] : serialized_param.GetInnerJson()->items()) {
+        (void)value;
+        if (key == WARP_MODE_MARKER) {
+            continue;
+        }
+        if (internal_param_keys.count(key) == 0) {
+            logger::warn("ignoring unrecognized serialized BruteForce parameter '{}'", key);
+            if (ignored_param_keys != nullptr) {
+                ignored_param_keys->emplace_back(key);
+            }
+        }
+    }
+
+    JsonType internal_param = serialized_param;
+    internal_param.Erase(WARP_MODE_MARKER);
+    auto brute_force_parameter = std::make_shared<BruteForceParameter>();
+    brute_force_parameter->FromJson(internal_param);
+    return brute_force_parameter;
+}
+
+}  // namespace
+
+// Keeping this trusted entry point separate from CheckAndMappingExternalParam prevents public
+// Factory/pyvsag JSON from enabling the internal parameter mapping bypass.
+IndexPtr
+CreateBruteForceIndexForAnalyzer(JsonType build_param,
+                                 std::vector<std::string>* ignored_param_keys) {
+    auto resource = std::make_shared<Resource>();
+    auto common_param = IndexCommonParam::CheckAndCreate(build_param, resource);
+    common_param.user_defined_ios_ = std::make_shared<UserDefinedIOSet>();
+    auto param =
+        MakeAnalyzerBruteForceParameter(build_param[INDEX_PARAM], common_param, ignored_param_keys);
+    auto inner_index = std::make_shared<BruteForce>(param, common_param);
+    return std::make_shared<IndexImpl<BruteForce>>(inner_index, common_param);
+}
+
+MetricType
+GetBruteForceMetricForAnalyzer(const IndexPtr& index) {
+    auto analyzer_index = std::dynamic_pointer_cast<IndexImpl<BruteForce>>(index);
+    if (analyzer_index == nullptr) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "analyzer index is not an internal BruteForce index");
+    }
+    auto brute_force = std::dynamic_pointer_cast<BruteForce>(analyzer_index->GetInnerIndex());
+    if (brute_force == nullptr) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "analyzer index does not contain a BruteForce backend");
+    }
+    return brute_force->GetMetricType();
 }
 
 ParamPtr
