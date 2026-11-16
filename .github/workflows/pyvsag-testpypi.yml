@@ -55,7 +55,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ steps.source.outputs.sha }}
         run: |
-          last=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/pyvsag-testpypi.yml/runs?branch=main&event=schedule&status=success&per_page=1" --jq '.workflow_runs[0].head_sha // ""')
+          last=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/pyvsag-testpypi.yml/runs?branch=main&event=schedule&status=success&per_page=1" --jq '.workflow_runs[0].head_sha // ""' 2>/dev/null) || {
+            echo "::warning::Failed to query the last successful nightly run; building instead of skipping."
+            last=""
+          }
           if [ "$last" = "$SHA" ]; then
             echo "main is still at $SHA, which the last successful nightly already built; skipping."
             echo "skip=true" >> "$GITHUB_OUTPUT"
