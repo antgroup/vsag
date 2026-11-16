@@ -4,6 +4,7 @@ name: pyvsag TestPyPI
 # and optionally uploads them to TestPyPI. Nothing here touches the real PyPI or a GitHub Release.
 # Uploading is on by default. Manual runs can untick publish to only build, and the repository
 # variable PYVSAG_NIGHTLY_PUBLISH=false pauses the nightly upload without touching the workflow.
+# A nightly run is skipped when the last successful nightly already built the same main commit.
 on:
   schedule:
     # 03:00 Beijing time (19:00 UTC the previous day), offset to avoid the top-of-hour rush.
@@ -27,8 +28,12 @@ jobs:
     name: Pin main source
     if: ${{ github.event_name != 'schedule' || github.repository == 'antgroup/vsag' }}
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
     outputs:
       sha: ${{ steps.source.outputs.sha }}
+      skip: ${{ steps.unchanged.outputs.skip }}
     steps:
       - name: Require main
         run: |
@@ -43,10 +48,26 @@ jobs:
       - name: Resolve immutable commit
         id: source
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Skip when main has no new commits
+        id: unchanged
+        if: ${{ github.event_name == 'schedule' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          last=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/pyvsag-testpypi.yml/runs?branch=main&event=schedule&status=success&per_page=1" --jq '.workflow_runs[0].head_sha // ""' 2>/dev/null) || {
+            echo "::warning::Failed to query the last successful nightly run; building instead of skipping."
+            last=""
+          }
+          if [ "$last" = "$SHA" ]; then
+            echo "main is still at $SHA, which the last successful nightly already built; skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
 
   build:
     name: Build py3-none wheel on ${{ matrix.arch }}
     needs: resolve-source
+    if: ${{ needs.resolve-source.outputs.skip != 'true' }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
