@@ -85,10 +85,19 @@ run_build() {
   PIP_DEFAULT_TIMEOUT="100"
   if $HAVE_DOCKER; then
     echo "🛠️  Starting cibuildwheel... "
+    rm -rf wheelhouse
     CIBW_ARCHS="${ARCH}" \
     CIBW_ENVIRONMENT_PASS_LINUX="CMAKE_BUILD_PARALLEL_LEVEL" \
     CIBW_TEST_COMMAND="pip install numpy pytest && python /project/tests/python/run_test.py" \
     cibuildwheel --platform linux --output-dir wheelhouse python
+    # Wheels built against system dependencies (e.g. PR CI) legitimately bundle libgfortran.
+    SYSTEM_DEPS="$(echo "${VSAG_USE_SYSTEM_DEPS:-OFF}" | tr '[:lower:]' '[:upper:]')"
+    if [ "${SYSTEM_DEPS}" = "OFF" ]; then
+      echo "🔎 Checking wheel libraries..."
+      python3 ./scripts/python/check_wheel_libs.py "wheelhouse/pyvsag-*.whl"
+    else
+      echo "ℹ️  Skipping wheel library check (VSAG_USE_SYSTEM_DEPS=${SYSTEM_DEPS})."
+    fi
   else
     echo "🛠️  Starting build..."
     python -m build --wheel --outdir wheelhouse python

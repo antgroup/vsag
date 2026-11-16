@@ -191,7 +191,7 @@ pip install wheelhouse/pyvsag-*.whl
 
 `make pyvsag` 在仓库根目录运行 `scripts/python/local_build_wheel.sh`，并把 wheel 写入 `wheelhouse/`。
 有 Docker 时通过 cibuildwheel 在 `manylinux_2_28` 镜像中构建，并在镜像内运行 `tests/python` 的一部分用例，
-不会改动宿主机环境。没有 Docker 时退回普通的 `python -m build`，把 wheel 安装到当前虚拟环境，并针对它运行
+不会改动宿主机环境，随后运行 `scripts/python/check_wheel_libs.py`，如果 wheel 打包或链接了 libgfortran、libquadmath、libaio、liburing 就会失败（当 `VSAG_USE_SYSTEM_DEPS` 不是 `OFF` 时跳过，因为系统 OpenBLAS 会引入 libgfortran）。没有 Docker 时退回普通的 `python -m build`，把 wheel 安装到当前虚拟环境，并针对它运行
 `tests/python`；这样得到的 wheel 带 `linux_<arch>` 标签，而不是 `manylinux_2_28`。如果当前不在虚拟环境中，
 脚本会在仓库内创建 `.venv/`。
 
