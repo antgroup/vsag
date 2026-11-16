@@ -250,6 +250,25 @@ ScalarQuantizer<metric, bit>::ComputeDistsBatch4Impl(Computer<ScalarQuantizer>& 
                               dist2,
                               dist3,
                               dist4);
+    } else if constexpr ((metric == MetricType::METRIC_TYPE_IP or
+                          metric == MetricType::METRIC_TYPE_COSINE) and
+                         bit == 8) {
+        SQ8ComputeIPBatch4(reinterpret_cast<float*>(computer.buf_),
+                           codes1,
+                           codes2,
+                           codes3,
+                           codes4,
+                           lower_bound_.data(),
+                           diff_.data(),
+                           this->dim_,
+                           dist1,
+                           dist2,
+                           dist3,
+                           dist4);
+        dist1 = 1 - dist1;
+        dist2 = 1 - dist2;
+        dist3 = 1 - dist3;
+        dist4 = 1 - dist4;
     } else {
         this->ComputeDistImpl(computer, codes1, &dist1);
         this->ComputeDistImpl(computer, codes2, &dist2);

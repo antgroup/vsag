@@ -78,7 +78,20 @@ SQ8ComputeL2SqrBatch4(const float* query,
                       float& dist2,
                       float& dist3,
                       float& dist4);
-}
+void
+SQ8ComputeIPBatch4(const float* query,
+                   const uint8_t* codes1,
+                   const uint8_t* codes2,
+                   const uint8_t* codes3,
+                   const uint8_t* codes4,
+                   const float* lower_bound,
+                   const float* diff,
+                   uint64_t dim,
+                   float& dist1,
+                   float& dist2,
+                   float& dist3,
+                   float& dist4);
+}  // namespace avx512
 
 using SQ8ComputeType = float (*)(const float* RESTRICT query,
                                  const uint8_t* RESTRICT codes,
@@ -101,6 +114,7 @@ using SQ8ComputeBatch4Type = void (*)(const float*,
                                       float&,
                                       float&);
 extern SQ8ComputeBatch4Type SQ8ComputeL2SqrBatch4;
+extern SQ8ComputeBatch4Type SQ8ComputeIPBatch4;
 
 using SQ8ComputeCodesType = float (*)(const uint8_t* RESTRICT codes1,
                                       const uint8_t* RESTRICT codes2,

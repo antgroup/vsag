@@ -250,9 +250,10 @@ TEST_CASE("SQ ComputeDistsBatch4 matches four ComputeDist calls", "[ut][SQ8Quant
     for (const uint64_t dim : {1ULL, 17ULL, 33ULL, 64ULL, 960ULL}) {
         // The batched L2 kernel.
         TestScalarQuantizerBatch4MatchesSingle<SQ8Quantizer<MetricType::METRIC_TYPE_L2SQR>>(dim);
-        // Configurations that fall back to four single distances.
+        // The batched inner product kernel; cosine also checks the normalized query buffer.
         TestScalarQuantizerBatch4MatchesSingle<SQ8Quantizer<MetricType::METRIC_TYPE_IP>>(dim);
         TestScalarQuantizerBatch4MatchesSingle<SQ8Quantizer<MetricType::METRIC_TYPE_COSINE>>(dim);
+        // A configuration that falls back to four single distances.
         TestScalarQuantizerBatch4MatchesSingle<SQ4Quantizer<MetricType::METRIC_TYPE_L2SQR>>(dim);
     }
 }
