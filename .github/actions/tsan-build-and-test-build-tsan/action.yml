@@ -6,6 +6,7 @@ runs:
     - name: Load Cache
       uses: hendrikmuhs/ccache-action@v1.2
       with:
+        job-summary: ${{ env.VSAG_DAILY_AGGREGATE != '1' && 'CCache Statistics' || '' }}
         max-size: "5G"
         save: ${{ github.event_name != 'pull_request' }}
         key: build-tsan-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}

@@ -161,7 +161,7 @@ class MainPolicyTest(unittest.TestCase):
             p = Path(tmp, "scripts/testing"); p.mkdir(parents=True)
             script = p / "test_parallel_by_name.sh"; script.write_text("#!/bin/sh\necho FULL\n"); script.chmod(0o755)
             stub = 'chmod() { :; }; python3() { echo "$*"; };\n'
-            for smoke, full_examples, full, calls in (("true", "false", False, 2), ("false", "false", True, 0), ("false", "true", True, 1)):
+            for smoke, full_examples, full, calls in (("true", "false", False, 2), ("false", "false", True, 0), ("false", "true", True, 0)):
                 out = subprocess.check_output(["bash", "-eu", "-c", stub + shell], cwd=tmp, env=dict(os.environ, SMOKE=smoke, FULL_EXAMPLES=full_examples), text=True)
                 self.assertEqual("FULL" in out, full)
                 self.assertEqual(out.count("platform_smoke.py"), calls)

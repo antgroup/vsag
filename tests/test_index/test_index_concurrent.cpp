@@ -140,6 +140,7 @@ TestIndex::TestConcurrentKnnSearch(const TestIndex::IndexPtr& index,
                                    const std::string& search_param,
                                    float expected_recall,
                                    bool expected_success) {
+    fixtures::daily::Phase daily_phase("TestConcurrentKnnSearch");
     if (not index->CheckFeature(vsag::SUPPORT_SEARCH_CONCURRENT)) {
         return;
     }
@@ -199,6 +200,7 @@ TestIndex::TestConcurrentAddSearchRemove(const TestIndex::IndexPtr& index,
                                          const TestDatasetPtr& dataset,
                                          const std::string& search_param,
                                          bool expected_success) {
+    fixtures::daily::Phase daily_phase("TestConcurrentAddSearchRemove");
     if (not index->CheckFeature(vsag::SUPPORT_ADD_SEARCH_DELETE_CONCURRENT)) {
         return;
     }
