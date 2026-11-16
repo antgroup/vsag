@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Small per-job diagnostics for the single final Daily Summary (no network)."""
+"""Small per-job diagnostics for the single final Nightly Summary (no network)."""
 import argparse
 import json
 import os

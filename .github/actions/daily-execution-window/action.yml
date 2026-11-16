@@ -1,4 +1,4 @@
-name: Refresh Daily execution window
+name: Refresh Nightly execution window
 description: Keep immutable source/date selection while refreshing the current retry attempt clock.
 outputs:
   remaining_minutes:

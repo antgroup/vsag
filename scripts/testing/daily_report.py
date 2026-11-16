@@ -139,7 +139,7 @@ def markdown(report):
     window = dp.policy()["window"]
     warning = (["**Incomplete evidence:** counts describe available verified plans/results only; missing lanes may add cases or change passing cases to failures.", ""]
                if report.get("incomplete") or report.get("coverage_gaps") else [])
-    lines = ["# Daily regression", "", *warning, *daily_counts.markdown(report.get("case_counts")), "",
+    lines = ["# Nightly regression", "", *warning, *daily_counts.markdown(report.get("case_counts")), "",
              f"Source: `{report['source_sha']}`; date: {report['date']}; slot: {report['slot']}.",
              "", f"Target operating window: **{window['start']}–{window['end']} {window['timezone']} ({window['wall_minutes'] / 60:g} hours)**.",
              f"Execution budget: **{window['execution_minutes'] / 60:g} hours**, with **{window['cleanup_minutes']} minutes** reserved for cleanup and reporting.",
@@ -177,9 +177,9 @@ def markdown(report):
                      f"{scope['extension_inventory']}; outside this week "
                      f"{scope['release_only_this_week']}. This is not full ARM coverage.")
     lines += ["", "A single day does not prove full weekly or release coverage.",
-              "Planned Daily HGraph concurrent stress uses at most 512 rows and a raw dimension cap of 256; RaBitQ retains its 960-dimensional recall floor. "
+              "Planned Nightly HGraph concurrent stress uses at most 512 rows and a raw dimension cap of 256; RaBitQ retains its 960-dimensional recall floor. "
               "large-shape stress remains a release obligation.",
-              "Daily Coverage bounds the PR variants of HGraph Duplicate Build, Export Model and Search Over Time to at most 256 rows before cost selection; metrics, dimensions, quantizers, queries, construction threads and assertions remain unchanged. Other lanes retain their workloads.", ""]
+              "Nightly Coverage bounds the PR variants of HGraph Duplicate Build, Export Model and Search Over Time to at most 256 rows before cost selection; metrics, dimensions, quantizers, queries, construction threads and assertions remain unchanged. Other lanes retain their workloads.", ""]
     if report.get("quarantines"):
         lines += ["### 🟡 Quarantined configurations — not validated", "",
                   "Passing selected checks does not validate these known exceptions."]
@@ -304,15 +304,15 @@ def main():
         message = str(error)
         dp.write(args.json, {"status": "failed", "incomplete": True, "case_counts": None, "error": message})
         Path(args.summary).write_text(
-            "# Daily regression: incomplete evidence\n\n"
+            "# Nightly regression: incomplete evidence\n\n"
             + "\n".join(daily_counts.markdown(None)) + "\n\n" +
             "Validation failed: " + message.replace("\n", " ") + "\n\n"
             "Missing or invalid results are not a pass or zero test cost.\n")
-        print("Daily report failed: " + message, file=sys.stderr)
+        print("Nightly report failed: " + message, file=sys.stderr)
         return 1
     for b, seconds in report["seconds"].items():
         if seconds > report["budgets_minutes"][b] * 60:
-            print(f"::warning::Daily {b} exceeded its legacy cumulative reference")
+            print(f"::warning::Nightly {b} exceeded its legacy cumulative reference")
     return 0 if report["status"] == "passed" else 1
 
 
@@ -320,5 +320,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except (dp.PlanError, OSError, KeyError, ValueError) as error:
-        print("Daily report failed: " + str(error), file=sys.stderr)
+        print("Nightly report failed: " + str(error), file=sys.stderr)
         sys.exit(1)

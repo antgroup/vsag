@@ -135,12 +135,14 @@ class MainPolicyTest(unittest.TestCase):
             for name in data[kind]: self.assertIn('"' + name + '"', source)
         for name in data["examples"]: self.assertTrue((ROOT / "examples/cpp" / (name + ".cpp")).is_file())
 
-    def test_daily_full_regression_remains_manual(self):
+    def test_nightly_full_regression_is_scheduled_and_manual(self):
         text = (ROOT / ".github/workflows/daily_test.yml").read_text()
         self.assertIn("github.event_name != 'schedule'", text)
         for profile in ('full-platform', 'full-python', 'full-lint', 'full-coverage', 'full-compatibility'):
             self.assertIn('  ' + profile + '-', text)
-        self.assertNotRegex(text, r"(?m)^    - cron: [\"']0 14 ")
+        self.assertRegex(text, r"(?m)^    - cron: [\"']0 14 ")
+        self.assertIn("workflow_dispatch:", text)
+        self.assertIn("github.event.schedule == '0 14 * * *'", text)
 
     def test_main_uses_only_light_contract_and_no_branch_wide_cancellation(self):
         text = (ROOT / ".github/workflows/main-ci.yml").read_text()

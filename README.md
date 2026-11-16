@@ -14,7 +14,7 @@ last-reviewed: 2026-05-12
 <div align="center">
   <h1><img alt="vsag-pages" src="docs/banner.svg" width=500/></h1>
 
-[![Daily](https://img.shields.io/badge/Daily-10h%20regression-blue?logo=githubactions)](https://github.com/antgroup/vsag/actions/workflows/daily_test.yml)
+[![Nightly](https://img.shields.io/badge/Nightly-10h%20regression-blue?logo=githubactions)](https://github.com/antgroup/vsag/actions/workflows/daily_test.yml)
 [![codecov](https://codecov.io/gh/antgroup/vsag/graph/badge.svg?token=KDT3SpPMYS)](https://codecov.io/gh/antgroup/vsag)
 ![GitHub License](https://img.shields.io/github/license/antgroup/vsag)
 ![GitHub Release](https://img.shields.io/github/v/release/antgroup/vsag?label=last%20release)

@@ -1,4 +1,4 @@
-name: Capture Daily job diagnostics
+name: Capture Nightly job diagnostics
 description: Preserve local results for the final Summary without publishing a per-job panel.
 runs:
   using: composite
