@@ -597,14 +597,21 @@ VSAG draws on the following works for graph construction, vector quantization, f
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/nw9663644-eng">
+                    <img src="https://avatars.githubusercontent.com/u/238131765?v=4" width="100" alt="nw9663644-eng"/>
+                    <br />
+                    <sub><b>Nannan Wang</b></sub>
+                </a>
+            </td>
+        </tr>
+        <tr>
+            <td align="center">
                 <a href="https://github.com/seuclkzsd">
                     <img src="https://avatars.githubusercontent.com/u/110705158?v=4" width="100" alt="seuclkzsd"/>
                     <br />
                     <sub><b>seuclkzsd</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/159753a52">
                     <img src="https://avatars.githubusercontent.com/u/137481623?v=4" width="100" alt="159753a52"/>
@@ -640,6 +647,8 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <sub><b>Fighting</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/geerniman">
                     <img src="https://avatars.githubusercontent.com/u/111114031?v=4" width="100" alt="geerniman"/>
@@ -647,8 +656,6 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <sub><b>Geerniman</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/hhy3">
                     <img src="https://avatars.githubusercontent.com/u/44047980?v=4" width="100" alt="hhy3"/>
@@ -684,20 +691,13 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <sub><b>Mingyu Yang</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/mukejane">
                     <img src="https://avatars.githubusercontent.com/u/272978297?v=4" width="100" alt="mukejane"/>
                     <br />
                     <sub><b>mukejane</b></sub>
-                </a>
-            </td>
-        </tr>
-        <tr>
-            <td align="center">
-                <a href="https://github.com/nw9663644-eng">
-                    <img src="https://avatars.githubusercontent.com/u/238131765?v=4" width="100" alt="nw9663644-eng"/>
-                    <br />
-                    <sub><b>Nannan Wang</b></sub>
                 </a>
             </td>
             <td align="center">
