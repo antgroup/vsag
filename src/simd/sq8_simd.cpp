@@ -21,7 +21,7 @@ namespace vsag {
 VSAG_DEFINE_SIMD_DISPATCH(SQ8ComputeIP, SQ8ComputeType);
 VSAG_DEFINE_SIMD_DISPATCH(SQ8ComputeL2Sqr, SQ8ComputeType);
 
-static void
+void
 SQ8ComputeL2SqrBatch4Fallback(const float* query,
                               const uint8_t* codes1,
                               const uint8_t* codes2,
@@ -49,7 +49,7 @@ GetSQ8ComputeL2SqrBatch4() {
 }
 SQ8ComputeBatch4Type SQ8ComputeL2SqrBatch4 = GetSQ8ComputeL2SqrBatch4();
 
-static void
+void
 SQ8ComputeIPBatch4Fallback(const float* query,
                            const uint8_t* codes1,
                            const uint8_t* codes2,

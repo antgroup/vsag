@@ -145,24 +145,28 @@ TEST_CASE("SQ8 L2 Batch4 matches four single distances", "[ut][simd][batch4]") {
             codes[i] = static_cast<uint8_t>((i * 37) % 256);
         }
 
-        float dist1 = 0, dist2 = 0, dist3 = 0, dist4 = 0;
-        SQ8ComputeL2SqrBatch4(query.data(),
-                              codes.data(),
-                              codes.data() + dim,
-                              codes.data() + 2 * dim,
-                              codes.data() + 3 * dim,
-                              lower_bound.data(),
-                              diff.data(),
-                              dim,
-                              dist1,
-                              dist2,
-                              dist3,
-                              dist4);
-        const float actual[4] = {dist1, dist2, dist3, dist4};
-        for (uint64_t i = 0; i < 4; ++i) {
-            const float expected = SQ8ComputeL2Sqr(
-                query.data(), codes.data() + i * dim, lower_bound.data(), diff.data(), dim);
-            REQUIRE(fixtures::dist_t(actual[i]) == fixtures::dist_t(expected));
+        // The dispatched kernel and the fallback used on CPUs without a batched kernel.
+        for (const SQ8ComputeBatch4Type batch4 :
+             {SQ8ComputeL2SqrBatch4, &SQ8ComputeL2SqrBatch4Fallback}) {
+            float dist1 = 0, dist2 = 0, dist3 = 0, dist4 = 0;
+            batch4(query.data(),
+                   codes.data(),
+                   codes.data() + dim,
+                   codes.data() + 2 * dim,
+                   codes.data() + 3 * dim,
+                   lower_bound.data(),
+                   diff.data(),
+                   dim,
+                   dist1,
+                   dist2,
+                   dist3,
+                   dist4);
+            const float actual[4] = {dist1, dist2, dist3, dist4};
+            for (uint64_t i = 0; i < 4; ++i) {
+                const float expected = SQ8ComputeL2Sqr(
+                    query.data(), codes.data() + i * dim, lower_bound.data(), diff.data(), dim);
+                REQUIRE(fixtures::dist_t(actual[i]) == fixtures::dist_t(expected));
+            }
         }
     }
 }
@@ -177,24 +181,28 @@ TEST_CASE("SQ8 IP Batch4 matches four single distances", "[ut][simd][batch4]") {
             codes[i] = static_cast<uint8_t>((i * 37) % 256);
         }
 
-        float dist1 = 0, dist2 = 0, dist3 = 0, dist4 = 0;
-        SQ8ComputeIPBatch4(query.data(),
-                           codes.data(),
-                           codes.data() + dim,
-                           codes.data() + 2 * dim,
-                           codes.data() + 3 * dim,
-                           lower_bound.data(),
-                           diff.data(),
-                           dim,
-                           dist1,
-                           dist2,
-                           dist3,
-                           dist4);
-        const float actual[4] = {dist1, dist2, dist3, dist4};
-        for (uint64_t i = 0; i < 4; ++i) {
-            const float expected = SQ8ComputeIP(
-                query.data(), codes.data() + i * dim, lower_bound.data(), diff.data(), dim);
-            REQUIRE(fixtures::dist_t(actual[i]) == fixtures::dist_t(expected));
+        // The dispatched kernel and the fallback used on CPUs without a batched kernel.
+        for (const SQ8ComputeBatch4Type batch4 :
+             {SQ8ComputeIPBatch4, &SQ8ComputeIPBatch4Fallback}) {
+            float dist1 = 0, dist2 = 0, dist3 = 0, dist4 = 0;
+            batch4(query.data(),
+                   codes.data(),
+                   codes.data() + dim,
+                   codes.data() + 2 * dim,
+                   codes.data() + 3 * dim,
+                   lower_bound.data(),
+                   diff.data(),
+                   dim,
+                   dist1,
+                   dist2,
+                   dist3,
+                   dist4);
+            const float actual[4] = {dist1, dist2, dist3, dist4};
+            for (uint64_t i = 0; i < 4; ++i) {
+                const float expected = SQ8ComputeIP(
+                    query.data(), codes.data() + i * dim, lower_bound.data(), diff.data(), dim);
+                REQUIRE(fixtures::dist_t(actual[i]) == fixtures::dist_t(expected));
+            }
         }
     }
 }
