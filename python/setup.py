@@ -23,7 +23,11 @@ class CMakeBuild(build_ext):
 
     @staticmethod
     def _report_ccache_stats():
-        """Prints ccache statistics so that a build log shows whether the cache is effective."""
+        """Prints ccache statistics so that a build log shows whether the cache is effective.
+
+        The per-result breakdown is opt-in: it only runs when CCACHE_LOGFILE is set, and it
+        is a temporary diagnostic for finding why ccache misses.
+        """
         try:
             subprocess.call(["ccache", "-s"])
             log = os.environ.get("CCACHE_LOGFILE")
@@ -33,6 +37,8 @@ class CMakeBuild(build_ext):
                     for line in f:
                         if "Result:" in line:
                             results[line.split("Result:", 1)[1].strip()] += 1
+                if not results:
+                    print("ccache result: no 'Result:' lines found in CCACHE_LOGFILE")
                 for name, count in results.most_common():
                     print(f"ccache result: {name}: {count}")
         except OSError as e:
@@ -59,7 +65,10 @@ class CMakeBuild(build_ext):
         use_ccache = os.environ.get("VSAG_ENABLE_CCACHE", "OFF").strip().upper() == "ON"
         if use_ccache:
             cmake_args.append("-DENABLE_CCACHE=ON")
-            subprocess.call(["ccache", "-z"])
+            try:
+                subprocess.call(["ccache", "-z"])
+            except OSError as e:
+                print(f"ccache unavailable, skipping stats reset: {e}")
 
         jobs = os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL", str(os.cpu_count() or 4))
         # Third-party builds (OpenBLAS, ...) use the same parallelism as the main build.
