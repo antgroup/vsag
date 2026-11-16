@@ -803,11 +803,9 @@ private:
 
         std::string statistics;
         try {
-            // SINDI and SINDI_V2 always use GetStats() for static analysis;
-            // AnalyzeIndexBySearch with null query (topk=0) is not supported
-            // by SINDI_V2 and may fail for SINDI depending on build parameters.
-            if (options_.base_path.empty() or
-                index_name_ != INDEX_SINDI and index_name_ != INDEX_SINDI_V2) {
+            // SINDI_V2 always uses GetStats() for static analysis because its basic query
+            // analyzer rejects the null query used here. Only SINDI uses base_path analysis.
+            if (options_.base_path.empty() or index_name_ != INDEX_SINDI) {
                 statistics = index_->GetStats();
             } else {
                 if (not index_->CheckFeature(IndexFeature::SUPPORT_ANALYZE_INDEX_BY_SEARCH)) {
