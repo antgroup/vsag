@@ -124,7 +124,7 @@ class WorkflowContractTest(unittest.TestCase):
     def test_single_pr_build_and_preserved_options(self):
         with self.assertRaisesRegex(AssertionError, "Missing step 'Missing step' in pr-ci-community.yml"):
             step(PR, 'Missing step')
-        self.assertIn('uses: actions/cache/restore@v4', step(PR, 'Restore ExternalProject Archives'))
+        self.assertIn('uses: actions/cache/restore@v5', step(PR, 'Restore ExternalProject Archives'))
         x86 = job(PR, 'build-asan-x86')
         self.assertEqual(x86.count('make asan COMPILE_JOBS=3'), 1)
         # Collector unit tests remain valid PR checks; only executing the benchmark is forbidden.
@@ -173,7 +173,7 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertNotIn('uses: actions/cache@', benchmark)
         self.assertNotIn('actions/cache/save', benchmark)
         self.assertNotIn('ccache-action', benchmark)
-        self.assertIn('uses: actions/cache/restore@v4', BENCH)
+        self.assertIn('uses: actions/cache/restore@v5', BENCH)
         self.assertNotIn('install_deps', step(BENCH, 'Prepare trusted Ubuntu host'))
         self.assertNotIn('/opt/hostedtoolcache', benchmark)
         self.assertIn("REQUESTED_REF: ${{ inputs.ref || 'main' }}", BENCH)

@@ -166,7 +166,7 @@ test('team format check has its own clean checkout and remains required', () => 
   const checks = team.split('  checks:\n')[1].split('  build:\n')[0];
   const summary = team.split('  summary:\n')[1];
   assert.match(checks, /runs-on: ubuntu-24.04/);
-  assert.match(checks, /uses: actions\/checkout@v4/);
+  assert.match(checks, /uses: actions\/checkout@v5/);
   assert.match(checks, /persist-credentials: false/);
   assert.ok(checks.includes('./scripts/format/check_format.sh'));
   assert.ok(!checks.includes('mkdir -p ci-logs'));

@@ -164,7 +164,7 @@ jobs:
           include-tests: "true"
           include-tools: "true"
       - name: Restore ExternalProject Archives
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: .ci-downloads
           key: external-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/**/*.cmake') }}

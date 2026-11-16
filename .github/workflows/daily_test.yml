@@ -1315,7 +1315,7 @@ jobs:
           PY
       - name: Restore ExternalProject Archives (never save)
         id: archives
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: .ci-downloads
           key: external-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/**/*.cmake') }}
