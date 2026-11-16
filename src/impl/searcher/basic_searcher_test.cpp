@@ -294,6 +294,14 @@ TEST_CASE("Descending RuntimeParameter restores its initial value", "[ut][BasicO
     REQUIRE(param.Cur() == 16.0F);
 }
 
+TEST_CASE("RuntimeParameter rejects a range against its step", "[ut][BasicOptimizer]") {
+    REQUIRE_THROWS_AS(RuntimeParameter(PREFETCH_STRIDE_CODE, 1, 10, -1), VsagException);
+    REQUIRE_THROWS_AS(RuntimeParameter(PREFETCH_STRIDE_CODE, 10, 1, 1), VsagException);
+    REQUIRE_NOTHROW(RuntimeParameter(PREFETCH_STRIDE_CODE, 1, 10, 1));
+    REQUIRE_NOTHROW(RuntimeParameter(PREFETCH_STRIDE_CODE, 10, 1, -1));
+    REQUIRE_NOTHROW(RuntimeParameter(PREFETCH_STRIDE_CODE, 5, 5, -1));
+}
+
 TEST_CASE("BasicSearcher duplicate threshold keeps nearest owner",
           "[ut][BasicSearcher][duplicate]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
