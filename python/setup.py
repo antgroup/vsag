@@ -1,3 +1,4 @@
+import collections
 import glob
 import os
 import shutil
@@ -20,6 +21,29 @@ class CMakeBuild(build_ext):
     def get_ext_filename(self, ext_name):
         return os.path.join("pyvsag", "libvsag_c.so")
 
+    @staticmethod
+    def _report_ccache_stats():
+        """Prints ccache statistics so that a build log shows whether the cache is effective.
+
+        The per-result breakdown is opt-in: it only runs when CCACHE_LOGFILE is set, and it
+        is a temporary diagnostic for finding why ccache misses.
+        """
+        try:
+            subprocess.call(["ccache", "-s"])
+            log = os.environ.get("CCACHE_LOGFILE")
+            if log and os.path.exists(log):
+                results = collections.Counter()
+                with open(log, errors="replace") as f:
+                    for line in f:
+                        if "Result:" in line:
+                            results[line.split("Result:", 1)[1].strip()] += 1
+                if not results:
+                    print("ccache result: no 'Result:' lines found in CCACHE_LOGFILE")
+                for name, count in results.most_common():
+                    print(f"ccache result: {name}: {count}")
+        except OSError as e:
+            print(f"ccache statistics unavailable: {e}")
+
     def build_extension(self, ext):
         extdir = os.path.abspath(os.path.join(self.build_lib, "pyvsag"))
         os.makedirs(extdir, exist_ok=True)
@@ -38,8 +62,13 @@ class CMakeBuild(build_ext):
             f"-DMKL_STATIC_LINK={mkl_static_link}",
             "-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -s",
         ]
-        if os.environ.get("VSAG_ENABLE_CCACHE", "OFF").strip().upper() == "ON":
+        use_ccache = os.environ.get("VSAG_ENABLE_CCACHE", "OFF").strip().upper() == "ON"
+        if use_ccache:
             cmake_args.append("-DENABLE_CCACHE=ON")
+            try:
+                subprocess.call(["ccache", "-z"])
+            except OSError as e:
+                print(f"ccache unavailable, skipping stats reset: {e}")
 
         jobs = os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL", str(os.cpu_count() or 4))
         # Third-party builds (OpenBLAS, ...) use the same parallelism as the main build.
@@ -55,6 +84,9 @@ class CMakeBuild(build_ext):
             cwd=build_temp,
             env=env,
         )
+
+        if use_ccache:
+            self._report_ccache_stats()
 
         libs = glob.glob(os.path.join(build_temp, "**", "libvsag_c.*"), recursive=True)
         if len(libs) != 1:
