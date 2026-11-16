@@ -15,13 +15,21 @@ runs:
       shell: bash -e {0}
       run: |
         pip3 uninstall pyvsag -y
-        pip3 install ./wheelhouse/*.whl
+        wheel=(./wheelhouse/*.whl)
+        pip3 install "${wheel[0]}[langchain]"
         pip3 install numpy pyjson pytest
+        pip3 install "langchain-tests==1.1.9"
     - name: Run Python Test
       shell: bash
       run: |
         set -euo pipefail
         python3 scripts/testing/daily_measure.py --name pytest --owner bindings-examples-compatibility --cwd tests/python -- python3 -m pytest . -v --tb=short 2>&1 | tee tests/python/test-output.log
+    - name: Test LangChain 0.3 compatibility
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 -m pip install 'langchain-core>=0.3.77,<0.4'
+        python3 -m pytest tests/python/test_langchain_vector_store.py -v --tb=short
     - name: Upload Test Logs
       if: always()
       uses: actions/upload-artifact@v5
