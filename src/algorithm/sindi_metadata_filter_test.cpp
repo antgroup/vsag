@@ -1167,3 +1167,50 @@ TEST_CASE("SINDI host serialization supports mutable and immutable",
         REQUIRE_THROWS(unsupported_restored.DeserializeStreaming(unsupported_stream));
     }
 }
+
+TEST_CASE("SINDI host selector keeps literal and missing-host semantics", "[ut][host_filter]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    SindiHostFilter hosts(allocator.get());
+    std::array<std::string, 4> values{"", "a.com/path", " host ", "[a]"};
+    auto base = Dataset::Make()
+                    ->NumElements(values.size())
+                    ->StringMetadata("host", values.data())
+                    ->Owner(false);
+    auto plan = hosts.PrepareBuild(base, 0);
+    for (uint32_t position = 0; position < values.size(); ++position) {
+        plan.RecordSuccess(position);
+    }
+    hosts.CommitBuild(std::move(plan), 0, static_cast<uint32_t>(values.size()));
+
+    const std::vector<std::pair<std::string, std::set<int64_t>>> cases{
+        {"", {0}},
+        {"a.com/path", {1}},
+        {"|a.com/path||a.com/path|unknown|", {1}},
+        {"|", {}},
+        {"|||", {}},
+        {"a.com", {}},
+        {"host", {}},
+        {" host ", {2}},
+        {"[a]", {3}},
+        {"a.com/path|[a]", {1, 3}},
+    };
+    for (const auto& [selection, expected] : cases) {
+        INFO(selection);
+        auto query =
+            Dataset::Make()->NumElements(1)->StringMetadata("host", &selection)->Owner(false);
+        const auto route = hosts.Classify(query);
+        if (expected.empty()) {
+            REQUIRE(route.kind == SindiHostRouteKind::EMPTY);
+            continue;
+        }
+        REQUIRE(route.kind == SindiHostRouteKind::WINDOW);
+        FilterPtr filter;
+        hosts.ApplyFilter(route, filter);
+        REQUIRE(filter != nullptr);
+        for (int64_t id = 0; id < static_cast<int64_t>(values.size()); ++id) {
+            REQUIRE(filter->CheckValid(id) == (expected.count(id) != 0));
+        }
+    }
+    auto query = Dataset::Make()->NumElements(1)->Owner(false);
+    REQUIRE(hosts.Classify(query).kind == SindiHostRouteKind::UNFILTERED);
+}

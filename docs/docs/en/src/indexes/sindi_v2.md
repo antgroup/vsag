@@ -159,3 +159,15 @@ The index creation parameters also accept `term_prune_ratio` (float in `[0, 1)`,
 For example, set `"term_prune_ratio": 0.2, "term_retain_threshold": 0` inside the index's build parameters to remove the lowest-weight 20% of each posting list per window.
 
 The posting cache is runtime-only and is cleared on reload or IO rebinding. Its budget covers resident parsed buffers and estimated entry overhead. Query-held buffers can outlive eviction, so process memory can temporarily exceed this budget. It does not cache rerank vectors.
+
+### Multiple-host KNN queries
+
+The existing string metadata `host` accepts one or more exact host values separated by `|`. Single and multiple hosts share the same OR filtering path, intersected with date conditions and the user Filter.
+
+```cpp
+std::string host = "a.com|b.com|c.com";
+query->StringMetadata("host", &host);
+// Keep host alive throughout the query and follow Dataset's existing ownership rules.
+```
+
+As with Pyramid's legacy multi-path query strings, `|` is reserved and has no escape syntax. Empty components in a nonempty selector are ignored, duplicates are removed, and unknown hosts are ignored. A selector such as `|` matches nothing. Whitespace is literal, not trimmed. An absent/null `host` does not restrict hosts, while a standalone empty string retains the existing missing-host meaning. `/` remains a literal character: host matching does not include descendant paths. Build metadata remains one literal host per document. Dataset APIs, ownership, copying and persisted formats are unchanged. Existing indexes need no rebuild.

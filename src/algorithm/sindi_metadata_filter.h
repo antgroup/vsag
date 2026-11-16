@@ -90,16 +90,14 @@ enum class SindiHostRouteKind : uint8_t {
     WINDOW,
 };
 
-struct SindiHostSearchRoute {
-    SindiHostRouteKind kind{SindiHostRouteKind::UNFILTERED};
-    uint32_t begin{0};
-    uint32_t end{0};
-    uint32_t host_index{0};
-};
-
 struct SindiHostRange {
     uint32_t begin{0};
     uint32_t end{0};
+};
+
+struct SindiHostSearchRoute {
+    SindiHostRouteKind kind{SindiHostRouteKind::UNFILTERED};
+    std::vector<SindiHostRange> ranges;
 };
 
 class SindiHostBuildPlan {

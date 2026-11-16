@@ -149,3 +149,15 @@ SINDI V2 会根据构建阶段的 `doc_prune_ratio` 与检索阶段的 `query_pr
 例如，在索引构建参数中设置 `"term_prune_ratio": 0.2, "term_retain_threshold": 0`，可删除每个窗口内各倒排列表中权重最低的 20% postings。
 
 倒排缓存仅存在于运行时，重新加载或绑定 IO 时清空。容量统计包括驻留的解析后 buffer 和估算的条目开销。查询持有的 buffer 可在淘汰后继续存活，因此进程内存可能暂时超过该预算。此缓存不缓存重排向量。
+
+### 多 host KNN 查询
+
+已有字符串 metadata `host` 支持用 `|` 分隔多个精确 host 值。单 host 就是一个元素的集合，与多 host 共用 OR 过滤流程，再与日期条件及用户 Filter 取交集。
+
+```cpp
+std::string host = "a.com|b.com|c.com";
+query->StringMetadata("host", &host);
+// 查询期间保持 host 有效，遵守 Dataset 原有所有权规则。
+```
+
+与 Pyramid 旧式多路径查询字符串一致，`|` 为保留分隔符，不支持转义。非空选择串中的空项被忽略，重复项去重，未知 host 忽略；例如 `|` 不匹配任何 host。空格按字面保留，不自动裁剪。未设置或空指针不限制 host，单独的空字符串保留原有缺失 host 语义。`/` 仍是字面字符，不表示匹配子路径。构建数据仍为每条文档提供一个字面的 host。Dataset 接口、所有权、复制及持久化格式均保持原样，已有索引无需重建。
