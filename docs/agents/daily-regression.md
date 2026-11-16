@@ -55,6 +55,39 @@ build/core lane and artifact-overwriting cleanup are removed. x86's bundled-Open
 source build and MKL build remain separate because they validate different backends.
 Coverage case names and thresholds remain unchanged; three expensive HGraph functional cases use a smaller, explicitly bounded Coverage dataset as described below.
 
+## Linux Python matrix
+
+Nightly builds one manylinux 2.28 `py3-none` wheel per Linux architecture
+(x86_64 and aarch64), using the same action and container-mounted compiler cache
+as PR, Branch and TestPyPI. TestPyPI publication remains independent.
+Every environment installs the matching source/architecture/SHA-256-verified wheel.
+
+| Python | NumPy 1.x | NumPy 2.x | Ordinary suite |
+| --- | --- | --- | --- |
+| 3.10, 3.11, 3.12 | 1.26.4 | Latest compatible 2.x; resolved version recorded | Complete directory, excluding the separate OpenMP module |
+| 3.13, 3.14 | Unsupported, not scheduled | Latest compatible 2.x; resolved version recorded | Same complete ordinary suite |
+
+Each architecture also has one mandatory Python 3.12 / NumPy 2 OpenMP lane with
+CPU torch and scikit-learn installed. Missing dependencies, fewer than six import
+orders, any skipped integration test or a failed process makes the lane fail.
+This is eight ordinary environments plus one OpenMP environment per architecture:
+**two builds and 18 required test environments**, with no daily rotation of Python.
+macOS Python is deferred to its separate packaging adaptation; existing macOS C++
+checks are unchanged. These results do not certify Windows or macOS wheels.
+
+The matrix shares the existing ten-hour execution window. The remaining-window
+check bounds dependency installation and testing, and optional x86 C++ supplemental
+planning waits for all 18 environments. Mandatory failures do not become budget
+skips; incomplete work fails final reconciliation. No new wall-time quota is added.
+
+Per-job artifacts carry JUnit plus JSON counts, source/wheel hashes, installed import
+paths and Python/NumPy/cffi versions (plus torch/sklearn for OpenMP). The final
+Nightly Summary reconciles every unique expected environment and reports Python
+cost separately from the optional x86 supplemental stage. Container compiler-cache
+counters feed the shared diagnostics table. Ordinary pytest discovers new test
+files automatically. Python executions are reported separately from the existing
+four-number Catch/C++ logical-case inventory; they do not inflate that inventory.
+
 ## What is selected
 
 * HGraph PR representatives and independent regression cases run daily. Extended

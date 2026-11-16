@@ -1,0 +1,58 @@
+name: Test verified Python wheel
+description: Test the installed caller artifact; OpenMP dependencies and cases are mandatory when selected.
+inputs:
+  artifact:
+    description: Wheel artifact name
+    required: true
+  arch:
+    description: Wheel architecture
+    required: true
+  numpy-version:
+    description: NumPy version or wildcard pattern, e.g. 1.26.4 or 2.* (not a comparison specifier)
+    default: '2.*'
+  mode:
+    description: ordinary or openmp
+    default: ordinary
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@v5
+      with:
+        name: ${{ inputs.artifact }}
+        path: wheelhouse
+    - uses: actions/download-artifact@v5
+      with:
+        name: provenance-${{ inputs.artifact }}
+        path: .
+    - name: Verify and install wheel
+      shell: bash
+      env:
+        SOURCE_SHA: ${{ github.sha }}
+        WHEEL_ARCH: ${{ inputs.arch }}
+        NUMPY_REQUIREMENT: ${{ inputs.numpy-version }}
+      run: |
+        set -euo pipefail
+        wheel=$(python3 scripts/ci/python_ci.py verify --source "$SOURCE_SHA" --arch "$WHEEL_ARCH")
+        mkdir -p python-test-report
+        python3 -m pip install --force-reinstall --report python-test-report/install.json "$wheel" "numpy==$NUMPY_REQUIREMENT" pytest
+        python3 -m pip check
+    - name: Install OpenMP integration dependencies
+      if: ${{ inputs.mode == 'openmp' }}
+      shell: bash
+      run: |
+        python3 -m pip install --report python-test-report/torch-install.json --index-url https://download.pytorch.org/whl/cpu torch
+        python3 -m pip install --report python-test-report/sklearn-install.json scikit-learn
+        python3 -m pip check
+    - name: Run required Python tests
+      shell: bash
+      env:
+        TEST_MODE: ${{ inputs.mode }}
+      run: python3 scripts/testing/daily_measure.py --name pytest --owner bindings-examples-compatibility -- python3 scripts/ci/python_ci.py test --mode "$TEST_MODE"
+    - uses: actions/upload-artifact@v5
+      if: always()
+      with:
+        name: python-report-${{ github.job }}-${{ strategy.job-index }}-${{ github.run_id }}
+        path: python-test-report
+        if-no-files-found: error
+        retention-days: 30
+        overwrite: true

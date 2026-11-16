@@ -80,6 +80,7 @@ jobs:
               - 'include/vsag/vsag_c_api.h'
               - 'src/vsag_c_api.cpp'
               - 'cmake/vsag_c.map'
+              - '.github/actions/python-*/**'
               - 'tests/python/**'
               - '.github/workflows/**'
               - 'scripts/**'
@@ -258,30 +259,10 @@ jobs:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
       - uses: actions/checkout@v4
-      - name: Prepare Env
-        run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
-      - name: Load Cache
-        uses: hendrikmuhs/ccache-action@v1.2
+      - uses: ./.github/actions/python-wheel-build
         with:
-          max-size: "2G"
-          save: ${{ github.event_name != 'pull_request' }}
-          key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
-      - name: Make Python Wheel
-        run: |
-          sudo apt update
-          sudo apt install -y python3-venv
-          export CMAKE_GENERATOR="Ninja"
-          export VSAG_USE_SYSTEM_DEPS=AUTO
-          export CIBW_ENVIRONMENT="${CIBW_ENVIRONMENT:+$CIBW_ENVIRONMENT }VSAG_USE_SYSTEM_DEPS=AUTO"
-          make pyvsag
-      - name: Save Wheel
-        uses: actions/upload-artifact@v5
-        with:
-          path: ./wheelhouse
-          name: wheelhouse-x86-${{ github.run_id }}
-          compression-level: 1
-          retention-days: 1
-          overwrite: 'true'
+          arch: x86_64
+          artifact: wheelhouse-x86-${{ github.run_id }}
 
   test-asan-x86-unittests:
     name: Test X86 Unittests
@@ -470,38 +451,25 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           allow-prereleases: true
-      - name: Download Wheel
-        uses: actions/download-artifact@v5
+      - uses: ./.github/actions/python-wheel-test
         with:
-          name: wheelhouse-x86-${{ github.run_id }}
-          path: ./wheelhouse
-      - name: Install Python Wheel
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install ./wheelhouse/*.whl "numpy==${{ matrix.numpy }}" pytest
-      - name: Install other OpenMP users
-        # torch and scikit-learn bring their own OpenMP runtimes; the coexistence test needs both.
+          arch: x86_64
+          artifact: wheelhouse-x86-${{ github.run_id }}
+          numpy-version: ${{ matrix.numpy }}
+          mode: ${{ matrix.openmp && 'openmp' || 'ordinary' }}
+
+      - name: Run ordinary tests in the integration environment
         if: ${{ matrix.openmp }}
-        run: |
-          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
-          python -m pip install scikit-learn
-      - name: Check installed wheel
-        run: python -c "import pyvsag, numpy; print(pyvsag.__version__, numpy.__version__)"
-      - name: Run Python Test
-        # Run from tests/python: the source tree's python/ directory is not on sys.path, so the
-        # installed wheel is what gets imported.
-        run: |
-          set -euo pipefail
-          cd ./tests/python/
-          python3 -m pytest . -v --tb=short 2>&1 | tee test-output.log
-      - name: Upload Test Logs
-        if: always()
+        run: python3 scripts/ci/python_ci.py test --output python-ordinary-report/results.json
+      - name: Upload ordinary integration-environment evidence
+        if: ${{ always() && matrix.openmp }}
         uses: actions/upload-artifact@v5
         with:
-          name: pytest-logs-x86-py${{ matrix.python }}-${{ github.run_id }}
-          path: ./tests/python/test-output.log
+          name: python-ordinary-report-${{ github.job }}-${{ strategy.job-index }}-${{ github.run_id }}
+          path: python-ordinary-report
+          if-no-files-found: warn
           retention-days: 30
-          if-no-files-found: ignore
+          overwrite: true
 
   validate:
     if: inputs.run-docs

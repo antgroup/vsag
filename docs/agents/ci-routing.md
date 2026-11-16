@@ -133,7 +133,7 @@ Only the final Team Summary job publishes Markdown; execution jobs retain their 
 ## Community failure propagation
 
 Community and standalone Python jobs use the pytest process exit status, including
-pipeline failures, as their result. Logs are uploaded even when pytest fails;
+pipeline failures, as their result. Structured JUnit/JSON evidence is uploaded even when pytest fails;
 matching words such as `passed` in a log never overrides a nonzero exit status.
 Community changed-source lint passes the generated pattern through a quoted
 environment variable, and manual dispatch defaults its comparison branch to `main`.
@@ -197,19 +197,23 @@ Linux execution paths, not different correctness requirements.
 
 - Python wheel build/test (`build-python-x86` and `test-python-x86`) runs on main-target PRs
   that change Python/bindings, the C ABI, or CMake/packaging files (the `python` and `cmake`
-  path filters). It builds the `py3-none` wheel with `make pyvsag` and runs pytest against it
-  (#3295). Main PRs test one primary environment (Python 3.12, NumPy 2); the Python 3.10-3.14 /
+  path filters). It builds the `py3-none` wheel with the shared Linux cibuildwheel action and runs complete ordinary pytest against the installed artifact. Main PRs test one primary environment (Python 3.12, NumPy 2); the Python 3.10-3.14 /
   NumPy 1.x-2.x matrix and the OpenMP coexistence test stay on version branches and manual runs, and
-  belong in Daily. The wheel build tolerates the intentionally skipped Community format job on
-  Team-routed C++ changes, but still stops on failed or cancelled prerequisites. Automatic main-push Python checks remain paused
-  (see [Temporary main-push Python pause](#temporary-main-push-python-pause-3295));
-  explicit manual Python checks remain available.
+  belong in Nightly. The wheel build tolerates the intentionally skipped Community format job on
+  Team-routed C++ changes, but still stops on failed or cancelled prerequisites. Main pushes restore the same primary Python environment through Branch CI; explicit manual Python checks remain available.
 - `.github/workflows/pyvsag-testpypi.yml` builds the pyvsag `py3-none` wheels for x86_64
   and aarch64 from `main` every night (03:17 Beijing time, cron `17 19 * * *`) and on manual
   dispatch, and can upload them to TestPyPI with the `TEST_PYPI_API_TOKEN` secret. Uploading is
   on by default: manual runs can set `publish: false` to only build, and the repository variable
-  `PYVSAG_NIGHTLY_PUBLISH=false` pauses the nightly upload. The build mounts a ccache directory restored with `actions/cache` into the cibuildwheel container, so nightly builds only recompile changed files (the cache limit is 6 GB with compression, since a full build exceeds 2 GB and a smaller limit evicts entries during the build), and the build log ends with `ccache -s` plus a per-result count to show the real hit rate. A nightly run is skipped when the last successful nightly run already built the same `main` commit (a manual run is never skipped, and a failed nightly is rebuilt the next night). The built wheels are checked by `scripts/python/check_wheel_libs.py`, which fails if a wheel bundles or links libgfortran, libquadmath, libaio, or liburing; `make pyvsag` runs the same check on its cibuildwheel output only when `VSAG_USE_SYSTEM_DEPS` is unset or `OFF`; the PR Python jobs set it to `AUTO` (system OpenBLAS, which legitimately pulls in libgfortran), so they skip the check. It never publishes to PyPI or a GitHub Release, and is not part
-  of PR CI.
+  `PYVSAG_NIGHTLY_PUBLISH=false` pauses the nightly upload. Its shared build action restores
+  the compiler cache described below; only Nightly CI publishes weekly snapshots. A scheduled
+  TestPyPI run skips when the last successful scheduled run already built the same main commit
+  (manual runs do not skip). Every shared build uses `VSAG_USE_SYSTEM_DEPS=OFF` and checks the
+  repaired wheel with `scripts/python/check_wheel_libs.py`, rejecting bundled or linked libgfortran,
+  libquadmath, libaio and liburing before artifacts are uploaded. `make pyvsag` retains the same
+  check for its Docker path when system dependencies are unset or OFF; explicit local AUTO builds
+  may legitimately depend on system libraries. TestPyPI publication remains independent of PR CI
+  and never uploads to PyPI or a GitHub Release.
 - macOS ASan builds and TSan no longer run for main-target PRs. Their main-push and
   manual workflows remain unchanged. Platform-specific and race regressions can thus
   be discovered after merge rather than before it.
@@ -242,8 +246,8 @@ failed diff operations conservatively select heavy checks and full lint.
 
 | Layer | Checks |
 | --- | --- |
-| Each main push | ARM64/macOS ASan builds plus fixed platform smoke inventory; Python X86 temporarily paused pending #3295; existing TSan concurrent tests; changed implementation lint, expanded to full lint for headers/build/dependencies/unknown changes |
-| Daily, manual until separately activated | Existing daily/SIMD/bundled-OpenBLAS/concurrent tests plus full X86/ARM64/macOS ASan suites, all numbered examples (including macOS), both Python architectures, full lint, Coverage and historical compatibility |
+| Each main push | ARM64/macOS ASan builds plus fixed platform smoke inventory; Python X86 wheel plus Python 3.12 / NumPy 2 ordinary tests; existing TSan concurrent tests; changed implementation lint, expanded to full lint for headers/build/dependencies/unknown changes |
+| Nightly scheduled/manual | Existing daily/SIMD/bundled-OpenBLAS/concurrent tests plus full X86/ARM64/macOS ASan suites, all numbered examples (including macOS), both Python architectures, full lint, Coverage and historical compatibility |
 | Version branches and standalone manual workflows | Existing full scope; reusable workflow inputs default to full behavior |
 
 Format and path-selected documentation checks use `main-ci.yml`; image publishing remains separate.
@@ -410,7 +414,7 @@ job runners, dependencies, selection and permissions. No workflow generator is n
 - PR CI retains the required `PR CI Gate` name. PR Metadata alone handles body/label
   edits. Retargeting a PR still requires pushing a new commit before code validation.
 - Branch CI retains a separate run for each main commit. Main uses platform smoke,
-  TSan and selected lint (automatic Python x86 is temporarily paused pending #3295); version branches retain their full standalone
+  TSan, selected lint and Python x86 wheel/install/ordinary tests; version branches retain their full standalone
   scopes, including Coverage and compatibility. SIMD path checks are also here.
 - Manual Checks offers full PR/branch profiles and individual ASan, TSan, Python,
   lint, Coverage, compatibility, SIMD, toolchain and performance checks. The actual
@@ -458,27 +462,53 @@ resources is outside the current activation change.
 
 See [Nightly regression budgets and seven-day rotation](daily-regression.md) for scheduled and manual regression, reproduction, and acceptance boundaries.
 
-### Temporary main-push Python pause (#3295)
+### Shared Linux Python build and restored Branch checks
 
-Automatic main pushes currently skip Python wheel construction and pytest. The
-pyvsag/manylinux upgrade in [#3295](https://github.com/antgroup/vsag/issues/3295) has
-landed: the wheel is now built in the `manylinux_2_28` image (GCC 14) as one `py3-none` wheel per
-architecture. The checks stay paused until that packaging has been validated in the development
-environment. This pause accepts that post-merge Python regressions will not be detected
-automatically during the transition.
+PR, Branch, Nightly and TestPyPI build jobs call `.github/actions/python-wheel-build`.
+It requires native Linux Docker, pins cibuildwheel v3.3.1, and uses the maintained
+`python/pyproject.toml` manylinux 2.28 / repair configuration. The dependency policy
+is `VSAG_USE_SYSTEM_DEPS=OFF`; x86 OpenBLAS uses `GENERIC`. CI never silently falls
+back to a host wheel. Source preparation and the `vsag_c` Release build remain shared.
+The in-container repaired-wheel gate deliberately runs the complete ordinary `tests/python`
+directory, excluding only the separately required OpenMP integration module. Its report is
+`build-tests.json`; a failure blocks artifact upload and all consumers, including publication.
+Dedicated environment lanes additionally check compatibility on their respective host runtimes.
+After repair, `check_wheel_libs.py` rejects forbidden bundled/NEEDED libraries before upload.
 
-`main_ci_policy.py` emits an explicit `python=false` only for main pushes (or
-when heavy checks are unnecessary). `main_ci_summary.py` requires that the
-Python result is skipped and explains the suspension; it still rejects failures,
-missing selection outputs, and failures in other selected checks. Daily, manual
-Python/full-branch checks, version branches and local contributor validation
-requirements retain their existing scope. No repository-wide workflow is disabled.
+The compressed ccache is capped at 3 GB per architecture. Restore keys include architecture
+and build configuration, and immutable save keys additionally use the UTC ISO week (not a
+run ID or source SHA). Only successful canonical-main **Nightly CI** scheduled/manual builds
+save, and only on an exact-key miss; PR, Branch and TestPyPI restore only. Thus unchanged
+configuration writes at most two snapshots a week. Older snapshots remain subject to GitHub
+cache eviction; this cap is not a repository-wide storage guarantee. New namespaces start cold.
+Changes to hashed build inputs (including `python/setup.py`, `extern/**/*.cmake` and the
+shared build action) create a new namespace: without a compatible entry, PR builds stay cold
+until that configuration reaches main and a successful Nightly CI build populates it.
+Fork PRs can read base-branch caches subject to GitHub's cache scope rules; they do not write
+trusted main entries. Restoring an entry does not prove compilation hits.
 
-Once the packaging upgrade from #3295 passes wheel build/install/pytest validation in the
-development environment,
-remove the main-push exception in `select_for_event`, update the pause regressions
-and these docs, and verify an actual main Branch CI Python run before considering
-automatic Python coverage restored.
+Container counters are best-effort diagnostics: machine-readable counters are preferred, with
+portable `ccache -s` text retained separately for older versions. Unavailable or unknown counters
+remain unmeasured and never fall back to an unrelated host cache or fail the build. No PR
+artifacts or cache writes are promoted to publication.
+
+Each caller retains its immutable source selection: PR validation SHA, actual
+Branch push SHA, frozen Nightly SHA, or TestPyPI's independently resolved main SHA.
+A separate manifest binds that SHA, architecture, filename and SHA-256 to exactly
+one wheel. Test jobs verify it before installation and reject source-tree imports.
+The publication job selects only wheel artifacts; provenance is separate. TestPyPI's
+source resolver, triggers, credentials and publishing job are unchanged.
+
+Branch main pushes run x86 wheel construction plus Python 3.12 / NumPy 2 full
+ordinary tests. Pure documentation skips heavy work; unknown changes/missing diffs
+conservatively select Python. Branch Summary rejects missing, failed, cancelled or
+unexpectedly skipped selected Python jobs. Version/manual routing keeps its scope.
+No OpenMP dependency requirement is added to the main PR or Branch primary lane.
+
+See [the Nightly Linux matrix](daily-regression.md#linux-python-matrix) for mandatory
+Python/NumPy compatibility and OpenMP environments. Native macOS Python integration
+is deferred to the separately owned packaging adaptation; Linux results do not
+validate macOS wheels.
 
 ## Branch ARM build diagnostics
 

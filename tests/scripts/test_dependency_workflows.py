@@ -270,30 +270,26 @@ class FailurePropagationTest(unittest.TestCase):
         import os
         import subprocess
         import tempfile
-        import textwrap
         from tests.scripts.test_build_benchmark_workflow import step
-        jobs = [('pr-ci-community.yml', 'test-python-x86'),
-                ('main-ci.yml', 'python-test-python-x86'),
-                ('main-ci.yml', 'python-test-python-aarch64')]
-        for filename, name in jobs:
-            body = job_text(ROOT / '.github/workflows' / filename, name)
-            run = step(body, 'Run Python Test')
-            self.assertNotIn('continue-on-error', run)
-            self.assertIn('if: always()', step(body, 'Upload Test Logs'))
-            script = textwrap.dedent(run.split('run: |\n', 1)[1])
-            for code in (0, 1, 2, 5, 137):
-                with self.subTest(workflow=filename, job=name, code=code), tempfile.TemporaryDirectory() as tmp:
-                    root = Path(tmp); (root / 'tests/python').mkdir(parents=True)
-                    fake = root / 'python3'
-                    marker = f'pytest-result-exit-{code}'
-                    fake.write_text('#!/bin/sh\necho "1 passed"\necho ' + marker + '\nexit ' + str(code) + '\n')
-                    fake.chmod(0o755)
-                    result = subprocess.run(['bash', '-c', script], cwd=root,
-                        env=dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH']),
-                        capture_output=True, text=True)
-                    self.assertEqual(result.returncode, code)
-                    self.assertIn(marker, result.stdout)
-                    self.assertIn(marker, (root / 'tests/python/test-output.log').read_text())
+        body = (ROOT / '.github/actions/python-wheel-test/action.yml').read_text()
+        run = step(body, 'Run required Python tests')
+        self.assertNotIn('continue-on-error', body)
+        self.assertIn('if: always()', body)
+        script = run.split('run: ', 1)[1].strip()
+        # The shared action must preserve the helper exit status, not parse stdout.
+        # test_python_ci separately exercises actual pytest/JUnit reconciliation.
+        for code in (0, 1, 2, 5, 137):
+            with self.subTest(code=code), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                fake = root / 'python3'
+                marker = f'pytest-result-exit-{code}'
+                fake.write_text('#!/bin/sh\necho "1 passed"\necho ' + marker + '\nexit ' + str(code) + '\n')
+                fake.chmod(0o755)
+                result = subprocess.run(['bash', '-c', script], cwd=root,
+                    env=dict(os.environ, TEST_MODE='ordinary', PATH=str(root) + os.pathsep + os.environ['PATH']),
+                    capture_output=True, text=True)
+                self.assertEqual(result.returncode, code)
+                self.assertIn(marker, result.stdout)
 
     def test_lint_pattern_is_data_and_dispatch_has_a_base(self):
         import os

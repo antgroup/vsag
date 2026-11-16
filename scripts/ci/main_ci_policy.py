@@ -36,10 +36,8 @@ def select(base, head):
 
 def select_for_event(base, head, event_name, ref):
     result = select(base, head)
-    # Temporary main-push suspension until the pyvsag/manylinux upgrade in #3295.
-    # Explicit manual checks retain their normal scope.
-    paused = event_name == "push" and ref == "refs/heads/main"
-    result["python"] = "false" if paused else result["heavy"]
+    # Unknown/build/header changes are conservative; pure docs remain skipped.
+    result["python"] = result["heavy"]
     return result
 
 

@@ -137,6 +137,43 @@ class JobDiagnosticsTests(unittest.TestCase):
             self.assertFalse(data["cache"]["available"])
             self.assertIsNone(data["matrix"])
 
+    def test_container_cache_statistics_override_unrelated_host_cache(self):
+        required = {"GITHUB_SHA": "a" * 40, "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1",
+                    "GITHUB_JOB": "wheel", "DAILY_JOB_STATUS": "success"}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "python-build-report").mkdir()
+            (root / "python-build-report/ccache.tsv").write_text(
+                "cache_hit_direct 8\ncache_hit_preprocessed 1\ncache_miss 1\n")
+            previous = os.getcwd()
+            try:
+                os.chdir(root)
+                with patch.dict(os.environ, required, clear=True), patch.object(
+                        jobs.subprocess, "run", side_effect=FileNotFoundError):
+                    self.assertEqual(jobs.collect()["cache"]["hit_percent"], 90)
+            finally:
+                os.chdir(previous)
+
+    def test_legacy_container_stats_and_missing_diagnostics_do_not_use_host_cache(self):
+        required = {"GITHUB_SHA": "a" * 40, "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1",
+                    "GITHUB_JOB": "wheel", "DAILY_JOB_STATUS": "success"}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            folder = root / 'python-build-report'
+            folder.mkdir()
+            previous = os.getcwd()
+            try:
+                os.chdir(root)
+                with patch.dict(os.environ, required, clear=True), patch.object(jobs.subprocess, 'run') as run:
+                    run.return_value.stdout = 'cache_hit_direct 100\ncache_hit_preprocessed 0\ncache_miss 0\n'
+                    self.assertFalse(jobs.collect()['cache']['available'])
+                    (folder / 'ccache.txt').write_text('cache hit (direct) 2\ncache hit (preprocessed) 1\ncache miss 7\n')
+                    self.assertEqual(jobs.collect()['cache']['hit_percent'], 30)
+                    (folder / 'ccache.txt').write_text('ccache: command not found')
+                    self.assertFalse(jobs.collect()['cache']['available'])
+            finally:
+                os.chdir(previous)
+
     def test_cache_rate_uses_cacheable_calls_and_no_calls_is_unmeasured(self):
         c=jobs.cache_statistics("cache_hit_direct 2\ncache_hit_preprocessed 1\ncache_miss 7\ncalled_for_link 4\n")
         self.assertEqual(c["hit_percent"],30)
