@@ -304,10 +304,16 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::FlattenDataCell(const QuantizerParamPtr&
     this->common_param_ = common_param;
     this->quantizer_ = std::make_shared<QuantTmpl>(quantization_param, common_param);
     this->code_size_ = quantizer_->GetCodeSize();
-    // Prefetching 6 codes ahead only pays off while each code spans a few cache lines.
     if constexpr (LayoutTmpl::InMemory) {
         if (this->code_size_ <= 256) {
+            // Prefetching 6 codes ahead only pays off while each code spans a few cache lines.
             this->prefetch_stride_code_ = 6;
+        } else if (this->code_size_ <= 1024) {
+            // A code of up to 16 cache lines is read from its first byte to its last, so fetch
+            // all of it, and start early enough for the whole code to arrive. Longer codes keep
+            // the defaults: fetching them whole this early costs more than it saves.
+            this->prefetch_stride_code_ = 4;
+            this->prefetch_depth_code_ = (this->code_size_ + 63) / 64;
         }
     }
     this->layout_ = std::make_shared<LayoutTmpl>(this->code_size_, io_param, common_param);

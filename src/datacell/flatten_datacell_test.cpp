@@ -132,6 +132,45 @@ TEST_CASE("FlattenDataCell prefetch stride follows storage type", "[ut][FlattenD
     REQUIRE(file_cell.prefetch_stride_code_ == 1);
 }
 
+TEST_CASE("FlattenDataCell prefetch defaults follow code size", "[ut][FlattenDataCell]") {
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(JsonType::Parse(R"({
+        "io_params": {"type": "block_memory_io"},
+        "quantization_params": {"type": "fp32"}
+    })"));
+    IndexCommonParam common_param;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+
+    // 64 floats are 256 bytes: a short code, prefetched one line at a time, 6 codes ahead.
+    common_param.dim_ = 64;
+    auto short_code = FlattenInterface::MakeInstance(param, common_param);
+    REQUIRE(short_code->code_size_ == 256);
+    REQUIRE(short_code->prefetch_stride_code_ == 6);
+    REQUIRE(short_code->prefetch_depth_code_ == 1);
+
+    // 65 floats are 260 bytes: a medium code, prefetched whole (5 lines), 4 codes ahead.
+    common_param.dim_ = 65;
+    auto medium_code = FlattenInterface::MakeInstance(param, common_param);
+    REQUIRE(medium_code->code_size_ == 260);
+    REQUIRE(medium_code->prefetch_stride_code_ == 4);
+    REQUIRE(medium_code->prefetch_depth_code_ == 5);
+
+    // 256 floats are 1024 bytes: the longest code that is still prefetched whole (16 lines).
+    common_param.dim_ = 256;
+    auto longest_whole_code = FlattenInterface::MakeInstance(param, common_param);
+    REQUIRE(longest_whole_code->code_size_ == 1024);
+    REQUIRE(longest_whole_code->prefetch_stride_code_ == 4);
+    REQUIRE(longest_whole_code->prefetch_depth_code_ == 16);
+
+    // 257 floats are 1028 bytes: a long code keeps the generic defaults.
+    common_param.dim_ = 257;
+    auto long_code = FlattenInterface::MakeInstance(param, common_param);
+    REQUIRE(long_code->code_size_ == 1028);
+    REQUIRE(long_code->prefetch_stride_code_ == 1);
+    REQUIRE(long_code->prefetch_depth_code_ == 1);
+}
+
 TEST_CASE("FlattenDataCell rejects invalid distance reads", "[ut][Flatten][invalid_reads]") {
     IndexCommonParam common;
     common.dim_ = 8;
