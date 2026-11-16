@@ -111,7 +111,7 @@ jobs:
     name: CI Routing Tests
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - run: node --test tests/scripts/ci_runner_route.test.cjs
@@ -154,7 +154,7 @@ jobs:
       simd: ${{ steps.select.outputs.simd }}
       lite: ${{ steps.select.outputs.lite }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           persist-credentials: false

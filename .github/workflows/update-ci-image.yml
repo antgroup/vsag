@@ -46,7 +46,7 @@ jobs:
       ARCH: ${{ matrix.arch }}
       FILE_PREFIX: ${{ matrix.file_prefix }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build on the native runner and verify the toolchain
         shell: bash
         run: |

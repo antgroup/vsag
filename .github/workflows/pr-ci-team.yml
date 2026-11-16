@@ -31,7 +31,7 @@ jobs:
     outputs:
       cpp: ${{ steps.changes.outputs.cpp }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - uses: dorny/paths-filter@v3
@@ -71,7 +71,7 @@ jobs:
     steps:
       - name: Prepare writable check home
         run: mkdir -p "$HOME"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -128,7 +128,7 @@ jobs:
     steps:
       - name: Prepare writable job home
         run: mkdir -p "$HOME"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -589,7 +589,7 @@ jobs:
       - name: Report skipped Team checks
         if: needs.changes.result == 'success' && needs.changes.outputs.cpp == 'false'
         run: echo 'Team Linux checks skipped because no relevant files changed.' >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         if: needs.changes.outputs.cpp == 'true'
         with:
           ref: ${{ github.sha }}

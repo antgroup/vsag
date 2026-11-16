@@ -36,7 +36,7 @@ jobs:
             echo "This workflow only builds main; run it from the main branch (got $GITHUB_REF)."
             exit 1
           fi
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: main
           persist-credentials: false
@@ -55,7 +55,7 @@ jobs:
           - {arch: x86_64, runner: ubuntu-latest}
           - {arch: aarch64, runner: ubuntu-24.04-arm}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ needs.resolve-source.outputs.sha }}
           fetch-depth: 0
@@ -65,7 +65,7 @@ jobs:
       # The compiler cache is mounted into the cibuildwheel container; every run saves its own
       # entry and starts from the newest one, so nightly builds only recompile what changed.
       - name: Restore ccache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ runner.temp }}/ccache
           key: pyvsag-ccache-${{ matrix.arch }}-${{ needs.resolve-source.outputs.sha }}

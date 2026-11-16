@@ -34,7 +34,7 @@ jobs:
       coverage: ${{ steps.changes.outputs.coverage }}
       python: ${{ steps.changes.outputs.python }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dorny/paths-filter@v3
         id: changes
         with:
@@ -98,7 +98,7 @@ jobs:
         shell: bash
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           persist-credentials: false
       - uses: ./.github/actions/check-format
@@ -109,7 +109,7 @@ jobs:
     if: needs.changes.outputs.coverage == 'true'
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Test coverage configuration
         run: |
           python3 -m unittest tests/scripts/coverage_diagnostics_test.py
@@ -130,7 +130,7 @@ jobs:
     steps:
       - name: Free Disk Space
         run: sudo rm -rf /opt/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Trust exact workspace for Git tooling
@@ -228,7 +228,7 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf "${RUNNER_TOOL_CACHE:-/Users/runner/hostedtoolcache}"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install Dependencies
         run: bash ./scripts/deps/install_deps.sh
         env:
@@ -257,7 +257,7 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Prepare Env
         run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
       - name: Load Cache
@@ -296,7 +296,7 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Clean Env
         run: rm -rf ./build
       - name: Download Build
@@ -339,7 +339,7 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Clean Env
         run: rm -rf ./build
       - name: Download Build
@@ -378,7 +378,7 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Clean Env
         run: rm -rf ./build
       - name: Download Build
@@ -433,7 +433,7 @@ jobs:
           install -m 0755 /tmp/gh_${GH_VERSION}_linux_amd64/bin/gh /usr/local/bin/gh
           rm -rf /tmp/gh.tar.gz /tmp/gh_${GH_VERSION}_linux_amd64
           gh --version
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Download Compatibility Indexes from Release
@@ -465,8 +465,8 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(github.event_name == 'pull_request' && github.base_ref == 'main' && '{"include":[{"python":"3.12","numpy":"2.*"}]}' || '{"include":[{"python":"3.10","numpy":"1.26.*"},{"python":"3.11","numpy":"2.*"},{"python":"3.12","numpy":"2.*","openmp":true},{"python":"3.13","numpy":"2.*"},{"python":"3.14","numpy":"2.*"}]}') }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
           allow-prereleases: true
@@ -509,7 +509,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - uses: ./.github/actions/check-docs
 
   simd-coverage:
@@ -521,7 +521,7 @@ jobs:
       # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
       image: ghcr.io/antgroup/vsag:ci-main-openblas
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -586,7 +586,7 @@ jobs:
       matrix:
         mode: [default-off, rabitq-on, sanitizer, coverage]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - uses: ./.github/actions/check-lite
@@ -626,7 +626,7 @@ jobs:
     outputs:
       non_markdown: ${{ steps.execute.outputs.non_markdown }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/tsan-build-and-test-changes
         id: execute
     if: ${{ (inputs.core && github.event_name == 'pull_request' && startsWith(github.base_ref, '0.') && !contains(github.base_ref, '/')) && (true) }}
@@ -672,7 +672,7 @@ jobs:
           done
           node24_diagnostics after
           exit "$cleanup_failed"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: '0'
       - uses: ./.github/actions/tsan-build-and-test-build-tsan
@@ -691,6 +691,6 @@ jobs:
       # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
       image: ghcr.io/antgroup/vsag:ci-main-openblas
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/tsan-build-and-test-test-tsan
         id: execute
