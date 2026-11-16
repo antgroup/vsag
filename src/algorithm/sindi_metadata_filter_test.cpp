@@ -14,6 +14,7 @@
 
 #include "algorithm/sindi_metadata_filter.h"
 
+#include <algorithm>
 #include <array>
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <cmath>
@@ -572,6 +573,78 @@ TEST_CASE("SINDI adjacent time partitions can share a UTC day",
         REQUIRE(exact_filter->CheckValid(inner_id));
     }
     REQUIRE_FALSE(exact_filter->CheckValid(int64_t{4}));
+}
+
+TEST_CASE("SINDI time partitions match sorted host selections across gaps",
+          "[ut][SINDI][metadata_filter][time_filter][host_filter]") {
+    const bool split_segments = GENERATE(false, true);
+    const bool use_time = GENERATE(false, true);
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    SindiTimeFilter filter(allocator.get());
+    constexpr uint32_t window_size = 3;
+    std::array<std::string, 12> hosts{"a", "b", "c", "d", "e", "f", "a", "d", "f", "b", "d", "e"};
+    std::array<int64_t, 12> timestamps{};
+    for (uint32_t id = 0; id < timestamps.size(); ++id) {
+        timestamps[id] = (id / window_size + 1) * SINDI_SECONDS_PER_DAY;
+    }
+    const uint32_t batch_size = split_segments ? 6 : 12;
+    for (uint32_t begin = 0; begin < hosts.size(); begin += batch_size) {
+        auto base = Dataset::Make()
+                        ->NumElements(batch_size)
+                        ->StringMetadata(SINDI_HOST_METADATA_NAME, hosts.data() + begin)
+                        ->Int64Metadata(SINDI_PUBLISH_TIME_METADATA_NAME, timestamps.data() + begin)
+                        ->Owner(false);
+        auto plan = filter.PrepareBuild(base, window_size);
+        for (uint32_t position = 0; position < batch_size; ++position) {
+            plan.RecordSuccess(position);
+        }
+        filter.CommitBuild(std::move(plan), begin, begin + batch_size);
+    }
+
+    using Ranges = std::vector<std::pair<uint32_t, uint32_t>>;
+    const std::vector<std::pair<std::string, Ranges>> cases{
+        {"a", {{0, 1}, {6, 7}}},
+        {"f", {{5, 6}, {8, 9}}},
+        {"d", {{3, 4}, {7, 8}, {10, 11}}},
+        {"b|d|e|f", {{1, 2}, {3, 6}, {7, 12}}},
+        {"f|a|f|unknown", {{0, 1}, {5, 7}, {8, 9}}},
+        {"e|c", {{2, 3}, {4, 5}, {11, 12}}},
+    };
+    int64_t query_begin = 2 * SINDI_SECONDS_PER_DAY;
+    int64_t query_end = 3 * SINDI_SECONDS_PER_DAY;
+    for (const auto& [selection, ranges] : cases) {
+        CAPTURE(split_segments, use_time, selection);
+        auto query = Dataset::Make()
+                         ->NumElements(1)
+                         ->StringMetadata(SINDI_HOST_METADATA_NAME, &selection)
+                         ->Owner(false);
+        Ranges expected;
+        if (use_time) {
+            query->Int64Metadata(SINDI_PUBLISH_TIME_BEGIN_METADATA_NAME, &query_begin)
+                ->Int64Metadata(SINDI_PUBLISH_TIME_END_METADATA_NAME, &query_end);
+            for (const auto& [begin, end] : ranges) {
+                const auto clipped_begin = std::max(begin, window_size);
+                const auto clipped_end = std::min(end, 3 * window_size);
+                if (clipped_begin < clipped_end) {
+                    expected.emplace_back(clipped_begin, clipped_end);
+                }
+            }
+        } else {
+            expected = ranges;
+        }
+        const auto route = filter.Classify(query, window_size);
+        REQUIRE(route.kind == SindiHostRouteKind::WINDOW);
+        REQUIRE(route.inner_ranges == expected);
+        FilterPtr exact_filter;
+        filter.ApplyFilter(route, exact_filter);
+        REQUIRE(exact_filter != nullptr);
+        for (uint32_t id = 0; id < hosts.size(); ++id) {
+            const bool allowed = std::any_of(expected.begin(), expected.end(), [id](auto range) {
+                return range.first <= id and id < range.second;
+            });
+            REQUIRE(exact_filter->CheckValid(id) == allowed);
+        }
+    }
 }
 
 TEST_CASE("SINDI time metadata validates serialized ranges",

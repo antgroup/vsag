@@ -1063,16 +1063,21 @@ SindiTimeFilter::Classify(const DatasetPtr& query, uint32_t window_size) const {
                 break;
             }
             if (use_host) {
+                auto host = partition.host_ids.begin();
+                const auto host_end = partition.host_ids.end();
                 for (const auto query_host_id : query_host_ids) {
-                    const auto host = std::lower_bound(
-                        partition.host_ids.begin(), partition.host_ids.end(), query_host_id);
-                    if (host == partition.host_ids.end() or *host != query_host_id) {
+                    host = std::lower_bound(host, host_end, query_host_id);
+                    if (host == host_end) {
+                        break;
+                    }
+                    if (*host != query_host_id) {
                         continue;
                     }
                     const auto index = static_cast<uint64_t>(host - partition.host_ids.begin());
                     append_merged_range(route.inner_ranges,
                                         partition.begin + partition.host_offsets[index],
                                         partition.begin + partition.host_offsets[index + 1]);
+                    ++host;
                 }
             } else {
                 append_merged_range(route.inner_ranges, partition.begin, partition.end);
