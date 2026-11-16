@@ -194,6 +194,7 @@ const char* const BUCKET_USE_RESIDUAL_KEY = "use_residual";
 const char* const IVF_TRAIN_TYPE_KEY = "ivf_train_type";
 const char* const IVF_TRAIN_TYPE_RANDOM = "random";
 const char* const IVF_TRAIN_TYPE_KMEANS = "kmeans";
+const char* const IVF_TRAIN_TYPE_E_MEANS = "e_means";
 
 const char* const TRAIN_SAMPLE_COUNT_KEY =
     "train_sample_count";  // used after v0.18 for both Hgraph and IVF
@@ -209,6 +210,7 @@ const char* const IVF_GPU_DEVICE_ID_KEY = "gpu_device_id";
 const char* const IVF_GPU_MEMORY_BUDGET_KEY = "gpu_memory_budget";
 const char* const IVF_GPU_MIN_WORK_THRESHOLD_KEY = "gpu_min_work_threshold";
 const char* const IVF_KMEANS_ITER_COUNT_KEY = "kmeans_iter_count";
+const char* const IVF_E_MEANS_EPOCHS_KEY = "e_means_epochs";
 
 const char* const GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY = "first_order_buckets_count";
 const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY = "second_order_buckets_count";
