@@ -75,6 +75,8 @@ class EntryTests(unittest.TestCase):
         self.assertIn('create_args: -v ${{ runner.temp }}/ccache:/ccache', text)
         self.assertIn('VSAG_ENABLE_CCACHE=ON CCACHE_DIR=/ccache', text)
         self.assertIn('CCACHE_BASEDIR=/project CCACHE_NOHASHDIR=1', text)
+        # A full build needs more than 2 GB uncompressed; a smaller limit evicts entries mid-build.
+        self.assertIn('CCACHE_MAXSIZE=6G CCACHE_COMPRESS=1', text)
 
     def test_pypi_publish_action_uses_existing_ref(self):
         # pypa/gh-action-pypi-publish has no `v1` tag; the moving ref is the release/v1 branch.
