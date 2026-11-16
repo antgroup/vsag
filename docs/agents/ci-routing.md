@@ -401,7 +401,7 @@ caller's token permissions even when the Team branch will be skipped.
 
 ## Workflow entry layout
 
-The Actions entries are PR CI, Branch CI, Daily CI, Release, Maintenance, CI Images,
+The Actions entries are PR CI, Branch CI, Nightly CI, Release, Maintenance, CI Images,
 Manual Checks, and PR Metadata. Team CI and Community CI remain reusable groups
 under PR CI; their standalone Actions pages do not own independent run history.
 Common hosted execution steps live under `.github/actions/`; entry workflows own
@@ -415,10 +415,12 @@ job runners, dependencies, selection and permissions. No workflow generator is n
 - Manual Checks offers full PR/branch profiles and individual ASan, TSan, Python,
   lint, Coverage, compatibility, SIMD, toolchain and performance checks. The actual
   selected jobs appear inside that manual run, not a separately dispatched run.
-- Daily CI defaults to a manually selected `regression` profile. Full regression
-  scheduling remains disabled. The pre-existing weekday performance and weekly
-  build-performance schedules select only their respective profiles; they do not
-  start full regression. No nightly compiler-cache scheduling is changed here.
+- Nightly CI runs complete regression on upstream main at 22:00 Asia/Shanghai daily
+  (`0 14 * * *` UTC), including supplemental x86 work and the final Nightly Summary.
+  The workflow filename remains `daily_test.yml`; manual/reusable regression is
+  still available. The weekday runtime-performance schedule is removed; runtime
+  performance remains manual. The weekly build-performance schedule is unchanged
+  and never selects regression. No compiler-cache or package-publishing schedule changes.
 - Maintenance preserves docs-only push filtering for docs synchronization and
   main-push contributor updates. It never executes on PR events.
 - Release consolidates release creation, Wheels and old-version indexes. The
@@ -440,8 +442,8 @@ by itself remove historical entries from the Actions sidebar.
 
 ### Performance profile source and concurrency
 
-The Daily CI `performance` profile runs only in the canonical repository's main
-context (scheduled, manual, or a reusable call from a main push). Like
+The Nightly CI `performance` profile runs only in the canonical repository's main
+context (manual, or a reusable call from a main push; no scheduled execution). Like
 `build-performance`, it accepts `inputs.ref` only as `main` or a full commit SHA
 reachable from fetched upstream main. Both profiles share the same inline ref
 validator through a YAML anchor; validation precedes dependency installation and
@@ -449,11 +451,12 @@ execution, and the actual commit is recorded in the job summary. Notification
 credentials are scoped to the runtime profile's report step.
 
 Each runtime-performance run/attempt has its own concurrency group with
-`cancel-in-progress: false`; a manual invocation cannot cancel a scheduled run.
+`cancel-in-progress: false`; separate invocations do not cancel each other.
 Runs can execute concurrently if GitHub-hosted capacity permits. This does not
-change the Team pool or enable full daily regression scheduling.
+change the Team pool. A future nightly performance service on dedicated Team CI
+resources is outside the current activation change.
 
-See [Daily regression budgets and seven-day rotation](daily-regression.md) for the opt-in Daily profile, reproduction, and acceptance boundaries.
+See [Nightly regression budgets and seven-day rotation](daily-regression.md) for scheduled and manual regression, reproduction, and acceptance boundaries.
 
 ### Temporary main-push Python pause (#3295)
 
@@ -583,14 +586,14 @@ update the production cache publisher. Promotion and scheduling changes require
 separate validation; a digest verifies consistency, not who produced the data.
 
 
-### Daily regression reporting and spare-capacity expansion
+### Nightly regression reporting and spare-capacity expansion
 
-Daily regression publishes one final **Daily Summary**. Individual jobs upload
+Nightly regression publishes one final **Nightly Summary**. Individual jobs upload
 small diagnostic records instead of ccache Summary panels; PR, Branch and manual
 checks keep their existing panels. The final report distinguishes scoped C++ line
 coverage (90% target) from test/collection/upload success. Missing coverage is
 reported as unmeasured. A green Coverage job alone does not certify the target.
-The README Daily badge is a budget/report link, not a status claim: the same entry
+The README Nightly badge is a budget/report link, not a status claim: the same entry
 also contains performance-only profiles, whose green runs must not stand in for a
 complete regression.
 
@@ -616,7 +619,8 @@ missing shard evidence still fails the run. Runner/process minutes are not actua
 CPU-core consumption. The initial cutoff is an operating target, not a guarantee
 against GitHub capacity delays. No separate Weekly full rerun is introduced: the
 seven-day planned union still needs execution evidence, and release-only scope
-remains a separate obligation. Regression scheduling remains disabled pending
-explicit activation and runtime acceptance of this updated flow.
+remains a separate obligation. Scheduled regression uses the same checked execution
+and reporting path as manual regression. The intended 22:00–08:00 window may shift
+when GitHub delays dispatch; the ten-hour allowance is measured from attempt start.
 
 Daily diagnostic identity (source SHA, run ID, attempt, job and job status) is required. Missing identity fails with an explicit diagnostic; optional compiler-cache measurements may be unavailable without failing collection. Full functional inventories must match every configured quarantine exactly; stale or core-targeted rules fail planning instead of silently disappearing.

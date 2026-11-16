@@ -38,18 +38,18 @@ class DailyWorkflowTests(unittest.TestCase):
             text = p.read_text()
             if 'hendrikmuhs/ccache-action@v1.2' in text:
                 self.assertIn("job-summary: ${{ env.VSAG_DAILY_AGGREGATE != '1'", text, str(p))
-        self.assertIn('name: Daily Summary', job_text(WORKFLOW,'daily-summary'))
+        self.assertIn('name: Nightly Summary', job_text(WORKFLOW,'daily-summary'))
         self.assertIn('name: Coverage — C++ lines and branches',job_text(WORKFLOW,'full-coverage-coverage'))
         for name in ('performance-performance', 'build-performance-benchmark-x86'):
             self.assertNotIn('daily-job-report', job_text(WORKFLOW, name))
         readme=(ROOT/'README.md').read_text()
-        self.assertIn('Daily-10h%20regression',readme)
+        self.assertIn('Nightly-10h%20regression',readme)
         self.assertNotIn('img.shields.io/circleci/',readme)
 
     def test_source_preflight_gates_heavy_regression_jobs(self):
         plan = job_text(WORKFLOW, "daily-plan")
         self.assertIn("run: python3 scripts/testing/daily_parameters.py", plan)
-        self.assertLess(plan.index("Preflight Daily parameter inventory"),
+        self.assertLess(plan.index("Preflight Nightly parameter inventory"),
                         plan.index("Freeze source, date and matrix"))
         self.assertNotIn("continue-on-error", plan)
         for name in ("daily_build_asan_x86", "daily_build_asan_aarch64", "daily_build_simd",
@@ -90,11 +90,12 @@ class DailyWorkflowTests(unittest.TestCase):
         build = job_text(WORKFLOW, "daily_build_asan_x86")
         self.assertLess(build.index("Load Cache"), build.index("Check build/lint execution window"))
 
-    def test_regression_schedule_stays_off(self):
+    def test_nightly_schedule_and_display_name(self):
         text = WORKFLOW.read_text()
         self.assertEqual(re.findall(r'(?m)^    - cron: ["\x27]([^"\x27]+)', text),
-                         ["01 08 * * 1-5", "23 3 * * 1"])
-        self.assertIn("github.event_name != 'schedule'", job_text(WORKFLOW, "daily-plan"))
+                         ["0 14 * * *", "23 3 * * 1"])
+        self.assertTrue(text.startswith("name: Nightly CI\n"))
+        self.assertNotIn("01 08 * * 1-5", text)
 
     def test_context_and_evidence_survive_failed_job_reruns(self):
         text = job_text(WORKFLOW, "daily-plan")
@@ -130,10 +131,10 @@ class DailyWorkflowTests(unittest.TestCase):
         for name in names:
             job = job_text(WORKFLOW, name)
             if "VSAG_DAILY_CONTEXT:" in job:
-                self.assertIn("Download frozen Daily plan", job, name)
+                self.assertIn("Download frozen Nightly plan", job, name)
                 self.assertIn("uses: ./.github/actions/daily-execution-window", job, name)
-                self.assertIn("Upload Daily evidence", job, name)
-                self.assertRegex(job, r"Upload Daily evidence\n\s+if: always\(\)")
+                self.assertIn("Upload Nightly evidence", job, name)
+                self.assertRegex(job, r"Upload Nightly evidence\n\s+if: always\(\)")
                 self.assertTrue(any(lane.startswith(name + "-") for lane in expected), name)
         summary = job_text(WORKFLOW, "daily-summary")
         self.assertIn("always()", summary)

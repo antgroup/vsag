@@ -1,7 +1,19 @@
-# Daily regression budget and weekly rotation
+# Nightly regression budget and weekly rotation
 
 Tracking: [CI layering plan #3225](https://github.com/antgroup/vsag/issues/3225).
-The regression schedule remains disabled. Existing performance schedules are independent.
+Nightly CI runs the complete regression profile on upstream `main` every day at
+**22:00 Asia/Shanghai (14:00 UTC, `0 14 * * *`)**. Only that cron in the canonical
+repository selects regression; the weekly build-performance cron remains separate.
+The former weekday runtime Performance cron is removed; its manual profile remains
+available. Future performance regression on dedicated Team CI resources is separate
+work, not enabled here.
+
+The workflow filename `daily_test.yml`, helper names, `VSAG_DAILY_*` variables,
+`[daily]` test tags and artifact identifiers stay unchanged for compatibility.
+The Actions entry is **Nightly CI**, with one final **Nightly Summary**.
+GitHub may delay scheduled dispatch: 22:00–08:00 is the intended operating window,
+not a guaranteed local-clock finish. The enforced ten-hour allowance starts at the
+actual attempt start; a delayed dispatch can therefore finish after 08:00.
 
 ## Budget contract
 
@@ -41,7 +53,7 @@ all shard indices exactly once. A failed shard does not cancel its siblings.
 ARM uses one shared OpenBLAS build for tests and examples. Its former duplicate
 build/core lane and artifact-overwriting cleanup are removed. x86's bundled-OpenBLAS
 source build and MKL build remain separate because they validate different backends.
-Coverage case names and thresholds remain unchanged; three expensive HGraph functional cases use a smaller, explicitly bounded Coverage dataset as described below. Regression scheduling stays disabled.
+Coverage case names and thresholds remain unchanged; three expensive HGraph functional cases use a smaller, explicitly bounded Coverage dataset as described below.
 
 ## What is selected
 
@@ -149,7 +161,7 @@ validation must use a fixed SHA and the full supported configuration set.
 
 ## Case counts in the workflow Summary
 
-The final Daily Summary starts with four numbers: **passed / failed / selected this run /
+The final Nightly Summary starts with four numbers: **passed / failed / selected this run /
 global discovered**. They count unique active Catch2 cases, identified by repository-relative
 source file and exact case name. Repeated configurations, shards and platform executions
 are not additional cases; assertion totals are not testcase totals.
@@ -194,8 +206,12 @@ regressions; they do not need a C++ test just to obtain an Issue number.
 
 ## Acceptance boundaries
 
-The ten-hour window, shard planner, artifact graph and reporting need a complete
-manual Daily replay on this revision before scheduling is enabled. A fast individual
+The complete manual replay [43714378490](https://github.com/antgroup/vsag/actions/runs/43714378490)
+on #3293 head `af70a508` passed in 7h48m, including all four supplemental x86 shards.
+Scheduling is enabled by the separately reviewed activation change; that replay
+validates its source and selected rotation, not all seven days or later main commits.
+Its 86.29% scoped line coverage remains below the 90% target, and the two exact
+HGraph Duplicate quarantines below remain not validated. A fast individual
 configuration is not proof of whole-night performance. Completed PR CI does not
 substitute for macOS/ARM/full Daily acceptance.
 Multiline DAILY_GENERATE plans include both opening and closing source-line aliases

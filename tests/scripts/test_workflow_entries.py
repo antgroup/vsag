@@ -166,16 +166,65 @@ class EntryTests(unittest.TestCase):
         values['needs.platforms-build-asan-aarch64.result'] = 'success'
         self.assertTrue(condition('main-ci.yml', 'platforms-test-asan-aarch64', values))
 
-    def test_schedules_select_performance_only(self):
+    def test_nightly_schedule_selects_complete_regression_only(self):
         text = (ROOT / '.github/workflows/daily_test.yml').read_text()
-        self.assertEqual(re.findall(r'(?m)^    - cron: [\"\x27]([^\"\x27]+)', text),
-                         ['01 08 * * 1-5', '23 3 * * 1'])
-        for cron, selected in [('01 08 * * 1-5', 'performance-performance'),
-                               ('23 3 * * 1', 'build-performance-benchmark-x86')]:
-            values = {'github.event_name': 'schedule', 'github.event.schedule': cron,
-                      'github.ref': 'refs/heads/main', 'github.repository': 'antgroup/vsag'}
-            for name in re.findall(r'(?m)^  ([\w-]+):$', text.split('jobs:\n', 1)[1]):
-                self.assertEqual(condition('daily_test.yml', name, values), name == selected, name)
+        self.assertEqual(re.findall(r"(?m)^    - cron: ['\"]([^'\"]+)", text),
+                         ['0 14 * * *', '23 3 * * 1'])
+        names = re.findall(r'(?m)^  ([\w-]+):$', text.split('jobs:\n', 1)[1])
+        benchmarks = {'performance-performance', 'build-performance-benchmark-x86'}
+        regression = set(names) - benchmarks
+        aggregate = re.search(r'(?m)^  VSAG_DAILY_AGGREGATE: (.+)$', text)[1]
+        for cron, repo, ref, selected in (
+            ('0 14 * * *', 'antgroup/vsag', 'refs/heads/main', regression),
+            ('23 3 * * 1', 'antgroup/vsag', 'refs/heads/main', {'build-performance-benchmark-x86'}),
+            ('01 08 * * 1-5', 'antgroup/vsag', 'refs/heads/main', set()),
+            ('0 15 * * *', 'antgroup/vsag', 'refs/heads/main', set()),
+            ('0 14 * * *', 'contributor/vsag', 'refs/heads/main', set()),
+            ('0 14 * * *', 'antgroup/vsag', 'refs/heads/1.1', set()),
+            ('23 3 * * 1', 'contributor/vsag', 'refs/heads/main', set()),
+        ):
+            with self.subTest(cron=cron, repo=repo, ref=ref):
+                values = {'github.event_name': 'schedule', 'github.event.schedule': cron,
+                          'github.ref': ref, 'github.repository': repo}
+                # Evaluate routing with successful dependencies; dependency failures
+                # are separately checked below and by the final result reconciler.
+                values.update({f'needs.{name}.result': 'success' for name in names})
+                for name in names:
+                    self.assertEqual(condition('daily_test.yml', name, values), name in selected, name)
+                self.assertEqual(expression(aggregate, values), '1' if selected == regression else '0')
+
+    def test_nightly_manual_and_reusable_profiles_keep_their_scope(self):
+        text = (ROOT / '.github/workflows/daily_test.yml').read_text()
+        names = re.findall(r'(?m)^  ([\w-]+):$', text.split('jobs:\n', 1)[1])
+        benchmarks = {'performance-performance', 'build-performance-benchmark-x86'}
+        for event in ('workflow_dispatch', 'push'):
+            for profile in ('', 'regression', 'performance', 'build-performance'):
+                with self.subTest(event=event, profile=profile):
+                    selected = (set(names) - benchmarks if profile in ('', 'regression') else
+                                {'performance-performance' if profile == 'performance' else
+                                 'build-performance-benchmark-x86'})
+                    values = {'github.event_name': event, 'inputs.profile': profile,
+                              'github.repository': 'antgroup/vsag', 'github.ref': 'refs/heads/main',
+                              'needs.full-coverage-changes.outputs.non_markdown': 'true'}
+                    values.update({f'needs.{name}.result': 'success' for name in names})
+                    for name in names:
+                        self.assertEqual(condition('daily_test.yml', name, values), name in selected, name)
+        # Manual regression replay of a PR/validation branch remains available.
+        values.update({'github.event_name': 'workflow_dispatch', 'inputs.profile': 'regression',
+                       'github.ref': 'refs/heads/validation'})
+        for name in names:
+            self.assertEqual(condition('daily_test.yml', name, values), name not in benchmarks, name)
+
+    def test_nightly_summary_is_selected_even_after_upstream_failure(self):
+        values = {'github.event_name': 'schedule', 'github.event.schedule': '0 14 * * *',
+                  'github.repository': 'antgroup/vsag', 'github.ref': 'refs/heads/main'}
+        for result in ('failure', 'cancelled', 'skipped'):
+            values['needs.daily-plan.result'] = result
+            values['needs.daily-extra-x86.result'] = result
+            self.assertTrue(condition('daily_test.yml', 'daily-summary', values))
+        self.assertIn('always()', job('daily_test.yml', 'daily-summary'))
+        self.assertIn('NEEDS_JSON: ${{ toJSON(needs) }}', job('daily_test.yml', 'daily-summary'))
+        self.assertIn('--expected-file', job('daily_test.yml', 'daily-summary'))
 
     def test_gate_rejects_missing_failed_cancelled_and_unexpected_skip(self):
         good = {'build': {'result': 'success'}, 'tests': {'result': 'success'}, 'unused': {'result': 'skipped'}}
@@ -235,7 +284,7 @@ class EntryTests(unittest.TestCase):
                     values = {'github.event_name': event, 'github.ref': ref,
                               'github.repository': repo, 'inputs.profile': 'performance',
                               'github.event.schedule': '01 08 * * 1-5'}
-                    expected = event != 'pull_request' and ref == 'refs/heads/main' and repo == 'antgroup/vsag'
+                    expected = event in ('workflow_dispatch', 'push') and ref == 'refs/heads/main' and repo == 'antgroup/vsag'
                     self.assertEqual(condition('daily_test.yml', 'performance-performance', values), expected)
 
     def test_runtime_benchmark_uses_shared_ref_validation_and_independent_runs(self):
