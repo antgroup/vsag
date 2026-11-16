@@ -4,6 +4,11 @@ import os
 import shutil
 import subprocess
 import sys
+# Set this before setuptools reads the platform configuration. All subprocesses,
+# including OpenBLAS and the private OpenMP build, inherit the same target.
+if sys.platform == "darwin":
+    os.environ.setdefault("MACOSX_DEPLOYMENT_TARGET", "14.0")
+
 from setuptools import setup, Extension
 from setuptools.command.build_ext import build_ext
 from setuptools.command.bdist_wheel import bdist_wheel
@@ -19,7 +24,8 @@ class CMakeBuild(build_ext):
     """Builds libvsag_c, which pyvsag loads through cffi; there is no Python extension module."""
 
     def get_ext_filename(self, ext_name):
-        return os.path.join("pyvsag", "libvsag_c.so")
+        suffix = "dylib" if sys.platform == "darwin" else "so"
+        return os.path.join("pyvsag", "libvsag_c." + suffix)
 
     @staticmethod
     def _report_ccache_stats():
@@ -60,8 +66,16 @@ class CMakeBuild(build_ext):
             "-DENABLE_TESTS=OFF",
             f"-DENABLE_LIBAIO={libaio}",
             f"-DMKL_STATIC_LINK={mkl_static_link}",
-            "-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -s",
+            "-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG"
+            + ("" if sys.platform == "darwin" else " -s"),
         ]
+        if sys.platform == "darwin":
+            cmake_args.extend([
+                "-DVSAG_OPENMP_STATIC=ON",
+                "-DCMAKE_OSX_DEPLOYMENT_TARGET=" + os.environ["MACOSX_DEPLOYMENT_TARGET"],
+            ])
+            if os.environ.get("LIBOMP_PREFIX"):
+                cmake_args.append("-DLIBOMP_PREFIX=" + os.environ["LIBOMP_PREFIX"])
         use_ccache = os.environ.get("VSAG_ENABLE_CCACHE", "OFF").strip().upper() == "ON"
         if use_ccache:
             cmake_args.append("-DENABLE_CCACHE=ON")
@@ -147,6 +161,10 @@ def _read_long_description():
 
 setup(
     version=_read_version(),
+    license_expression=("Apache-2.0 AND Apache-2.0 WITH LLVM-exception"
+                        if sys.platform == "darwin" else "Apache-2.0"),
+    license_files=(["LICENSE", "NOTICE", "licenses/LLVM-OpenMP.txt"]
+                   if sys.platform == "darwin" else ["LICENSE"]),
     long_description=_read_long_description(),
     long_description_content_type='text/markdown',
     distclass=BinaryDistribution,

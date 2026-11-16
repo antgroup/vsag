@@ -1,11 +1,12 @@
 #!/bin/bash
 
 # Exit immediately if a command exits with a non-zero status.
-set -e
+set -eo pipefail
 
 # --- Configuration ---
 VENV_DIR=".venv"
 HAVE_DOCKER=true
+WHEEL_BUILD_DIR=""
 
 # --- Prerequisite Checks ---
 echo "🔎 Checking prerequisites..."
@@ -17,7 +18,10 @@ if [ ! -f "scripts/python/prepare_python_build.sh" ]; then
     echo "❌ Preparation script not found at 'scripts/python/prepare_python_build.sh'."
     exit 1
 fi
-if ! docker info > /dev/null 2>&1; then
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  echo "🍎 Building a native macOS wheel."
+  HAVE_DOCKER=false
+elif ! docker info > /dev/null 2>&1; then
   echo "⚠️ Docker daemon is not running. Build without Docker."
   HAVE_DOCKER=false
 fi
@@ -61,7 +65,10 @@ echo "✅ Detected local architecture: $ARCH"
 cleanup() {
   echo "🧹 Cleaning up..."
   rm -f python/pyvsag/_version.py
-  rm -rf python/build python/*.so python/pyvsag/*.so
+  rm -rf python/build python/*.so python/pyvsag/*.so python/pyvsag/*.dylib
+  if [ -n "$WHEEL_BUILD_DIR" ]; then
+    rm -rf "$WHEEL_BUILD_DIR"
+  fi
   echo "✅ Cleanup complete."
 }
 
@@ -75,11 +82,14 @@ run_build() {
     pip install -q cibuildwheel
   else
     pip install build
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+      pip install delocate
+    fi
   fi
 
   trap cleanup EXIT INT TERM
 
-  rm -rf python/build python/*.so python/pyvsag/*.so
+  rm -rf python/build python/*.so python/pyvsag/*.so python/pyvsag/*.dylib
   bash ./scripts/python/prepare_python_build.sh
 
   PIP_DEFAULT_TIMEOUT="100"
@@ -100,19 +110,29 @@ run_build() {
     fi
   else
     echo "🛠️  Starting build..."
-    python -m build --wheel --outdir wheelhouse python
-    echo "✅ Build complete. Starting test..."
-    LATEST_WHEEL=$(ls -t wheelhouse/pyvsag-*.whl | head -n 1)
-    if [ -z "$LATEST_WHEEL" ]; then
-        echo "❌ Failed to find the built wheel."
+    mkdir -p wheelhouse
+    WHEEL_BUILD_DIR=$(mktemp -d "$PWD/wheelhouse/.native-build.XXXXXX")
+    python -m build --wheel --outdir "$WHEEL_BUILD_DIR" python
+    wheels=("$WHEEL_BUILD_DIR"/pyvsag-*.whl)
+    if [ "${#wheels[@]}" -ne 1 ] || [ ! -f "${wheels[0]}" ]; then
+        echo "❌ Expected exactly one newly built wheel."
         exit 1
     fi
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+      # Repair any remaining dynamic dependencies and validate the shipped architecture.
+      delocate-wheel --require-archs "$(uname -m)" \
+        --wheel-dir "$WHEEL_BUILD_DIR/repaired" "${wheels[0]}"
+      wheels=("$WHEEL_BUILD_DIR"/repaired/pyvsag-*.whl)
+      python scripts/python/check_macos_wheel.py "${wheels[0]}"
+    fi
+    LATEST_WHEEL="wheelhouse/$(basename "${wheels[0]}")"
+    cp "${wheels[0]}" "$LATEST_WHEEL"
+    echo "✅ Build complete. Starting test..."
     echo "   - Installing wheel: ${LATEST_WHEEL}"
     pip install "${LATEST_WHEEL}" --force-reinstall
     echo "   - Running tests..."
     pip install pytest
-    cd tests/python && python -m pytest . -v --tb=short 2>&1 | tee test-output.log || (cat test-output.log && exit 1)
-    cd ../..
+    (cd tests/python && python -m pytest . -v --tb=short 2>&1 | tee test-output.log)
   fi
 
   cleanup

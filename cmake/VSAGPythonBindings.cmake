@@ -31,6 +31,7 @@ elseif (VSAG_BLAS_BACKEND STREQUAL "mkl")
     maybe_add_dependencies (vsag_c mkl)
 endif ()
 if (APPLE)
+    # This also localizes the statically linked libomp's weak C++ symbols in macOS wheels.
     target_link_options (vsag_c PRIVATE
         -Wl,-exported_symbol,_vsag_*)
 else ()

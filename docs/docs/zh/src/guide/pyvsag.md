@@ -11,7 +11,7 @@ pip install pyvsag
 要求：
 
 - **平台：** Linux `x86_64` 或 `aarch64`，glibc 2.28 及以上（`manylinux_2_28`，例如 Ubuntu 20.04+、
-  Debian 10+、RHEL/Alma/Rocky 8+）。macOS、Windows 以及 Alpine 等基于 musl 的发行版没有 wheel。
+  Debian 10+、RHEL/Alma/Rocky 8+）。macOS、Windows 以及 Alpine 等基于 musl 的发行版没有已发布的 wheel；macOS arm64 可按下文在本机构建。
 - **Python：** CPython 3.10 及以上。支持 3.10 到 3.14；wheel 不依赖 Python ABI，更新的版本无需新的 wheel。
 - **依赖：** `numpy` 和 `cffi`，会自动安装。wheel 自带 OpenMP 运行时，不依赖 libaio、libcurl 和 OpenBLAS。
 
@@ -32,9 +32,38 @@ pip install wheelhouse/pyvsag-*.whl
 ```
 
 `make pyvsag` 在仓库根目录运行 `scripts/python/local_build_wheel.sh`，并把 wheel 写入 `wheelhouse/`。
-有 Docker 时在 `manylinux_2_28` 镜像中构建，并在镜像内运行 `tests/python` 的一部分用例；没有 Docker 时退回普通的
-`python -m build`，把 wheel 安装到当前虚拟环境并针对它运行 `tests/python`，得到的 wheel 带 `linux_<arch>` 标签，
-而不是 `manylinux_2_28`。如果当前不在虚拟环境中，脚本会在仓库内创建 `.venv/`。
+在 Linux 上，有 Docker 时在 `manylinux_2_28` 镜像中构建，并在镜像内运行 `tests/python` 的一部分用例；
+没有 Docker 时使用 `python -m build` 构建原生 `linux_<arch>` wheel，安装到当前虚拟环境并运行 `tests/python`。
+如果当前不在虚拟环境中，脚本会在仓库内创建 `.venv/`。
+
+在 macOS Apple Silicon 上，先安装 Xcode Command Line Tools 和 Homebrew，再运行：
+
+```bash
+bash scripts/deps/install_deps_macos.sh
+# 激活 Python 3.10+ 虚拟环境，或确保 PATH 中的 python3 为 3.10+。
+make pyvsag
+```
+
+macOS 始终原生构建，即使 Docker 正在运行。构建要求 CMake 3.20+ 和 `PATH` 中的 Perl（可用 `perl -v` 检查，缺少时运行 `brew install perl`），静态链接 OpenBLAS 和 LLVM OpenMP 20.1.8，
+仅导出 VSAG C API，以隔离其他包的 OpenMP 运行时。固定版本的 OpenMP 源码会自动下载并编译，
+仅 macOS wheel 包含其 Apache-2.0-with-LLVM-exception 许可证及归属声明。
+源码构建需要访问 GitHub Release 下载地址，或通过 `VSAG_THIRDPARTY_OPENMP_20_1_8` 和
+`VSAG_THIRDPARTY_LLVM_CMAKE_20_1_8` 配置镜像 URL，分别提供未修改的 `openmp-20.1.8.src.tar.xz` 和
+`cmake-20.1.8.src.tar.xz`；镜像文件仍须通过 SHA256 校验。OpenMP 子构建使用与 VSAG 相同的
+`CMAKE_BUILD_PARALLEL_LEVEL` 并发上限。
+构建会自动安装 `delocate`，修复动态依赖并检查本机架构；随后运行 Mach-O 审计，要求唯一原生库为
+`libvsag_c.dylib`、仅依赖系统库、仅导出 C API、包含许可证元数据，并且部署目标不高于 wheel 标签，最后安装并运行测试。
+
+默认 `MACOSX_DEPLOYMENT_TARGET` 为 `14.0`，统一应用于 VSAG 及从源码构建的依赖；默认构建无需设置环境变量。
+如需调整部署目标，可设置 `MACOSX_DEPLOYMENT_TARGET`；如需限制编译并发，可设置 `CMAKE_BUILD_PARALLEL_LEVEL`。
+`macosx_14_0_arm64` 标签记录二进制部署目标，但在新版本 Mac 上构建不能替代 macOS 14 上的运行验证。
+正式发布和每晚构建流程仍只发布 Linux wheel。在测试环境中安装 `torch` 和 `scikit-learn` 可同时运行可选的 OpenMP 共存测试。
+
+macOS wheel 构建启用 `VSAG_OPENMP_STATIC`，普通 C++ 构建仍使用动态 OpenMP。
+C++ 构建可通过 Homebrew 安装 `libomp`，或向 CMake 传入 `-DLIBOMP_PREFIX=/path/to/libomp`。
+wheel 构建可通过可选的 `LIBOMP_PREFIX` 环境变量指定包含 `$LIBOMP_PREFIX/include/omp.h` 和 `$LIBOMP_PREFIX/lib/libomp.a` 的自定义安装；
+静态库的最低系统要求不能高于部署目标。构建会拒绝要求较新系统的 Homebrew 库，而不会仅修改标签。
+取消 `LIBOMP_PREFIX` 即恢复使用兼容部署目标的源码构建。
 
 如果想直接使用源码树中的构建结果，而不打包 wheel：
 
@@ -44,6 +73,8 @@ bash scripts/python/prepare_python_build.sh    # 生成 python/pyvsag/_version.p
 export PYVSAG_LIBRARY="$PWD/build/src/libvsag_c.so"
 export PYTHONPATH="$PWD/python"
 ```
+
+macOS 上将 `build/src/libvsag_c.so` 替换为 `build/src/libvsag_c.dylib`。
 
 `PYVSAG_LIBRARY` 指定要加载的 `libvsag_c`；未设置时，`pyvsag` 加载与 Python 文件放在一起的那一份。
 

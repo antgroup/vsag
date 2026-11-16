@@ -19,6 +19,7 @@ interpreter, because the runtime that gets loaded first can decide whether a lat
 """
 
 import itertools
+import os
 import subprocess
 import sys
 import textwrap
@@ -33,7 +34,7 @@ LIBRARIES = ("pyvsag", "torch", "sklearn")
 WORKLOAD = textwrap.dedent(
     """
     import json
-    import threading
+    from concurrent.futures import ThreadPoolExecutor
 
     import numpy as np
     import pyvsag
@@ -67,15 +68,15 @@ WORKLOAD = textwrap.dedent(
             if ids[0] != i:
                 failures.append(i)
 
-    worker = threading.Thread(target=search)
-    worker.start()
-    torch.set_num_threads(4)
-    for _ in range(5):
-        product = torch.randn(256, 256) @ torch.randn(256, 256)
-        assert torch.isfinite(product).all()
-    clusters = sklearn.cluster.KMeans(n_clusters=4, n_init=2, random_state=0).fit(vectors[:, :8])
-    assert len(set(clusters.labels_)) == 4
-    worker.join()
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        worker = executor.submit(search)
+        torch.set_num_threads(4)
+        for _ in range(5):
+            product = torch.randn(256, 256) @ torch.randn(256, 256)
+            assert torch.isfinite(product).all()
+        clusters = sklearn.cluster.KMeans(n_clusters=4, n_init=2, random_state=0).fit(vectors[:, :8])
+        assert len(set(clusters.labels_)) == 4
+        worker.result()
     search()
     assert not failures, failures
     print("OPENMP_COEXISTENCE_OK")
@@ -88,6 +89,8 @@ def test_shares_a_process_with_other_openmp_runtimes(order):
     imports = "\n".join("import " + name for name in order)
     result = subprocess.run(
         [sys.executable, "-c", imports + "\n" + WORKLOAD],
+        # scikit-learn otherwise enables this workaround at import time, masking conflicts.
+        env=dict(os.environ, KMP_DUPLICATE_LIB_OK="FALSE"),
         capture_output=True,
         text=True,
         timeout=300,
