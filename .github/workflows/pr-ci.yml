@@ -115,6 +115,13 @@ jobs:
         with:
           persist-credentials: false
       - run: node --test tests/scripts/ci_runner_route.test.cjs
+      - name: Python packaging helper regressions (no native build)
+        run: >-
+          python3 -m unittest
+          tests/scripts/test_local_build_wheel.py
+          tests/scripts/test_macos_wheel_audit.py
+          tests/scripts/test_macos_openmp.py
+          tests/scripts/test_python_license.py
 
   community:
     if: always() && needs.select-checks.result == 'success' && (needs.route.result == 'success' || needs.route.result == 'skipped')

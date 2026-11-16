@@ -16,7 +16,7 @@ Requirements:
 
 - **Platform:** Linux `x86_64` or `aarch64` with glibc 2.28 or later (`manylinux_2_28`; for example
   Ubuntu 20.04+, Debian 10+, RHEL/Alma/Rocky 8+). macOS, Windows and musl-based distributions such as
-  Alpine have no wheels.
+  Alpine have no published wheels. macOS arm64 wheels can be built locally as described below.
 - **Python:** CPython 3.10 or later. 3.10 to 3.14 are supported; later releases need no new wheel, because the wheel does not depend on the Python ABI.
 - **Dependencies:** `numpy` and `cffi`, installed automatically. The wheel bundles its OpenMP runtime
   and has no libaio, libcurl or OpenBLAS dependency.
@@ -39,11 +39,46 @@ pip install wheelhouse/pyvsag-*.whl
 ```
 
 `make pyvsag` runs `scripts/python/local_build_wheel.sh` from the repository root and writes the
-wheel to `wheelhouse/`. With Docker it builds inside the `manylinux_2_28` image and runs part of
-`tests/python` there. Without Docker it falls back to a plain `python -m build`, installs the wheel
-into the active virtual environment and runs `tests/python` against it; that wheel carries a
-`linux_<arch>` tag instead of `manylinux_2_28`. Outside an active virtual environment the script
-creates `.venv/` in the repository.
+wheel to `wheelhouse/`. On Linux, with Docker it builds inside the `manylinux_2_28` image and runs
+part of `tests/python` there. Without Docker it builds a native `linux_<arch>` wheel using
+`python -m build`, installs it into the active virtual environment and runs `tests/python`.
+Outside an active virtual environment the script creates `.venv/` in the repository.
+
+On macOS Apple Silicon, install Xcode Command Line Tools and Homebrew, then run:
+
+```bash
+bash scripts/deps/install_deps_macos.sh
+# Activate a Python 3.10+ virtual environment, or put python3 3.10+ on PATH.
+make pyvsag
+```
+
+macOS always builds natively, even when Docker is running. The build requires CMake 3.20+ and
+Perl on `PATH` (`perl -v`; install with `brew install perl` if missing), and
+statically links OpenBLAS and LLVM OpenMP 20.1.8, with only the VSAG C API exported to isolate
+OpenMP from other packages. The pinned OpenMP source is downloaded and built automatically;
+its Apache-2.0-with-LLVM-exception license and attribution are included in macOS wheels only.
+The source build needs access to GitHub release downloads, or mirrors configured through
+`VSAG_THIRDPARTY_OPENMP_20_1_8` and `VSAG_THIRDPARTY_LLVM_CMAKE_20_1_8` (URLs for the unchanged
+`openmp-20.1.8.src.tar.xz` and `cmake-20.1.8.src.tar.xz` archives; SHA256 checks remain enforced).
+The OpenMP sub-build uses the same `CMAKE_BUILD_PARALLEL_LEVEL` limit as VSAG.
+`delocate` is installed automatically, repairs dynamic dependencies and checks the native architecture.
+A Mach-O audit then requires exactly `libvsag_c.dylib`, only system dependencies, C API exports,
+license metadata, and a deployment target no newer than the wheel tag, before installation and tests.
+
+The default `MACOSX_DEPLOYMENT_TARGET` is `14.0`, applied to VSAG and its source-built dependencies.
+No environment variables are needed for the default build. Set `MACOSX_DEPLOYMENT_TARGET` to
+choose another deployment target, or `CMAKE_BUILD_PARALLEL_LEVEL` to limit build concurrency.
+A `macosx_14_0_arm64` tag records the binary deployment target; building on a newer Mac does not
+replace runtime validation on macOS 14. The release and nightly workflows still publish Linux wheels
+only. Install `torch` and `scikit-learn` in the test environment to include the optional OpenMP
+coexistence tests.
+
+The macOS wheel build enables `VSAG_OPENMP_STATIC`; ordinary C++ builds keep dynamic OpenMP.
+For C++ builds, install `libomp` with Homebrew or pass `-DLIBOMP_PREFIX=/path/to/libomp` to CMake.
+For a wheel, an optional `LIBOMP_PREFIX` environment variable selects a custom installation containing
+`$LIBOMP_PREFIX/include/omp.h` and `$LIBOMP_PREFIX/lib/libomp.a`; the archive must target the requested macOS version or older.
+Newer Homebrew bottles are rejected instead of being silently relabeled. Unset `LIBOMP_PREFIX` to
+return to the compatible source build.
 
 To develop against an in-tree build without packaging a wheel:
 
@@ -53,6 +88,8 @@ bash scripts/python/prepare_python_build.sh    # generates python/pyvsag/_versio
 export PYVSAG_LIBRARY="$PWD/build/src/libvsag_c.so"
 export PYTHONPATH="$PWD/python"
 ```
+
+On macOS, use `build/src/libvsag_c.dylib` instead of `.so`.
 
 `PYVSAG_LIBRARY` selects the `libvsag_c` to load; without it, `pyvsag` loads the copy packaged next
 to the Python files.
