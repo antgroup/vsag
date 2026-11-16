@@ -176,7 +176,7 @@ pip install wheelhouse/pyvsag-*.whl
 The wheel is a `py3-none` package, so one build per architecture serves every supported CPython
 (3.10+). `make pyvsag` runs `scripts/python/local_build_wheel.sh` from the repository root and
 writes the wheel to `wheelhouse/`. With Docker it builds inside the `manylinux_2_28` image (via
-cibuildwheel) and runs part of `tests/python` there, leaving the host environment untouched. Without
+cibuildwheel) and runs part of `tests/python` there, leaving the host environment untouched. It then runs `scripts/python/check_wheel_libs.py`, which fails if the wheel bundles or links libgfortran, libquadmath, libaio, or liburing (skipped when `VSAG_USE_SYSTEM_DEPS` is not `OFF`, since system OpenBLAS pulls in libgfortran). Without
 Docker it falls back to a plain `python -m build`, installs the wheel into the active virtual
 environment and runs `tests/python` against it; that wheel carries a `linux_<arch>` tag instead of
 `manylinux_2_28`. Outside an active virtual environment the script creates `.venv/` in the

@@ -68,6 +68,8 @@ class EntryTests(unittest.TestCase):
         self.assertNotRegex(text, r'^\s+arch:\s*\n\s+description', re.M)
         # A nightly is skipped when the last successful nightly already built this main commit.
         self.assertIn('event=schedule&status=success', text)
+        self.assertIn('scripts/python/check_wheel_libs.py', text)
+        self.assertIn('VSAG_USE_SYSTEM_DEPS=OFF', text)
         self.assertIn("needs.resolve-source.outputs.skip != 'true'", text)
         # The matrix context is not available in jobs.<id>.if; GitHub rejects the workflow.
         for condition in re.findall(r'^    if: (.*)$', text, re.M):
