@@ -52,6 +52,8 @@ The VSAG algorithm achieves a significant boost of efficiency and outperforms th
 ### gist-960-euclidean
 ![](./docs/gist-960-euclidean_10_euclidean.png)
 
+Pyramid supports path filtering across named hierarchies with OR within each hierarchy and AND across hierarchies. See the [intersection query example](docs/docs/en/src/indexes/pyramid.md#intersection-across-hierarchies).
+
 ## Getting Started
 
 ### Quickstart
