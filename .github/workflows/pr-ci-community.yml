@@ -82,8 +82,25 @@ jobs:
               - 'cmake/vsag_c.map'
               - '.github/actions/python-*/**'
               - 'tests/python/**'
-              - '.github/workflows/**'
-              - 'scripts/**'
+              # Wheel build inputs and the callers of the shared Python actions.
+              - 'extern/**'
+              - 'src/**/CMakeLists.txt'
+              - 'src/**/*.cmake'
+              - 'scripts/python/**'
+              - 'scripts/deps/**'
+              - 'scripts/ci/python_ci.py'
+              - 'scripts/ci/collect_python_cache.sh'
+              # The installed-wheel test wrapper imports both planners even outside Nightly.
+              - 'scripts/testing/daily_measure.py'
+              - 'scripts/testing/daily_plan.py'
+              - 'scripts/testing/team_test_shards.py'
+              - 'tests/scripts/test_python*.py'
+              - 'tests/scripts/test_local_build_wheel.py'
+              - '.github/workflows/pr-ci.yml'
+              - '.github/workflows/pr-ci-community.yml'
+              - '.github/workflows/main-ci.yml'
+              - '.github/workflows/daily_test.yml'
+              - '.github/workflows/pyvsag-testpypi.yml'
 
   format:
     name: Format Check

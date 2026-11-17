@@ -191,6 +191,11 @@ The image workflow watches both the Dockerfiles and the shared installer. PR eve
 
 ## Main-target PR check scope
 
+A newer push cancels the previous PR run, including the Community reusable-workflow
+caller (`!cancelled()`). Final Gate reporting still uses `always()` to retain failed
+or incomplete results; manual shared checks still run when route selection is
+intentionally skipped.
+
 PRs targeting `main` keep the Linux ASan tests, examples, compatibility, changed-source
 lint, formatting, routing checks and `PR CI Gate`. Team and Community remain alternative
 Linux execution paths, not different correctness requirements.
@@ -201,6 +206,14 @@ Linux execution paths, not different correctness requirements.
   NumPy 1.x-2.x matrix and the OpenMP coexistence test stay on version branches and manual runs, and
   belong in Nightly. The wheel build tolerates the intentionally skipped Community format job on
   Team-routed C++ changes, but still stops on failed or cancelled prerequisites. Main pushes restore the same primary Python environment through Branch CI; explicit manual Python checks remain available.
+  Python selection also covers native dependency/build definitions, `scripts/python/`,
+  `scripts/deps/`, the Python CI/cache helpers, Python helper regressions and the
+  PR/Branch/Nightly/TestPyPI workflows that call the shared Python actions. The shared
+  `daily_measure.py` test wrapper and its `daily_plan.py`/`team_test_shards.py` imports
+  remain included because installed-wheel tests execute them even outside Nightly. Unrelated
+  test-planning, coverage, lint and maintenance helpers no longer trigger a wheel
+  build merely because they live under `scripts/` or `.github/workflows/`. Selected
+  wheels still receive the same build and complete ordinary pytest checks.
 - `.github/workflows/pyvsag-testpypi.yml` builds the pyvsag `py3-none` wheels for x86_64
   and aarch64 from `main` every night (03:17 Beijing time, cron `17 19 * * *`) and on manual
   dispatch, and can upload them to TestPyPI with the `TEST_PYPI_API_TOKEN` secret. Uploading is

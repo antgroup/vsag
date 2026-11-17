@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts/ci'))
 from branch_entry_policy import select
 from check_job_results import validate
+from checks_policy import matches
 
 
 def job(file, name):
@@ -30,7 +31,7 @@ def condition(file, name, values):
 
 def expression(text, values):
     text = text.removeprefix('${{').removesuffix('}}').strip()
-    text = text.replace('always()', 'True').replace('cancelled()', 'False')
+    text = text.replace('always()', 'True').replace('cancelled()', repr(bool(values.get('cancelled()', False))))
     # Evaluate this documented condition subset; never execute workflow shell code.
     token = r"'(?:[^']|'')*'|\b(?:needs|github|inputs|steps)\.[\w.-]+|\b(?:true|false)\b"
     def value(match):
@@ -48,6 +49,65 @@ def expression(text, values):
 
 
 class EntryTests(unittest.TestCase):
+    def test_community_cancels_with_superseded_run_but_keeps_manual_checks(self):
+        for cancelled in (False, True):
+            for route in ('success', 'skipped', 'failure', 'cancelled'):
+                for selected in ('success', 'skipped', 'failure', 'cancelled'):
+                    values = {'cancelled()': cancelled, 'needs.route.result': route,
+                              'needs.select-checks.result': selected}
+                    with self.subTest(cancelled=cancelled, route=route, selected=selected):
+                        self.assertEqual(condition('pr-ci.yml', 'community', values),
+                                         not cancelled and selected == 'success'
+                                         and route in ('success', 'skipped'))
+                        # Final reporting must still expose incomplete/cancelled results.
+                        self.assertTrue(condition('pr-ci.yml', 'gate', values))
+        self.assertIn('cancel-in-progress: true', (ROOT / '.github/workflows/pr-ci.yml').read_text())
+
+    def test_python_pr_paths_select_build_inputs_not_unrelated_ci_helpers(self):
+        changes = job('pr-ci-community.yml', 'changes')
+        def paths(name):
+            block = re.search(r'(?ms)^            ' + name + r':\n(.*?)(?=^            [\w-]+:|\Z)', changes)[1]
+            return re.findall(r"^              - '([^']+)'", block, re.M)
+        python_paths, cmake_paths = paths('python'), paths('cmake')
+        selected = [
+            'python/pyproject.toml', 'python/setup.py', 'python/pyvsag/index.py',
+            'tests/python/test_index.py', 'include/vsag/vsag_c_api.h', 'src/vsag_c_api.cpp',
+            'cmake/vsag_c.map', 'CMakeLists.txt', 'Makefile', 'cmake/options.cmake',
+            'extern/openblas/openblas.cmake', 'src/CMakeLists.txt', 'src/index/CMakeLists.txt',
+            'src/index/options.cmake', '.github/actions/python-wheel-build/action.yml',
+            '.github/actions/python-wheel-test/action.yml', 'scripts/python/check_wheel_libs.py',
+            'scripts/deps/install_deps_centos.sh', 'scripts/ci/python_ci.py',
+            'scripts/ci/collect_python_cache.sh', 'tests/scripts/test_python_ci.py',
+            'scripts/testing/daily_measure.py', 'scripts/testing/daily_plan.py',
+            'scripts/testing/team_test_shards.py',
+            'tests/scripts/test_local_build_wheel.py', '.github/workflows/pr-ci.yml',
+            '.github/workflows/pr-ci-community.yml', '.github/workflows/main-ci.yml',
+            '.github/workflows/daily_test.yml', '.github/workflows/pyvsag-testpypi.yml',
+        ]
+        unrelated = [
+            'scripts/testing/daily_report.py', 'scripts/testing/team_test_timings.py',
+            'scripts/ci/daily_budget.py', 'scripts/coverage/check_cov.sh',
+            'scripts/linters/prepare_lint_base.py', 'tests/scripts/test_daily_plan.py',
+            '.github/workflows/maintenance.yml', '.github/workflows/release.yml',
+            '.github/workflows/pr-issue-link.yml', '.github/workflows/pr-ci-team.yml',
+            '.github/actions/check-format/action.yml', 'docs/agents/ci-routing.md',
+            'README.md', 'tests/test_hgraph.cpp',
+        ]
+        # These simple positive globs have no extglob/negation syntax. Read the actual
+        # workflow lists so a broad scripts/** or workflows/** regression is caught.
+        for expected, files in ((True, selected), (False, unrelated)):
+            for path in files:
+                outputs = {'needs.changes.result': 'success', 'needs.format.result': 'skipped',
+                           'needs.build-python-x86.result': 'success'}
+                for name, patterns in (('python', python_paths), ('cmake', cmake_paths)):
+                    outputs[f'needs.changes.outputs.{name}'] = str(any(
+                        matches(path, pattern) for pattern in patterns)).lower()
+                for name in ('build-python-x86', 'test-python-x86'):
+                    with self.subTest(path=path, job=name):
+                        self.assertEqual(condition('pr-ci-community.yml', name, outputs), expected)
+                        self.assertFalse(condition('pr-ci-community.yml', name,
+                                                   dict(outputs, **{'cancelled()': True})))
+
     def test_exact_workflow_files_and_local_workflow_targets_exist(self):
         expected = {'pr-ci.yml', 'pr-ci-team.yml', 'pr-ci-community.yml', 'pr-issue-link.yml',
                     'main-ci.yml', 'daily_test.yml', 'manual-checks.yml', 'release.yml',
