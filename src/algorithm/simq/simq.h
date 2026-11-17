@@ -135,6 +135,16 @@ private:
     void
     build_rep_hgraph(const uint8_t* token_codes, int64_t dim);
 
+    void
+    build_fixed_representatives(const uint8_t* codes,
+                                int64_t dim,
+                                const std::vector<std::vector<InnerIdType>>& members);
+
+    void
+    build_online_representatives(const uint8_t* codes,
+                                 int64_t dim,
+                                 const std::vector<std::vector<InnerIdType>>& members);
+
     std::vector<std::pair<InnerIdType, float>>
     coarse_search(const float* query_tokens,
                   uint32_t query_token_count,
@@ -200,6 +210,7 @@ private:
 
     double split_delay_seconds_{0.0};
 
+    bool enable_build_centroid_updates_{false};
     bool support_duplicate_{false};
     bool deduplicate_storage_{false};
 

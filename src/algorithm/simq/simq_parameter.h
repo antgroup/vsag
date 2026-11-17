@@ -39,6 +39,7 @@ public:
     int64_t max_cluster_size{64};    // split threshold
     int64_t split_start_idx{32};     // index within sorted cluster where new cluster begins
     int64_t random_seed{42};
+    bool enable_build_centroid_updates{false};
 
     // Search parameters (index-level defaults, overridable per-query)
     int64_t coarse_k{8};    // clusters searched per query token

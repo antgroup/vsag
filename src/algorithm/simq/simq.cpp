@@ -185,6 +185,7 @@ public:
                             int64_t split_start_idx,
                             int64_t random_seed,
                             int64_t build_thread_count,
+                            bool enable_build_centroid_updates,
                             IndexCommonParam common_param,
                             FlattenInterfacePtr storage,
                             std::string quantization)
@@ -193,6 +194,7 @@ public:
           split_start_idx_(static_cast<int>(split_start_idx)),
           random_seed_(static_cast<int>(random_seed)),
           build_thread_count_(build_thread_count),
+          enable_build_centroid_updates_(enable_build_centroid_updates),
           common_param_(std::move(common_param)),
           storage_(std::move(storage)),
           quantization_(std::move(quantization)) {
@@ -203,7 +205,10 @@ public:
     ~HGraphDynamicClustering() = default;
 
     void
-    Fit(const uint8_t* codes, int64_t num_vecs, int64_t dim);
+    Fit(const uint8_t* codes,
+        int64_t num_vecs,
+        int64_t dim,
+        const std::shared_ptr<SafeThreadPool>& thread_pool);
 
     std::atomic<uint64_t> center_update_count_{0};
     std::vector<int> cluster_centers_;
@@ -242,6 +247,10 @@ private:
     void
     split_overflow_clusters(int cid);
     void
+    fit_fixed_centers(const std::vector<int>& all_indices,
+                      int64_t first,
+                      const std::shared_ptr<SafeThreadPool>& thread_pool);
+    void
     rebuild_center_sum(int cid);
     void
     insert_token(int vid, int nearest, bool allow_split = true);
@@ -250,6 +259,7 @@ private:
     int split_start_idx_;
     int random_seed_;
     int64_t build_thread_count_;
+    bool enable_build_centroid_updates_;
     IndexCommonParam common_param_;
 
     FlattenInterfacePtr storage_;
@@ -300,7 +310,7 @@ HGraphDynamicClustering::find_nearest_cluster(int vec_id) const {
 
     int nearest_id = static_cast<int>(result->GetIds()[0]);
 
-    return clusters_.count(nearest_id) ? nearest_id : cluster_centers_.front();
+    return clusters_.count(nearest_id) != 0 ? nearest_id : cluster_centers_.front();
 }
 
 float
@@ -341,16 +351,17 @@ HGraphDynamicClustering::rebuild_center_sum(int cid) {
             center.sum[d] += decoded[d];
         }
     }
+    const auto member_count = static_cast<double>(members.size());
     for (int64_t d = 0; d < dim_; ++d) {
-        center.mean[d] = static_cast<float>(center.sum[d] / members.size());
+        center.mean[d] = static_cast<float>(center.sum[d] / member_count);
     }
     token_codes_->EncodeToken(center.mean.data(), center.encoded_mean.data());
 }
 
 void
 HGraphDynamicClustering::insert_token(int vid, int nearest, bool allow_split) {
-    CHECK_ARGUMENT(vid >= 0 and vid < num_vecs_ and clusters_.count(nearest) != 0,
-                   "simq: invalid token assignment");
+    const bool valid_assignment = vid >= 0 and vid < num_vecs_ and clusters_.count(nearest) != 0;
+    CHECK_ARGUMENT(valid_assignment, "simq: invalid token assignment");
     const float dist = ip_distance(vid, nearest);
     sorted_insert(clusters_.at(nearest), static_cast<InnerIdType>(vid), dist);
     vec_to_cluster_[vid] = nearest;
@@ -380,7 +391,7 @@ HGraphDynamicClustering::refresh_center(int cid, bool in_graph) {
     }
     token_codes_->EncodeToken(mean.data(), center.encoded_mean.data());
     for (auto& member : members) {
-        member.distance = ip_distance(member.vec_id, cid);
+        member.distance = ip_distance(static_cast<int>(member.vec_id), cid);
     }
     std::sort(members.begin(), members.end(), [](const auto& a, const auto& b) {
         return a.distance == b.distance ? a.vec_id < b.vec_id : a.distance < b.distance;
@@ -398,13 +409,17 @@ HGraphDynamicClustering::split_cluster(int old_center_id) {
     // The caller holds the exclusive graph lock (or there is only one worker).
     // HGraph's own Add acquires neighbor locks internally; temporarily remove
     // extra vector read locking to avoid recursive acquisition of those locks.
-    hgraph_->SetClusterVectorNodeLocks(false);
     struct RestoreVectorLocks {
         HGraph* graph;
         ~RestoreVectorLocks() {
-            graph->SetClusterVectorNodeLocks(true);
+            if (graph != nullptr) {
+                graph->SetClusterVectorNodeLocks(true);
+            }
         }
-    } restore{hgraph_.get()};
+    } restore{enable_build_centroid_updates_ ? hgraph_.get() : nullptr};
+    if (restore.graph != nullptr) {
+        restore.graph->SetClusterVectorNodeLocks(false);
+    }
     auto it = clusters_.find(old_center_id);
     if (it == clusters_.end()) {
         return -1;  // Cluster not found
@@ -415,25 +430,22 @@ HGraphDynamicClustering::split_cluster(int old_center_id) {
         return -1;  // Not enough elements to split
     }
 
-    int new_center_id = static_cast<int>(cluster.back().vec_id);
-    if (clusters_.count(new_center_id) != 0) {
-        // A non-unit seed or moving mean need not leave the original seed first in distance order.
-        auto candidate = std::find_if(cluster.rbegin(), cluster.rend(), [&](const auto& entry) {
-            return clusters_.count(static_cast<int>(entry.vec_id)) == 0;
-        });
-        CHECK_ARGUMENT(candidate != cluster.rend(), "simq: split requires a fresh center label");
-        new_center_id = static_cast<int>(candidate->vec_id);
-        // Keep the chosen representative in the moved partition.
-        if (candidate->vec_id != cluster.back().vec_id) {
-            std::iter_swap(candidate, cluster.rbegin());
-        }
+    const auto split_it = cluster.begin() + (split_start_idx_ - 1);
+    // Starting from the far end prefers a token in the moved partition.
+    const auto candidate = std::find_if(cluster.rbegin(), cluster.rend(), [&](const auto& entry) {
+        return clusters_.count(static_cast<int>(entry.vec_id)) == 0;
+    });
+    CHECK_ARGUMENT(candidate != cluster.rend(), "simq: split requires a fresh center label");
+    const auto new_center_id = static_cast<int>(candidate->vec_id);
+    if (candidate != cluster.rbegin() and
+        (enable_build_centroid_updates_ or candidate.base() <= split_it)) {
+        std::iter_swap(candidate, cluster.rbegin());
     }
 
     if (new_center_id < 0 || new_center_id >= num_vecs_) {
         return -1;
     }
 
-    auto split_it = cluster.begin() + (split_start_idx_ - 1);
     std::vector<ClusterMemberEntry> to_move(split_it, cluster.end());
     cluster.erase(split_it, cluster.end());
 
@@ -452,22 +464,26 @@ HGraphDynamicClustering::split_cluster(int old_center_id) {
 
     clusters_[new_center_id] = std::move(new_cluster);
     cluster_centers_.push_back(new_center_id);
-    // Splitting changes membership; rebuild both sums before publishing either mean.
-    rebuild_center_sum(old_center_id);
-    rebuild_center_sum(new_center_id);
-    refresh_center(old_center_id, true);
-    refresh_center(new_center_id, false);
-
-    if (hgraph_ != nullptr) {
-        auto label = static_cast<int64_t>(new_center_id);
-        auto new_ds = Dataset::Make();
-        new_ds->NumElements(1)
-            ->Dim(dim_)
-            ->Float32Vectors(center_vector(new_center_id))
-            ->Ids(&label)
-            ->Owner(false);
-        CHECK_ARGUMENT(hgraph_->Add(new_ds).empty(), "simq: new cluster label already exists");
+    std::vector<float> fixed_center;
+    const float* center;
+    if (enable_build_centroid_updates_) {
+        // Splitting changes membership; rebuild both sums before publishing either mean.
+        rebuild_center_sum(old_center_id);
+        rebuild_center_sum(new_center_id);
+        refresh_center(old_center_id, true);
+        refresh_center(new_center_id, false);
+        center = center_vector(new_center_id);
+    } else {
+        fixed_center.resize(dim_);
+        storage_->Decode(codes_ + new_center_id * code_size_, fixed_center.data());
+        center = fixed_center.data();
     }
+
+    auto label = static_cast<int64_t>(new_center_id);
+    auto new_ds = Dataset::Make();
+    new_ds->NumElements(1)->Dim(dim_)->Float32Vectors(center)->Ids(&label)->Owner(false);
+    auto failed = hgraph_->Add(new_ds);
+    CHECK_ARGUMENT(failed.empty(), "simq: new cluster label already exists");
     return new_center_id;
 }
 
@@ -489,7 +505,57 @@ HGraphDynamicClustering::split_overflow_clusters(int cid) {
 }
 
 void
-HGraphDynamicClustering::Fit(const uint8_t* codes, int64_t num_vecs, int64_t dim) {
+HGraphDynamicClustering::fit_fixed_centers(const std::vector<int>& all_indices,
+                                           int64_t first,
+                                           const std::shared_ptr<SafeThreadPool>& thread_pool) {
+    constexpr int64_t batch_size = 10000;
+    for (int64_t start = first; start < num_vecs_; start += batch_size) {
+        const int64_t count = std::min(batch_size, num_vecs_ - start);
+        std::vector<int> assignments(count);
+        const auto assign = [&](int64_t begin, int64_t end) {
+            for (int64_t i = begin; i < end; ++i) {
+                assignments[i] = find_nearest_cluster(all_indices[start + i]);
+            }
+        };
+        if (thread_pool && build_thread_count_ > 1 && count > 100) {
+            const int64_t chunk_size = (count + build_thread_count_ - 1) / build_thread_count_;
+            std::vector<std::future<void>> futures;
+            futures.reserve((count + chunk_size - 1) / chunk_size);
+            try {
+                for (int64_t begin = 0; begin < count; begin += chunk_size) {
+                    const auto end = std::min(begin + chunk_size, count);
+                    futures.emplace_back(
+                        thread_pool->GeneralEnqueue([&, begin, end]() { assign(begin, end); }));
+                }
+            } catch (...) {
+                for (auto& future : futures) {
+                    future.wait();
+                }
+                throw;
+            }
+            wait_all_futures(futures);
+        } else {
+            assign(0, count);
+        }
+        // The graph changes only after all assignments in the batch have completed.
+        for (int64_t i = 0; i < count; ++i) {
+            const int vid = all_indices[start + i];
+            const int nearest = assignments[i];
+            auto& members = clusters_.at(nearest);
+            sorted_insert(members, static_cast<InnerIdType>(vid), ip_distance(vid, nearest));
+            vec_to_cluster_[vid] = nearest;
+            if (static_cast<int>(members.size()) > max_cluster_size_) {
+                split_cluster(nearest);
+            }
+        }
+    }
+}
+
+void
+HGraphDynamicClustering::Fit(const uint8_t* codes,
+                             int64_t num_vecs,
+                             int64_t dim,
+                             const std::shared_ptr<SafeThreadPool>& thread_pool) {
     codes_ = codes;
     code_size_ = storage_->GetQuantizerCodeSize();
     CHECK_ARGUMENT(code_size_ > 0, "simq: empty token encoding");
@@ -513,10 +579,16 @@ HGraphDynamicClustering::Fit(const uint8_t* codes, int64_t num_vecs, int64_t dim
         cluster.clear();
         cluster.push_back({static_cast<InnerIdType>(cid), 0.0F});
         vec_to_cluster_[cid] = cid;
-        rebuild_center_sum(cid);
+        if (enable_build_centroid_updates_) {
+            rebuild_center_sum(cid);
+        }
     }
 
     build_hgraph(init_centers, dim);
+    if (not enable_build_centroid_updates_) {
+        fit_fixed_centers(all_indices, num_init, thread_pool);
+        return;
+    }
     hgraph_->SetClusterVectorNodeLocks(true);
 
     const auto insertion_start = std::chrono::steady_clock::now();
@@ -597,7 +669,7 @@ HGraphDynamicClustering::Fit(const uint8_t* codes, int64_t num_vecs, int64_t dim
         std::chrono::duration<double>(std::chrono::steady_clock::now() - insertion_start).count();
     std::cerr << "SIMQ_TOKEN_INSERT_PROFILE threads=" << workers << " tokens=" << num_vecs_ - first
               << " seconds=" << insertion_seconds << " center_updates=" << center_update_count_
-              << std::endl;
+              << '\n';
 }
 
 }  // anonymous namespace
@@ -624,6 +696,7 @@ SIMQ::SIMQ(const SIMQParameterPtr& param, const IndexCommonParam& common_param)
     default_coarse_k_ = param->coarse_k;
     default_rerank_k_ = param->rerank_k;
     split_delay_seconds_ = param->split_delay_seconds;
+    enable_build_centroid_updates_ = param->enable_build_centroid_updates;
     support_duplicate_ = param->support_duplicate;
     deduplicate_storage_ = param->deduplicate_storage;
     this->has_raw_vector_ = true;
@@ -729,12 +802,14 @@ SIMQ::run_clustering(const uint8_t* token_codes,
                                        split_start_idx_,
                                        random_seed_,
                                        static_cast<int64_t>(build_thread_count_),
+                                       enable_build_centroid_updates_,
                                        common_param_,
                                        mv_codes_,
                                        quantization_type_);
-    clustering.Fit(token_codes, num_vecs, dim);
+    clustering.Fit(token_codes, num_vecs, dim, this->thread_pool_);
     center_update_count_ = clustering.center_update_count_;
-    {  // Verify membership and capacity after all insertion workers finish.
+    // Verify membership and capacity after all workers finish.
+    if (enable_build_centroid_updates_) {
         std::vector<uint8_t> seen(static_cast<uint64_t>(num_vecs), 0);
         uint64_t assigned = 0;
         for (const auto& [cid, members] : clustering.clusters_) {
@@ -793,6 +868,70 @@ SIMQ::run_clustering(const uint8_t* token_codes,
 }
 
 void
+SIMQ::build_fixed_representatives(const uint8_t* codes,
+                                  int64_t dim,
+                                  const std::vector<std::vector<InnerIdType>>& members) {
+    const auto code_size = mv_codes_->GetQuantizerCodeSize();
+    const auto select_representative = [&](uint64_t cid) {
+        thread_local std::vector<float> mean;
+        thread_local std::vector<float> decoded;
+        thread_local std::vector<uint8_t> mean_code;
+        mean.assign(dim, 0.0F);
+        decoded.resize(dim);
+        mean_code.resize(code_size);
+        CHECK_ARGUMENT(not members[cid].empty(), "simq empty partition");
+        for (const auto tid : members[cid]) {
+            mv_codes_->Decode(codes + tid * code_size, decoded.data());
+            for (int64_t d = 0; d < dim; ++d) {
+                mean[d] += decoded[d];
+            }
+        }
+        for (auto& value : mean) {
+            value /= static_cast<float>(members[cid].size());
+        }
+        token_codes_->EncodeToken(mean.data(), mean_code.data());
+        float best = std::numeric_limits<float>::max();
+        auto representative = members[cid].front();
+        for (const auto tid : members[cid]) {
+            const auto distance =
+                token_codes_->ComputeTokenCodes(mean_code.data(), codes + tid * code_size);
+            if (distance < best) {
+                best = distance;
+                representative = tid;
+            }
+        }
+        std::memcpy(representative_codes_.data() + cid * code_size,
+                    codes + representative * code_size,
+                    code_size);
+    };
+
+    if (this->thread_pool_ && members.size() > 10) {
+        std::vector<std::future<void>> futures;
+        futures.reserve(members.size());
+        try {
+            for (uint64_t cid = 0; cid < members.size(); ++cid) {
+                futures.emplace_back(
+                    this->thread_pool_->GeneralEnqueue([&, cid]() { select_representative(cid); }));
+            }
+        } catch (...) {
+            for (auto& future : futures) {
+                future.wait();
+            }
+            throw;
+        }
+        wait_all_futures(futures);
+    } else {
+        for (uint64_t cid = 0; cid < members.size(); ++cid) {
+            select_representative(cid);
+        }
+    }
+
+    std::vector<uint64_t> labels(members.size());
+    std::iota(labels.begin(), labels.end(), uint64_t{0});
+    insert_simq_representatives(rep_hgraph_, labels, representative_codes_.data(), mv_codes_, dim);
+}
+
+void
 SIMQ::build_rep_hgraph(const uint8_t* codes, int64_t dim) {
     const auto cluster_count = static_cast<uint64_t>(num_clusters_);
     const auto code_size = mv_codes_->GetQuantizerCodeSize();
@@ -814,6 +953,25 @@ SIMQ::build_rep_hgraph(const uint8_t* codes, int64_t dim) {
                               deduplicate_storage_),
         cp);
     rep_hgraph_ = std::make_shared<HGraph>(param, cp);
+    if (not enable_build_centroid_updates_) {
+        build_fixed_representatives(codes, dim, members);
+    } else {
+        build_online_representatives(codes, dim, members);
+    }
+    for (uint64_t tid = 0; tid < vec_to_cluster_.size(); ++tid) {
+        token_to_dist_[tid] = token_codes_->ComputeTokenCodes(
+            codes + tid * code_size,
+            representative_codes_.data() + vec_to_cluster_[tid] * code_size);
+    }
+    ++final_graph_build_count_;
+}
+
+void
+SIMQ::build_online_representatives(const uint8_t* codes,
+                                   int64_t dim,
+                                   const std::vector<std::vector<InnerIdType>>& members) {
+    const auto cluster_count = static_cast<uint64_t>(members.size());
+    const auto code_size = mv_codes_->GetQuantizerCodeSize();
     constexpr uint64_t batch_limit = 4096;
     for (uint64_t offset = 0; offset < cluster_count; offset += batch_limit) {
         const uint64_t count = std::min(batch_limit, cluster_count - offset);
@@ -831,17 +989,26 @@ SIMQ::build_rep_hgraph(const uint8_t* codes, int64_t dim) {
                 }
             }
             auto* mean = means.data() + i * dim;
+            const auto member_count = static_cast<double>(members[cid].size());
             for (int64_t d = 0; d < dim; ++d) {
-                mean[d] = static_cast<float>(sum[d] / members[cid].size());
+                mean[d] = static_cast<float>(sum[d] / member_count);
             }
             labels[i] = static_cast<int64_t>(cid);
             token_codes_->EncodeToken(mean, representative_codes_.data() + cid * code_size);
         };
         if (this->thread_pool_ && count > 10) {
             std::vector<std::future<void>> futures;
-            for (uint64_t i = 0; i < count; ++i) {
-                futures.emplace_back(
-                    this->thread_pool_->GeneralEnqueue([&, i]() { compute_mean(i); }));
+            futures.reserve(count);
+            try {
+                for (uint64_t i = 0; i < count; ++i) {
+                    futures.emplace_back(
+                        this->thread_pool_->GeneralEnqueue([&, i]() { compute_mean(i); }));
+                }
+            } catch (...) {
+                for (auto& future : futures) {
+                    future.wait();
+                }
+                throw;
             }
             wait_all_futures(futures);
         } else {
@@ -861,12 +1028,6 @@ SIMQ::build_rep_hgraph(const uint8_t* codes, int64_t dim) {
             rep_hgraph_->Add(ds);
         }
     }
-    for (uint64_t tid = 0; tid < vec_to_cluster_.size(); ++tid) {
-        token_to_dist_[tid] = token_codes_->ComputeTokenCodes(
-            codes + tid * code_size,
-            representative_codes_.data() + vec_to_cluster_[tid] * code_size);
-    }
-    ++final_graph_build_count_;
 }
 
 static void
@@ -1328,7 +1489,6 @@ SIMQ::coarse_search(const float* query_tokens,
                     int64_t coarse_k,
                     uint64_t* coarse_dist_cmp,
                     uint64_t* coarse_probe_count) const {
-    constexpr auto hgraph_parameters = R"({"hgraph": {"ef_search": 100}})";
     const auto n_docs = static_cast<size_t>(total_count_);
     std::vector<float> score_buf(n_docs, 0.0F);
     std::vector<bool> seen_buf(n_docs, false);
@@ -1338,8 +1498,7 @@ SIMQ::coarse_search(const float* query_tokens,
     dirty_list.reserve(n_docs);
 
     // Each query token's search is independent. We do all KnnSearch calls in
-    // parallel, then sequentially propagate scores (which is fast O(k) per
-    // token).
+    // parallel, then sequentially propagate scores (which is fast O(k) per token).
     struct TokenSearchResult {
         std::vector<std::pair<float, InnerIdType>> cscores;
         int64_t actual_coarse_k{0};
@@ -1364,7 +1523,7 @@ SIMQ::coarse_search(const float* query_tokens,
                 auto query_ds = Dataset::Make();
                 query_ds->NumElements(1)->Dim(dim_)->Float32Vectors(qt)->Owner(false);
                 auto result_ds = rep_hgraph_->KnnSearch(
-                    query_ds, result.actual_coarse_k, hgraph_parameters, nullptr);
+                    query_ds, result.actual_coarse_k, R"({"hgraph": {"ef_search": 100}})", nullptr);
 
                 if (coarse_dist_cmp != nullptr) {
                     result.dist_cmp = read_dist_cmp(result_ds);
@@ -1399,7 +1558,7 @@ SIMQ::coarse_search(const float* query_tokens,
             auto query_ds = Dataset::Make();
             query_ds->NumElements(1)->Dim(dim_)->Float32Vectors(qt)->Owner(false);
             auto result_ds = rep_hgraph_->KnnSearch(
-                query_ds, result.actual_coarse_k, hgraph_parameters, nullptr);
+                query_ds, result.actual_coarse_k, R"({"hgraph": {"ef_search": 100}})", nullptr);
 
             if (coarse_dist_cmp != nullptr) {
                 result.dist_cmp = read_dist_cmp(result_ds);
@@ -1537,12 +1696,8 @@ SIMQ::KnnSearchImpl(const DatasetPtr& query,
     uint64_t coarse_dist_cmp = 0;
     uint64_t coarse_probe_count = 0;
     auto t_coarse_start = std::chrono::steady_clock::now();
-    auto coarse_results =
-        coarse_search(query_mvs[0].vectors_,
-                      query_mvs[0].len_,
-                      coarse_k,
-                      &coarse_dist_cmp,
-                      &coarse_probe_count);
+    auto coarse_results = coarse_search(
+        query_mvs[0].vectors_, query_mvs[0].len_, coarse_k, &coarse_dist_cmp, &coarse_probe_count);
     double coarse_ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_coarse_start)
             .count();
@@ -1718,12 +1873,8 @@ SIMQ::RangeSearchImpl(const DatasetPtr& query,
     uint64_t coarse_dist_cmp = 0;
     uint64_t coarse_probe_count = 0;
     auto t_coarse_start = std::chrono::steady_clock::now();
-    auto coarse_results =
-        coarse_search(query_mvs[0].vectors_,
-                      query_mvs[0].len_,
-                      coarse_k,
-                      &coarse_dist_cmp,
-                      &coarse_probe_count);
+    auto coarse_results = coarse_search(
+        query_mvs[0].vectors_, query_mvs[0].len_, coarse_k, &coarse_dist_cmp, &coarse_probe_count);
     double coarse_ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_coarse_start)
             .count();
@@ -1936,10 +2087,12 @@ SIMQ::Deserialize(StreamReader& reader) {
         // NOLINTNEXTLINE(readability-simplify-boolean-expr)
         CHECK_ARGUMENT(not tmp_param.deduplicate_storage or tmp_param.support_duplicate,
                        "SIMQ deserialize deduplicate_storage requires support_duplicate");
+        enable_build_centroid_updates_ = tmp_param.enable_build_centroid_updates;
         support_duplicate_ = tmp_param.support_duplicate;
         deduplicate_storage_ = tmp_param.deduplicate_storage;
         auto simq_param = std::dynamic_pointer_cast<SIMQParameter>(this->create_param_ptr_);
         if (simq_param) {
+            simq_param->enable_build_centroid_updates = tmp_param.enable_build_centroid_updates;
             simq_param->support_duplicate = tmp_param.support_duplicate;
             simq_param->deduplicate_storage = tmp_param.deduplicate_storage;
         }
@@ -2191,7 +2344,8 @@ SIMQ::CheckAndMappingExternalParam(const JsonType& external_param,
                    key == "split_start_idx" || key == "random_seed" || key == "coarse_k" ||
                    key == "rerank_k" || key == "quantization_type" ||
                    key == BUILD_THREAD_COUNT_KEY || key == "split_delay_seconds" ||
-                   key == "support_duplicate" || key == "deduplicate_storage") {
+                   key == "support_duplicate" || key == "deduplicate_storage" ||
+                   key == "enable_build_centroid_updates") {
             inner_json[key].SetJson(value);
         } else {
             throw VsagException(ErrorType::INVALID_ARGUMENT,

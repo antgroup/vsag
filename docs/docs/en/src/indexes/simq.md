@@ -106,7 +106,7 @@ Input is FP32 `MultiVector` data regardless of the internal storage quantization
 
 ### Fields under `index_param`
 
-These are all 15 public SIMQ build fields. Other keys under `index_param` are rejected.
+These are all 16 public SIMQ build fields. Other keys under `index_param` are rejected.
 
 | Parameter | Type | Default | Constraints and effect |
 |-----------|------|---------|------------------------|
@@ -116,6 +116,7 @@ These are all 15 public SIMQ build fields. Other keys under `index_param` are re
 | `base_cache_total_size` | unsigned int | `268435456` (256 MiB) | Non-negative byte budget for that cache. Capacity is rounded down to 128 KiB pages; less than one page (including `0`) disables caching even when enabled. Applies to the document-code IO instance, not the representative graph. |
 | `quantization_type` | string | `"fp32"` | Factory-supported document/graph storage types: `fp32`, `fp16`, `bf16`, `sq8_uniform`, `int8`. See the `int8` caveat below; this does not change FP32 input requirements. |
 | `build_thread_count` | unsigned int | `1` | Shared parser accepts non-negative integers without a SIMQ-specific positive check; use `>= 1`. Controls construction/representative HGraphs and clustering work, not a per-query parallelism override. Clustering uses at least one worker. |
+| `enable_build_centroid_updates` | bool | `false` | Update cluster centers as tokens are inserted during the initial Build and enable parallel token insertion. The final representative graph uses cluster means. The default uses fixed seed centers during clustering and selects a representative token per cluster. |
 | `init_cluster_ratio` | float | `0.2` | In `(0, 1]`; fraction of tokens selected as initial seeds. Smaller values tend to produce fewer, larger partitions. |
 | `max_cluster_size` | int | `64` | Must be `> 1`; token-count threshold for splitting a partition, not a document-count limit. |
 | `split_start_idx` | int | `32` | Must be in `(1, max_cluster_size)`; start of the new partition in the distance-sorted overflowing partition. |
