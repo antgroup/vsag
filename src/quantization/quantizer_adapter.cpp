@@ -43,6 +43,16 @@ struct HalfInputTraits {
     static constexpr bool ENABLED = false;
 };
 
+template <typename QuantT>
+struct RaBitQHalfTrainingTraits {
+    static constexpr bool ENABLED = false;
+};
+
+template <MetricType metric>
+struct RaBitQHalfTrainingTraits<RaBitQuantizer<metric>> {
+    static constexpr bool ENABLED = true;
+};
+
 template <typename Format, MetricType metric>
 struct HalfInputTraits<HalfPrecisionQuantizer<Format, metric>> {
     static constexpr bool ENABLED = true;
@@ -77,6 +87,10 @@ QuantizerAdapter<QuantT, DataT>::TrainImpl(const float* data, uint64_t count) {
         this->is_trained_ = this->inner_quantizer_->ReTrain(vec.data(), count);
         return this->is_trained_;
     } else if constexpr (std::is_same_v<DataT, uint16_t>) {
+        if constexpr (RaBitQHalfTrainingTraits<QuantT>::ENABLED) {
+            this->is_trained_ = this->inner_quantizer_->ReTrainHalf(data, count, data_type_);
+            return this->is_trained_;
+        }
         const auto* data_fp16 = reinterpret_cast<const uint16_t*>(data);
         Vector<float> vec(this->dim_ * count, this->allocator_);
         for (int64_t i = 0; i < this->dim_ * count; ++i) {
