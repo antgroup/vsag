@@ -432,8 +432,20 @@ jobs:
           echo ${EXTRA_DEFINED}
           echo ${EXTRA_KEY}
           echo "SIMD_KEY=${EXTRA_KEY}" >> $GITHUB_ENV
-          export VSAG_ENABLE_INTEL_MKL=ON CMAKE_GENERATOR="Ninja"; make asan
-          cmake --build build --target unittests_simd --parallel 3
+          export VSAG_ENABLE_INTEL_MKL=ON CMAKE_GENERATOR="Ninja"
+          python3 scripts/ci/monitor_build.py --output-dir "$RUNNER_TEMP/simd-build-diagnostics/asan" -- \
+            make asan COMPILE_JOBS=3 DATACELL_COMPILE_JOBS=1
+          python3 scripts/ci/monitor_build.py --output-dir "$RUNNER_TEMP/simd-build-diagnostics/simd" -- \
+            cmake --build build --target unittests_simd --parallel 3
+      - name: Upload SIMD build diagnostics
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v5
+        with:
+          path: ${{ runner.temp }}/simd-build-diagnostics/
+          name: simd-build-diagnostics-${{ strategy.job-index }}-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 7
       - name: Clean
         run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
