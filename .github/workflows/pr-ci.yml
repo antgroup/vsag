@@ -114,6 +114,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Test SIMD check selection
+        run: |
+          python3 -m venv "$RUNNER_TEMP/check-selection-tests"
+          "$RUNNER_TEMP/check-selection-tests/bin/pip" install --disable-pip-version-check -r scripts/ci/check-selection-requirements.txt
+          "$RUNNER_TEMP/check-selection-tests/bin/python" -m unittest tests.scripts.test_simd_check_selection
       - run: node --test tests/scripts/ci_runner_route.test.cjs
       - name: Python packaging helper regressions (no native build)
         run: >-
@@ -168,7 +173,7 @@ jobs:
           persist-credentials: false
       - name: Select original event and path scopes
         id: select
-        run: python3 scripts/ci/checks_policy.py
+        run: bash scripts/ci/select_checks.sh
 
   gate:
     # Always instantiate one named context, including out-of-scope runs.
