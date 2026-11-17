@@ -24,7 +24,7 @@ docker pull vsaglib/vsag:ubuntu
 - Operating System:
   - Ubuntu 20.04 or later
   - or CentOS 7 or later
-  - or macOS 14 or later (arm64, C++ build path)
+  - or macOS 15 or later (arm64, C++ build path)
 - Compiler:
   - GCC version 9.4.0 or later
   - or Clang version 13.0.0 or later

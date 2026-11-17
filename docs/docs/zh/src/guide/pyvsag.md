@@ -1,6 +1,6 @@
 # pyvsag
 
-`pyvsag` 是 VSAG 官方的 Python 绑定，是一个纯 Python 层，通过 [cffi](https://cffi.readthedocs.io/) 调用 [C API](c_api.md)（`libvsag_c`）。每个 CPU 架构只需一个 `py3-none-manylinux_2_28` wheel，即可适用于所有 CPython 3.10+ 版本。数据仅以指针、形状和 dtype 的形式跨越边界，因此不依赖 NumPy 的 ABI。源代码位于 [`python/`](https://github.com/antgroup/vsag/tree/main/python)。
+`pyvsag` 是 VSAG 官方的 Python 绑定，是一个纯 Python 层，通过 [cffi](https://cffi.readthedocs.io/) 调用 [C API](c_api.md)（`libvsag_c`）。每个 CPU 架构只需一个 `py3-none` 平台 wheel，即可适用于所有 CPython 3.10+ 版本。数据仅以指针、形状和 dtype 的形式跨越边界，因此不依赖 NumPy 的 ABI。源代码位于 [`python/`](https://github.com/antgroup/vsag/tree/main/python)。
 
 ## 安装
 
@@ -11,18 +11,34 @@ pip install pyvsag
 要求：
 
 - **平台：** Linux `x86_64` 或 `aarch64`，glibc 2.28 及以上（`manylinux_2_28`，例如 Ubuntu 20.04+、
-  Debian 10+、RHEL/Alma/Rocky 8+）。macOS、Windows 以及 Alpine 等基于 musl 的发行版没有已发布的 wheel；macOS arm64 可按下文在本机构建。
+  Debian 10+、RHEL/Alma/Rocky 8+）。正式 PyPI 暂无 macOS、Windows 以及 Alpine 等基于 musl 的发行版 wheel；macOS arm64 可通过下文的 TestPyPI 工作流获取，也可在本机构建。
 - **Python：** CPython 3.10 及以上。支持 3.10 到 3.14；wheel 不依赖 Python ABI，更新的版本无需新的 wheel。
 - **依赖：** `numpy` 和 `cffi`，会自动安装。wheel 自带 OpenMP 运行时，不依赖 libaio、libcurl 和 OpenBLAS。
 
 ### 每晚构建（TestPyPI）
 
 `pyvsag TestPyPI` 工作流会在每晚和手动触发时，用 `main` 构建 wheel 并发布到 TestPyPI（上传可暂停）。
+覆盖 Linux x86_64/aarch64 和 macOS Apple Silicon arm64（`macosx_15_0_arm64`）。
 版本号带 `.devN`，需要加 `--pre`；依赖仍从正式 PyPI 安装：
 
 ```bash
-pip install --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ pyvsag
+pip install numpy cffi
+pip install --pre --no-deps --index-url https://test.pypi.org/simple/ pyvsag
 ```
+
+macOS 作业执行 `make pyvsag` 和 Mach-O 审计，然后在干净环境中安装同一个经 SHA-256 校验的 wheel：
+CPython 3.10–3.14 搭配 NumPy 2.x，CPython 3.10–3.12 额外覆盖 NumPy 1.26.4。
+两个 Python 3.12 作业分别搭配 NumPy 1.26.4 和 2.x，强制安装 `torch==2.15.0`、`scikit-learn==1.9.1`，
+以 `KMP_DUPLICATE_LIB_OK=FALSE` 运行全部六种 OpenMP 导入顺序；缺少依赖或跳过 OpenMP 测试均视为失败。
+最低支持 macOS 15，与 CI 的运行系统版本一致。最低版本已从 macOS 14 提高到 15；
+macOS 14 不再属于支持范围，本地默认源码构建同样以 15.0 为目标。
+
+Linux 与 macOS 独立上传；只有 macOS 上传等待 macOS 矩阵全部通过。上传后，新的 macOS 作业仅从 TestPyPI 下载精确版本
+（不下载依赖、不使用 pip 缓存），对照构建清单校验文件名和 SHA-256，再审计并在干净环境中运行普通测试集。
+下载最多重试十分钟，等待索引更新。如果 TestPyPI 已有同名 macOS 文件，上传前会明确报错；
+应在原上传运行中仅重跑验证作业，或使用新版本。依赖单独从正式 PyPI 安装。
+手动运行时取消勾选 `publish`，可验证任意分支，只保留构建和测试产物，不上传也不执行发布后验证。
+工作流产物保留源码 SHA、wheel 哈希、依赖版本和测试报告。正式 PyPI 发布流程仍只包含 Linux。
 
 ### 从源码构建
 
@@ -54,10 +70,10 @@ macOS 始终原生构建，即使 Docker 正在运行。构建要求 CMake 3.20+
 构建会自动安装 `delocate`，修复动态依赖并检查本机架构；随后运行 Mach-O 审计，要求唯一原生库为
 `libvsag_c.dylib`、仅依赖系统库、仅导出 C API、包含许可证元数据，并且部署目标不高于 wheel 标签，最后安装并运行测试。
 
-默认 `MACOSX_DEPLOYMENT_TARGET` 为 `14.0`，统一应用于 VSAG 及从源码构建的依赖；默认构建无需设置环境变量。
+默认 `MACOSX_DEPLOYMENT_TARGET` 为 `15.0`，统一应用于 VSAG 及从源码构建的依赖；默认构建无需设置环境变量。
 如需调整部署目标，可设置 `MACOSX_DEPLOYMENT_TARGET`；如需限制编译并发，可设置 `CMAKE_BUILD_PARALLEL_LEVEL`。
-`macosx_14_0_arm64` 标签记录二进制部署目标，但在新版本 Mac 上构建不能替代 macOS 14 上的运行验证。
-正式发布和每晚构建流程仍只发布 Linux wheel。在测试环境中安装 `torch` 和 `scikit-learn` 可同时运行可选的 OpenMP 共存测试。
+`macosx_15_0_arm64` 标签声明最低支持 macOS 15，CI 也在此系统版本上运行。
+TestPyPI 包含 macOS arm64，正式 PyPI 发布仍只包含 Linux。在测试环境中安装 `torch` 和 `scikit-learn` 可同时运行可选的 OpenMP 共存测试。
 
 macOS wheel 构建启用 `VSAG_OPENMP_STATIC`，普通 C++ 构建仍使用动态 OpenMP。
 C++ 构建可通过 Homebrew 安装 `libomp`，或向 CMake 传入 `-DLIBOMP_PREFIX=/path/to/libomp`。

@@ -1,13 +1,14 @@
 import collections
 import glob
 import os
+import platform
 import shutil
 import subprocess
 import sys
 # Set this before setuptools reads the platform configuration. All subprocesses,
 # including OpenBLAS and the private OpenMP build, inherit the same target.
 if sys.platform == "darwin":
-    os.environ.setdefault("MACOSX_DEPLOYMENT_TARGET", "14.0")
+    os.environ.setdefault("MACOSX_DEPLOYMENT_TARGET", "15.0")
 
 from setuptools import setup, Extension
 from setuptools.command.build_ext import build_ext
@@ -122,6 +123,11 @@ class PlatformWheel(bdist_wheel):
 
     def get_tag(self):
         _, _, plat = bdist_wheel.get_tag(self)
+        if sys.platform == "darwin":
+            # CMake builds one native architecture, even when Python is universal2.
+            # Preserve the deployment target calculated from the built library.
+            os_name, major, minor, _ = plat.split("_", 3)
+            plat = f"{os_name}_{major}_{minor}_{platform.machine()}"
         return "py3", "none", plat
 
 

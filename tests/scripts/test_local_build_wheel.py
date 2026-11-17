@@ -27,7 +27,7 @@ elif name == "python" and args[:2] == ["-m", "build"]:
     if os.environ.get("BUILD_FAIL"):
         sys.exit(13)
     out = Path(args[args.index("--outdir") + 1])
-    (out / "pyvsag-1.0-py3-none-macosx_14_0_arm64.whl").write_text("unrepaired")
+    (out / "pyvsag-1.0-py3-none-macosx_15_0_arm64.whl").write_text("unrepaired")
 elif name == "delocate-wheel":
     if os.environ.get("REPAIR_FAIL"):
         sys.exit(9)
@@ -55,7 +55,7 @@ class LocalWheelTest(unittest.TestCase):
             (root / "scripts/python/prepare_python_build.sh").write_text(":\n")
             if stale_wheel:
                 (root / "wheelhouse").mkdir()
-                (root / "wheelhouse/pyvsag-9.0-py3-none-macosx_14_0_arm64.whl").write_text("stale")
+                (root / "wheelhouse/pyvsag-9.0-py3-none-macosx_15_0_arm64.whl").write_text("stale")
             for tool in ("python", "python3", "pip", "docker", "uname", "delocate-wheel"):
                 path = root / "bin" / tool
                 path.write_text(f"#!{sys.executable}\n" + FAKE_TOOL)
