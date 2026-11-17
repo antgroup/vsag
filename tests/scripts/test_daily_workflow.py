@@ -36,7 +36,7 @@ class DailyWorkflowTests(unittest.TestCase):
         self.assertIn("VSAG_DAILY_AGGREGATE:", workflow)
         for p in [WORKFLOW] + list((ROOT / '.github/actions').glob('*/action.yml')):
             text = p.read_text()
-            if 'hendrikmuhs/ccache-action@v1.2' in text:
+            if 'hendrikmuhs/ccache-action@v1.2.25' in text:
                 self.assertIn("job-summary: ${{ env.VSAG_DAILY_AGGREGATE != '1'", text, str(p))
         self.assertIn('name: Nightly Summary', job_text(WORKFLOW,'daily-summary'))
         self.assertIn('name: Coverage — C++ lines and branches',job_text(WORKFLOW,'full-coverage-coverage'))

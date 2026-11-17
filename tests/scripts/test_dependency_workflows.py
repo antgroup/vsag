@@ -71,9 +71,9 @@ class DependencyWorkflowTest(unittest.TestCase):
     def test_pull_request_archive_cache_is_restore_only(self) -> None:
         pr_ci = (ROOT / ".github/workflows/pr-ci-community.yml").read_text(encoding="utf-8")
 
-        self.assertIn("uses: actions/cache/restore@v4", pr_ci)
-        self.assertNotIn("uses: actions/cache@v4", pr_ci)
-        self.assertNotIn("uses: actions/cache/save@v4", pr_ci)
+        self.assertIn("uses: actions/cache/restore@v5", pr_ci)
+        self.assertNotIn("uses: actions/cache@v5", pr_ci)
+        self.assertNotIn("uses: actions/cache/save@v5", pr_ci)
         benchmark = (ROOT / ".github/workflows/daily_test.yml").read_text(encoding="utf-8")
         self.assertIn("dependency-cache-write-policy restore-only", benchmark)
 
@@ -321,7 +321,7 @@ class FailurePropagationTest(unittest.TestCase):
             self.assertNotIn('||',download)
             self.assertIn('COMPATIBILITY_INDEX_DIR: ${{ github.workspace }}/.ci-compatibility-inputs',body)
             self.assertNotIn('runner.temp', body.split('    steps:', 1)[0])
-            self.assertLess(body.index('actions/checkout@v4'),body.index('download_compatibility_inputs.py'))
+            self.assertLess(body.index('actions/checkout@v5'),body.index('download_compatibility_inputs.py'))
 
 
 class CompatibilityDownloadTest(unittest.TestCase):

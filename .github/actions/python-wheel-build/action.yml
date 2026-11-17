@@ -25,7 +25,7 @@ runs:
         test "$(uname -m)" = "$BUILD_ARCH"
         docker info >/dev/null
         test ! -d wheelhouse || test -z "$(ls -A wheelhouse)"
-    - uses: actions/setup-python@v5
+    - uses: actions/setup-python@v6
       with:
         python-version: '3.12'
     - name: Validate Python CI contracts
@@ -40,7 +40,7 @@ runs:
       run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
     - name: Restore trusted compiler cache
       id: cache
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v5
       with:
         path: ${{ runner.temp }}/pyvsag-ccache
         key: pyvsag-v2-Linux-${{ inputs.arch }}-${{ hashFiles('python/pyproject.toml', 'python/setup.py', 'scripts/deps/install_deps_centos.sh', 'extern/**/*.cmake', '.github/actions/python-wheel-build/action.yml') }}-${{ steps.cache-epoch.outputs.week }}
@@ -68,21 +68,21 @@ runs:
         SOURCE_SHA: ${{ inputs.source-sha }}
         BUILD_ARCH: ${{ inputs.arch }}
       run: python3 scripts/ci/python_ci.py manifest --source "$SOURCE_SHA" --arch "$BUILD_ARCH"
-    - uses: actions/upload-artifact@v5
+    - uses: actions/upload-artifact@v6
       with:
         name: ${{ inputs.artifact }}
         path: wheelhouse/*.whl
         if-no-files-found: error
         retention-days: 14
         overwrite: true
-    - uses: actions/upload-artifact@v5
+    - uses: actions/upload-artifact@v6
       with:
         name: provenance-${{ inputs.artifact }}
         path: wheel-manifest.json
         if-no-files-found: error
         retention-days: 14
         overwrite: true
-    - uses: actions/upload-artifact@v5
+    - uses: actions/upload-artifact@v6
       if: always()
       with:
         name: python-build-report-${{ github.job }}-${{ strategy.job-index }}-${{ github.run_id }}
@@ -92,7 +92,7 @@ runs:
         overwrite: true
     - name: Save trusted compiler cache
       if: ${{ success() && steps.cache.outputs.cache-hit != 'true' && github.workflow == 'Nightly CI' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v5
       with:
         path: ${{ runner.temp }}/pyvsag-ccache
         key: ${{ steps.cache.outputs.cache-primary-key }}
