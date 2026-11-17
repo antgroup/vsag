@@ -16,11 +16,11 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/download-artifact@v5
+    - uses: actions/download-artifact@v7
       with:
         name: ${{ inputs.artifact }}
         path: wheelhouse
-    - uses: actions/download-artifact@v5
+    - uses: actions/download-artifact@v7
       with:
         name: provenance-${{ inputs.artifact }}
         path: .
@@ -48,7 +48,7 @@ runs:
       env:
         TEST_MODE: ${{ inputs.mode }}
       run: python3 scripts/testing/daily_measure.py --name pytest --owner bindings-examples-compatibility -- python3 scripts/ci/python_ci.py test --mode "$TEST_MODE"
-    - uses: actions/upload-artifact@v5
+    - uses: actions/upload-artifact@v6
       if: always()
       with:
         name: python-report-${{ github.job }}-${{ strategy.job-index }}-${{ github.run_id }}

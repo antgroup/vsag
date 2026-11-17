@@ -18,7 +18,7 @@ runs:
     - name: Prepare FetchContent Sources
       uses: ./.github/actions/prepare-fetchcontent
     - name: Cache ExternalProject Archives
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: .ci-downloads
         key: external-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/**/*.cmake') }}
@@ -34,7 +34,7 @@ runs:
           exit 1
         fi
     - name: Load Cache
-      uses: hendrikmuhs/ccache-action@v1.2
+      uses: hendrikmuhs/ccache-action@v1.2.25
       with:
         job-summary: ${{ env.VSAG_DAILY_AGGREGATE != '1' && 'CCache Statistics' || '' }}
         max-size: "5G"

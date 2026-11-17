@@ -92,7 +92,7 @@ stamp、日志和元数据不计入 `local_bytes`，也不计入准备阶段表�
 
 > **[ #2899 ](https://github.com/antgroup/vsag/pull/2899) 修复前，旧版 no-op 测量不可信。** 独立工作流会对缺少受支持 schema 3 `true_noop` 报告能力的 collector 明确预检失败。拆分 PR 构建本身并不修复 collector；前置 PR 尚未合并时，定时任务会失败，而不是发布误导性的旧版基线。
 
-PR CI 的 **ASan Build X86** 只运行一次 `make asan COMPILE_JOBS=3`，保留 Ninja、compile commands、system OpenBLAS、examples 和 tools。Makefile 仍启用 tests、Sanitize 和 ASan/UBSan，changed-source lint、下游测试、兼容性检查及构建产物契约保持不变。`ccache --zero-stats` 只重置统计，**不删除缓存对象**。构建步骤记录耗时，always 步骤输出 verbose/兼容回退缓存诊断，不掩盖真实构建失败；ccache 仍启用并使用一次性 GitHub-hosted VM 上的默认目录，不跨 job 恢复或保存编译缓存。PR X86 的依赖归档缓存有意从恢复并保存改为**只恢复**（`actions/cache/restore@v4`），防止 PR 上下文将归档写回共享缓存；这项策略并不只适用于独立 benchmark。
+PR CI 的 **ASan Build X86** 只运行一次 `make asan COMPILE_JOBS=3`，保留 Ninja、compile commands、system OpenBLAS、examples 和 tools。Makefile 仍启用 tests、Sanitize 和 ASan/UBSan，changed-source lint、下游测试、兼容性检查及构建产物契约保持不变。`ccache --zero-stats` 只重置统计，**不删除缓存对象**。构建步骤记录耗时，always 步骤输出 verbose/兼容回退缓存诊断，不掩盖真实构建失败；ccache 仍启用并使用一次性 GitHub-hosted VM 上的默认目录，不跨 job 恢复或保存编译缓存。PR X86 的依赖归档缓存有意从恢复并保存改为**只恢复**（`actions/cache/restore@v5`），防止 PR 上下文将归档写回共享缓存；这项策略并不只适用于独立 benchmark。
 
 **Nightly CI / Build Performance X86** 配置（`.github/workflows/daily_test.yml`, `profile=build-performance`）每周一 UTC 03:23 测 upstream `main`，也可通过 Actions 手动运行。它不是 PR required check，使用独立 concurrency、Ubuntu 24.04 hosted runner、180 分钟超时和 14 天报告保留期。工作流进入默认分支后，可运行：
 

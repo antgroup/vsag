@@ -59,13 +59,13 @@ jobs:
       simd_options: ${{ steps.plan.outputs.simd_options }}
       simd_keys: ${{ steps.plan.outputs.simd_keys }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Preflight Nightly parameter inventory
         run: python3 scripts/testing/daily_parameters.py
       - name: Read original run date
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           retries: 3
           script: |
@@ -105,7 +105,7 @@ jobs:
               print('simd_options=' + json.dumps([mode + ';' + flags[mode]]), file=output)
               print('simd_keys=' + json.dumps([mode]), file=output)
           PY
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: daily-context-${{ github.run_id }}
           overwrite: true
@@ -136,18 +136,18 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
       - name: Load Cache
-        uses: hendrikmuhs/ccache-action@v1.2
+        uses: hendrikmuhs/ccache-action@v1.2.25
         with:
           job-summary: ${{ env.VSAG_DAILY_AGGREGATE != '1' && 'CCache Statistics' || '' }}
           max-size: "2G"
           save: false
           key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Download frozen Nightly plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -166,7 +166,7 @@ jobs:
       - name: Clean
         run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           path: ./build
           name: daily_test_x86-${{ github.run_id }}
@@ -198,18 +198,18 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
       - name: Load Cache
-        uses: hendrikmuhs/ccache-action@v1.2
+        uses: hendrikmuhs/ccache-action@v1.2.25
         with:
           job-summary: ${{ env.VSAG_DAILY_AGGREGATE != '1' && 'CCache Statistics' || '' }}
           max-size: "2G"
           save: false
           key: build-aarch-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Download frozen Nightly plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -222,7 +222,7 @@ jobs:
       - name: Clean
         run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           path: ./build/
           name: daily_test_aarch64-${{ github.run_id }}
@@ -268,11 +268,11 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
       - name: Download frozen Nightly plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -281,7 +281,7 @@ jobs:
       - name: Clean Env
         run: rm -rf ./build
       - name: Download Test
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: daily_test_x86-${{ github.run_id }}
           path: ./build
@@ -292,7 +292,7 @@ jobs:
           chmod +x ./build/tests/${{ matrix.test_type }}
           ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }} ~[pr]
       - name: Upload Log
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           path: ./log
           name: daily-log-x86-${{ matrix.test_type }}-${{ matrix.shard }}-${{ github.run_id }}
@@ -302,7 +302,7 @@ jobs:
 
       - name: Upload Nightly evidence
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: daily-results-daily_test_asan_x86-${{ matrix.test_type }}-shard${{ matrix.shard }}-${{ github.run_id }}
           overwrite: true
@@ -343,11 +343,11 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
       - name: Download frozen Nightly plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -356,7 +356,7 @@ jobs:
       - name: Clean Build
         run: rm -rf ./build
       - name: Download Test
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: daily_test_aarch64-${{ github.run_id }}
           path: ./build
@@ -367,7 +367,7 @@ jobs:
           chmod +x ./build/tests/${{ matrix.test_type }}
           ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }} ~[pr]
       - name: Upload Log
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           path: ./log
           name: daily-log-aarch64-${{ matrix.test_type }}-${{ github.run_id }}
@@ -377,7 +377,7 @@ jobs:
 
       - name: Upload Nightly evidence
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: daily-results-daily_test_asan_aarch64-${{ matrix.test_type }}-${{ github.run_id }}
           overwrite: true
@@ -413,11 +413,11 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
       - name: Download frozen Nightly plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -449,7 +449,7 @@ jobs:
       - name: Clean
         run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           path: ./build
           name: daily_test_simd-${{ env.SIMD_KEY }}-${{ github.run_id }}
@@ -490,11 +490,11 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
       - name: Download frozen Nightly plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -503,7 +503,7 @@ jobs:
       - name: Clean Env
         run: rm -rf ./build
       - name: Download Test
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: daily_test_simd-${{ matrix.simd_key }}-${{ github.run_id }}
           path: ./build/
@@ -517,7 +517,7 @@ jobs:
 
       - name: Upload Nightly evidence
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: daily-results-daily_test_asan_simd-${{ matrix.test_type }}-${{ github.run_id }}
           overwrite: true
@@ -546,7 +546,7 @@ jobs:
       - name: Create Empty File
         run: touch /tmp/clean_up
       - name: Overwrite Test Artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           path: /tmp/clean_up
           name: test-x86-${{ matrix.simd_key }}-${{ github.run_id }}
@@ -567,19 +567,19 @@ jobs:
       # Docker Hub alternative: vsaglib/vsag:ci-main-mkl
       image: ghcr.io/antgroup/vsag:ci-main-mkl
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: '0'
           ref: ${{ github.sha }}
       - name: Load Cache
-        uses: hendrikmuhs/ccache-action@v1.2
+        uses: hendrikmuhs/ccache-action@v1.2.25
         with:
           job-summary: ${{ env.VSAG_DAILY_AGGREGATE != '1' && 'CCache Statistics' || '' }}
           max-size: "2G"
           save: false
           key: build-tsan-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Download frozen Nightly plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -594,7 +594,7 @@ jobs:
       - name: Clean
         run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           path: ./build
           name: daily_test_x86-${{ github.run_id }}-tsan
@@ -626,9 +626,9 @@ jobs:
       VSAG_DAILY_LANE: daily_test_tsan
       VSAG_DAILY_ENVIRONMENT: daily_test_tsan
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Download frozen Nightly plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -637,7 +637,7 @@ jobs:
       - name: Clean Env
         run: rm -rf ./build
       - name: Download Test
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: daily_test_x86-${{ github.run_id }}-tsan
           path: ./build/
@@ -655,7 +655,7 @@ jobs:
 
       - name: Upload Nightly evidence
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: daily-results-daily_test_tsan-${{ github.run_id }}
           overwrite: true
@@ -688,9 +688,9 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Download frozen Nightly plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -718,9 +718,9 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf "${RUNNER_TOOL_CACHE:-/Users/runner/hostedtoolcache}"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Download frozen Nightly plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -768,9 +768,9 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Download frozen Nightly plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -782,7 +782,7 @@ jobs:
           matrix-test-type: ${{ matrix.test_type }}
       - name: Upload Nightly evidence
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: daily-results-full-platform-test-asan-x86-${{ matrix.test_type }}-${{ github.run_id }}
           overwrite: true
@@ -820,9 +820,9 @@ jobs:
       group: test_asan_macos-${{ matrix.test_type }}-${{ github.sha }}
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Download frozen Nightly plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -834,7 +834,7 @@ jobs:
           matrix-test-type: ${{ matrix.test_type }}
       - name: Upload Nightly evidence
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: daily-results-full-platform-test-asan-macos-arm64-${{ matrix.test_type }}-${{ github.run_id }}
           overwrite: true
@@ -873,9 +873,9 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Download frozen Nightly plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -885,7 +885,7 @@ jobs:
         id: execute
       - name: Upload Nightly evidence
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: daily-results-full-platform-test-example-x86-${{ github.run_id }}
           overwrite: true
@@ -922,9 +922,9 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Download frozen Nightly plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -937,7 +937,7 @@ jobs:
           artifact-name: daily_test_aarch64-${{ github.run_id }}
       - name: Upload Nightly evidence
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: daily-results-full-platform-test-example-aarch64-${{ github.run_id }}
           overwrite: true
@@ -964,9 +964,9 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Download frozen Nightly plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -996,9 +996,9 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Download frozen Nightly plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -1032,12 +1032,12 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Download frozen Nightly plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -1052,7 +1052,7 @@ jobs:
           mode: ${{ matrix.mode }}
       - name: Upload Nightly evidence
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: daily-results-full-python-test-python-x86-${{ matrix.key }}-${{ github.run_id }}
           overwrite: true
@@ -1086,12 +1086,12 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Download frozen Nightly plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -1106,7 +1106,7 @@ jobs:
           mode: ${{ matrix.mode }}
       - name: Upload Nightly evidence
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: daily-results-full-python-test-python-aarch64-${{ matrix.key }}-${{ github.run_id }}
           overwrite: true
@@ -1129,7 +1129,7 @@ jobs:
       - full-python-test-python-aarch64
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - uses: ./.github/actions/python-build-and-test-clean-up
@@ -1158,11 +1158,11 @@ jobs:
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Download frozen Nightly plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -1191,7 +1191,7 @@ jobs:
     outputs:
       non_markdown: ${{ steps.execute.outputs.non_markdown }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/coverage-changes
         id: execute
       - name: Capture Nightly job diagnostics
@@ -1225,12 +1225,12 @@ jobs:
       VSAG_THIRDPARTY_DOWNLOAD_DIR: ${{ github.workspace }}/.ci-downloads
       VSAG_TEST_SEED: 424242
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: '0'
           persist-credentials: false
       - name: Download frozen Nightly plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -1242,7 +1242,7 @@ jobs:
           secrets-CODECOV-TOKEN: ${{ secrets.CODECOV_TOKEN }}
       - name: Upload Nightly evidence
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: daily-results-full-coverage-coverage-${{ github.run_id }}
           overwrite: true
@@ -1286,11 +1286,11 @@ jobs:
           install -m 0755 /tmp/gh_${GH_VERSION}_linux_amd64/bin/gh /usr/local/bin/gh
           rm -rf /tmp/gh.tar.gz /tmp/gh_${GH_VERSION}_linux_amd64
           gh --version
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Download frozen Nightly plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -1300,7 +1300,7 @@ jobs:
         id: execute
       - name: Upload Nightly evidence
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: daily-results-full-compatibility-compatibility-${{ github.run_id }}
           overwrite: true
@@ -1327,7 +1327,7 @@ jobs:
       image: ghcr.io/antgroup/vsag:ci-main-openblas
     steps:
       - name: Checkout approved main history
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: antgroup/vsag
           ref: main
@@ -1410,7 +1410,7 @@ jobs:
       VSAG_ENABLE_TOOLS: 'ON'
     steps:
       - name: Checkout approved main history
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: antgroup/vsag
           ref: main
@@ -1514,7 +1514,7 @@ jobs:
           PY
       - name: Restore ExternalProject Archives (never save)
         id: archives
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: .ci-downloads
           key: external-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/**/*.cmake') }}
@@ -1618,7 +1618,7 @@ jobs:
           PY
       - name: Upload build metrics
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           path: ./build-metrics
           name: build-performance-metrics-${{ github.run_id }}-${{ github.run_attempt }}
@@ -1636,15 +1636,15 @@ jobs:
     needs: [daily-plan, daily_test_asan_x86, daily_test_asan_aarch64, daily_test_asan_simd, daily_test_tsan, full-platform-test-asan-x86, full-platform-test-asan-macos-arm64, full-platform-test-example-x86, full-platform-test-example-aarch64, full-python-test-python-x86, full-python-test-python-aarch64, full-coverage-coverage, full-compatibility-compatibility, full-lint-clang-tidy-check]
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           pattern: daily-results-daily_test_asan_x86-functests-shard*-${{ github.run_id }}
           path: daily-base-results
       - name: Read current attempt clock
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           retries: 3
           script: |
@@ -1652,7 +1652,7 @@ jobs:
             require('fs').writeFileSync('daily-extra-clock.json', JSON.stringify({started_at: run.data.run_started_at}));
       - name: Freeze disjoint candidates and remaining quota
         run: python3 scripts/testing/daily_extra.py plan --collect daily-base-results --clock daily-extra-clock.json --proposal daily-extra-proposal.json
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: daily-extra-proposal-${{ github.run_id }}
           path: daily-extra-proposal.json
@@ -1680,10 +1680,10 @@ jobs:
       matrix:
         shard: ${{ fromJSON(needs.daily-plan.outputs.x86_shards) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-extra-proposal-${{ github.run_id }}
           path: .
@@ -1701,7 +1701,7 @@ jobs:
           PYCODE
       - name: Reuse verified X86 build
         if: steps.extra.outputs.available == 'true'
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily_test_x86-${{ github.run_id }}
           path: build
@@ -1715,7 +1715,7 @@ jobs:
           python3 scripts/testing/daily_extra.py run --proposal daily-extra-proposal.json --shard "$EXTRA_SHARD" --output "daily-results/daily-extra-x86-functests-shard$EXTRA_SHARD"
       - name: Upload Nightly evidence
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: daily-results-extra-x86-shard${{ matrix.shard }}-${{ github.run_id }}
           path: daily-results
@@ -1739,37 +1739,37 @@ jobs:
       contents: read
       actions: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           pattern: daily-results-*-${{ github.run_id }}
           path: daily-collected
       - name: Download extra quota plan
         if: always()
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-extra-proposal-${{ github.run_id }}
           path: .
       - name: Download per-job diagnostics
         if: always()
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           pattern: daily-job-*-${{ github.run_id }}
           path: daily-job-collected
       - name: Download Python environment reports
         if: always()
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           pattern: python-report-full-python-test-python-*
           path: python-collected
       - name: Collect workflow elapsed and job timings
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           retries: 3
           script: |
@@ -1789,7 +1789,7 @@ jobs:
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: |
           python3 scripts/testing/daily_report.py --collect daily-collected --metrics daily-job-metrics.json --extra-proposal daily-extra-proposal.json --job-reports daily-job-collected --python-reports python-collected --expected-file daily-context/expected-lanes.json --summary "$GITHUB_STEP_SUMMARY" --json daily-summary.json
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: daily-summary-${{ github.run_id }}

@@ -20,8 +20,8 @@ from tests.scripts.test_dependency_workflows import job_text
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/main-ci.yml"
-# v6's toolkit rejects its inactivity timeout; v5 can exit zero with a pending promise.
-DOWNLOAD_ACTION = "actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53"
+# v7's toolkit rejects its inactivity timeout; v5 can exit zero with a pending promise.
+DOWNLOAD_ACTION = "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131"
 JOBS = ("platforms-test-asan-aarch64", "platforms-test-example-aarch64")
 
 

@@ -8,7 +8,7 @@ runs:
       run: python3 scripts/testing/daily_job_report.py --output daily-job-report/job-report.json
     - name: Upload job diagnostic record
       if: always()
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: daily-job-${{ github.job }}-${{ strategy.job-index }}-${{ github.run_id }}
         path: daily-job-report/job-report.json

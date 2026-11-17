@@ -19,7 +19,7 @@ runs:
       run: rm -rf ./build
     - name: Download Test
       id: download-tests
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@v7
       with:
         name: test_macos_arm64-${{ github.run_id }}
         path: ./build
@@ -45,7 +45,7 @@ runs:
       run: python3 scripts/testing/daily_measure.py --name examples --owner bindings-examples-compatibility -- python3 scripts/ci/platform_smoke.py all-examples
     - name: Upload Log
       if: always()
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         path: ./log
         name: log-macos-${{ inputs.matrix-test-type }}-${{ github.run_id }}
