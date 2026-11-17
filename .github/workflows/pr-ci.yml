@@ -127,6 +127,11 @@ jobs:
           tests/scripts/test_macos_wheel_audit.py
           tests/scripts/test_macos_openmp.py
           tests/scripts/test_python_license.py
+          tests/scripts/test_python_ci.py
+          tests/scripts/test_workflow_entries.py
+          tests/scripts/test_daily_plan.py
+          tests/scripts/test_daily_workflow.py
+          tests/scripts/test_team_test_shards.py
 
   community:
     # A superseding push must cancel the entire hosted branch, including wheel builds.

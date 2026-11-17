@@ -446,6 +446,7 @@ class LeanPrChecksTest(unittest.TestCase):
         values = {"github.base_ref": base, "github.event_name": event,
                   "inputs.team-linux": team, "needs.changes.outputs.cpp": str(cpp).lower(),
                   "needs.changes.outputs.python": str(python).lower(),
+                  "needs.changes.outputs.wheel": str(python or cmake).lower(),
                   "needs.changes.outputs.cmake": str(cmake).lower(),
                   "needs.changes.result": "success", "needs.format.result": format_result,
                   "needs.build-python-x86.result": build_result}
