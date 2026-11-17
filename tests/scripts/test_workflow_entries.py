@@ -94,7 +94,8 @@ class EntryTests(unittest.TestCase):
             'scripts/testing/team_test_shards.py', 'scripts/testing/daily_report.py',
             'scripts/testing/team_test_timings.py', 'tests/scripts/test_python_ci.py',
             'tests/scripts/test_python_license.py', 'tests/scripts/test_local_build_wheel.py',
-            'tests/scripts/test_daily_plan.py', 'scripts/deps/install_deps_ubuntu.sh',
+            'tests/scripts/test_daily_plan.py', 'tests/scripts/test_daily_workflow.py',
+            'scripts/deps/install_deps_ubuntu.sh',
             'scripts/python/check_macos_wheel.py', 'docker/Dockerfile.x86.base',
             'scripts/ci/daily_budget.py', 'scripts/coverage/check_cov.sh',
             'scripts/linters/prepare_lint_base.py', 'src/algorithm/hgraph.cpp',
@@ -164,11 +165,14 @@ class EntryTests(unittest.TestCase):
 
     def test_wheel_helper_regressions_run_without_a_native_artifact(self):
         body = job('pr-ci.yml', 'routing-tests')
-        for module in ('test_python_ci', 'test_workflow_entries', 'test_daily_plan',
+        for module in ('test_python_ci', 'test_workflow_entries', 'test_daily_plan', 'test_daily_workflow',
                        'test_team_test_shards', 'test_local_build_wheel', 'test_python_license'):
             self.assertIn('tests/scripts/' + module + '.py', body)
         self.assertNotIn('download-artifact', body)
         self.assertNotIn('python-wheel-build', body)
+        self.assertNotIn('needs:', body)
+        team = job('pr-ci-team.yml', 'checks')
+        self.assertIn('python3 -m unittest tests/scripts/test_daily_workflow.py', team)
 
     def test_renamed_and_deleted_wheel_inputs_remain_selected(self):
         # The existing no-renames diff contract presents both endpoints, including

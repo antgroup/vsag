@@ -224,6 +224,11 @@ Linux execution paths, not different correctness requirements.
   contract requires a fresh wheel from the exact tested SHA, and cannot reuse a published
   wheel or an unrelated run's artifact.
 
+  Nightly CI remains the wheel build/test backstop for native implementation-only
+  changes excluded by this main-PR filter, including wheel-specific link or visibility
+  failures. Team/Community native PR checks retain their existing scope; they do not
+  validate wheel construction for those changes.
+
   Both jobs preserve `!cancelled()` and prerequisite failure handling, including the
   intentionally skipped Community formatter on Team-routed C++ changes. The consumer
   requires a successful build before downloading wheel/provenance artifacts. **Python Checks
