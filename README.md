@@ -546,12 +546,21 @@ VSAG draws on the following works for graph construction, vector quantization, f
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/159753a52">
+                    <img src="https://avatars.githubusercontent.com/u/137481623?v=4" width="100" alt="159753a52"/>
+                    <br />
+                    <sub><b>Zelong Fang</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/Danbaiwq">
                     <img src="https://avatars.githubusercontent.com/u/212493818?v=4" width="100" alt="Danbaiwq"/>
                     <br />
                     <sub><b>Danbaiwq</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/Hastyshell">
                     <img src="https://avatars.githubusercontent.com/u/82279870?v=4" width="100" alt="Hastyshell"/>
@@ -559,8 +568,6 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <sub><b>Siyang Tang</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/HeHuMing">
                     <img src="https://avatars.githubusercontent.com/u/223064905?v=4" width="100" alt="HeHuMing"/>
@@ -596,6 +603,8 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <sub><b>Xinger</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/nw9663644-eng">
                     <img src="https://avatars.githubusercontent.com/u/238131765?v=4" width="100" alt="nw9663644-eng"/>
@@ -603,8 +612,6 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <sub><b>Nannan Wang</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/seuclkzsd">
                     <img src="https://avatars.githubusercontent.com/u/110705158?v=4" width="100" alt="seuclkzsd"/>
@@ -617,13 +624,6 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <img src="https://avatars.githubusercontent.com/u/216521501?v=4" width="100" alt="ykindred"/>
                     <br />
                     <sub><b>ykindred</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/159753a52">
-                    <img src="https://avatars.githubusercontent.com/u/137481623?v=4" width="100" alt="159753a52"/>
-                    <br />
-                    <sub><b>Zelong Fang</b></sub>
                 </a>
             </td>
             <td align="center">
