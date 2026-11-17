@@ -291,3 +291,35 @@ auto fast_result = index->KnnSearch(
 - [创建索引](../guide/create_index.md)
 - [索引参数](../resources/index_parameters.md)
 - [序列化格式](../advanced/serialization.md)
+
+### 可选 worker 诊断（C++）
+
+对于带外部 `distance_batch_func_` 的 IVF 单 query KNN，可附加 `SearchProfile`，
+定位请求并行度已开启但 CPU 利用不足的问题。**默认关闭**；不改变检索结果及
+attribute、距离回调、通用 Filter 的执行顺序。
+
+```cpp
+request.profile_ = std::make_shared<vsag::SearchProfile>();
+auto result = index->SearchWithRequest(request);
+std::cout << request.profile_->ToString(query_id) << '\n';
+request.profile_ = nullptr;  // 关闭采集，而不只是停止打印。
+```
+
+仅在查询返回后读取或格式化。每个同时在途请求应有独立 profile；同一对象并发复用会拒绝，
+顺序复用会重置。库不在 worker 中打印。不支持的 IVF 路径（内置距离、范围查询、批量 query、
+迭代器、仅路由）会拒绝诊断；其他索引类型不采集此 profile。
+
+`ToString(query_id)` 返回一行 `[IVF_PROFILE]` 汇总和每个逻辑 worker 一行 `[IVF_WORKER]`：
+
+| 字段 | 含义 |
+| --- | --- |
+| `total_wall_ms`、`scan_wall_ms` | IVF 请求及并行扫描 elapsed 时间，扫描包含提交任务和等待；不含格式化和打印。 |
+| `worker_cpu_ms`、`scan_avg_cores` | worker 线程 CPU 增量总和及其除以扫描 wall 时间的平均核数；不含回调派生线程的 CPU。 |
+| `start_ms`、`end_ms`、`wall_ms`、`cpu_ms` | 相对扫描起点的执行区间、区间长度和线程 CPU。wall/CPU 差距本身不能区分阻塞、抢占或配额。 |
+| `buckets`、`candidates`、`batches` | 处理的有效桶数、提交距离回调的条目数、回调批次数；副本可能重复标签，抛异常的批次也计已提交条目。 |
+| `attr_ms`、`dist_ms` | 桶属性 executor `Clear/Run`、距离回调 elapsed，包含内部等待；不单独计时逐候选属性检查及通用 Filter。 |
+
+线程 CPU 使用 Linux `CLOCK_THREAD_CPUTIME_ID`；不可用输出 `NA`，不是零核。
+`complete=true` 表示正常返回，包含超时部分返回，不保证完整扫描。
+只在 worker 首尾、桶和批次边界采集，不逐候选埋点。诊断仍可能扰动性能，应按需开启；
+不表示开启零开销，也不保证关闭后与原版绝对无退化。

@@ -328,3 +328,41 @@ For latency-sensitive, high-recall workloads on dense embeddings, compare agains
 - [Creating an Index](../guide/create_index.md)
 - [Index Parameters](../resources/index_parameters.md)
 - [Serialization](../advanced/serialization.md)
+
+### Optional worker diagnostics (C++)
+
+For single-query IVF KNN with an external `distance_batch_func_`, attach a
+`SearchProfile` to diagnose insufficient CPU utilization despite requested
+parallelism. Profiling is **disabled by default**; it does not change search
+results or the attribute/distance/general-filter order.
+
+```cpp
+request.profile_ = std::make_shared<vsag::SearchProfile>();
+auto result = index->SearchWithRequest(request);
+std::cout << request.profile_->ToString(query_id) << '\n';
+request.profile_ = nullptr;  // Disable collection, not just printing.
+```
+
+Read or format the profile only after search returns. Each simultaneous request
+must own a distinct profile; concurrent reuse is rejected, sequential reuse resets
+it. The library does not print from worker threads. Profiling is rejected for
+unsupported IVF paths (including built-in-distance, range, batched-query,
+iterator and routing-only search); other index types do not collect this profile.
+
+`ToString(query_id)` returns one `[IVF_PROFILE]` summary and one `[IVF_WORKER]`
+line per logical worker:
+
+| Fields | Meaning |
+| --- | --- |
+| `total_wall_ms`, `scan_wall_ms` | IVF request elapsed time and parallel scan elapsed time, including task submission and waiting. Formatting/printing is outside both. |
+| `worker_cpu_ms`, `scan_avg_cores` | Sum of worker thread CPU increments and that sum divided by scan wall time. CPU of threads spawned by callbacks is excluded. |
+| `start_ms`, `end_ms`, `wall_ms`, `cpu_ms` | Worker interval relative to scan start, its elapsed length, and thread CPU consumed. A wall/CPU gap alone cannot distinguish blocking, preemption or quotas. |
+| `buckets`, `candidates`, `batches` | Processed valid buckets, entries submitted to distance callbacks, and callback batches. Replicated entries may repeat labels; a throwing batch still counts submitted entries. |
+| `attr_ms`, `dist_ms` | Bucket attribute executor `Clear/Run` and distance callback elapsed time, including internal waits. Per-candidate attribute checks and the general filter are not separately timed. |
+
+Thread CPU uses Linux `CLOCK_THREAD_CPUTIME_ID`; unavailable measurements print
+`NA` rather than zero cores. `complete=true` means a normal return, including a
+normal timeout with partial results, not necessarily a complete scan. Counts and
+elapsed time are sampled only at worker, bucket and batch boundaries, not per
+candidate. Diagnostics still perturb execution; use selectively. No claim of
+zero overhead or zero regression when disabled is implied.
