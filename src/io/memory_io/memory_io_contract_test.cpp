@@ -16,17 +16,20 @@
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <random>
 #include <sstream>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include "impl/allocator/safe_allocator.h"
 #include "io/backend/heap_region.h"
 #include "io/memory_io/memory_io.h"
 #include "storage/serialization.h"
+#include "storage/tlv_section.h"
 #include "unittest.h"
 
 namespace vsag {
@@ -340,4 +343,126 @@ TEST_CASE("MemoryIO publishes initialized append bytes to concurrent readers",
     REQUIRE(io.Size() == byte_count);
 }
 
+}  // namespace vsag
+
+namespace vsag {
+namespace {
+class MovingIOAllocator : public Allocator {
+public:
+    std::string
+    Name() override {
+        return "MovingIOAllocator";
+    }
+    void*
+    Allocate(uint64_t size) override {
+        if (size > LIMIT || live_bytes + size > 2 * LIMIT) {
+            throw std::bad_alloc();
+        }
+        auto* data = std::malloc(size);
+        if (data == nullptr) {
+            throw std::bad_alloc();
+        }
+        sizes[data] = size;
+        live_bytes += size;
+        largest = std::max(largest, size);
+        return data;
+    }
+    void
+    Deallocate(void* data) override {
+        if (data != nullptr) {
+            live_bytes -= sizes.at(data);
+            sizes.erase(data);
+            std::free(data);
+        }
+    }
+    void*
+    Reallocate(void* data, uint64_t size) override {
+        // Allocate before freeing, so every reallocation really moves.
+        auto* result = Allocate(size);
+        const auto copied = std::min(sizes.at(data), size);
+        std::memcpy(result, data, copied);
+        copy_bytes += copied;
+        ++moves;
+        Deallocate(data);
+        return result;
+    }
+    static constexpr uint64_t LIMIT = uint64_t{32} * 1024 * 1024;
+    uint64_t copy_bytes{0}, moves{0}, largest{0}, live_bytes{0};
+    std::unordered_map<void*, uint64_t> sizes;
+};
+}  // namespace
+
+TEST_CASE("MemoryIO deserialization has amortized moving allocator growth",
+          "[ut][MemoryIO][io_growth]") {
+    constexpr uint64_t chunk = uint64_t{2} * 1024 * 1024;
+    const uint64_t chunks = GENERATE(uint64_t{2}, uint64_t{4}, uint64_t{8});
+    const bool forward = GENERATE(false, true);
+    const uint64_t size = chunks * chunk + 17;
+    std::string payload(sizeof(size) + size, '\0');
+    std::memcpy(payload.data(), &size, sizeof(size));
+    for (uint64_t i = 0; i < size; ++i) {
+        payload[sizeof(size) + i] = static_cast<char>(i * 31);
+    }
+    MovingIOAllocator allocator;
+    MemoryIO io(&allocator);
+    std::istringstream input(payload + "next");
+    if (forward) {
+        ForwardStreamReader source(input);
+        StreamBlockHeader header;
+        header.value_len = payload.size();
+        header.payload_checksum = StreamHeader::CalculateChecksum(payload);
+        ReadForwardBlockPayload(
+            source, header, [&](StreamReader& block) { io.Deserialize(block); });
+        REQUIRE(source.GetCursor() == payload.size());
+    } else {
+        IOStreamReader source(input);
+        io.Deserialize(source);
+        REQUIRE(source.GetCursor() == payload.size());
+    }
+    REQUIRE(io.Size() == size);
+    std::string actual(size, '\0');
+    REQUIRE(io.ReadAt(0, size, reinterpret_cast<uint8_t*>(actual.data())));
+    REQUIRE(actual == payload.substr(sizeof(size)));
+    std::cout << "io_growth chunks=" << chunks << " forward=" << forward << " bytes=" << size
+              << " moves=" << allocator.moves << " copied=" << allocator.copy_bytes
+              << " largest=" << allocator.largest << '\n';
+    REQUIRE(allocator.copy_bytes < 2 * size);
+    uint64_t expected_moves = 1;
+    for (uint64_t capacity = chunk; capacity < size; capacity *= 2) {
+        ++expected_moves;
+    }
+    REQUIRE(allocator.moves <= expected_moves);
+}
+
+TEST_CASE("MemoryIO truncated source growth follows completed reads", "[ut][MemoryIO][io_growth]") {
+    constexpr uint64_t chunk = uint64_t{2} * 1024 * 1024;
+    constexpr uint64_t declared = uint64_t{64} * 1024 * 1024;
+    const uint64_t chunks = GENERATE(uint64_t{0}, uint64_t{1}, uint64_t{3});
+    const bool forward = GENERATE(false, true);
+    std::string payload(sizeof(declared) + chunks * chunk + 23, 'x');
+    std::memcpy(payload.data(), &declared, sizeof(declared));
+    MovingIOAllocator allocator;
+    MemoryIO io(&allocator);
+    std::istringstream input(payload);
+    auto verify = [&](StreamReader& reader) {
+        REQUIRE_THROWS_AS(io.Deserialize(reader), VsagException);
+        REQUIRE(io.Size() == chunks * chunk);
+        REQUIRE(allocator.largest <= std::max(chunk, 2 * chunks * chunk));
+        REQUIRE(allocator.copy_bytes <= 2 * chunks * chunk);
+        if (forward) {
+            REQUIRE(reader.GetCursor() == sizeof(declared) + chunks * chunk);
+        }
+        std::string actual(io.Size(), '\0');
+        REQUIRE(io.ReadAt(0, io.Size(), reinterpret_cast<uint8_t*>(actual.data())));
+        REQUIRE(actual == std::string(io.Size(), 'x'));
+    };
+    if (forward) {
+        ForwardStreamReader source(input);
+        BoundedForwardReader block(&source, sizeof(declared) + declared);
+        verify(block);
+    } else {
+        IOStreamReader source(input);
+        verify(source);
+    }
+}
 }  // namespace vsag

@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 
 #include "vsag/allocator.h"
 #include "vsag_exception.h"
@@ -90,13 +91,18 @@ public:
         if (size <= capacity_) {
             return;
         }
-        auto* new_data = static_cast<uint8_t*>(allocator_->Reallocate(data_, size));
+        // Amortize moving reallocations, including the bounded chunks read by ByteIO.
+        // Spare capacity depends on existing storage, never on a serialized declaration.
+        const uint64_t grown_size = capacity_ <= std::numeric_limits<uint64_t>::max() / 2
+                                        ? std::max(size, capacity_ * 2)
+                                        : size;
+        auto* new_data = static_cast<uint8_t*>(allocator_->Reallocate(data_, grown_size));
         if (new_data == nullptr) {
             throw VsagException(
                 ErrorType::NO_ENOUGH_MEMORY, "failed to grow HeapRegion, requested size: ", size);
         }
         data_ = new_data;
-        capacity_ = size;
+        capacity_ = grown_size;
     }
 
     void
