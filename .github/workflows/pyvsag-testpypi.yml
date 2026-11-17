@@ -157,6 +157,12 @@ jobs:
     needs: [build]
     if: ${{ github.ref == 'refs/heads/main' && ((github.event_name == 'workflow_dispatch' && inputs.publish) || (github.event_name == 'schedule' && vars.PYVSAG_NIGHTLY_PUBLISH != 'false')) && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/pyvsag/
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/download-artifact@v5
         with:
@@ -170,7 +176,6 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
-          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
           skip-existing: true
           verbose: true
 
@@ -179,6 +184,12 @@ jobs:
     needs: [resolve-source, build-macos, test-macos]
     if: ${{ github.ref == 'refs/heads/main' && ((github.event_name == 'workflow_dispatch' && inputs.publish) || (github.event_name == 'schedule' && vars.PYVSAG_NIGHTLY_PUBLISH != 'false')) && needs.build-macos.result == 'success' && needs.test-macos.result == 'success' }}
     runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/pyvsag/
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -202,7 +213,6 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
-          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
           skip-existing: true
           verbose: true
 
