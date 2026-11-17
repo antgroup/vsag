@@ -300,6 +300,18 @@ provenance; inherited history is not a measurement of this revision. Re-measure
 changed concurrency shapes and newly split Extra Info groups in a full manual
 Daily before accepting the ten-hour target.
 
+### SIMD build memory diagnostics
+
+Nightly SIMD keeps the full ASan build, `unittests_simd`, and the fixed functional
+sentinels. The full build explicitly uses `COMPILE_JOBS=3 DATACELL_COMPILE_JOBS=1`;
+the subsequent SIMD-module target also uses three jobs. Both commands run through
+`monitor_build.py`, which streams memory/swap, cgroup OOM counters and compiler
+process memory into the log and saves separate `asan/` and `simd/` diagnostics.
+The matrix-index/run/attempt-specific diagnostic artifact is retained for seven
+days and upload is attempted even on failure; upload failure cannot mask the
+build outcome. Abrupt runner termination can still prevent upload, so retain the
+streamed samples. Exit 137 alone is not proof of an OOM kill.
+
 ### Coverage-specific workload bound
 
 `VSAG_DAILY_COVERAGE=1` caps the original PR variants of HGraph Duplicate Build,
