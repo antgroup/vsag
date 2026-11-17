@@ -71,6 +71,10 @@ next_index->Build(next_base).value();
 Source ID 使用缓存邻居 warm-start；未匹配记录作为 cache miss 走正常构建 refine。
 缓存辅助 `Build()` 未设置 `Dataset::SourceID` 时会返回参数错误。
 
+存在 cache miss 时，构建结束前会检查连通性，将仍不在图入口可达分量中的未命中节点接入，
+同时保持度数上限和已有节点的入口可达性。该阶段需要遍历图，并使用与快照节点数量成正比的临时内存；
+评估重建时间和峰值内存时应计入这部分开销。成员未变化且全部命中的快照仍保留 warm-start 快速路径。
+
 ## 随索引持久化 Source ID
 
 HGraph 默认不会在序列化中写入 Source ID 元数据。如果反序列化后的索引还需要

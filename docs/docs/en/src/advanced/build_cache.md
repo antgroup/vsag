@@ -74,6 +74,12 @@ both snapshots are warm-started from cached neighbors; unmatched records are tre
 misses and refined by the normal build path. Calling cache-assisted `Build()` without
 `Dataset::SourceID` returns an invalid-argument error.
 
+When cache misses exist, a final connectivity pass joins missed nodes left outside the graph
+entry's reachable component. It preserves the degree limit and keeps previously reachable nodes reachable. This
+pass scans the graph and uses temporary memory proportional to the snapshot's node count;
+include that work when measuring rebuild time and peak memory. Unchanged all-hit snapshots
+retain their warm-start fast path.
+
 ## Persisting source IDs with the index
 
 Source-ID metadata is not included in HGraph serialization by default. Set
