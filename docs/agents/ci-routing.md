@@ -319,7 +319,7 @@ Job names are short and fixed; only Lite includes its matrix mode.
 | Format | Push to main or `0.*`, except documentation-only changes | Manual Checks: format |
 | Docs | PR opened/reopened/synchronize against any branch, or main push; original path filters | Manual Checks: docs |
 | Issue Link | PR opened/edited/reopened/synchronize/labeled/unlabeled targeting main or `0.*` | None |
-| SIMD Coverage | PR opened/reopened/synchronize targeting main; original path filters | None |
+| SIMD Coverage | PR opened/reopened/synchronize targeting main; SIMD code/test/build paths, excluding external step Action revision-only changes | None |
 | Lite | PR opened/reopened/synchronize targeting main or `0.*`; original path filters | Manual Checks: lite |
 | Core PR CI | PR opened/reopened/synchronize targeting main or `0.*` | Manual Checks: full-pr |
 | Main integration | Non-deleted main pushes | Manual Checks: full-branch |
@@ -345,6 +345,10 @@ checks that intended route explicitly. Metadata remains independently enforced
 by Mergify; it does not rerun code checks. Other names
 include `Community / Docs`, `Branch Docs`, `Community / SIMD Coverage`,
 `Issue Link` and `Community / Lite <mode>`.
+
+SIMD selection uses `scripts/ci/checks_paths.json` and compares relevant workflow/composite Action YAML at the PR merge base and head. A file is exempt only when its semantic changes are revisions of the same external step Actions (version tags or commit SHAs in `steps[].uses`). Commands, inputs, dependency pins, images, runner selection, Action identity and local/Docker Action changes still select coverage. Added/deleted files, ambiguous YAML and unavailable parser/blob data conservatively retain selection. Mixed PRs with SIMD code, tests, public headers, Local SQ reference tests or build changes still run coverage; Docs and Lite selection are unchanged. The selector and its regression tests use an isolated environment with the pinned parser in `scripts/ci/check-selection-requirements.txt`. If selector environment creation or installation fails, `scripts/ci/select_checks.sh` warns and runs the original path policy without Action exemptions; unrelated checks remain unselected.
+
+This exemption changes job selection only. If coverage is selected, the dependency comparability preflight and coverage thresholds below still apply; an Action upgrade does not waive that preflight in a mixed PR.
 
 SIMD Coverage still compares clean base/head coverage with the same test filter,
 seed and thresholds. It builds only `unittests_simd` and its dependencies using
