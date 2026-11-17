@@ -414,26 +414,26 @@ VSAG draws on the following works for graph construction, vector quantization, f
                 </a>
             </td>
             <td align="center">
-                <a href="https://github.com/jac0626">
-                    <img src="https://avatars.githubusercontent.com/u/118544282?v=4" width="100" alt="jac0626"/>
-                    <br />
-                    <sub><b>jac</b></sub>
-                </a>
-            </td>
-            <td align="center">
                 <a href="https://github.com/LightWant">
                     <img src="https://avatars.githubusercontent.com/u/32861432?v=4" width="100" alt="LightWant"/>
                     <br />
                     <sub><b>LightWant</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/Roxanne0321">
                     <img src="https://avatars.githubusercontent.com/u/188438858?v=4" width="100" alt="Roxanne0321"/>
                     <br />
                     <sub><b>Roxanne</b></sub>
+                </a>
+            </td>
+        </tr>
+        <tr>
+            <td align="center">
+                <a href="https://github.com/jac0626">
+                    <img src="https://avatars.githubusercontent.com/u/118544282?v=4" width="100" alt="jac0626"/>
+                    <br />
+                    <sub><b>jac</b></sub>
                 </a>
             </td>
             <td align="center">
@@ -613,6 +613,13 @@ VSAG draws on the following works for graph construction, vector quantization, f
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/ykindred">
+                    <img src="https://avatars.githubusercontent.com/u/216521501?v=4" width="100" alt="ykindred"/>
+                    <br />
+                    <sub><b>ykindred</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/159753a52">
                     <img src="https://avatars.githubusercontent.com/u/137481623?v=4" width="100" alt="159753a52"/>
                     <br />
@@ -640,6 +647,8 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <sub><b>cubicc</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/Fightingzzy">
                     <img src="https://avatars.githubusercontent.com/u/94771814?v=4" width="100" alt="Fightingzzy"/>
@@ -647,8 +656,6 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <sub><b>Fighting</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/geerniman">
                     <img src="https://avatars.githubusercontent.com/u/111114031?v=4" width="100" alt="geerniman"/>
@@ -684,6 +691,8 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <sub><b>Lss-lmj</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/mingyu-hkustgz">
                     <img src="https://avatars.githubusercontent.com/u/151442761?v=4" width="100" alt="mingyu-hkustgz"/>
@@ -691,8 +700,6 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <sub><b>Mingyu Yang</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/mukejane">
                     <img src="https://avatars.githubusercontent.com/u/272978297?v=4" width="100" alt="mukejane"/>
@@ -726,13 +733,6 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <img src="https://avatars.githubusercontent.com/u/150929960?v=4" width="100" alt="wellkilo"/>
                     <br />
                     <sub><b>He Dong</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/ykindred">
-                    <img src="https://avatars.githubusercontent.com/u/216521501?v=4" width="100" alt="ykindred"/>
-                    <br />
-                    <sub><b>ykindred</b></sub>
                 </a>
             </td>
         </tr>
