@@ -127,8 +127,8 @@ TEST_CASE("RaBitQ bounded half training", "[ut][RaBitQuantizer][half_train]") {
                   "unbounded live scratch");
             auto max = a.max_request;
             check(reference.Train(f.data(), n), "reference train");
-            check(codes(typed, f.data(), std::min(n, 64UL), D) ==
-                      codes(reference, f.data(), std::min(n, 64UL), D),
+            check(codes(typed, f.data(), std::min<uint64_t>(n, 64), D) ==
+                      codes(reference, f.data(), std::min<uint64_t>(n, 64), D),
                   "encoded mismatch");
             a.Reset();
             check(typed.TrainHalf(
