@@ -216,7 +216,10 @@ Linux execution paths, not different correctness requirements.
   wheels still receive the same build and complete ordinary pytest checks.
 - `.github/workflows/pyvsag-testpypi.yml` builds the pyvsag `py3-none` wheels for x86_64
   and aarch64 from `main` every night (03:17 Beijing time, cron `17 19 * * *`) and on manual
-  dispatch, and can upload them to TestPyPI with the `TEST_PYPI_API_TOKEN` secret. Uploading is
+  dispatch, and can upload them to TestPyPI through Trusted Publishing (OIDC; no stored token). The two
+  publish jobs run in the GitHub environment `testpypi` with `id-token: write`, and TestPyPI
+  must list this repository, workflow `pyvsag-testpypi.yml` and environment `testpypi` as a
+  trusted publisher of `pyvsag`; an unconfigured publisher fails the upload. Uploading is
   on by default: manual runs can set `publish: false` to only build, and the repository variable
   `PYVSAG_NIGHTLY_PUBLISH=false` pauses the nightly upload. Its shared build action restores
   the compiler cache described below; only Nightly CI publishes weekly snapshots. A scheduled

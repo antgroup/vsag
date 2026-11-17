@@ -137,6 +137,13 @@ class EntryTests(unittest.TestCase):
         # Callers share container construction, but retain their own source selection.
         self.assertIn("uses: ./.github/actions/python-wheel-build", text)
         self.assertIn("source-sha: ${{ needs.resolve-source.outputs.sha }}", text)
+        # Trusted Publishing: the environment name must match the TestPyPI publisher entry.
+        for name in ('publish-linux', 'publish-macos'):
+            body = job('pyvsag-testpypi.yml', name)
+            self.assertIn('name: testpypi', body)
+            self.assertIn('id-token: write', body)
+            self.assertNotIn('password:', body)
+            self.assertNotIn('secrets.', body)
         text = (ROOT / ".github/actions/python-wheel-build/action.yml").read_text()
         self.assertIn('scripts/python/check_wheel_libs.py', text)
         self.assertIn('VSAG_USE_SYSTEM_DEPS=OFF', text)
