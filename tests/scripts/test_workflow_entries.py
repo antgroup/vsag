@@ -2,6 +2,10 @@
 import copy
 import importlib.util
 import json
+import os
+import subprocess
+import tempfile
+import textwrap
 from pathlib import Path
 import re
 import sys
@@ -68,45 +72,132 @@ class EntryTests(unittest.TestCase):
         def paths(name):
             block = re.search(r'(?ms)^            ' + name + r':\n(.*?)(?=^            [\w-]+:|\Z)', changes)[1]
             return re.findall(r"^              - '([^']+)'", block, re.M)
-        python_paths, cmake_paths = paths('python'), paths('cmake')
+        filters = {name: paths(name) for name in ('python', 'cmake', 'wheel', 'cpp')}
         selected = [
-            'python/pyproject.toml', 'python/setup.py', 'python/pyvsag/index.py',
+            'python/pyproject.toml', 'python/setup.py', 'python/setup.cfg',
+            'python/MANIFEST.in', 'python/requirements-build.txt',
+            'python/pyvsag/_index.py', 'python/pyvsag/_version.py.in', 'python/LICENSE',
+            'python/NOTICE', 'python/licenses/LLVM-OpenMP.txt', 'README.md',
             'tests/python/test_index.py', 'include/vsag/vsag_c_api.h', 'src/vsag_c_api.cpp',
-            'cmake/vsag_c.map', 'CMakeLists.txt', 'Makefile', 'cmake/options.cmake',
+            'include/vsag/index.h', 'include/vsag/expected.hpp', 'src/version.h.in',
+            'cmake/vsag_c.map', 'CMakeLists.txt', 'Makefile', 'cmake/VSAGOptions.cmake',
             'extern/openblas/openblas.cmake', 'src/CMakeLists.txt', 'src/index/CMakeLists.txt',
             'src/index/options.cmake', '.github/actions/python-wheel-build/action.yml',
             '.github/actions/python-wheel-test/action.yml', 'scripts/python/check_wheel_libs.py',
+            'scripts/python/prepare_python_build.sh', 'scripts/python/local_build_wheel.sh',
             'scripts/deps/install_deps_centos.sh', 'scripts/ci/python_ci.py',
-            'scripts/ci/collect_python_cache.sh', 'tests/scripts/test_python_ci.py',
-            'scripts/testing/daily_measure.py', 'scripts/testing/daily_plan.py',
-            'scripts/testing/team_test_shards.py',
-            'tests/scripts/test_local_build_wheel.py', '.github/workflows/pr-ci.yml',
-            '.github/workflows/pr-ci-community.yml', '.github/workflows/main-ci.yml',
-            '.github/workflows/daily_test.yml', '.github/workflows/pyvsag-testpypi.yml',
+            'scripts/ci/collect_python_cache.sh', '.github/workflows/pr-ci-community.yml',
         ]
         unrelated = [
-            'scripts/testing/daily_report.py', 'scripts/testing/team_test_timings.py',
+            'python/README.md', 'python/docs/guide.md', 'docs/docs/en/src/guide/pyvsag.md',
+            'scripts/testing/daily_measure.py', 'scripts/testing/daily_plan.py',
+            'scripts/testing/team_test_shards.py', 'scripts/testing/daily_report.py',
+            'scripts/testing/team_test_timings.py', 'tests/scripts/test_python_ci.py',
+            'tests/scripts/test_python_license.py', 'tests/scripts/test_local_build_wheel.py',
+            'tests/scripts/test_daily_plan.py', 'scripts/deps/install_deps_ubuntu.sh',
+            'scripts/python/check_macos_wheel.py', 'docker/Dockerfile.x86.base',
             'scripts/ci/daily_budget.py', 'scripts/coverage/check_cov.sh',
-            'scripts/linters/prepare_lint_base.py', 'tests/scripts/test_daily_plan.py',
-            '.github/workflows/maintenance.yml', '.github/workflows/release.yml',
-            '.github/workflows/pr-issue-link.yml', '.github/workflows/pr-ci-team.yml',
+            'scripts/linters/prepare_lint_base.py', 'src/algorithm/hgraph.cpp',
+            'src/algorithm/hgraph_test.cpp', 'tests/test_hgraph.cpp', 'examples/cpp/101_index.cpp',
+            '.github/workflows/pr-ci.yml',
+            '.github/workflows/main-ci.yml', '.github/workflows/daily_test.yml',
+            '.github/workflows/pyvsag-testpypi.yml', '.github/workflows/pr-ci-team.yml',
+            '.github/workflows/release.yml', '.github/workflows/pr-issue-link.yml',
+            '.github/actions/python-macos-wheel-build/action.yml',
             '.github/actions/check-format/action.yml', 'docs/agents/ci-routing.md',
-            'README.md', 'tests/test_hgraph.cpp',
         ]
-        # These simple positive globs have no extglob/negation syntax. Read the actual
-        # workflow lists so a broad scripts/** or workflows/** regression is caught.
-        for expected, files in ((True, selected), (False, unrelated)):
-            for path in files:
-                outputs = {'needs.changes.result': 'success', 'needs.format.result': 'skipped',
-                           'needs.build-python-x86.result': 'success'}
-                for name, patterns in (('python', python_paths), ('cmake', cmake_paths)):
+        # Use the existing matcher on the actual positive paths-filter globs. A mixed
+        # list selects if any path matches; status (added/modified/deleted) is unrestricted.
+        cases = [(True, [p]) for p in selected] + [(False, [p]) for p in unrelated]
+        cases += [(False, unrelated), (True, unrelated + ['python/setup.cfg']), (False, [])]
+        for expected, files in cases:
+            for team in (False, True):
+                outputs = {'github.event_name': 'pull_request', 'github.base_ref': 'main',
+                           'inputs.team-linux': team, 'needs.changes.result': 'success'}
+                for name, patterns in filters.items():
                     outputs[f'needs.changes.outputs.{name}'] = str(any(
-                        matches(path, pattern) for pattern in patterns)).lower()
+                        matches(path, pattern) for path in files for pattern in patterns)).lower()
+                outputs['needs.format.result'] = ('success' if condition(
+                    'pr-ci-community.yml', 'format', outputs) else 'skipped')
+                outputs['needs.build-python-x86.result'] = 'success' if expected else 'skipped'
                 for name in ('build-python-x86', 'test-python-x86'):
-                    with self.subTest(path=path, job=name):
+                    with self.subTest(files=files, team=team, job=name):
                         self.assertEqual(condition('pr-ci-community.yml', name, outputs), expected)
+                        for failure in ('failure', 'cancelled', 'skipped'):
+                            self.assertFalse(condition('pr-ci-community.yml', name,
+                                dict(outputs, **{'needs.changes.result': failure})))
                         self.assertFalse(condition('pr-ci-community.yml', name,
                                                    dict(outputs, **{'cancelled()': True})))
+                for failed in ('failure', 'cancelled'):
+                    self.assertFalse(condition('pr-ci-community.yml', 'build-python-x86',
+                        dict(outputs, **{'needs.format.result': failed})))
+                for failed in ('failure', 'cancelled', 'skipped'):
+                    self.assertFalse(condition('pr-ci-community.yml', 'test-python-x86',
+                        dict(outputs, **{'needs.build-python-x86.result': failed})))
+
+    def test_python_gate_requires_selected_jobs_and_accepts_inapplicable_skips(self):
+        body = job('pr-ci-community.yml', 'python-result')
+        self.assertIn('needs: [changes, build-python-x86, test-python-x86]', body)
+        self.assertTrue(condition('pr-ci-community.yml', 'python-result', {'cancelled()': True}))
+        script = textwrap.dedent(body.split('        run: |\n', 1)[1])
+        selection = re.search(r'RUN_PYTHON: (.+)', body)[1]
+        for core, selected in ((True, True), (True, False), (False, False)):
+            values = {'github.event_name': 'pull_request', 'github.base_ref': 'main',
+                      'needs.changes.outputs.wheel': str(selected).lower(),
+                      # Legacy filters must not reselect an excluded main PR.
+                      'needs.changes.outputs.python': 'true', 'needs.changes.outputs.cmake': 'true'}
+            enabled = expression(selection, values)
+            expected = 'success' if core and selected else 'skipped'
+            env = dict(os.environ, CORE=str(core).lower(), RUN_PYTHON=str(enabled).lower(),
+                       CHANGES_RESULT='success' if core else 'skipped',
+                       BUILD_RESULT=expected, TEST_RESULT=expected)
+            def run(overrides):
+                return subprocess.run(['bash', '-e', '-c', script], env={**env, **overrides},
+                                      capture_output=True, timeout=10).returncode
+            self.assertEqual(run({}), 0)
+            for key in ('BUILD_RESULT', 'TEST_RESULT'):
+                for bad in ('failure', 'cancelled', '', 'skipped' if selected else 'success'):
+                    self.assertNotEqual(run({key: bad}), 0)
+            if core:
+                for bad in ('failure', 'cancelled', 'skipped', ''):
+                    self.assertNotEqual(run({'CHANGES_RESULT': bad}), 0)
+
+    def test_wheel_helper_regressions_run_without_a_native_artifact(self):
+        body = job('pr-ci.yml', 'routing-tests')
+        for module in ('test_python_ci', 'test_workflow_entries', 'test_daily_plan',
+                       'test_team_test_shards', 'test_local_build_wheel', 'test_python_license'):
+            self.assertIn('tests/scripts/' + module + '.py', body)
+        self.assertNotIn('download-artifact', body)
+        self.assertNotIn('python-wheel-build', body)
+
+    def test_renamed_and_deleted_wheel_inputs_remain_selected(self):
+        # The existing no-renames diff contract presents both endpoints, including
+        # deleted paths. Exercise it with a real repository instead of basename guesses.
+        from scripts.ci.checks_policy import changed_paths
+        with tempfile.TemporaryDirectory() as tmp:
+            def git(*args):
+                return subprocess.check_output(['git', '-C', tmp, *args], text=True).strip()
+            git('init', '-q')
+            git('config', 'user.name', 'Test')
+            git('config', 'user.email', 'test@example.com')
+            Path(tmp, 'python').mkdir()
+            Path(tmp, 'python/setup.cfg').write_text('metadata\n')
+            git('add', '.')
+            git('commit', '-qm', 'base')
+            base = git('rev-parse', 'HEAD')
+            Path(tmp, 'python/setup.cfg').rename(Path(tmp, 'notes.md'))
+            git('add', '-A')
+            git('commit', '-qm', 'move out of scope')
+            head = git('rev-parse', 'HEAD')
+            event = {'action': 'synchronize', 'pull_request': {
+                'base': {'sha': base}, 'head': {'sha': head}}}
+            with patch('scripts.ci.checks_policy.git',
+                       side_effect=lambda *args: subprocess.check_output(['git', '-C', tmp, *args])):
+                paths = changed_paths('pull_request', event)
+            self.assertEqual(set(paths), {'python/setup.cfg', 'notes.md'})
+            block = job('pr-ci-community.yml', 'changes').split('            wheel:\n', 1)[1]
+            patterns = re.findall(r"^              - '([^']+)'", block, re.M)
+            self.assertTrue(any(matches(path, pat) for path in paths for pat in patterns))
 
     def test_exact_workflow_files_and_local_workflow_targets_exist(self):
         expected = {'pr-ci.yml', 'pr-ci-team.yml', 'pr-ci-community.yml', 'pr-issue-link.yml',

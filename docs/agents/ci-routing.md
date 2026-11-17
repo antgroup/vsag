@@ -200,20 +200,37 @@ PRs targeting `main` keep the Linux ASan tests, examples, compatibility, changed
 lint, formatting, routing checks and `PR CI Gate`. Team and Community remain alternative
 Linux execution paths, not different correctness requirements.
 
-- Python wheel build/test (`build-python-x86` and `test-python-x86`) runs on main-target PRs
-  that change Python/bindings, the C ABI, or CMake/packaging files (the `python` and `cmake`
-  path filters). It builds the `py3-none` wheel with the shared Linux cibuildwheel action and runs complete ordinary pytest against the installed artifact. Main PRs test one primary environment (Python 3.12, NumPy 2); the Python 3.10-3.14 /
-  NumPy 1.x-2.x matrix and the OpenMP coexistence test stay on version branches and manual runs, and
-  belong in Nightly. The wheel build tolerates the intentionally skipped Community format job on
-  Team-routed C++ changes, but still stops on failed or cancelled prerequisites. Main pushes restore the same primary Python environment through Branch CI; explicit manual Python checks remain available.
-  Python selection also covers native dependency/build definitions, `scripts/python/`,
-  `scripts/deps/`, the Python CI/cache helpers, Python helper regressions and the
-  PR/Branch/Nightly/TestPyPI workflows that call the shared Python actions. The shared
-  `daily_measure.py` test wrapper and its `daily_plan.py`/`team_test_shards.py` imports
-  remain included because installed-wheel tests execute them even outside Nightly. Unrelated
-  test-planning, coverage, lint and maintenance helpers no longer trigger a wheel
-  build merely because they live under `scripts/` or `.github/workflows/`. Selected
-  wheels still receive the same build and complete ordinary pytest checks.
+- Python wheel build/test (`build-python-x86` and `test-python-x86`) uses the dedicated
+  `wheel` path filter for main-target PRs. It builds the `py3-none` wheel with the shared
+  Linux cibuildwheel action and runs complete ordinary pytest against that installed artifact.
+  Main PRs test Python 3.12 / NumPy 2; version/manual scope retains the existing `python` OR
+  `cmake` selection and Python 3.10–3.14 / NumPy 1.x–2.x matrix including OpenMP coexistence.
+  Branch, Nightly and release behavior is unchanged.
+
+  | Main PR category | Wheel policy and reason |
+  | --- | --- |
+  | Python package and metadata | Include `python/pyvsag/**`, `setup.py`, `setup.cfg`, `pyproject.toml`, `MANIFEST.in`, `requirements*.txt`, package license/notice files and `python/licenses/**`. Root `README.md` is an intentional documentation exception: `setup.py` reads it into wheel metadata. `python/README.md`, `python/docs/**` and website docs do not select a wheel. |
+  | C ABI and shared build configuration | Include `src/vsag_c_api.cpp`, public `include/vsag/*.h` / `*.hpp`, `src/version.h.in`, root `CMakeLists.txt`, `Makefile`, `cmake/**`, native `src/**/CMakeLists.txt` / `*.cmake` and `extern/**`. These can affect the `vsag_c` build, ABI, linkage or dependencies. Public headers are conservative because they can break the bindings' native build. |
+  | Wheel construction and installed-wheel validation | Include the Linux wheel build/test actions, their Community caller, `prepare_python_build.sh`, `check_wheel_libs.py`, `local_build_wheel.sh`, `install_deps_centos.sh`, `python_ci.py`, `collect_python_cache.sh` and `tests/python/**`. These govern packaging, audits, provenance or required installed tests. The manylinux container/toolchain is configured in `pyproject.toml` and the build action, not `docker/Dockerfile.x86.base`. |
+  | Helper and regression-only changes | Exclude `tests/scripts/test_python*.py`, `test_local_build_wheel.py`, `daily_measure.py`, `daily_plan.py` and `team_test_shards.py` from wheel selection. The router's required **CI Routing Tests** job runs Python CI/packaging, workflow-selection, Daily planner/measurement and Team shard regressions without compiling a wheel. Planner imports in the installed-test wrapper alone do not justify repackaging. |
+  | Other native and CI changes | Native algorithm implementation-only changes (for example `src/algorithm/hgraph.cpp`), C++ tests/examples, coverage/lint/planning helpers, Ubuntu/macOS dependency installers, macOS-only wheel actions and other workflow callers (`pr-ci.yml`, Branch, Nightly, TestPyPI) do not select this wheel. Existing Team/Community native checks and helper regressions retain their scopes. |
+
+  This is a path policy, not a semantic dependency analyzer. Root Makefile, all CMake
+  modules, `extern/**`, package licenses and the Community caller intentionally allow
+  false positives (for example a macOS-only CMake edit or a non-Python job edit in that
+  caller). Keeping shared build failures visible is preferable to fragile per-line rules.
+  A mixed PR selects a wheel if any changed path matches; added, modified and deleted
+  inputs use the same policy. Pure Python test changes still build: the existing provenance
+  contract requires a fresh wheel from the exact tested SHA, and cannot reuse a published
+  wheel or an unrelated run's artifact.
+
+  Both jobs preserve `!cancelled()` and prerequisite failure handling, including the
+  intentionally skipped Community formatter on Team-routed C++ changes. The consumer
+  requires a successful build before downloading wheel/provenance artifacts. **Python Checks
+  Result** always runs: it requires both selected jobs to succeed, rejects missing/failed/
+  cancelled/unexpectedly skipped results and accepts skipped jobs when inapplicable. The
+  existing Community result and top-level **PR CI Gate** still propagate failures; an
+  inapplicable Python check never skips the whole PR workflow.
 - `.github/workflows/pyvsag-testpypi.yml` builds the pyvsag `py3-none` wheels for x86_64
   and aarch64 from `main` every night (03:17 Beijing time, cron `17 19 * * *`) and on manual
   dispatch, and can upload them to TestPyPI with the `TEST_PYPI_API_TOKEN` secret. Uploading is
