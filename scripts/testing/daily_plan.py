@@ -187,8 +187,15 @@ def quarantine_extensions(extension, rules):
             raise PlanError("Daily quarantine identity mismatch")
         excluded.append({**rule, "configuration": unit.get("configuration"), "status": "not_validated"})
     missing = keys - {item["key"] for item in excluded}
-    if missing:
-        raise PlanError("Stale or mistargeted Daily quarantine: " + ", ".join(sorted(missing)))
+    # Weekly seeds change effective configurations. An absent tuple is not a
+    # stale testcase, and must not prevent the rest of the inventory running.
+    rotation_names = {test["name"] for unit in extension if unit.get("mode") == "rotation"
+                      for test in unit.get("tests", [])}
+    stale = {key for key in missing if by_key[key]["case"] not in rotation_names}
+    if stale:
+        raise PlanError("Stale or mistargeted Daily quarantine: " + ", ".join(sorted(stale)))
+    excluded.extend({**by_key[key], "configuration": None, "status": "not_in_inventory"}
+                    for key in sorted(missing))
     return retained, excluded
 
 
@@ -204,6 +211,8 @@ def build_plan(ctx, environment, core, extension, inventory=None, core_only=Fals
         # including renamed/removed cases. Other profiles only own their cases.
         names = {test["name"] for unit in core + extension for test in unit.get("tests", [])}
         applicable = rules if profile == "functional" else [r for r in rules if r["case"] in names]
+        if {r["key"] for r in applicable} & {unit["key"] for unit in core}:
+            raise PlanError("Stale or mistargeted Daily quarantine: core configuration")
         extension, quarantines = quarantine_extensions(extension, applicable)
     units = core + extension
     if len({u["key"] for u in units}) != len(units):

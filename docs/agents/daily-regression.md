@@ -281,6 +281,13 @@ failure is in its fp32 path, but the quarantine excludes the entire atomic group
 not only that assertion. Run 43169422580 also exposed a distinct cosine / 1536-dimensional / 600-row group; the same fp32 filtered-recall failure reproduced on rebased main, including a wider-search diagnostic. That exact atomic group is now separately quarantined. Other configurations and original assertions remain enabled. A dedicated Summary
 section lists quarantines as **not validated**, including when their weekly slot
 is not today's slot. Explicit full-coverage planning ignores this quarantine.
+Weekly seeds can change the effective parameter inventory. If the testcase still has
+rotation configurations but an exact quarantined key is absent, the rule is reported
+separately as **inactive / not in this inventory**; no current configuration is excluded
+by that rule and no pass is credited. The rule remains configured and applies again
+if that exact key returns in a later week. Missing/renamed testcases, malformed rules,
+identity mismatches and rules targeting core configurations still fail planning.
+This does not broaden an exclusion to other configurations of the same testcase.
 Remove the entry after a root-cause fix and a successful targeted replay, tracked
 in #3225. Unexpected test skips, failures or missing planned results still fail.
 

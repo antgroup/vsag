@@ -835,13 +835,82 @@ class DailyNamedCountTests(unittest.TestCase):
 
     def test_stale_quarantine_fails_and_unrelated_profiles_stay_independent(self):
         rule = dp.load(dp.HERE / "daily_matrix.json")["quarantine"][0]
-        for extension in ([], [{**self.unit("changed-key"), "mode": "rotation", "tests": [{"name": rule["case"]}]}]):
+        for extension in ([], [{**self.unit("changed-key"), "mode": "rotation", "tests": [{"name": "renamed case"}]}]):
             with self.assertRaisesRegex(dp.PlanError, "Stale or mistargeted"):
                 dp.quarantine_extensions(extension, [rule])
         with self.assertRaisesRegex(dp.PlanError, "Stale or mistargeted"):
             dp.build_plan(self.context(), "env", [self.unit()], [], profile="functional")
         for profile in ("unit", "simd", "concurrent"):
             self.assertFalse(dp.build_plan(self.context(), "env", [self.unit()], [], profile=profile)["quarantines"])
+
+    def test_weekly_quarantine_drift_and_return_preserve_exact_exclusions(self):
+        case = "(Daily) HGraph Duplicate"
+        key = dp.digest([[case, "tests/test_hgraph.cpp"]])
+        def unit(rows, metric):
+            configuration = {"base_count": rows, "dim": 1536, "metric": metric}
+            return {**self.unit(dp.digest([key, configuration])), "mode": "rotation",
+                    "configuration": configuration, "tests": [{"name": case}]}
+        # Only tuple identity matters to the planner; no full binary inventory
+        # or quantizer list is needed to exercise disappearance and return.
+        old = [unit(600, metric) for metric in ("l2", "cosine")]
+        current = [unit(1000, metric) for metric in ("l2", "cosine")]
+        matrix = dp.load(dp.HERE / "daily_matrix.json")
+        matrix["quarantine"] = [{"key": u["key"], "case": case, "reason": "Known failure",
+                                 "tracking": "https://github.com/antgroup/vsag/issues/3225"}
+                                for u in old]
+        original = dp.load
+        def load(path):
+            return matrix if Path(path).name == "daily_matrix.json" else original(path)
+        for date, inventory in (("2026-11-10", old + current),
+                                ("2026-11-17", current),
+                                ("2026-11-24", old + current)):
+            with self.subTest(date=date), patch.object(dp, "load", side_effect=load):
+                plan = dp.build_plan(self.context(date), "env", [self.unit()], inventory,
+                                     profile="functional")
+                self.assertEqual({u["key"] for day in plan["rotation"] for u in day},
+                                 {u["key"] for u in current})
+                status = "not_in_inventory" if date == "2026-11-17" else "not_validated"
+                self.assertEqual([r["status"] for r in plan["quarantines"]], [status] * 2)
+                if status == "not_in_inventory":
+                    self.assertTrue(all(r["configuration"] is None for r in plan["quarantines"]))
+
+    def test_inactive_quarantine_is_visible_once_per_sharded_lane_not_a_pass(self):
+        rule = dp.load(dp.HERE / "daily_matrix.json")["quarantine"][0]
+        extension = {**self.unit("new-configuration"), "mode": "rotation",
+                     "tests": [{"name": rule["case"]}]}
+        core = [{**self.unit(str(i)), "tests": [{"name": f"core{i}", "binary": "functests",
+                                                "source_file": "tests/core.cpp"}]} for i in range(4)]
+        extension["tests"][0].update(binary="functests", source_file="tests/test_hgraph.cpp")
+        inventory = {"named_cases": [test for unit in core + [extension] for test in unit["tests"]]}
+        parent = dp.build_plan(self.context("2026-11-17"), "env", core, [extension],
+                               inventory=inventory, profile="functional")
+        results = []
+        for i in range(4):
+            plan = dp.shard_plan(parent, i, 4)
+            results.append(dp.sealed({"schema_version": 1, "kind": "daily-result", "plan": plan,
+                                     "lane": f"test-shard{i}", "records": [
+                                         {"key": u["key"], "status": "passed", "seconds": 1}
+                                         for u in plan["selected"]]}))
+        summary = report.summarize(results)
+        self.assertEqual(len(summary["quarantines"]), 2)
+        self.assertEqual(summary["status"], "passed")
+        self.assertEqual(summary["case_counts"]["configurations"]["passed"], len(parent["selected"]))
+        text = report.markdown(summary)
+        self.assertIn("Inactive quarantine rules", text)
+        self.assertNotIn("Quarantined configurations — not validated", text)
+        self.assertIn("No configuration was excluded", text)
+        self.assertEqual(text.count(rule["key"]), 1)
+        # An inactive rule cannot turn an unrelated actual failure into success.
+        results[0]["records"][0]["status"] = "failed"
+        results[0] = dp.sealed({k: v for k, v in results[0].items() if k != "digest"})
+        self.assertEqual(report.summarize(results)["status"], "failed")
+
+    def test_core_quarantine_is_rejected_even_with_rotating_siblings(self):
+        rule = dp.load(dp.HERE / "daily_matrix.json")["quarantine"][0]
+        core = {**self.unit(rule["key"]), "tests": [{"name": rule["case"]}]}
+        sibling = {**core, "key": "sibling", "mode": "rotation"}
+        with self.assertRaisesRegex(dp.PlanError, "core configuration"):
+            dp.build_plan(self.context(), "env", [core], [sibling], profile="functional")
 
     def test_process_failure_cannot_promote_group_members_to_passed(self):
         import daily_counts
