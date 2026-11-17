@@ -183,13 +183,19 @@ def markdown(report):
               "Planned Nightly HGraph concurrent stress uses at most 512 rows and a raw dimension cap of 256; RaBitQ retains its 960-dimensional recall floor. "
               "large-shape stress remains a release obligation.",
               "Nightly Coverage bounds the PR variants of HGraph Duplicate Build, Export Model and Search Over Time to at most 256 rows before cost selection; metrics, dimensions, quantizers, queries, construction threads and assertions remain unchanged. Other lanes retain their workloads.", ""]
-    if report.get("quarantines"):
-        lines += ["### 🟡 Quarantined configurations — not validated", "",
-                  "Passing selected checks does not validate these known exceptions."]
-        for item in report["quarantines"]:
-            lines.append(f"- {item['lane']} / {item['case']} / `{item['key']}`: "
-                         f"{item['reason']} Tracking: {item['tracking']}")
-        lines.append("")
+    for status, heading, explanation in (
+            ("not_validated", "Quarantined configurations — not validated",
+             "Passing selected checks does not validate these known exceptions."),
+            ("not_in_inventory", "Inactive quarantine rules — absent from this inventory",
+             "No configuration was excluded by these rules in this inventory. They remain "
+             "unvalidated and automatically apply if the exact configuration returns.")):
+        items = [item for item in report.get("quarantines", []) if item["status"] == status]
+        if items:
+            lines += ["### 🟡 " + heading, "", explanation]
+            for item in items:
+                lines.append(f"- {item['lane']} / {item['case']} / `{item['key']}`: "
+                             f"{item['reason']} Tracking: {item['tracking']}")
+            lines.append("")
     lines += ["<details><summary>Capability exclusions (not validated in these lanes)</summary>", ""]
     for item in report["exclusions"]:
         lines.append("- " + item["lane"] + " / " + item["test"]["name"] + ": " + item["reason"])
