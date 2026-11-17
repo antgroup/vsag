@@ -124,7 +124,8 @@ jobs:
           tests/scripts/test_python_license.py
 
   community:
-    if: always() && needs.select-checks.result == 'success' && (needs.route.result == 'success' || needs.route.result == 'skipped')
+    # A superseding push must cancel the entire hosted branch, including wheel builds.
+    if: ${{ !cancelled() && needs.select-checks.result == 'success' && (needs.route.result == 'success' || needs.route.result == 'skipped') }}
     name: Community
     needs: [route, select-checks]
     uses: ./.github/workflows/pr-ci-community.yml
