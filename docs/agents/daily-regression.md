@@ -53,7 +53,7 @@ all shard indices exactly once. A failed shard does not cancel its siblings.
 ARM uses one shared OpenBLAS build for tests and examples. Its former duplicate
 build/core lane and artifact-overwriting cleanup are removed. x86's bundled-OpenBLAS
 source build and MKL build remain separate because they validate different backends.
-Coverage case names and thresholds remain unchanged; three expensive HGraph functional cases use a smaller, explicitly bounded Coverage dataset as described below.
+Coverage case names and thresholds remain unchanged; four expensive HGraph functional cases use a smaller, explicitly bounded Coverage dataset as described below.
 
 ## Linux Python matrix
 
@@ -303,11 +303,15 @@ Daily before accepting the ten-hour target.
 ### Coverage-specific workload bound
 
 `VSAG_DAILY_COVERAGE=1` caps the original PR variants of HGraph Duplicate Build,
-Export Model and Search Over Time at **256 rows before cost-budget selection**.
+Export Model, Search Over Time, and Estimate Memory And Get Memory Usage at
+**256 rows after fixed-workload normalization and before cost-budget selection**.
 Coverage's `-O0` and atomic counters amplify the repeated distance/pruning work;
 these functional contracts do not require large-data stress. The bound preserves
 the selected metrics, quantizers, raw dimensions, RaBitQ's 960-dimensional floor,
 query count, construction thread count, assertions and the coverage threshold.
+The memory case still independently builds the estimate and serialization/load
+paths and retains both memory-accounting assertions. Its fixed 1,000-row default
+must not overwrite the Coverage cap or disagree with the recorded budget.
 256 retains the PQ training minimum. This is an explicit dataset-size reduction,
 not a claim that the original large workloads became faster.
 

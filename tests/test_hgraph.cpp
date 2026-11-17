@@ -390,8 +390,24 @@ TEST_CASE("HGraph budget candidate counts preserve bounds and coverage", "[test_
     REQUIRE(HGraphBudgetCounts(largest, largest) == std::vector<uint64_t>{largest});
 }
 
+// Coverage instruments hot distance/pruning paths with atomic counters. Keep these
+// functional contracts at a small dataset size; ASan and TSan retain their workloads.
 void
-ApplyHGraphBudget(const HGraphResourcePtr& resource) {
+BoundDailyCoverage(const HGraphResourcePtr& resource, bool coverage) {
+    const auto title = HGraphCaseTitle(resource->identity);
+    if (!coverage || !resource->sample || resource->identity.name != "(PR) " + title ||
+        (title != "HGraph Duplicate Build" && title != "HGraph Export Model" &&
+         title != "HGraph Search Over Time" &&
+         title != "HGraph Estimate Memory And Get Memory Usage")) {
+        return;
+    }
+    // 256 also preserves the PQ training floor. Do not change dimensions, metrics,
+    // quantizers, query counts, construction threads, or any correctness assertion.
+    resource->base_count = std::min(resource->base_count, uint64_t{256});
+}
+
+void
+ApplyHGraphBudget(const HGraphResourcePtr& resource, bool daily_coverage = false) {
     const auto title = HGraphCaseTitle(resource->identity);
     const bool pipnn = resource->graph_type == "pipnn";
     const bool tune = title == "HGraph Tune";
@@ -439,6 +455,10 @@ ApplyHGraphBudget(const HGraphResourcePtr& resource) {
             resource->query_count = pipnn ? 10 : 20;
         }
     }
+
+    // Apply after fixed workload normalization, before selecting the budget. Otherwise
+    // the memory contract resets the Coverage cap to 1000 and the plan becomes stale.
+    BoundDailyCoverage(resource, daily_coverage);
 
     uint64_t minimum = dirty ? 1000 : 128;
     for (const auto& [quantizer, recall] : resource->test_cases) {
@@ -614,26 +634,12 @@ ApplyHGraphBudget(const HGraphResourcePtr& resource) {
     }
 }
 
-// Coverage instruments hot distance/pruning paths with atomic counters. Keep these
-// functional contracts at a small dataset size; ASan and TSan retain their workloads.
-void
-BoundDailyCoverage(const HGraphResourcePtr& resource, bool coverage) {
-    const auto title = HGraphCaseTitle(resource->identity);
-    if (!coverage || !resource->sample || resource->identity.name != "(PR) " + title ||
-        (title != "HGraph Duplicate Build" && title != "HGraph Export Model" &&
-         title != "HGraph Search Over Time")) {
-        return;
-    }
-    // 256 also preserves the PQ training floor. Do not change dimensions, metrics,
-    // quantizers, query counts, construction threads, or any correctness assertion.
-    resource->base_count = std::min(resource->base_count, uint64_t{256});
-}
-
 TEST_CASE("Daily coverage bounds only expensive HGraph functional workloads",
           "[ft][hgraph][daily_plan][test_budget]") {
     const auto title = GENERATE("HGraph Duplicate Build",
                                 "HGraph Export Model",
                                 "HGraph Search Over Time",
+                                "HGraph Estimate Memory And Get Memory Usage",
                                 "HGraph Concurrent Add",
                                 "HGraph Build Test");
     const bool enabled = GENERATE(false, true);
@@ -649,13 +655,48 @@ TEST_CASE("Daily coverage bounds only expensive HGraph functional workloads",
     const bool bounded = enabled && sample &&
                          (std::string(title) == "HGraph Duplicate Build" ||
                           std::string(title) == "HGraph Export Model" ||
-                          std::string(title) == "HGraph Search Over Time");
+                          std::string(title) == "HGraph Search Over Time" ||
+                          std::string(title) == "HGraph Estimate Memory And Get Memory Usage");
     BoundDailyCoverage(resource, enabled);
     REQUIRE(resource->base_count == (bounded ? 256 : 600));
     REQUIRE(resource->dims == std::vector<int>{64, 1536});
     REQUIRE(resource->metric_types == std::vector<std::string>{"l2", "cosine"});
     REQUIRE(resource->test_cases == HGraphTestIndex::all_test_cases);
     REQUIRE(resource->query_count == 100);
+}
+
+TEST_CASE("HGraph memory Coverage cap survives budget normalization",
+          "[ft][hgraph][daily_plan][test_budget]") {
+    const bool coverage = GENERATE(false, true);
+    const auto prefix = GENERATE("(PR) ", "(Daily) ");
+    const bool pipnn = GENERATE(false, true);
+    const auto quantizer = GENERATE("sq8", "pq", "rabitq,fp32");
+    auto resource = std::make_shared<HGraphTestResource>();
+    resource->sample = std::string(prefix) == "(PR) ";
+    resource->graph_type = pipnn ? "pipnn" : "nsw";
+    resource->identity.name = std::string(prefix) + "HGraph Estimate Memory And Get Memory Usage" +
+                              (pipnn ? " PiPNN" : "");
+    resource->identity.source_file = __FILE__;
+    resource->report_budget = false;
+    resource->base_count = 3000;
+    resource->dims = {64};
+    resource->metric_types = {"ip"};
+    resource->test_cases = {{quantizer, 0.95F}};
+    ApplyHGraphBudget(resource, coverage);
+    const bool bounded = coverage && resource->sample && !pipnn;
+    REQUIRE(resource->base_count == (bounded ? 256 : 1000));
+    REQUIRE(resource->dims == std::vector<int>{64});
+    REQUIRE(resource->metric_types == std::vector<std::string>{"ip"});
+    REQUIRE(resource->test_cases.size() == 1);
+    REQUIRE(resource->test_cases.front().first == quantizer);
+    REQUIRE(resource->query_count == 100);
+    REQUIRE(resource->budget_plan->Runs().front().workload.build_runs == 2);
+    REQUIRE(resource->budget_plan->Runs().front().workload.serialize_runs == 1);
+    for (const auto& run : resource->budget_plan->Runs()) {
+        REQUIRE(run.workload.num == resource->base_count);
+        REQUIRE(run.workload.dim ==
+                (HGraphTestIndex::IsRaBitQ(quantizer) ? RABITQ_MIN_RACALL_DIM : 64));
+    }
 }
 
 // Daily concurrency protects interleavings, not a large-dimensional throughput target.
@@ -718,10 +759,9 @@ HGraphTestIndex::GetResource(bool sample,
     BoundDailyConcurrency(resource,
                           std::getenv("VSAG_DAILY_ENUMERATE") != nullptr ||
                               std::getenv("VSAG_DAILY_HGRAPH") != nullptr);
-    BoundDailyCoverage(resource,
-                       std::getenv("VSAG_DAILY_COVERAGE") != nullptr &&
-                           std::string(std::getenv("VSAG_DAILY_COVERAGE")) == "1");
-    ApplyHGraphBudget(resource);
+    ApplyHGraphBudget(resource,
+                      std::getenv("VSAG_DAILY_COVERAGE") != nullptr &&
+                          std::string(std::getenv("VSAG_DAILY_COVERAGE")) == "1");
     // Rotation retains every tuple in the effective workload. Only opt-in Daily
     // concurrency uses bounded shapes; ordinary full/release invocation is unchanged.
     if (!sample && identity.name.rfind("(Daily) ", 0) == 0) {
