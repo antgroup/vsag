@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 @unittest.skipUnless(shutil.which("cmake"), "requires cmake")
 class MacOSOpenMPTest(unittest.TestCase):
-    def configure(self, *, minos="14.0", missing=False, legacy=False, platform="1", extra_commands="", source=False, disable_perl=False, banner=""):
+    def configure(self, *, minos="15.0", missing=False, legacy=False, platform="1", extra_commands="", source=False, disable_perl=False, banner=""):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             prefix = root / "custom"
@@ -36,7 +36,7 @@ class MacOSOpenMPTest(unittest.TestCase):
             (root / "CMakeLists.txt").write_text(f'''
 cmake_minimum_required(VERSION 3.20)
 project(openmp_configuration NONE)
-set(CMAKE_OSX_DEPLOYMENT_TARGET 14.0)
+set(CMAKE_OSX_DEPLOYMENT_TARGET 15.0)
 set(LIBOMP_PREFIX "{'' if source else prefix}")
 set(NUM_BUILDING_JOBS 2)
 set(CMAKE_DISABLE_FIND_PACKAGE_Perl {'TRUE' if disable_perl else 'FALSE'})
@@ -83,7 +83,7 @@ endif()
                 self.assertIn("non-macOS", result.stderr)
 
     def test_mixed_archive_platform_is_rejected(self):
-        result = self.configure(extra_commands="Load command 0\ncmd LC_BUILD_VERSION\n platform 7\n minos 14.0\n")
+        result = self.configure(extra_commands="Load command 0\ncmd LC_BUILD_VERSION\n platform 7\n minos 15.0\n")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("non-macOS", result.stderr)
 
@@ -97,14 +97,14 @@ endif()
         for banner in ("/tmp/lib[;omp.a(member.o):\n", "/tmp/lib];omp.a(member.o):\n"):
             with self.subTest(banner=banner):
                 result = self.configure(banner=banner, extra_commands=
-                                        "Load command 0\ncmd LC_BUILD_VERSION\n platform 7\n minos 14.0\n")
+                                        "Load command 0\ncmd LC_BUILD_VERSION\n platform 7\n minos 15.0\n")
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("non-macOS", result.stderr)
 
     def test_newer_archive_is_rejected(self):
         result = self.configure(minos="26.0")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("newer than target 14.0", result.stderr)
+        self.assertIn("newer than target 15.0", result.stderr)
 
     def test_missing_archive_has_actionable_diagnostic(self):
         result = self.configure(missing=True)

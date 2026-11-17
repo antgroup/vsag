@@ -1,0 +1,87 @@
+name: Build verified macOS Python wheel
+description: Native Apple Silicon wheel; callers own source selection and publication.
+inputs:
+  source-sha:
+    description: Exact caller checkout SHA
+    required: true
+  artifact:
+    description: Wheel artifact name (provenance is uploaded separately)
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Verify source and platform
+      shell: bash
+      env:
+        SOURCE_SHA: ${{ inputs.source-sha }}
+      run: |
+        set -euo pipefail
+        test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+        test "$(uname -s)" = Darwin
+        test "$(uname -m)" = arm64
+        test ! -d wheelhouse || test -z "$(ls -A wheelhouse)"
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - name: Validate wheel CI contracts
+      shell: bash
+      run: python3 -m unittest tests.scripts.test_python_ci
+    - name: Check runner build tools
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Use the image's tools without a network-dependent Homebrew upgrade.
+        python3 - <<'PYTHON'
+        import re
+        import subprocess
+        for command, minimum in [('cmake', (3, 20)), ('ninja', (1, 10))]:
+            output = subprocess.check_output([command, '--version'], text=True)
+            print(output)
+            match = re.search(r'(\d+)\.(\d+)', output)
+            if not match or tuple(map(int, match.groups())) < minimum:
+                raise SystemExit(f'{command} must be at least {minimum}')
+        PYTHON
+        perl -e 'use 5.010; print "Perl $^V\n";'
+        clang++ --version
+    - name: Build, repair and audit native wheel
+      shell: bash
+      env:
+        MACOSX_DEPLOYMENT_TARGET: '15.0'
+        CMAKE_BUILD_PARALLEL_LEVEL: '3'
+        VSAG_USE_SYSTEM_DEPS: 'OFF'
+      run: |
+        set -euo pipefail
+        mkdir -p python-build-report
+        SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
+        export SOURCE_DATE_EPOCH
+        # Keep make's installed-wheel tests as an early build gate; the matrix tests clean venvs.
+        make pyvsag 2>&1 | tee python-build-report/build.log
+        # Repeat the cheap audit explicitly before publishing the artifact.
+        python3 scripts/python/check_macos_wheel.py wheelhouse/*.whl
+    - name: Record wheel provenance
+      shell: bash
+      env:
+        SOURCE_SHA: ${{ inputs.source-sha }}
+      run: python3 scripts/ci/macos_wheel_ci.py manifest --source "$SOURCE_SHA"
+    - uses: actions/upload-artifact@v5
+      with:
+        name: ${{ inputs.artifact }}
+        path: wheelhouse/*.whl
+        if-no-files-found: error
+        retention-days: 14
+        overwrite: true
+    - uses: actions/upload-artifact@v5
+      with:
+        name: provenance-${{ inputs.artifact }}
+        path: wheel-manifest.json
+        if-no-files-found: error
+        retention-days: 14
+        overwrite: true
+    - uses: actions/upload-artifact@v5
+      if: always()
+      with:
+        name: macos-wheel-build-report-${{ github.run_id }}
+        path: python-build-report
+        if-no-files-found: warn
+        retention-days: 14
+        overwrite: true

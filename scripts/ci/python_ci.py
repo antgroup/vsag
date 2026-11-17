@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Linux wheel identity, supported test matrix and honest pytest reporting."""
+"""Wheel identity, supported test matrix and honest pytest reporting."""
 import argparse
 import datetime as dt
 import hashlib
@@ -34,7 +34,7 @@ def lanes():
 
 
 def wheel_manifest(directory, sha, arch):
-    if not re.fullmatch(r'[a-f0-9]{40}', sha) or arch not in ('x86_64', 'aarch64'):
+    if not re.fullmatch(r'[a-f0-9]{40}', sha) or arch not in ('x86_64', 'aarch64', 'arm64'):
         raise ValueError('Invalid source or architecture')
     wheels = list(Path(directory).glob('*.whl'))
     if len(wheels) != 1 or not wheels[0].name.endswith(f'_{arch}.whl'):
@@ -175,7 +175,7 @@ def markdown(reports, job_metrics=None):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('command', choices=['matrix', 'manifest', 'verify', 'test'])
-    parser.add_argument('--arch', choices=['x86_64', 'aarch64'])
+    parser.add_argument('--arch', choices=['x86_64', 'aarch64', 'arm64'])
     parser.add_argument('--source')
     parser.add_argument('--directory', default='wheelhouse')
     parser.add_argument('--manifest', default='wheel-manifest.json')

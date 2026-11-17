@@ -15,10 +15,10 @@ SPEC.loader.exec_module(audit)
 
 
 class MacOSWheelAuditTest(unittest.TestCase):
-    def check(self, *, extra=None, dependency="/usr/lib/libSystem.B.dylib", minos="14.0",
+    def check(self, *, extra=None, dependency="/usr/lib/libSystem.B.dylib", minos="15.0",
               symbol="_vsag_init\n_vsag_destroy", license_expression=audit.LICENSE_EXPRESSION, omit_license=None, platform="1", magic="cffaedfe"):
         with tempfile.TemporaryDirectory() as directory:
-            wheel = Path(directory) / "pyvsag-1.0-py3-none-macosx_14_0_arm64.whl"
+            wheel = Path(directory) / "pyvsag-1.0-py3-none-macosx_15_0_arm64.whl"
             with zipfile.ZipFile(wheel, "w") as archive:
                 archive.writestr(audit.LIBRARY, bytes.fromhex(magic))
                 archive.writestr("pyvsag/_vsag_c_api.h", "/* vsag_comment_only(); */\nvoid vsag_init(void);\nvoid vsag_destroy(void);\n")
@@ -71,7 +71,7 @@ class MacOSWheelAuditTest(unittest.TestCase):
 
     def test_legacy_deployment_command(self):
         self.assertEqual(audit.deployment_versions(
-            "cmd LC_VERSION_MIN_MACOSX\n cmdsize 16\n version 14.0\n sdk 26.0"), [(14, 0, 0)])
+            "cmd LC_VERSION_MIN_MACOSX\n cmdsize 16\n version 15.0\n sdk 26.0"), [(15, 0, 0)])
 
     def test_rejects_openmp_exports(self):
         with self.assertRaisesRegex(ValueError, "export only"):

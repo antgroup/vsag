@@ -26,7 +26,7 @@ the sum of simultaneously resident build processes.
 
 ## Prerequisites
 
-- **OS**: Ubuntu 20.04+, CentOS 7+, or macOS 14+ on Apple Silicon
+- **OS**: Ubuntu 20.04+, CentOS 7+, or macOS 15+ on Apple Silicon
 - **Compiler**: GCC 9.4.0+, Clang 13.0.0+, or Apple Clang from Xcode Command Line Tools
 - **CMake**: 3.18.0+
 - **Ninja**: preferred when available; Unix Makefiles are used as the fallback

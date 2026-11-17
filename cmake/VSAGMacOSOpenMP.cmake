@@ -14,7 +14,7 @@ include (${CMAKE_CURRENT_LIST_DIR}/VSAGThirdPartyOverride.cmake)
 
 function (vsag_configure_private_openmp)
     if (NOT CMAKE_OSX_DEPLOYMENT_TARGET)
-        message (FATAL_ERROR "Private OpenMP requires CMAKE_OSX_DEPLOYMENT_TARGET (wheel default: 14.0)")
+        message (FATAL_ERROR "Private OpenMP requires CMAKE_OSX_DEPLOYMENT_TARGET (wheel default: 15.0)")
     endif ()
     if (LIBOMP_PREFIX)
         set (_include "${LIBOMP_PREFIX}/include")

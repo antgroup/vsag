@@ -2,7 +2,7 @@
 
 VSAG 使用 CMake 构建。Full VSAG 的内部 CPU 源码使用 C++20，Linux 保留 GCC 9.4.0+ / Clang 13.0.0+ 的源码编译器基线，开发和 CI 固定使用 GCC 13 / Clang 20，并单独验证旧基线。公开头文件和 API 保持 C++17 可用；CUDA 源文件、Node.js 绑定和独立 Lite 继续使用 C++17。clang-format 和 clang-tidy 固定为版本 20。
 
-支持的平台包括 Ubuntu 20.04+、CentOS 7+，以及 Apple Silicon 上的 macOS 14+。
+支持的平台包括 Ubuntu 20.04+、CentOS 7+，以及 Apple Silicon 上的 macOS 15+。
 macOS 使用 Xcode Command Line Tools 提供的 Apple Clang 和 Homebrew 依赖；当前支持范围是
 arm64 核心 C++ 构建，预编译 C++ 包与 Python wheel 仍以 Linux 为主。首次构建前运行：
 

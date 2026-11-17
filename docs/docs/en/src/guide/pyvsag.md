@@ -2,7 +2,7 @@
 
 `pyvsag` is the official Python binding for VSAG. It is a pure-Python layer that calls the
 [C API](c_api.md) (`libvsag_c`) through [cffi](https://cffi.readthedocs.io/), so one
-`py3-none-manylinux_2_28` wheel per architecture serves every CPython 3.10+ release. Data crosses
+`py3-none` platform wheel per architecture serves every CPython 3.10+ release. Data crosses
 the boundary only as pointer, shape and dtype, hence it does not depend on the NumPy ABI. Sources
 live under [`python/`](https://github.com/antgroup/vsag/tree/main/python).
 
@@ -16,7 +16,8 @@ Requirements:
 
 - **Platform:** Linux `x86_64` or `aarch64` with glibc 2.28 or later (`manylinux_2_28`; for example
   Ubuntu 20.04+, Debian 10+, RHEL/Alma/Rocky 8+). macOS, Windows and musl-based distributions such as
-  Alpine have no published wheels. macOS arm64 wheels can be built locally as described below.
+  Alpine have no wheels on the production PyPI index. macOS arm64 wheels are available through
+  the TestPyPI workflow below, or can be built locally.
 - **Python:** CPython 3.10 or later. 3.10 to 3.14 are supported; later releases need no new wheel, because the wheel does not depend on the Python ABI.
 - **Dependencies:** `numpy` and `cffi`, installed automatically. The wheel bundles its OpenMP runtime
   and has no libaio, libcurl or OpenBLAS dependency.
@@ -25,11 +26,30 @@ Requirements:
 
 Wheels built from `main` are published to TestPyPI by the `pyvsag TestPyPI` workflow (nightly and
 manual runs; uploads can be paused). They carry a `.devN` version, so `--pre` is required, and the
-dependencies still come from the real PyPI:
+dependencies still come from the real PyPI. The workflow includes Linux x86_64/aarch64 and
+macOS Apple Silicon arm64 (`macosx_15_0_arm64`):
 
 ```bash
-pip install --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ pyvsag
+pip install numpy cffi
+pip install --pre --no-deps --index-url https://test.pypi.org/simple/ pyvsag
 ```
+
+The macOS job runs `make pyvsag` and the Mach-O audit, then tests the same SHA-256-verified
+wheel in clean environments: CPython 3.10–3.14 with NumPy 2.x, plus NumPy 1.26.4 on
+CPython 3.10–3.12. Two Python 3.12 lanes require `torch==2.15.0` and `scikit-learn==1.9.1` and all six OpenMP
+import orders, with NumPy 1.26.4 and 2.x and `KMP_DUPLICATE_LIB_OK=FALSE`; missing dependencies
+or skipped OpenMP tests fail the job. The minimum supported macOS is 15, matching the CI runner. This raises the previous macOS 14
+minimum: macOS 14 is no longer supported, including by the default local source build.
+
+Linux and macOS upload independently; only macOS upload waits for the macOS matrix. After upload, a new macOS job downloads the exact
+version from TestPyPI alone (without dependencies or pip cache), verifies the filename and
+SHA-256 against the build manifest, audits it and runs the ordinary suite in a clean environment.
+The download retries for up to ten minutes to allow index propagation. A same-name macOS file already on
+TestPyPI is rejected before upload: rerun only verification in the original upload run, or use a new version.
+Dependencies are installed separately from PyPI. Manual runs with `publish` unchecked can validate any branch and retain
+build/test artifacts without uploading or running the published-wheel check. Source SHA, wheel
+hash, dependency versions and test reports are retained with the workflow artifacts.
+The production PyPI release workflow remains Linux-only.
 
 ### Build from source
 
@@ -65,12 +85,11 @@ The OpenMP sub-build uses the same `CMAKE_BUILD_PARALLEL_LEVEL` limit as VSAG.
 A Mach-O audit then requires exactly `libvsag_c.dylib`, only system dependencies, C API exports,
 license metadata, and a deployment target no newer than the wheel tag, before installation and tests.
 
-The default `MACOSX_DEPLOYMENT_TARGET` is `14.0`, applied to VSAG and its source-built dependencies.
+The default `MACOSX_DEPLOYMENT_TARGET` is `15.0`, applied to VSAG and its source-built dependencies.
 No environment variables are needed for the default build. Set `MACOSX_DEPLOYMENT_TARGET` to
 choose another deployment target, or `CMAKE_BUILD_PARALLEL_LEVEL` to limit build concurrency.
-A `macosx_14_0_arm64` tag records the binary deployment target; building on a newer Mac does not
-replace runtime validation on macOS 14. The release and nightly workflows still publish Linux wheels
-only. Install `torch` and `scikit-learn` in the test environment to include the optional OpenMP
+The `macosx_15_0_arm64` tag declares macOS 15 as the minimum; CI runs on that OS version. TestPyPI includes macOS arm64; production PyPI releases
+remain Linux-only. Install `torch` and `scikit-learn` in the test environment to include the optional OpenMP
 coexistence tests.
 
 The macOS wheel build enables `VSAG_OPENMP_STATIC`; ordinary C++ builds keep dynamic OpenMP.

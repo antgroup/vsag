@@ -496,8 +496,8 @@ Each caller retains its immutable source selection: PR validation SHA, actual
 Branch push SHA, frozen Nightly SHA, or TestPyPI's independently resolved main SHA.
 A separate manifest binds that SHA, architecture, filename and SHA-256 to exactly
 one wheel. Test jobs verify it before installation and reject source-tree imports.
-The publication job selects only wheel artifacts; provenance is separate. TestPyPI's
-source resolver, triggers, credentials and publishing job are unchanged.
+The publication job selects only wheel artifacts; provenance is separate. TestPyPI retains
+its source-selection policy, triggers and credentials; macOS publication adds the gates below.
 
 Branch main pushes run x86 wheel construction plus Python 3.12 / NumPy 2 full
 ordinary tests. Pure documentation skips heavy work; unknown changes/missing diffs
@@ -506,9 +506,51 @@ unexpectedly skipped selected Python jobs. Version/manual routing keeps its scop
 No OpenMP dependency requirement is added to the main PR or Branch primary lane.
 
 See [the Nightly Linux matrix](daily-regression.md#linux-python-matrix) for mandatory
-Python/NumPy compatibility and OpenMP environments. Native macOS Python integration
-is deferred to the separately owned packaging adaptation; Linux results do not
-validate macOS wheels.
+Python/NumPy compatibility and OpenMP environments. The independent `pyvsag TestPyPI`
+workflow builds macOS arm64 wheels with `make pyvsag`, audits Mach-O contents and tests
+one provenance-verified artifact in ten clean environments on `macos-15`: eight ordinary
+Python/NumPy combinations and two Python 3.12 OpenMP lanes (NumPy 1.26.4 and 2.x).
+Both OpenMP lanes require `torch==2.15.0`, `scikit-learn==1.9.1` and all six import orders with
+`KMP_DUPLICATE_LIB_OK=FALSE`. The authoritative pins live in
+`OPENMP_PACKAGES` in `scripts/ci/macos_wheel_ci.py`; installation and tests read that tuple, and
+a regression checks that this document and both user guides match it. Review the pins when
+preparing a pyvsag release, when a pinned wheel is yanked/unavailable, or when an upstream
+compatibility/security fix is needed. Edit the tuple and the three documentation pages, run
+`python3 -m unittest tests.scripts.test_python_ci`, then dispatch `publish: false` on the branch
+and require both NumPy 1.26.4 and 2.x OpenMP lanes on macOS 15 to pass before adopting the update.
+The wheel tag records the native CMake architecture even when the runner Python is universal2.
+The wheel's minimum macOS version and deployment target are 15 / 15.0, matching the CI runner.
+The build action uses the image's CMake (>= 3.20), Ninja (>= 1.10) and Perl (>= 5.10), asserts
+those versions and logs Clang; it does not install or upgrade Homebrew packages. `make pyvsag`
+retains its own installed-wheel tests as an early gate, before the clean-environment matrix.
+The explicit second Mach-O audit is a cheap guard immediately before artifact creation.
+
+Linux and macOS publish independently. `publish-linux` needs only the Linux builds and selects
+only their two wheel artifacts; `publish-macos` needs its own build and full matrix and selects
+only the macOS wheel. Both preserve the publish switch and `skip-existing: true`.
+Before macOS upload, a TestPyPI JSON lookup rejects an already present exact filename with an
+explicit recovery message (other platforms' files do not block it). Manual dispatches and full
+workflow reruns on an unchanged, already-published main intentionally end red in `publish-macos`
+and skip macOS verification, while Linux may succeed through `skip-existing`. This means
+"already published", not a build/test regression; use `publish: false` to retest that source.
+The lookup retries transient network, timeout, 429/5xx and malformed-JSON errors three times
+with 5/10-second delays, then fails closed with a publication-blocked diagnostic. Non-404
+client errors fail closed immediately. Files are immutable and
+rebuilding a source commit is not assumed to reproduce identical bytes. If verification failed
+after upload, rerun only that failed job in the original run to reuse its manifest; do not rerun
+all jobs or redispatch the same version for publication. To publish a rebuild, use a new main
+commit/version. A concurrent upload or stale JSON response still cannot silently substitute a
+file: the post-upload job strictly checks the build manifest's filename and SHA-256.
+
+The post-upload job downloads only from TestPyPI without dependencies/cache, with a ten-minute
+bounded retry window (15/30/60-second backoff, each pip attempt capped at 60 seconds), audits the
+wheel and reruns ordinary tests. Pip errors and attempts remain in the job log. Missing files
+fail when the window expires; hash mismatches fail immediately.
+Manual `publish: false` skips both uploads and the round trip and permits a branch dry run,
+including from a fork; publication remains main-only. The checkout uses the immutable triggering SHA; its resolved HEAD supplies both matrix
+generation and every later checkout. The extra equality assertion is a maintenance guard against
+a future intervening checkout, not an independent check of branch resolution.
+This does not change `daily_test.yml` or enable macOS publication in the production PyPI flow.
 
 ## Branch ARM build diagnostics
 
