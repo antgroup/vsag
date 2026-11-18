@@ -17,6 +17,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <future>
 #include <numeric>
 #include <set>
@@ -76,6 +77,18 @@ struct HGraphMCITestAccess {
     static CliqueDataCellPtr
     GetCliques(const HGraph& index) {
         return index.mci_cliques_;
+    }
+
+    static FlattenInterfacePtr
+    GetPreciseCodes(const IndexPtr& index) {
+        const auto wrapper = std::dynamic_pointer_cast<IndexImpl<HGraph>>(index);
+        return std::dynamic_pointer_cast<HGraph>(wrapper->GetInnerIndex())->get_precise_codes();
+    }
+
+    static FlattenInterfacePtr
+    GetBaseCodes(const IndexPtr& index) {
+        const auto wrapper = std::dynamic_pointer_cast<IndexImpl<HGraph>>(index);
+        return std::dynamic_pointer_cast<HGraph>(wrapper->GetInnerIndex())->basic_flatten_codes_;
     }
 
     static CliqueDataCellPtr
@@ -664,6 +677,343 @@ TEST_CASE("Clique validation rejects empty node offsets and unknown formats", "[
     vsag::IOStreamReader reader(stream);
     REQUIRE_THROWS_AS(cell.Deserialize(reader, 0), vsag::VsagException);
     REQUIRE_THROWS_AS(cell.Deserialize(reader, 3), vsag::VsagException);
+}
+
+TEST_CASE("HGraph MCI resident RaBitQ defers disk SQ8 reads until reorder",
+          "[ut][hgraph][mci][mci_memory]") {
+    const std::string metric = GENERATE("l2", "ip", "cosine");
+    const bool complete_seeds = GENERATE(false, true);
+    const bool batch_distance = GENERATE(false, true);
+    const bool one_bit_search = GENERATE(false, true);
+    CAPTURE(metric, complete_seeds, batch_distance, one_bit_search);
+    constexpr int64_t total = 160;
+    constexpr int64_t dim = 32;
+    constexpr int64_t ef = 24;
+    constexpr int64_t topk = 5;
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 1000);
+    std::vector<float> vectors(total * dim);
+    for (int64_t i = 0; i < total * dim; ++i) {
+        vectors[i] =
+            std::sin(static_cast<float>(i) * 0.173F) + std::cos(static_cast<float>(i) * 0.037F);
+    }
+    const auto temporary_path = []() {
+        return (std::filesystem::temp_directory_path() /
+                ("vsag-mci-memory-" +
+                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())))
+            .string();
+    };
+    auto config = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
+    config["metric_type"].SetString(metric);
+    auto build = config["index_param"];
+    build["graph_type"].SetString("nsw");
+    build["build_thread_count"].SetInt(1);
+    build["base_quantization_type"].SetString("rabitq");
+    build["rabitq_bits_per_dim_base"].SetInt(3);
+    build["base_io_type"].SetString("block_memory_io");
+    build["use_reorder"].SetBool(true);
+    build["precise_quantization_type"].SetString("sq8");
+    build["precise_io_type"].SetString("buffer_io");
+    const auto precise_path = temporary_path();
+    build["precise_file_path"].SetString(precise_path);
+    auto created = vsag::Factory::CreateIndex("hgraph", config.Dump());
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    REQUIRE(index->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+    std::vector<int64_t> valid_ids(ids.begin(), ids.begin() + total / 2);
+    const auto removed = valid_ids.back();
+    valid_ids.pop_back();
+    REQUIRE(index->Remove({removed}).value() == 1);
+    // Make partial-seed reachability deterministic: this test checks scoring and IO,
+    // independently of the quality of the graph used to build the original cliques.
+    vsag::DefaultAllocator allocator;
+    vsag::Vector<vsag::InnerIdType> members(total, &allocator);
+    std::iota(members.begin(), members.end(), 0);
+    auto cliques = vsag::HGraphMCITestAccess::GetCliques(index);
+    cliques->AppendNewClique(members, total);
+    cliques->MarkAvailable(total);
+    cliques->Flush(total);
+    auto filter = std::make_shared<HalfRatioAllValidFilter>(valid_ids);
+    auto query = make_dataset(ids, vectors, 20, 1, dim);
+    auto search = vsag::JsonType::Parse(R"({"hgraph":{"ef_search":24,
+        "use_mci":true,"hgraph_valid_ratio_threshold":1.0,"mci_seed_coverage":0.0}})");
+    search["hgraph"]["mci_seed_ratio"].SetFloat(complete_seeds ? 100.0F : 0.4F);
+    search["hgraph"]["mci_batch_distance"].SetBool(batch_distance);
+    search["hgraph"]["rabitq_one_bit_search"].SetBool(one_bit_search);
+
+    // Missing/false must preserve the precise route, even when reorder is disabled.
+    search["hgraph"]["enable_reorder"].SetBool(false);
+    auto legacy = index->KnnSearch(query, topk, search.Dump(), filter);
+    REQUIRE(legacy.has_value());
+    search["hgraph"]["mci_use_memory_quantization"].SetBool(false);
+    auto disabled = index->KnnSearch(query, topk, search.Dump(), filter);
+    REQUIRE(disabled.has_value());
+    REQUIRE(legacy.value()->GetDim() == disabled.value()->GetDim());
+    const std::vector<std::string> legacy_counters{
+        "dist_cmp", "hops", "io_cnt", "reorder_distance_count", "mci_hybrid_route"};
+    REQUIRE(legacy.value()->GetStatistics(legacy_counters) ==
+            disabled.value()->GetStatistics(legacy_counters));
+    for (int64_t i = 0; i < legacy.value()->GetDim(); ++i) {
+        REQUIRE(legacy.value()->GetIds()[i] == disabled.value()->GetIds()[i]);
+        REQUIRE(legacy.value()->GetDistances()[i] == disabled.value()->GetDistances()[i]);
+    }
+
+    search["hgraph"]["mci_use_memory_quantization"].SetBool(true);
+    auto approximate = index->KnnSearch(query, ef, search.Dump(), filter);
+    REQUIRE(approximate.has_value());
+    REQUIRE(approximate.value()->GetDim() == ef);
+    const auto approximate_stats = vsag::JsonType::Parse(approximate.value()->GetStatistics());
+    REQUIRE(approximate_stats["mci_hybrid_route"].GetString() == "mci");
+    REQUIRE(approximate_stats["io_cnt"].GetInt() == 0);
+    REQUIRE(approximate_stats["reorder_distance_count"].GetInt() == 0);
+    REQUIRE_FALSE(approximate_stats["mci_raw_float_csr"].GetBool());
+    REQUIRE(approximate_stats["dist_cmp"].GetInt() >= approximate_stats["mci_seed_count"].GetInt());
+    if (not complete_seeds) {
+        REQUIRE(approximate_stats["hops"].GetInt() > 0);
+        REQUIRE(approximate_stats["dist_cmp"].GetInt() >
+                approximate_stats["mci_seed_count"].GetInt());
+    }
+    if (complete_seeds) {
+        REQUIRE(approximate_stats["mci_seed_count"].GetInt() == valid_ids.size());
+        REQUIRE(approximate_stats["dist_cmp"].GetInt() == valid_ids.size());
+        REQUIRE(approximate_stats["hops"].GetInt() == 0);
+    }
+
+    // Independently score the retained IDs with SQ8: final results must use these distances,
+    // not RaBitQ scores, and must be selected from the entire ef-sized candidate heap.
+    auto precise = vsag::HGraphMCITestAccess::GetPreciseCodes(index);
+    REQUIRE_FALSE(precise->InMemory());
+    auto computer = precise->FactoryComputer(query->GetFloat32Vectors());
+    std::vector<std::pair<float, int64_t>> expected;
+    for (int64_t i = 0; i < ef; ++i) {
+        const auto label = approximate.value()->GetIds()[i];
+        REQUIRE(filter->CheckValid(label));
+        const auto inner_id = static_cast<vsag::InnerIdType>(label - ids.front());
+        float distance = 0.0F;
+        precise->Query(&distance, computer, &inner_id, 1);
+        expected.emplace_back(distance, label);
+    }
+    std::sort(expected.begin(), expected.end());
+    search["hgraph"]["enable_reorder"].SetBool(true);
+    auto reordered = index->KnnSearch(query, topk, search.Dump(), filter);
+    REQUIRE(reordered.has_value());
+    REQUIRE(reordered.value()->GetDim() == topk);
+    const auto reordered_stats = vsag::JsonType::Parse(reordered.value()->GetStatistics());
+    REQUIRE(reordered_stats["mci_hybrid_route"].GetString() == "mci");
+    REQUIRE(reordered_stats["io_cnt"].GetInt() == ef);
+    REQUIRE(reordered_stats["reorder_distance_count"].GetInt() == ef);
+    // A RaBitQ lower bound must never be used to prune a separate SQ8 precise store.
+    REQUIRE(reordered_stats["reorder_lower_bound_probe_count"].GetInt() == 0);
+    for (int64_t i = 0; i < topk; ++i) {
+        REQUIRE(reordered.value()->GetIds()[i] == expected[i].second);
+        REQUIRE(reordered.value()->GetDistances()[i] == Catch::Approx(expected[i].first));
+    }
+
+    if (complete_seeds and batch_distance) {
+        std::stringstream stream;
+        REQUIRE(index->Serialize(stream).has_value());
+        build["precise_file_path"].SetString(temporary_path());
+        auto restored = vsag::Factory::CreateIndex("hgraph", config.Dump()).value();
+        REQUIRE(restored->Deserialize(stream).has_value());
+        auto result = restored->KnnSearch(query, topk, search.Dump(), filter);
+        REQUIRE(result.has_value());
+        REQUIRE(vsag::JsonType::Parse(result.value()->GetStatistics())["io_cnt"].GetInt() == ef);
+        for (int64_t i = 0; i < topk; ++i) {
+            REQUIRE(result.value()->GetIds()[i] == reordered.value()->GetIds()[i]);
+            REQUIRE(result.value()->GetDistances()[i] == reordered.value()->GetDistances()[i]);
+        }
+    }
+
+    // A stronger guard than counters (single-record reads are not counted by this IO):
+    // remove all SQ8 backing bytes. Seed scoring and expansion must still succeed,
+    // while the legacy precise scorer must observe a real read failure.
+    std::filesystem::resize_file(precise_path, 0);
+    search["hgraph"]["enable_reorder"].SetBool(false);
+    REQUIRE(index->KnnSearch(query, topk, search.Dump(), filter).has_value());
+    if (batch_distance) {
+        search["hgraph"]["mci_use_memory_quantization"].SetBool(false);
+        REQUIRE_FALSE(index->KnnSearch(query, topk, search.Dump(), filter).has_value());
+    }
+}
+
+TEST_CASE("HGraph MCI one-bit dispatch shares HGraph scoring and same-base reorder",
+          "[ut][hgraph][mci][mci_one_bit]") {
+    const std::string metric = GENERATE("l2", "ip", "cosine");
+    const bool complete_seeds = GENERATE(false, true);
+    const bool batch = GENERATE(false, true);
+    const bool configured_reorder = GENERATE(false, true);
+    CAPTURE(metric, complete_seeds, batch, configured_reorder);
+    constexpr int64_t total = 79;
+    constexpr int64_t dim = 64;
+    constexpr int64_t ef = 24;
+    constexpr int64_t k = 5;
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto vectors = fixtures::generate_vectors(total, dim, 23);
+    auto config = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
+    config["metric_type"].SetString(metric);
+    auto build = config["index_param"];
+    build["graph_type"].SetString("nsw");
+    build["build_thread_count"].SetInt(1);
+    build["base_quantization_type"].SetString("rabitq");
+    build["precise_quantization_type"].SetString("rabitq");
+    build["rabitq_bits_per_dim_base"].SetInt(1);
+    build["rabitq_bits_per_dim_precise"].SetInt(7);
+    build["base_io_type"].SetString("block_memory_io");
+    build["use_reorder"].SetBool(configured_reorder);
+    // The 1.0 MCI builder needs pair distances, which RaBitQ alone does not implement.
+    build["store_raw_vector"].SetBool(true);
+    auto index = vsag::Factory::CreateIndex("hgraph", config.Dump()).value();
+    REQUIRE(index->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+    auto cliques = vsag::HGraphMCITestAccess::GetCliques(index);
+    vsag::DefaultAllocator allocator;
+    vsag::Vector<vsag::InnerIdType> members(total, &allocator);
+    std::iota(members.begin(), members.end(), 0);
+    cliques->AppendNewClique(members, total);
+    cliques->MarkAvailable(total);
+    cliques->Flush(total);
+    auto query = make_dataset(ids, vectors, 20, 1, dim);
+    auto filter = std::make_shared<HalfRatioAllValidFilter>(ids);
+    auto search = vsag::JsonType::Parse(R"({"hgraph":{"ef_search":24,
+        "hgraph_valid_ratio_threshold":1.0,"mci_seed_coverage":0.0,
+        "rabitq_one_bit_search":true,"enable_reorder":false}})");
+    search["hgraph"]["mci_seed_ratio"].SetFloat(complete_seeds ? 100.0F : 0.4F);
+    search["hgraph"]["mci_batch_distance"].SetBool(batch);
+
+    // Existing one-bit flags alone must not change the legacy MCI precise path.
+    auto legacy = index->KnnSearch(query, k, search.Dump(), filter);
+    REQUIRE(legacy.has_value());
+    REQUIRE(legacy.value()->GetStatistics({"rabitq_filter_count"})[0] == "0");
+    search["hgraph"]["rabitq_one_bit_search"].SetBool(false);
+    auto legacy_disabled = index->KnnSearch(query, k, search.Dump(), filter);
+    REQUIRE(legacy_disabled.has_value());
+    for (int64_t i = 0; i < k; ++i) {
+        REQUIRE(legacy_disabled.value()->GetIds()[i] == legacy.value()->GetIds()[i]);
+        REQUIRE(legacy_disabled.value()->GetDistances()[i] == legacy.value()->GetDistances()[i]);
+    }
+    search["hgraph"]["rabitq_one_bit_search"].SetBool(true);
+    search["hgraph"]["mci_use_memory_quantization"].SetBool(true);
+    auto coarse = index->KnnSearch(query, ef, search.Dump(), filter);
+    REQUIRE(coarse.has_value());
+    REQUIRE(coarse.value()->GetDim() == ef);
+    const auto coarse_stats = vsag::JsonType::Parse(coarse.value()->GetStatistics());
+    REQUIRE(coarse_stats["mci_hybrid_route"].GetString() == "mci");
+    REQUIRE(coarse_stats["rabitq_filter_count"].GetInt() == total);
+    REQUIRE(coarse_stats["reorder_distance_count"].GetInt() == 0);
+    REQUIRE(coarse_stats["io_cnt"].GetInt() == 0);
+
+    auto flatten = vsag::HGraphMCITestAccess::GetBaseCodes(index);
+    REQUIRE(flatten->InMemory());
+    auto computer = flatten->FactoryComputer(query->GetFloat32Vectors());
+    std::vector<vsag::InnerIdType> inner_ids(total);
+    std::iota(inner_ids.begin(), inner_ids.end(), 0);
+    std::vector<float> expected_coarse(total);
+    std::vector<float> expected_full(total);
+    flatten->QueryWithDistanceLowerBound(
+        expected_coarse.data(), nullptr, computer, inner_ids.data(), total);
+    flatten->Query(expected_full.data(), computer, inner_ids.data(), total);
+    for (int64_t i = 0; i < ef; ++i) {
+        const auto id = coarse.value()->GetIds()[i];
+        REQUIRE(coarse.value()->GetDistances()[i] == Catch::Approx(expected_coarse[id]));
+    }
+    search["hgraph"]["rabitq_one_bit_search"].SetBool(false);
+    auto full = index->KnnSearch(query, k, search.Dump(), filter);
+    REQUIRE(full.has_value());
+    REQUIRE(full.value()->GetStatistics({"rabitq_filter_count"})[0] == "0");
+    for (int64_t i = 0; i < k; ++i) {
+        REQUIRE(full.value()->GetDistances()[i] ==
+                Catch::Approx(expected_full[full.value()->GetIds()[i]]));
+    }
+
+    search["hgraph"]["rabitq_one_bit_search"].SetBool(true);
+    search["hgraph"]["enable_reorder"].SetBool(true);
+    auto refined = index->KnnSearch(query, k, search.Dump(), filter);
+    REQUIRE(refined.has_value());
+    REQUIRE(refined.value()->GetDim() == k);
+    const auto refined_stats = vsag::JsonType::Parse(refined.value()->GetStatistics());
+    REQUIRE(refined_stats["io_cnt"].GetInt() == 0);
+    REQUIRE(refined_stats["reorder_distance_count"].GetInt() > 0);
+    if (configured_reorder) {
+        // The same-base lower-bound candidate buffer is passed to the existing reorder.
+        REQUIRE(refined_stats["reorder_lower_bound_probe_count"].GetInt() == ef);
+    } else {
+        REQUIRE(refined_stats["reorder_distance_count"].GetInt() == ef);
+    }
+    for (int64_t i = 0; i < k; ++i) {
+        const auto id = refined.value()->GetIds()[i];
+        REQUIRE(filter->CheckValid(id));
+        REQUIRE(refined.value()->GetDistances()[i] == Catch::Approx(expected_full[id]));
+        if (i != 0) {
+            REQUIRE(refined.value()->GetDistances()[i - 1] <= refined.value()->GetDistances()[i]);
+        }
+    }
+    if (complete_seeds and batch and configured_reorder) {
+        std::stringstream stream;
+        REQUIRE(index->Serialize(stream).has_value());
+        auto restored = vsag::Factory::CreateIndex("hgraph", config.Dump()).value();
+        REQUIRE(restored->Deserialize(stream).has_value());
+        auto result = restored->KnnSearch(query, k, search.Dump(), filter);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+        REQUIRE(std::stoll(result.value()->GetStatistics({"rabitq_filter_count"})[0]) > 0);
+        for (int64_t i = 0; i < k; ++i) {
+            REQUIRE(result.value()->GetIds()[i] == refined.value()->GetIds()[i]);
+            REQUIRE(result.value()->GetDistances()[i] == refined.value()->GetDistances()[i]);
+        }
+    }
+}
+
+TEST_CASE("HGraph MCI memory quantization rejects unsupported base storage",
+          "[ut][hgraph][mci][mci_memory]") {
+#ifdef HAVE_LIBAIO
+    const std::string layout = GENERATE("fp32", "disk_base", "disk_supplement");
+#else
+    const std::string layout = GENERATE("fp32", "disk_base");
+#endif
+    CAPTURE(layout);
+    const int64_t total = 32;
+    const int64_t dim = 16;
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<float> vectors(total * dim);
+    for (int64_t i = 0; i < total * dim; ++i) {
+        vectors[i] = std::sin(static_cast<float>(i) * 0.12F);
+    }
+    auto config = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
+    auto build = config["index_param"];
+    build["graph_type"].SetString("nsw");
+    build["build_thread_count"].SetInt(1);
+    build["base_quantization_type"].SetString(layout == "fp32" ? "fp32" : "rabitq");
+    if (layout != "fp32") {
+        build["base_io_type"].SetString(layout == "disk_base" ? "buffer_io" : "block_memory_io");
+        build["base_file_path"].SetString(
+            (std::filesystem::temp_directory_path() /
+             ("vsag-mci-disk-base-" +
+              std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())))
+                .string());
+    }
+    if (layout == "disk_supplement") {
+        build["precise_quantization_type"].SetString("rabitq");
+        build["base_supplement_io_type"].SetString("async_io");
+        build["rabitq_bits_per_dim_base"].SetInt(3);
+        build["rabitq_bits_per_dim_precise"].SetInt(5);
+        build["use_reorder"].SetBool(true);
+    }
+    auto index = vsag::Factory::CreateIndex("hgraph", config.Dump()).value();
+    REQUIRE(index->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+    auto filter = std::make_shared<HalfRatioAllValidFilter>(ids);
+    auto query = make_dataset(ids, vectors, 0, 1, dim);
+    auto search = vsag::JsonType::Parse(R"({"hgraph":{"ef_search":16,
+        "hgraph_valid_ratio_threshold":1.0,"mci_use_memory_quantization":true,
+        "rabitq_one_bit_search":true}})");
+    auto unsupported = index->KnnSearch(query, 5, search.Dump(), filter);
+    REQUIRE_FALSE(unsupported.has_value());
+    REQUIRE(unsupported.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    search["hgraph"]["mci_use_memory_quantization"].SetBool(false);
+    REQUIRE(index->KnnSearch(query, 5, search.Dump(), filter).has_value());
+    search["hgraph"]["use_mci"].SetBool(false);
+    search["hgraph"]["mci_use_memory_quantization"].SetBool(true);
+    REQUIRE(index->KnnSearch(query, 5, search.Dump(), filter).has_value());
 }
 
 TEST_CASE("HGraph FP32 MCI deletion repairs use the complete Add candidate pipeline",

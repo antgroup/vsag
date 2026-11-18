@@ -14,10 +14,128 @@
 
 #include "mci_searcher.h"
 
+#include <catch2/catch_approx.hpp>
+
 #include "impl/label_table/label_table.h"
+#include "impl/reorder/flatten_reorder.h"
 #include "searcher_test.h"
 
 using namespace vsag;
+
+TEST_CASE("MCISearcher uses the HGraph one-bit backend for seeds and clique expansion",
+          "[ut][MCISearcher][mci][mci_one_bit]") {
+    const auto metric = GENERATE(
+        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP, MetricType::METRIC_TYPE_COSINE);
+    const bool complete_scan = GENERATE(false, true);
+    const bool batch = GENERATE(false, true);
+    const bool one_bit = GENERATE(false, true);
+    CAPTURE(metric, complete_scan, batch, one_bit);
+    constexpr InnerIdType count = 79;
+    constexpr uint64_t dim = 64;
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.allocator_ = allocator;
+    common.dim_ = dim;
+    common.metric_ = metric;
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(JsonType::Parse(R"({"codes_type":"rabitq_split",
+        "io_params":{"type":"memory_io"},"quantization_params":{"type":"rabitq",
+        "rabitq_bits_per_dim_base":8,"rabitq_bits_per_dim_filter":1}})"));
+    auto flatten = FlattenInterface::MakeInstance(param, common);
+    auto vectors = fixtures::generate_vectors(count, dim, 23);
+    auto queries = fixtures::generate_vectors(1, dim, 17);
+    flatten->Train(vectors.data(), count);
+    flatten->BatchInsertVector(vectors.data(), count);
+    auto cliques = std::make_shared<CliqueDataCell>(allocator.get());
+    Vector<InnerIdType> offsets({0, count}, allocator.get());
+    Vector<InnerIdType> members(count, allocator.get());
+    std::iota(members.begin(), members.end(), 0);
+    Vector<InnerIdType> inverse_offsets(count + 1, allocator.get());
+    std::iota(inverse_offsets.begin(), inverse_offsets.end(), 0);
+    Vector<InnerIdType> inverse(count, 0, allocator.get());
+    cliques->Assign(std::move(offsets),
+                    std::move(members),
+                    std::move(inverse_offsets),
+                    std::move(inverse),
+                    count);
+    cliques->MarkAvailable(count);
+    Vector<InnerIdType> seeds(allocator.get());
+    for (InnerIdType id = 0; id < (complete_scan ? count : 1); ++id) {
+        seeds.push_back(id);
+    }
+    const std::vector<uint8_t> bitmap(count, 1);
+    MCISearcherParam params;
+    params.seed_count = seeds.size();
+    params.seed_inner_ids = &seeds;
+    params.enumerated_valid_count = complete_scan ? count : 0;
+    params.valid_bitmap = bitmap.data();
+    params.valid_bitmap_size = bitmap.size();
+    params.batch_distance = batch;
+    params.use_one_bit_distance = one_bit;
+    InnerSearchParam search;
+    search.topk = count;
+    search.ef = count;
+    SearchStatistics stats;
+    QueryContext ctx{.alloc = allocator.get(), .stats = &stats};
+    auto result =
+        MCISearcher(common).Search(cliques, flatten, queries.data(), search, params, &ctx);
+    REQUIRE(result->Size() == count);
+    REQUIRE(stats.dist_cmp.load() == count);
+    REQUIRE(stats.io_cnt.load() == 0);
+    REQUIRE(stats.rabitq_filter_count.load() == (one_bit ? count : 0));
+    REQUIRE(stats.hops.load() == (complete_scan ? 0 : 1));
+
+    std::vector<InnerIdType> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<float> expected(count);
+    auto computer = flatten->FactoryComputer(queries.data());
+    if (one_bit) {
+        flatten->QueryWithDistanceLowerBound(expected.data(), nullptr, computer, ids.data(), count);
+    } else {
+        flatten->Query(expected.data(), computer, ids.data(), count);
+    }
+    while (not result->Empty()) {
+        const auto record = result->Top();
+        REQUIRE(record.first == Catch::Approx(expected[record.second]));
+        result->Pop();
+    }
+    if (one_bit) {
+        // Loose bounds force recovery beyond a one-entry approximate heap. Validate the
+        // existing reorder against full scores over exactly the recovered candidate union.
+        search.ef = 1;
+        search.topk = 1;
+        DistanceRecordVector extra(allocator.get());
+        params.one_bit_lower_bound_candidates = &extra;
+        SearchStatistics recovery_stats;
+        QueryContext recovery_ctx{.alloc = allocator.get(), .stats = &recovery_stats};
+        recovery_ctx.rabitq_error_rate = 1000.0F;
+        auto candidates = MCISearcher(common).Search(
+            cliques, flatten, queries.data(), search, params, &recovery_ctx);
+        REQUIRE(candidates->Size() == 1);
+        REQUIRE_FALSE(extra.empty());
+        std::vector<uint8_t> recovered(count, 0);
+        recovered[candidates->Top().second] = 1;
+        for (const auto& record : extra) {
+            REQUIRE(record.second < count);
+            recovered[record.second] = 1;
+        }
+        flatten->Query(expected.data(), computer, ids.data(), count);
+        auto minimum = std::numeric_limits<float>::max();
+        for (InnerIdType id = 0; id < count; ++id) {
+            if (recovered[id] != 0) {
+                minimum = std::min(minimum, expected[id]);
+            }
+        }
+        auto refined = FlattenReorder(flatten, allocator.get())
+                           .Reorder(candidates, queries.data(), 1, recovery_ctx, nullptr, &extra);
+        REQUIRE(refined->Size() == 1);
+        REQUIRE(recovered[refined->Top().second] != 0);
+        REQUIRE(refined->Top().first == Catch::Approx(minimum));
+        REQUIRE(recovery_stats.reorder_lower_bound_probe_count.load() == 1);
+        REQUIRE(recovery_stats.reorder_distance_count.load() > 1);
+        REQUIRE(recovery_stats.io_cnt.load() == 0);
+    }
+}
 
 TEST_CASE("MCISearcher traverses base extras delta and tombstones before and after flush",
           "[ut][MCISearcher][mci][flush]") {

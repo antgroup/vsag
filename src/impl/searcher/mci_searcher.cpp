@@ -157,6 +157,38 @@ mci_precise_float_distance(const float* query,
     return 1.0F - similarity;
 }
 
+// Match HGraph's one-bit dispatch and same-base reorder recovery. The caller has checked
+// residency, so even a backend's full-score fallback cannot read disk precise/supplement codes.
+void
+query_mci_codes(const FlattenInterfacePtr& flatten,
+                const ComputerInterfacePtr& computer,
+                const InnerIdType* ids,
+                uint64_t count,
+                float* distances,
+                const MCISearcherParam& mci_param,
+                const DistHeapPtr& result_heap,
+                int64_t candidate_limit,
+                QueryContext* ctx) {
+    if (not mci_param.use_one_bit_distance) {
+        flatten->Query(distances, computer, ids, count, ctx);
+        return;
+    }
+    std::array<float, 64> bounds;
+    auto* extra = mci_param.one_bit_lower_bound_candidates;
+    const bool collect_bounds =
+        extra != nullptr and result_heap->Size() >= static_cast<uint64_t>(candidate_limit);
+    flatten->QueryWithDistanceLowerBound(
+        distances, collect_bounds ? bounds.data() : nullptr, computer, ids, count, ctx);
+    if (collect_bounds) {
+        const auto threshold = result_heap->Top().first;
+        for (uint64_t i = 0; i < count; ++i) {
+            if (bounds[i] < threshold) {
+                extra->emplace_back(bounds[i], ids[i]);
+            }
+        }
+    }
+}
+
 template <bool use_raw_float>
 DistHeapPtr
 search_clique_view(const CliqueDataCellSearchView& view,
@@ -207,7 +239,15 @@ search_clique_view(const CliqueDataCellSearchView& view,
             const auto batch_size = mci_param.batch_distance ? batch_capacity : 1;
             for (uint64_t i = 0; i < seeds->size(); i += batch_size) {
                 const auto count = std::min<uint64_t>(batch_size, seeds->size() - i);
-                flatten->Query(distances.data(), computer, seeds->data() + i, count, ctx);
+                query_mci_codes(flatten,
+                                computer,
+                                seeds->data() + i,
+                                count,
+                                distances.data(),
+                                mci_param,
+                                result_heap,
+                                candidate_limit,
+                                ctx);
                 for (uint64_t j = 0; j < count; ++j) {
                     if (is_result_distance_eligible(distances[j])) {
                         result_heap->Push(distances[j], (*seeds)[i + j]);
@@ -255,7 +295,15 @@ search_clique_view(const CliqueDataCellSearchView& view,
                     query, vector, dim, metric, cosine_query_inv_norm, cosine_hold_mold);
             }
         } else {
-            flatten->Query(batch_distances.data(), computer, batch_ids.data(), batch_count, ctx);
+            query_mci_codes(flatten,
+                            computer,
+                            batch_ids.data(),
+                            batch_count,
+                            batch_distances.data(),
+                            mci_param,
+                            result_heap,
+                            candidate_limit,
+                            ctx);
         }
         for (uint64_t i = 0; i < batch_count; ++i) {
             const auto distance = batch_distances[i];
@@ -412,6 +460,10 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
     auto heap = DistanceHeap::MakeInstanceBySize<true, true>(alloc, candidate_limit);
     if (cliques == nullptr or flatten == nullptr or query == nullptr) {
         return heap;
+    }
+    if (mci_param.use_one_bit_distance) {
+        CHECK_ARGUMENT(flatten->InMemory(),
+                       "MCI one-bit scoring requires fully in-memory base codes");
     }
 
     const auto total = static_cast<InnerIdType>(flatten->TotalCount());

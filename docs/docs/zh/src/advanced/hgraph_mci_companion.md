@@ -491,6 +491,54 @@ build/tests/unittests '[mci],[LabelTable],RaBitQSplitDataCell serialize and meth
 review 后另补充了反向边恢复及加载后 FORCE_REMOVE 回归。大数据集加载复测、ABI、序列化兼容
 及更全面的并发修改仍需独立验证；不能把定向测试当作生产就绪证明。
 
+## 可选的内存 RaBitQ 搜索与磁盘 SQ8 精排
+
+在 `hgraph` 搜索对象中设置 `mci_use_memory_quantization: true`，让 MCI
+种子和团成员使用内存中的 RaBitQ base 评分。默认值为 `false`，保留原来使用
+最高可用精度的 MCI 路径。该查询参数不要求重建索引，不改变序列化格式，也不改变
+路由规则、范围搜索、迭代器搜索或 Hybrid 联合遍历。
+
+例如建库时设置 `base_quantization_type: "rabitq"`、
+`base_io_type: "block_memory_io"`、`use_reorder: true`、
+`precise_quantization_type: "sq8"`、`precise_io_type: "buffer_io"`，并提供
+`precise_file_path`。查询时使用：
+
+```json
+{"hgraph":{"ef_search":200,"use_mci":true,"mci_use_memory_quantization":true}}
+```
+
+现有规则选中 MCI 后，种子评分、前沿初始化和团扩展只读取内存 base。
+即使种子覆盖全部合法点，也保留 `max(k, ef_search)` 个候选。开启精排时，只有
+这些最终候选读取 precise；因此作为最终候选保留下来的种子可以在精排阶段读取
+SQ8。RaBitQ 的评分不作为 SQ8 的内积复用。`enable_reorder: false` 时，结果
+保留 RaBitQ 距离，MCI 搜索不读取 precise。量化候选筛选可能改变召回，需要在
+相同 Recall@k 下比较性能并调整 `ef_search`；SQ8 距离也不是原始 FP32 距离。
+
+进入该 MCI 路径时，如果 base 不是 RaBitQ，或者没有完整驻留内存，则明确报错。
+补充位放在磁盘上的 split RaBitQ 也会被拒绝，不会回退为读取 precise 来评分种子。
+其他搜索路由沿用其原有行为。
+
+要在该 MCI 新路径上使用与 HGraph 相同的 one-bit 评分分派，还需设置
+`rabitq_one_bit_search: true`，其默认值仍为 `false`：
+
+```json
+{"hgraph":{"ef_search":200,"mci_use_memory_quantization":true,"rabitq_one_bit_search":true}}
+```
+
+种子评分、完整种子扫描和团扩展将调用 HGraph 使用的
+`QueryWithDistanceLowerBound()`。内存 split RaBitQ 后端使用配置的低位码筛选；
+普通 RaBitQ 与 HGraph 一样回退到完整 base 评分。打开查询参数不会自动给已有的
+普通 RaBitQ 索引增加 split 码或新的 one-bit 表示。1.0 的纯 split RaBitQ MCI
+建库可通过 `store_raw_vector: true` 提供构团所需的两点距离；新查询路径仍使用
+内存 base，不使用该 raw 副本。base 仍必须完整驻留内存，
+因此后端回退也不会读取磁盘 precise 或补充位。旧 MCI 路径不受该分派影响。
+
+当精排使用同一 RaBitQ base 时，通过 HGraph 现有精排接口恢复符合下界条件的
+候选，因此可能精算超过 `ef_search` 个内存记录。独立 SQ8 精排只接收保留的
+候选堆，不把 RaBitQ 下界当作 SQ8 下界使用。与 HGraph 一样，即使没有单独配置
+精排，`enable_reorder: true` 也会对 one-bit 结果使用内存 base 进行精算；
+`enable_reorder: false` 则保留粗评分结果。
+
 ## 压缩过滤位图与按点限制团激活
 
 以下参数位于搜索 JSON 的 `hgraph` 对象内，作用于分流后的 MCI 路径。
@@ -498,6 +546,7 @@ review 后另补充了反向边恢复及加载后 FORCE_REMOVE 回归。大数�
 
 | 搜索参数 | 默认值 | 含义 |
 | --- | --- | --- |
+| `mci_use_memory_quantization` | `false` | 独立 MCI KNN 使用完整驻留内存的 RaBitQ base 评分种子和团成员，仅最终候选按配置执行 precise 精排。 |
 | `mci_packed_filter` | `true` | 从完整的合法 inner ID 或身份映射下的字节位图构造查询私有的单比特位图。静态 CSR 支持运行时选择 AVX512／AVX2 和标量回退，保留成员顺序；没有完整来源时沿用原谓词检查。 |
 | `mci_batch_distance` | `true` | 每批最多对 64 个首次访问的合法点调用距离接口；选择下一父节点和检查收敛前提交剩余批次。FP32 内核可能选择不同的严格等距 ID。 |
 | `mci_activation_cap` | `0` | 每个展开点只考虑其存储顺序中的前若干条团归属，0 表示不限。已经访问过的团仍占用前缀。这会改变搜索图，可能降低召回。 |
