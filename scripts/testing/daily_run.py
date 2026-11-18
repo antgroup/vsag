@@ -128,10 +128,19 @@ def inventory_units(binary, root, profile, output, seed, cancelled, deadline=Non
             configurations = dp.load(manifest)
             if not configurations or len({dp.digest(c) for c in configurations}) != len(configurations):
                 raise dp.PlanError("Empty/duplicate HGraph configuration inventory")
+            def hgraph_unit(configuration):
+                return {**base, "key": dp.digest([key, configuration]),
+                        "mode": "rotation", "configuration": configuration,
+                        "env": {"VSAG_DAILY_HGRAPH": json.dumps(configuration)}}
+
             for configuration in configurations:
-                extension.append({**base, "key": dp.digest([key, configuration]),
-                                  "mode": "rotation", "configuration": configuration,
-                                  "env": {"VSAG_DAILY_HGRAPH": json.dumps(configuration)}})
+                parts = configuration.pop("execution_parts", None)
+                unit = hgraph_unit(configuration)
+                if parts is not None:
+                    if not parts:
+                        raise dp.PlanError("Empty HGraph execution parts")
+                    unit["execution_parts"] = [hgraph_unit(part) for part in parts]
+                extension.append(unit)
         else:
             # Non-adapted tests are indivisible exhaustive groups; never silently sample them.
             target = extension if all("[daily]" in t["tags"].lower() for t in group) else core

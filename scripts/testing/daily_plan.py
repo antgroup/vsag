@@ -199,6 +199,22 @@ def quarantine_extensions(extension, rules):
     return retained, excluded
 
 
+def expand_execution_parts(unit, environment, history):
+    parts = unit["execution_parts"]
+    expanded = []
+    fallback = unit["order_seconds"] / len(parts)
+    for part in parts:
+        measured = estimate(part, environment, history)
+        exact = [s["seconds"] for s in history["samples"]
+                 if s["key"] == part["key"] and s["environment"] == environment
+                 and s["status"] in ("passed", "timeout")]
+        if any(type(value) not in (int, float) or not math.isfinite(value) or value <= 0 for value in exact):
+            raise PlanError("Invalid scheduling observation")
+        expanded.append({**part, "parent_key": unit["key"], "estimate_seconds": measured,
+                         "order_seconds": max([measured or 60.0] + (exact or [fallback]))})
+    return expanded
+
+
 def build_plan(ctx, environment, core, extension, inventory=None, core_only=False, full_coverage=False, profile=None):
     validate_context(ctx)
     if not environment or not core:
@@ -270,13 +286,25 @@ def build_plan(ctx, environment, core, extension, inventory=None, core_only=Fals
                               "release_only_this_week": len(extension) - len(eligible)}
         extension = eligible
     week = partition([] if core_only else extension)
+    # Preserve the original group key for quarantine, ARM strata and day selection.
+    parts = {u["key"]: expand_execution_parts(u, environment, history)
+             for u in units if "execution_parts" in u}
+
+    def execution_units(group):
+        return [part for u in group for part in parts.get(u["key"], (u,))]
+
+    expanded = execution_units(units)
+    if len({part["key"] for part in expanded}) != len(expanded):
+        raise PlanError("Duplicate execution unit key")
+    week = [execution_units(day) for day in week]
+    core = execution_units(core)
     return sealed({"schema_version": 1, "kind": "daily-plan", "context": ctx,
                    "environment": environment, "architecture_scope": architecture_scope,
                    "quarantines": quarantines,
                    "core": core, "rotation": week,
                    "inventory": inventory or {"exclusions": []},
                    "selected": core + week[ctx["slot"]],
-                   "unknown_timings": sum(u["estimate_seconds"] is None for u in units)})
+                   "unknown_timings": sum(u["estimate_seconds"] is None for u in expanded)})
 
 
 def main():

@@ -248,11 +248,27 @@ ForEachHGraphDiskIOCase(const HGraphResourcePtr& resource, Callback callback) {
     }
 }
 
+bool
+SupportsHGraphReaderQuantizer(const std::string& metric, int dim, const std::string& quantizer) {
+    return !HGraphTestIndex::IsRaBitQ(quantizer) ||
+           (metric == "l2" && dim >= fixtures::RABITQ_MIN_RACALL_DIM);
+}
+
+bool
+SupportsHGraphDuplicateQuantizer(const std::string& quantizer) {
+    // Bare uniform codes store norms that are unsuitable for duplicate detection.
+    return quantizer != "sq8_uniform" && quantizer != "sq4_uniform";
+}
+
 nlohmann::json
-HGraphDailyGroups(const HGraphResourcePtr& resource) {
+HGraphDailyGroups(const HGraphResourcePtr& resource, bool include_execution_parts = false) {
     nlohmann::json groups = nlohmann::json::array();
     uint64_t disk_graph_io_start = 0;
-    const bool disk_io = HGraphCaseTitle(resource->identity) == "HGraph Disk IO Type Index";
+    const auto title = HGraphCaseTitle(resource->identity);
+    const bool disk_io = title == "HGraph Disk IO Type Index";
+    const bool split_execution =
+        include_execution_parts && (title == "HGraph Reader IO" || title == "HGraph Duplicate" ||
+                                    title == "HGraph Multi-Query Knn Search");
     for (const auto& metric : resource->metric_types) {
         for (const auto dim : resource->dims) {
             nlohmann::json group = {{"metric", metric},
@@ -270,7 +286,6 @@ HGraphDailyGroups(const HGraphResourcePtr& resource) {
             }
             // These helpers consume test_cases directly. Fixed matrices retain their
             // special contracts; disk tuples use the original backend cursor above.
-            const auto title = HGraphCaseTitle(resource->identity);
             const bool split_quantizers =
                 title == "HGraph Build Test" || title == "HGraph Clone" ||
                 title == "HGraph Build & ContinueAdd Test" ||
@@ -305,6 +320,23 @@ HGraphDailyGroups(const HGraphResourcePtr& resource) {
                     groups.push_back(std::move(part));
                 }
             } else {
+                if (split_execution) {
+                    auto parts = nlohmann::json::array();
+                    for (uint64_t i = 0; i < resource->test_cases.size(); ++i) {
+                        const auto& quantizer = resource->test_cases[i];
+                        if ((title == "HGraph Reader IO" &&
+                             !SupportsHGraphReaderQuantizer(metric, dim, quantizer.first)) ||
+                            (title == "HGraph Duplicate" &&
+                             !SupportsHGraphDuplicateQuantizer(quantizer.first))) {
+                            continue;
+                        }
+                        auto part = group;
+                        part["quantizer_index"] = i;
+                        part["quantizers"] = nlohmann::json::array({quantizer});
+                        parts.push_back(std::move(part));
+                    }
+                    group["execution_parts"] = std::move(parts);
+                }
                 groups.push_back(std::move(group));
             }
         }
@@ -314,8 +346,15 @@ HGraphDailyGroups(const HGraphResourcePtr& resource) {
 
 void
 SelectHGraphDailyGroup(const HGraphResourcePtr& resource, const nlohmann::json& selected) {
-    const auto groups = HGraphDailyGroups(resource);
-    if (std::find(groups.begin(), groups.end(), selected) == groups.end()) {
+    const auto groups = HGraphDailyGroups(resource, selected.contains("quantizer_index"));
+    const auto matches = [&selected](const auto& group) {
+        const auto parts = group.find("execution_parts");
+        if (parts == group.end()) {
+            return group == selected;
+        }
+        return std::find(parts->begin(), parts->end(), selected) != parts->end();
+    };
+    if (std::none_of(groups.begin(), groups.end(), matches)) {
         throw std::invalid_argument("Daily HGraph configuration not in full inventory");
     }
     if (HGraphCaseTitle(resource->identity) == "HGraph Disk IO Type Index") {
@@ -765,10 +804,9 @@ HGraphTestIndex::GetResource(bool sample,
     // Rotation retains every tuple in the effective workload. Only opt-in Daily
     // concurrency uses bounded shapes; ordinary full/release invocation is unchanged.
     if (!sample && identity.name.rfind("(Daily) ", 0) == 0) {
-        const auto groups = HGraphDailyGroups(resource);
         if (const auto* path = std::getenv("VSAG_DAILY_ENUMERATE")) {
             std::ofstream output(path);
-            output << groups.dump(2) << std::endl;
+            output << HGraphDailyGroups(resource, true).dump(2) << std::endl;
             if (!output) {
                 throw std::runtime_error("Cannot write Daily configuration inventory");
             }
@@ -1628,52 +1666,107 @@ MakeHGraphQueryComputerCountParam(const std::string& quantization,
 TEST_CASE("HGraph Daily quantizer splitting preserves the complete tuple inventory",
           "[ft][hgraph][test_budget][daily_plan][pr]") {
     using namespace fixtures;
-    auto whole = std::make_shared<HGraphTestResource>();
-    const auto title = GENERATE("HGraph Build Test",
-                                "HGraph Reverse Edges",
-                                "HGraph ODescent Build",
-                                "HGraph Serialize File",
-                                "HGraph Multi-Query Range Search",
-                                "HGraph Concurrent Add Search Remove",
-                                "HGraph With Extra Info",
-                                "HGraph Compressed Graph Build");
-    whole->identity = {std::string("(Daily) ") + title, "", __FILE__, 0};
-    whole->base_count = 1000;
-    whole->query_count = 100;
-    whole->metric_types = {"l2", "ip"};
-    whole->dims = {32, 128};
-    whole->test_cases = {{"fp32", 0.99F}, {"sq8,fp32", 0.95F}, {"pq,fp32", 0.9F}};
-    const auto groups = HGraphDailyGroups(whole);
-    REQUIRE(groups.size() == 12);
-    uint64_t index = 0;
-    for (const auto& metric : whole->metric_types) {
-        for (const auto dim : whole->dims) {
-            for (const auto& quantizer : whole->test_cases) {
-                auto selected = std::make_shared<HGraphTestResource>(*whole);
-                SelectHGraphDailyGroup(selected, groups.at(index++));
-                REQUIRE(selected->metric_types == std::vector<std::string>{metric});
-                REQUIRE(selected->dims == std::vector<int>{dim});
-                REQUIRE(selected->test_cases.size() == 1);
-                REQUIRE(selected->test_cases.front() == quantizer);
-                REQUIRE(selected->base_count == whole->base_count);
-                REQUIRE(selected->query_count == whole->query_count);
+    SECTION("Groups already split during rotation planning") {
+        auto whole = std::make_shared<HGraphTestResource>();
+        const auto title = GENERATE("HGraph Build Test",
+                                    "HGraph Reverse Edges",
+                                    "HGraph ODescent Build",
+                                    "HGraph Serialize File",
+                                    "HGraph Multi-Query Range Search",
+                                    "HGraph Concurrent Add Search Remove",
+                                    "HGraph With Extra Info",
+                                    "HGraph Compressed Graph Build");
+        whole->identity = {std::string("(Daily) ") + title, "", __FILE__, 0};
+        whole->base_count = 1000;
+        whole->query_count = 100;
+        whole->metric_types = {"l2", "ip"};
+        whole->dims = {32, 128};
+        whole->test_cases = {{"fp32", 0.99F}, {"sq8,fp32", 0.95F}, {"pq,fp32", 0.9F}};
+        const auto groups = HGraphDailyGroups(whole);
+        REQUIRE(groups.size() == 12);
+        uint64_t index = 0;
+        for (const auto& metric : whole->metric_types) {
+            for (const auto dim : whole->dims) {
+                for (const auto& quantizer : whole->test_cases) {
+                    auto selected = std::make_shared<HGraphTestResource>(*whole);
+                    SelectHGraphDailyGroup(selected, groups.at(index++));
+                    REQUIRE(selected->metric_types == std::vector<std::string>{metric});
+                    REQUIRE(selected->dims == std::vector<int>{dim});
+                    REQUIRE(selected->test_cases.size() == 1);
+                    REQUIRE(selected->test_cases.front() == quantizer);
+                    REQUIRE(selected->base_count == whole->base_count);
+                    REQUIRE(selected->query_count == whole->query_count);
+                }
             }
         }
+        whole->identity.name = "(Daily) HGraph Tune";
+        whole->tune_cases = {{"sq8,fp32", "sq8"}, {"sq4,fp32", "sq4"}};
+        const auto tunes = HGraphDailyGroups(whole);
+        REQUIRE(tunes.size() == 8);
+        for (uint64_t i = 0; i < tunes.size(); ++i) {
+            auto selected = std::make_shared<HGraphTestResource>(*whole);
+            SelectHGraphDailyGroup(selected, tunes.at(i));
+            REQUIRE(selected->tune_cases.size() == 1);
+            REQUIRE(selected->tune_cases.front() == whole->tune_cases.at(i % 2));
+        }
+        whole->identity.name = "(Daily) HGraph Build Test";
+        auto invalid = groups.front();
+        invalid["quantizer_index"] = 99;
+        REQUIRE_THROWS_AS(SelectHGraphDailyGroup(whole, invalid), std::invalid_argument);
     }
-    whole->identity.name = "(Daily) HGraph Tune";
-    whole->tune_cases = {{"sq8,fp32", "sq8"}, {"sq4,fp32", "sq4"}};
-    const auto tunes = HGraphDailyGroups(whole);
-    REQUIRE(tunes.size() == 8);
-    for (uint64_t i = 0; i < tunes.size(); ++i) {
-        auto selected = std::make_shared<HGraphTestResource>(*whole);
-        SelectHGraphDailyGroup(selected, tunes.at(i));
-        REQUIRE(selected->tune_cases.size() == 1);
-        REQUIRE(selected->tune_cases.front() == whole->tune_cases.at(i % 2));
+    SECTION("Execution parts of a preserved rotation group") {
+        auto whole = std::make_shared<HGraphTestResource>();
+        const auto title =
+            GENERATE("HGraph Reader IO", "HGraph Duplicate", "HGraph Multi-Query Knn Search");
+        whole->identity = {std::string("(Daily) ") + title, "", __FILE__, 0};
+        whole->base_count = 1000;
+        whole->query_count = 100;
+        whole->metric_types = {"l2", "ip"};
+        whole->dims = {256, RABITQ_MIN_RACALL_DIM};
+        whole->test_cases = {{"fp32", 0.99F},
+                             {"sq8_uniform", 0.95F},
+                             {"rabitq,fp32,block_memory_io,4,1", 0.3F},
+                             {"sq8_uniform,fp32", 0.95F}};
+        const auto parents = HGraphDailyGroups(whole);
+        const auto inventory = HGraphDailyGroups(whole, true);
+        REQUIRE(inventory.size() == parents.size());
+        for (uint64_t i = 0; i < inventory.size(); ++i) {
+            auto parent = inventory.at(i);
+            auto parts = parent.at("execution_parts");
+            parent.erase("execution_parts");
+            REQUIRE(parent == parents.at(i));
+
+            std::vector<uint64_t> expected{0, 1, 2, 3};
+            if (std::string(title) == "HGraph Reader IO" && i != 1) {
+                expected = {0, 1, 3};
+            } else if (std::string(title) == "HGraph Duplicate") {
+                expected = {0, 2, 3};
+            }
+            REQUIRE(parts.size() == expected.size());
+            for (uint64_t j = 0; j < parts.size(); ++j) {
+                const auto index = expected.at(j);
+                auto selected = std::make_shared<HGraphTestResource>(*whole);
+                auto part = parts.at(j);
+                REQUIRE(part.at("quantizer_index") == index);
+                SelectHGraphDailyGroup(selected, part);
+                REQUIRE(selected->test_cases.size() == 1);
+                REQUIRE(selected->test_cases.front() == whole->test_cases.at(index));
+                REQUIRE(selected->base_count == whole->base_count);
+                REQUIRE(selected->query_count == whole->query_count);
+
+                part.erase("quantizer_index");
+                part["quantizers"] = parent.at("quantizers");
+                REQUIRE(part == parent);
+            }
+
+            auto invalid = parts.front();
+            invalid["quantizer_index"] = whole->test_cases.size();
+            REQUIRE_THROWS_AS(SelectHGraphDailyGroup(whole, invalid), std::invalid_argument);
+            auto unsplit = std::make_shared<HGraphTestResource>(*whole);
+            SelectHGraphDailyGroup(unsplit, parent);
+            REQUIRE(unsplit->test_cases == whole->test_cases);
+        }
     }
-    whole->identity.name = "(Daily) HGraph Build Test";
-    auto invalid = groups.front();
-    invalid["quantizer_index"] = 99;
-    REQUIRE_THROWS_AS(SelectHGraphDailyGroup(whole, invalid), std::invalid_argument);
 }
 
 TEST_CASE("HGraph Daily disk IO splitting preserves the original backend sequence",
@@ -3990,13 +4083,7 @@ RunHGraphDuplicateChecks(const fixtures::HGraphTestIndexPtr& test_index,
             for (auto raw_dim : resource->dims) {
                 for (auto& [base_quantization_str, recall] : resource->test_cases) {
                     auto dim = raw_dim;
-                    if (base_quantization_str == "sq8_uniform" or
-                        base_quantization_str == "sq4_uniform") {
-                        // The codes for sq8_uniform and sq4_uniform store the norm values. Even when
-                        // vectors are identical, there may be precision errors in the norms, so it's
-                        // not possible to determine duplicates based solely on the codes. Since the
-                        // uniform version of quantization isn't used for building indexes, this step
-                        // can be omitted here.
+                    if (!SupportsHGraphDuplicateQuantizer(base_quantization_str)) {
                         continue;
                     }
                     INFO(fmt::format(
@@ -4527,9 +4614,8 @@ TestHGraphReaderIO(const fixtures::HGraphTestIndexPtr& test_index,
                                  dim,
                                  base_quantization_str,
                                  recall));
-                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
-                    (metric_type != "l2" || dim < fixtures::RABITQ_MIN_RACALL_DIM)) {
-                    continue;  // Skip invalid RaBitQ configurations
+                if (!SupportsHGraphReaderQuantizer(metric_type, dim, base_quantization_str)) {
+                    continue;
                 }
                 vsag::Options::Instance().set_block_size_limit(size);
                 HGraphTestIndex::HGraphBuildParam build_param(
