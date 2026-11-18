@@ -685,7 +685,8 @@ TEST_CASE("HGraph MCI resident RaBitQ defers disk SQ8 reads until reorder",
     const bool complete_seeds = GENERATE(false, true);
     const bool batch_distance = GENERATE(false, true);
     const bool one_bit_search = GENERATE(false, true);
-    CAPTURE(metric, complete_seeds, batch_distance, one_bit_search);
+    const bool packed_filter = GENERATE(false, true);
+    CAPTURE(metric, complete_seeds, batch_distance, one_bit_search, packed_filter);
     constexpr int64_t total = 160;
     constexpr int64_t dim = 32;
     constexpr int64_t ef = 24;
@@ -739,6 +740,7 @@ TEST_CASE("HGraph MCI resident RaBitQ defers disk SQ8 reads until reorder",
         "use_mci":true,"hgraph_valid_ratio_threshold":1.0,"mci_seed_coverage":0.0}})");
     search["hgraph"]["mci_seed_ratio"].SetFloat(complete_seeds ? 100.0F : 0.4F);
     search["hgraph"]["mci_batch_distance"].SetBool(batch_distance);
+    search["hgraph"]["mci_packed_filter"].SetBool(packed_filter);
     search["hgraph"]["rabitq_one_bit_search"].SetBool(one_bit_search);
 
     // Missing/false must preserve the precise route, even when reorder is disabled.
@@ -842,7 +844,8 @@ TEST_CASE("HGraph MCI one-bit dispatch shares HGraph scoring and same-base reord
     const bool complete_seeds = GENERATE(false, true);
     const bool batch = GENERATE(false, true);
     const bool configured_reorder = GENERATE(false, true);
-    CAPTURE(metric, complete_seeds, batch, configured_reorder);
+    const bool packed_filter = GENERATE(false, true);
+    CAPTURE(metric, complete_seeds, batch, configured_reorder, packed_filter);
     constexpr int64_t total = 79;
     constexpr int64_t dim = 64;
     constexpr int64_t ef = 24;
@@ -879,6 +882,7 @@ TEST_CASE("HGraph MCI one-bit dispatch shares HGraph scoring and same-base reord
         "rabitq_one_bit_search":true,"enable_reorder":false}})");
     search["hgraph"]["mci_seed_ratio"].SetFloat(complete_seeds ? 100.0F : 0.4F);
     search["hgraph"]["mci_batch_distance"].SetBool(batch);
+    search["hgraph"]["mci_packed_filter"].SetBool(packed_filter);
 
     // Existing one-bit flags alone must not change the legacy MCI precise path.
     auto legacy = index->KnnSearch(query, k, search.Dump(), filter);

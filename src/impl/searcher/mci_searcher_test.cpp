@@ -22,6 +22,169 @@
 
 using namespace vsag;
 
+namespace {
+class BatchRecordingMCIBase
+    : public FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, MemoryIO> {
+public:
+    using Parent = FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, MemoryIO>;
+    using Parent::Parent;
+
+    void
+    Query(float* distances,
+          const ComputerInterfacePtr& computer,
+          const InnerIdType* ids,
+          InnerIdType count,
+          QueryContext* ctx = nullptr) override {
+        ++full_calls;
+        record(ids, count);
+        Parent::Query(distances, computer, ids, count, ctx);
+    }
+
+    void
+    QueryWithDistanceLowerBound(float* distances,
+                                float* bounds,
+                                const ComputerInterfacePtr& computer,
+                                const InnerIdType* ids,
+                                InnerIdType count,
+                                QueryContext* ctx = nullptr) override {
+        ++one_bit_calls;
+        record(ids, count);
+        Parent::Query(distances, computer, ids, count, ctx);
+        if (bounds != nullptr) {
+            std::fill(bounds, bounds + count, std::numeric_limits<float>::max());
+        }
+    }
+
+    uint64_t full_calls{0};
+    uint64_t one_bit_calls{0};
+    std::vector<uint64_t> batch_sizes;
+    std::vector<InnerIdType> scored_ids;
+
+private:
+    void
+    record(const InnerIdType* ids, InnerIdType count) {
+        batch_sizes.push_back(count);
+        scored_ids.insert(scored_ids.end(), ids, ids + count);
+    }
+};
+
+class MCIModuloFilter : public Filter {
+public:
+    [[nodiscard]] bool
+    CheckValid(int64_t id) const override {
+        return id >= 0 and id % 5 != 4;
+    }
+};
+}  // namespace
+
+TEST_CASE("MCI resident base batches packed overlapping cliques without precise scoring",
+          "[ut][MCISearcher][mci][mci_memory][MCIOptimization]") {
+    constexpr InnerIdType count = 259;
+    const bool packed = GENERATE(false, true);
+    const bool batch = GENERATE(false, true);
+    const bool one_bit = GENERATE(false, true);
+    const bool from_ids = GENERATE(false, true);
+    CAPTURE(packed, batch, one_bit, from_ids);
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.dim_ = 1;
+    common.allocator_ = allocator;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    const auto quantizer =
+        QuantizerParameter::GetQuantizerParameterByJson(JsonType::Parse(R"({"type":"fp32"})"));
+    const auto io = IOParameter::GetIOParameterByJson(JsonType::Parse(R"({"type":"memory_io"})"));
+    auto base = std::make_shared<BatchRecordingMCIBase>(quantizer, io, common);
+    std::vector<float> vectors(count);
+    std::iota(vectors.begin(), vectors.end(), 0.0F);
+    base->Train(vectors.data(), count);
+    base->BatchInsertVector(vectors.data(), count, nullptr);
+    auto cliques = std::make_shared<CliqueDataCell>(allocator.get());
+    Vector<InnerIdType> offsets({0, 193, 324}, allocator.get());
+    Vector<InnerIdType> members(allocator.get());
+    Vector<InnerIdType> inverse_offsets(allocator.get());
+    inverse_offsets.push_back(0);
+    Vector<InnerIdType> inverse(allocator.get());
+    for (InnerIdType id = 0; id < 193; ++id) {
+        members.push_back(id);
+    }
+    for (InnerIdType id = 128; id < count; ++id) {
+        members.push_back(id);
+    }
+    for (InnerIdType id = 0; id < count; ++id) {
+        if (id < 193) {
+            inverse.push_back(0);
+        }
+        if (id >= 128) {
+            inverse.push_back(1);
+        }
+        inverse_offsets.push_back(inverse.size());
+    }
+    cliques->Assign(std::move(offsets),
+                    std::move(members),
+                    std::move(inverse_offsets),
+                    std::move(inverse),
+                    count);
+    cliques->MarkAvailable(count);
+    LabelTable labels(allocator.get());
+    std::vector<uint8_t> bitmap(count, 0);
+    Vector<InnerIdType> valid_ids(allocator.get());
+    std::vector<InnerIdType> expected;
+    for (InnerIdType id = 0; id < count; ++id) {
+        labels.Insert(id, id);
+        if (id % 5 != 4) {
+            bitmap[id] = 7;
+            valid_ids.push_back(id);
+            if (id != 1) {
+                expected.push_back(id);
+            }
+        }
+    }
+    REQUIRE(labels.MarkRemove(1) == 1);
+    Vector<InnerIdType> seeds({0, 0, 1}, allocator.get());
+    MCISearcherParam params;
+    params.use_one_bit_distance = one_bit;
+    params.packed_filter = packed;
+    params.batch_distance = batch;
+    params.seed_count = seeds.size();
+    params.seed_inner_ids = &seeds;
+    params.revalidate_predicate = true;
+    params.valid_bitmap = from_ids ? nullptr : bitmap.data();
+    params.valid_bitmap_size = bitmap.size();
+    params.valid_inner_ids = from_ids ? valid_ids.data() : nullptr;
+    params.valid_inner_count = valid_ids.size();
+    params.deleted_ids_filter = labels.GetDeletedIdsReadView();
+    InnerSearchParam search;
+    search.topk = count;
+    search.ef = count;
+    search.is_inner_id_allowed = std::make_shared<MCIModuloFilter>();
+    SearchStatistics stats;
+    QueryContext ctx{.alloc = allocator.get(), .stats = &stats};
+    const float query = 260.125F;
+    auto result = MCISearcher(common).Search(cliques, base, &query, search, params, &ctx);
+    REQUIRE(stats.hops.load() == 2);
+    REQUIRE(stats.dist_cmp.load() == expected.size());
+    REQUIRE(stats.io_cnt.load() == 0);
+    REQUIRE(result->Size() == expected.size());
+    REQUIRE(base->full_calls == (one_bit ? 0 : base->batch_sizes.size()));
+    REQUIRE(base->one_bit_calls == (one_bit ? base->batch_sizes.size() : 0));
+    for (auto size : base->batch_sizes) {
+        REQUIRE(size > 0);
+        REQUIRE(size <= (batch ? 64 : 1));
+    }
+    if (batch) {
+        REQUIRE(std::find(base->batch_sizes.begin(), base->batch_sizes.end(), 64) !=
+                base->batch_sizes.end());
+        REQUIRE(base->batch_sizes.back() < 64);
+    }
+    std::sort(base->scored_ids.begin(), base->scored_ids.end());
+    REQUIRE(base->scored_ids == expected);
+    while (not result->Empty()) {
+        const auto [distance, id] = result->Top();
+        REQUIRE(distance == Catch::Approx((query - vectors[id]) * (query - vectors[id])));
+        result->Pop();
+    }
+}
+
 TEST_CASE("MCISearcher uses the HGraph one-bit backend for seeds and clique expansion",
           "[ut][MCISearcher][mci][mci_one_bit]") {
     const auto metric = GENERATE(

@@ -564,6 +564,13 @@ RaBitQ scores are not reused as SQ8 inner products. When `enable_reorder` is
 MCI search. Quantized candidate selection can change recall; compare at equal
 Recall@k and tune `ef_search`. SQ8 distances are not original FP32 distances.
 
+This base-only scoring also applies with `mci_packed_filter` and `mci_batch_distance`.
+SIMD packing filters static CSR clique members first; newly visited, live members
+are then gathered into base-code batches of at most 64 IDs. Overlapping cliques and
+seeds are deduplicated before scoring, and any partial batch is submitted before
+selecting the next parent. This route passes base codes to the distance backend;
+precise codes are accessed only by final reorder.
+
 The selected MCI path rejects non-RaBitQ bases and bases that are not fully
 resident, including split RaBitQ with a disk-backed supplement. It never falls
 back to precise reads to score seeds. Other routes keep their existing behavior.

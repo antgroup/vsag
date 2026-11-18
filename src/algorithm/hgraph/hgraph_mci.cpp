@@ -706,18 +706,18 @@ HGraph::try_mci_search(const SearchRequest& request,
     }
 
     auto codes_lock = make_search_read_lock(this->persistent_codes_mutex_);
-    auto precise_flatten =
+    auto scoring_flatten =
         params.mci_use_memory_quantization ? this->basic_flatten_codes_ : this->get_precise_codes();
     if (params.mci_use_memory_quantization) {
         // Query() on split codes can read a disk supplement. Require the entire base cell
         // to be resident, rather than silently falling back to precise or supplement IO.
-        CHECK_ARGUMENT(precise_flatten != nullptr and precise_flatten->InMemory() and
-                           precise_flatten->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_RABITQ,
+        CHECK_ARGUMENT(scoring_flatten != nullptr and scoring_flatten->InMemory() and
+                           scoring_flatten->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_RABITQ,
                        "mci_use_memory_quantization requires fully in-memory RaBitQ base codes");
-    } else if (precise_flatten != nullptr) {
+    } else if (scoring_flatten != nullptr) {
         uint64_t precise_vector_stride = 0;
         mci_param.precise_vectors =
-            precise_flatten->TryGetContiguousRawFloatData(&precise_vector_stride);
+            scoring_flatten->TryGetContiguousRawFloatData(&precise_vector_stride);
         mci_param.dim = this->dim_;
         mci_param.precise_vector_stride = precise_vector_stride;
         mci_param.metric = this->metric_;
@@ -746,7 +746,7 @@ HGraph::try_mci_search(const SearchRequest& request,
         mci_param.one_bit_lower_bound_candidates = one_bit_candidates.get();
     }
     result.result = this->mci_searcher_->Search(
-        this->mci_cliques_, precise_flatten, query, mci_search_param, mci_param, ctx);
+        this->mci_cliques_, scoring_flatten, query, mci_search_param, mci_param, ctx);
     if (result.result == nullptr or result.result->Empty()) {
         // A concurrent mutation may have unpublished the companion before the view was pinned.
         return result;

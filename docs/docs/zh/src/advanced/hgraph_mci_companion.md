@@ -514,6 +514,11 @@ SQ8。RaBitQ 的评分不作为 SQ8 的内积复用。`enable_reorder: false` �
 保留 RaBitQ 距离，MCI 搜索不读取 precise。量化候选筛选可能改变召回，需要在
 相同 Recall@k 下比较性能并调整 `ef_search`；SQ8 距离也不是原始 FP32 距离。
 
+该 base 评分路径与 `mci_packed_filter`、`mci_batch_distance` 组合使用。
+SIMD pack 先筛选静态 CSR 团成员，再将首次访问且存活的成员收集为每批最多
+64 个 ID 的 base 距离调用。重叠团与种子先去重再评分，选择下一父节点之前
+提交剩余批次。该路径将 base 传给距离接口，precise 只在最终精排时访问。
+
 进入该 MCI 路径时，如果 base 不是 RaBitQ，或者没有完整驻留内存，则明确报错。
 补充位放在磁盘上的 split RaBitQ 也会被拒绝，不会回退为读取 precise 来评分种子。
 其他搜索路由沿用其原有行为。
