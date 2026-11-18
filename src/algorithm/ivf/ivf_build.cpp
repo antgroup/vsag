@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <chrono>
 #include <exception>
 #include <future>
 #include <limits>
@@ -27,6 +28,7 @@
 #include "impl/graph_build_helper.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/inner_search_param.h"
+#include "impl/logger/logger.h"
 #include "impl/pruning_strategy.h"
 #include "impl/searcher/basic_searcher.h"
 #include "index_feature_list.h"
@@ -138,6 +140,9 @@ IVF::Build(const DatasetPtr& base) {
         CHECK_ARGUMENT(this->total_elements_ == 0,
                        "graph bucket searcher requires a fresh Build with no prior data");
     }
+    const auto nodes = base->GetNumElements();
+    const auto build_begin = std::chrono::steady_clock::now();
+    logger::info("[ivf_build] build starting nodes={}", nodes);
     this->Train(base);
     // TODO(LHT): duplicate
     auto result = this->add(base, true);
@@ -145,6 +150,10 @@ IVF::Build(const DatasetPtr& base) {
         this->build_bucket_graphs();
     }
     this->cal_memory_usage();
+    const auto total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              std::chrono::steady_clock::now() - build_begin)
+                              .count();
+    logger::info("[ivf_build] build completed nodes={} duration={}ms", nodes, total_ms);
     return result;
 }
 
