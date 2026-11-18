@@ -288,7 +288,7 @@ def main():
         if report["coverage_gaps"]:
             report["incomplete"] = True
             report["status"] = "failed"
-        if args.extra_proposal:
+        if args.extra_proposal and needs.get("daily-extra-plan", {}).get("result") != "skipped":
             import daily_extra
             try:
                 proposal = dp.load(args.extra_proposal)

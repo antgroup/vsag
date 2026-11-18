@@ -1751,7 +1751,7 @@ jobs:
           pattern: daily-results-*-${{ github.run_id }}
           path: daily-collected
       - name: Download extra quota plan
-        if: always()
+        if: ${{ always() && needs.daily-extra-plan.result != 'skipped' }}
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-extra-proposal-${{ github.run_id }}
