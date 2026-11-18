@@ -16,8 +16,11 @@
 
 #include <atomic>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <exception>
+#include <limits>
+#include <memory>
 #include <mutex>
 #include <new>
 #include <nlohmann/json.hpp>
@@ -124,10 +127,13 @@ BruteForce::train_multi_vector(const DatasetPtr& data) {
 
 void
 BruteForce::Train(const DatasetPtr& data) {
+    CHECK_ARGUMENT(data != nullptr, "base is nullptr");
     if (is_multi_vector_) {
         this->train_multi_vector(data);
     } else {
-        this->inner_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
+        const auto* vectors = this->get_data(data);
+        CHECK_ARGUMENT(vectors != nullptr, "base.float_vector is nullptr");
+        this->inner_codes_->Train(vectors, data->GetNumElements());
     }
 }
 
@@ -217,6 +223,7 @@ BruteForce::add_multi_vector(const DatasetPtr& data) {
 
 std::vector<int64_t>
 BruteForce::Add(const DatasetPtr& data) {
+    CHECK_ARGUMENT(data != nullptr, "base is nullptr");
     if (is_multi_vector_) {
         return this->add_multi_vector(data);
     }
@@ -225,7 +232,17 @@ BruteForce::Add(const DatasetPtr& data) {
     auto base_dim = data->GetDim();
     CHECK_ARGUMENT(base_dim == dim_,
                    fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
-    CHECK_ARGUMENT(data->GetFloat32Vectors() != nullptr, "base.float_vector is nullptr");
+    const auto total = data->GetNumElements();
+    CHECK_ARGUMENT(total >= 0, "base count must be non-negative");
+    void* vectors = nullptr;
+    uint64_t row_bytes = 0;
+    get_vectors(data_type_, dim_, data, &vectors, &row_bytes);
+    CHECK_ARGUMENT(vectors != nullptr, "base.float_vector is nullptr");
+    const bool valid_extent =
+        static_cast<uint64_t>(total) <=
+        static_cast<uint64_t>(std::numeric_limits<std::ptrdiff_t>::max()) / row_bytes;
+    CHECK_ARGUMENT(valid_extent, "base vectors size overflows");
+    const auto* first_row = static_cast<const uint8_t*>(vectors);
 
     {
         std::lock_guard lock(this->add_mutex_);
@@ -234,7 +251,7 @@ BruteForce::Add(const DatasetPtr& data) {
         }
     }
 
-    auto add_func = [&](const float* data,
+    auto add_func = [&](const void* data,
                         const int64_t label,
                         const AttributeSet* attr,
                         const char* extra_info) -> std::optional<int64_t> {
@@ -251,9 +268,7 @@ BruteForce::Add(const DatasetPtr& data) {
     };
 
     std::vector<std::future<std::optional<int64_t>>> futures;
-    const auto total = data->GetNumElements();
     const auto* labels = data->GetIds();
-    const auto* vectors = data->GetFloat32Vectors();
     const auto* attrs = data->GetAttributeSets();
     const auto* extra_info = data->GetExtraInfos();
     const auto extra_info_size = data->GetExtraInfoSize();
@@ -262,37 +277,50 @@ BruteForce::Add(const DatasetPtr& data) {
         CHECK_ARGUMENT(extra_info_size == static_cast<int64_t>(this->extra_info_size_),
                        "extra_infos size mismatch");
     }
-    for (int64_t j = 0; j < total; ++j) {
-        const auto label = labels[j];
-        {
-            std::lock_guard label_lock(this->label_lookup_mutex_);
-            if (this->label_table_->CheckLabel(label)) {
-                failed_ids.emplace_back(label);
-                continue;
+    std::exception_ptr first_exception;
+    try {
+        for (int64_t j = 0; j < total; ++j) {
+            const auto label = labels[j];
+            {
+                std::lock_guard label_lock(this->label_lookup_mutex_);
+                if (this->label_table_->CheckLabel(label)) {
+                    failed_ids.emplace_back(label);
+                    continue;
+                }
             }
-        }
-        const auto* ei_ptr = extra_info == nullptr ? nullptr : extra_info + j * extra_info_size;
-        if (this->thread_pool_ != nullptr) {
-            auto future = this->thread_pool_->GeneralEnqueue(add_func,
-                                                             vectors + j * dim_,
-                                                             label,
-                                                             attrs == nullptr ? nullptr : attrs + j,
-                                                             ei_ptr);
-            futures.emplace_back(std::move(future));
-        } else {
-            if (auto add_res = add_func(
-                    vectors + j * dim_, label, attrs == nullptr ? nullptr : attrs + j, ei_ptr);
-                add_res.has_value()) {
+            const auto* row = first_row + static_cast<uint64_t>(j) * row_bytes;
+            const auto* attr = attrs == nullptr ? nullptr : attrs + j;
+            const auto* ei_ptr = extra_info == nullptr ? nullptr : extra_info + j * extra_info_size;
+            if (this->thread_pool_ != nullptr) {
+                // Allocate the slot before enqueueing so vector growth cannot lose a future.
+                futures.emplace_back();
+                futures.back() =
+                    this->thread_pool_->GeneralEnqueue(add_func, row, label, attr, ei_ptr);
+            } else if (auto add_res = add_func(row, label, attr, ei_ptr); add_res.has_value()) {
                 failed_ids.emplace_back(add_res.value());
             }
         }
+    } catch (...) {
+        first_exception = std::current_exception();
     }
-    if (this->thread_pool_ != nullptr) {
-        for (auto& future : futures) {
-            if (auto reply = future.get(); reply.has_value()) {
+    // Drain every submitted task before the caller can release the borrowed dataset buffers.
+    for (auto& future : futures) {
+        if (not future.valid()) {
+            continue;
+        }
+        try {
+            auto reply = future.get();
+            if (reply.has_value() and first_exception == nullptr) {
                 failed_ids.emplace_back(reply.value());
             }
+        } catch (...) {
+            if (first_exception == nullptr) {
+                first_exception = std::current_exception();
+            }
         }
+    }
+    if (first_exception != nullptr) {
+        std::rethrow_exception(first_exception);
     }
     return failed_ids;
 }
@@ -692,12 +720,15 @@ BruteForce::RangeSearch(const vsag::DatasetPtr& query,
 
 ComputerInterfacePtr
 BruteForce::make_search_computer(const DatasetPtr& query) const {
+    CHECK_ARGUMENT(query != nullptr, "query is nullptr");
     if (is_multi_vector_) {
         const MultiVector* query_multi_vectors = query->GetMultiVectors();
         CHECK_ARGUMENT(query_multi_vectors != nullptr, "query.multi_vectors is nullptr");
         return this->inner_codes_->FactoryComputer(&query_multi_vectors[0]);
     }
-    return this->inner_codes_->FactoryComputer(query->GetFloat32Vectors());
+    const auto* vectors = this->get_data(query);
+    CHECK_ARGUMENT(vectors != nullptr, "query.float_vector is nullptr");
+    return this->inner_codes_->FactoryComputer(vectors);
 }
 
 float
@@ -1138,7 +1169,11 @@ void
 BruteForce::InitFeatures() {
     this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
                                             IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID});
-    auto name = this->inner_codes_->GetQuantizerName();
+    const auto quantizer_name = this->inner_codes_->GetQuantizerName();
+    const bool native_half =
+        data_type_ == DataTypes::DATA_TYPE_FP16 or data_type_ == DataTypes::DATA_TYPE_BF16;
+    const std::string_view name =
+        native_half ? GetBaseQuantizerName(quantizer_name) : std::string_view(quantizer_name);
     if (is_multi_vector_) {
         if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16) {
             this->index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN);
@@ -1379,8 +1414,29 @@ BruteForce::shrink_to_fit() {
 }
 
 void
-BruteForce::add_one(const float* data, InnerIdType inner_id) {
+BruteForce::add_one(const void* data, InnerIdType inner_id) {
     this->inner_codes_->InsertVector(data, inner_id);
+}
+
+void
+BruteForce::GetFloat32VectorByInnerId(InnerIdType inner_id, float* data) const {
+    if (is_multi_vector_) {
+        this->GetVectorByInnerId(inner_id, data);
+        return;
+    }
+    Vector<uint8_t> codes(inner_codes_->code_size_, allocator_);
+    inner_codes_->GetCodesById(inner_id, codes.data());
+    if (data_type_ == DataTypes::DATA_TYPE_FP16 or data_type_ == DataTypes::DATA_TYPE_BF16) {
+        Vector<float> native_row(dim_, allocator_);
+        if (not inner_codes_->Decode(codes.data(), native_row.data())) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "BruteForce vector source does not support decode");
+        }
+        this->expand_native_half_row(native_row.data(), data);
+    } else if (not inner_codes_->Decode(codes.data(), data)) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "BruteForce vector source does not support decode");
+    }
 }
 
 void
@@ -1412,14 +1468,66 @@ BruteForce::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_upda
     auto base_dim = new_base->GetDim();
     CHECK_ARGUMENT(base_dim == dim_,
                    fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
-    CHECK_ARGUMENT(new_base->GetFloat32Vectors() != nullptr, "base.float_vector is nullptr");
+    const auto* vectors = this->get_data(new_base);
+    CHECK_ARGUMENT(vectors != nullptr, "base.float_vector is nullptr");
 
     std::shared_lock add_lock(this->add_mutex_, std::defer_lock);
     std::shared_lock label_lock(this->label_lookup_mutex_, std::defer_lock);
     std::lock(add_lock, label_lock);
     std::unique_lock global_lock(this->global_mutex_);
     InnerIdType inner_id = this->label_table_->GetIdByLabel(id);
-    return this->inner_codes_->UpdateVector(new_base->GetFloat32Vectors(), inner_id);
+    return this->inner_codes_->UpdateVector(vectors, inner_id);
+}
+
+DatasetPtr
+BruteForce::GetNativeDataByIds(const int64_t* ids, int64_t count) const {
+    CHECK_ARGUMENT(not is_multi_vector_, "native dense export does not support multi-vectors");
+    if (data_type_ == DataTypes::DATA_TYPE_FLOAT) {
+        return this->GetDataByIds(ids, count);
+    }
+    const bool supported_dtype =
+        data_type_ == DataTypes::DATA_TYPE_FP16 or data_type_ == DataTypes::DATA_TYPE_BF16;
+    CHECK_ARGUMENT(supported_dtype, "native dense export requires float32, float16 or bfloat16");
+    uint64_t flags = DATA_FLAG_ID;
+    if (this->extra_info_size_ > 0) {
+        flags |= DATA_FLAG_EXTRA_INFO;
+    }
+    if (this->has_attribute_) {
+        flags |= DATA_FLAG_ATTRIBUTE;
+    }
+    auto dataset = this->GetDataByIdsWithFlag(ids, count, flags);
+    if (count == 0) {
+        return dataset;
+    }
+    const bool valid_extent = dim_ > 0 and static_cast<uint64_t>(count) <=
+                                               std::numeric_limits<uint64_t>::max() /
+                                                   static_cast<uint64_t>(dim_) / sizeof(uint16_t);
+    CHECK_ARGUMENT(valid_extent, "native dense export size overflows");
+    auto release_buffer = [this](uint16_t* buffer) { allocator_->Deallocate(buffer); };
+    std::unique_ptr<uint16_t, decltype(release_buffer)> buffer(
+        static_cast<uint16_t*>(
+            allocator_->Allocate(static_cast<uint64_t>(count) * dim_ * sizeof(uint16_t))),
+        release_buffer);
+    if (buffer == nullptr) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate native export rows");
+    }
+    auto* vectors = buffer.get();
+    dataset->Float16Vectors(vectors);
+    // Ownership has already been transferred to the dataset.
+    // NOLINTNEXTLINE(bugprone-unused-return-value)
+    static_cast<void>(buffer.release());
+    // Decode writes packed native half values into a float-aligned scratch row.
+    // Never expose it as Float32Vectors or allocate a full FP32 replay matrix.
+    Vector<float> row(dim_, allocator_);
+    std::shared_lock global_lock(global_mutex_, std::defer_lock);
+    std::shared_lock label_lock(label_lookup_mutex_, std::defer_lock);
+    std::lock(global_lock, label_lock);
+    for (int64_t i = 0; i < count; ++i) {
+        const auto inner_id = label_table_->GetIdByLabel(ids[i]);
+        this->GetVectorByInnerId(inner_id, row.data());
+        std::memcpy(vectors + i * dim_, row.data(), dim_ * sizeof(uint16_t));
+    }
+    return dataset;
 }
 
 void

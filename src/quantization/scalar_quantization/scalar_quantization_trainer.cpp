@@ -18,8 +18,11 @@
 #include <cstring>
 #include <queue>
 #include <random>
+#include <stdexcept>
 
+#include "simd/bf16_simd.h"
 #include "simd/normalize.h"
+#include "utils/half_input.h"
 
 namespace vsag {
 
@@ -41,6 +44,135 @@ ScalarQuantizationTrainer::Train(const float* data,
     } else if (mode == TRUNC_BOUND) {
         this->trunc_bound_train(sample_datas.data(), sample_count, upper_bound, lower_bound);
     }
+}
+
+void
+ScalarQuantizationTrainer::TrainHalf(const uint16_t* data,
+                                     uint64_t count,
+                                     bool bf16,
+                                     float* upper,
+                                     float* lower,
+                                     bool normalize,
+                                     SQTrainMode mode) {
+    if (dim_ <= 0 || count > static_cast<uint64_t>(PTRDIFF_MAX) / sizeof(uint16_t) / dim_) {
+        throw std::invalid_argument("invalid half scalar training extent");
+    }
+    const auto row_bytes = static_cast<uint64_t>(dim_) * sizeof(uint16_t);
+    const TrainingRows input(data,
+                             count,
+                             dim_,
+                             bf16 ? DataTypes::DATA_TYPE_BF16 : DataTypes::DATA_TYPE_FP16,
+                             row_bytes,
+                             count * row_bytes);
+    TrainRows(input, upper, lower, normalize, mode);
+}
+
+void
+ScalarQuantizationTrainer::TrainRows(
+    const TrainingRows& input, float* upper, float* lower, bool normalize, SQTrainMode mode) {
+    if (upper == nullptr || lower == nullptr || dim_ <= 0 || input.Dim() != dim_ ||
+        max_sample_count_ == 0) {
+        throw std::invalid_argument("invalid scalar row training input");
+    }
+    // Preserve existing FP32 entry point and sampling/normalization implementation.
+    if (const auto* contiguous = input.ContiguousFP32()) {
+        Train(contiguous, input.Count(), upper, lower, normalize, mode);
+        return;
+    }
+    const uint64_t count = input.Count();
+    const uint64_t samples = std::min(count, max_sample_count_);
+    const uint64_t step = count <= max_sample_count_ ? 1 : 2147483647UL % count;
+    const uint64_t width = std::min<uint64_t>(32, dim_);
+    if (samples > static_cast<uint64_t>(PTRDIFF_MAX) / sizeof(float) / width ||
+        (step != 0 && samples > UINT64_MAX / step)) {
+        throw std::overflow_error("row training extent overflow");
+    }
+    if (mode != CLASSIC && mode != TRUNC_BOUND) {
+        throw std::invalid_argument("unsupported row scalar training mode");
+    }
+    std::vector<float> tile(samples * width);
+    // A full row only when normalization or a provider lacking ReadColumns requires it.
+    std::vector<float> row((normalize || !input.HasColumnReader()) ? dim_ : width);
+    std::vector<float> normalized(normalize ? dim_ : 0);
+    std::vector<float> norms(normalize ? samples : 0);
+    if (normalize) {
+        for (uint64_t j = 0; j < samples; ++j) {
+            input.Read((j * step) % count, row.data());
+            norms[j] = Normalize(row.data(), normalized.data(), dim_);
+        }
+    }
+    for (uint64_t begin = 0; begin < static_cast<uint64_t>(dim_); begin += width) {
+        const auto cols = std::min<uint64_t>(width, dim_ - begin);
+        for (uint64_t j = 0; j < samples; ++j) {
+            const auto id = (j * step) % count;
+            const float* values;
+            if (input.HasColumnReader()) {
+                input.ReadColumns(id, begin, cols, row.data());
+                values = row.data();
+            } else {
+                input.Read(id, row.data());
+                values = row.data() + begin;
+            }
+            if (normalize) {
+                DivScalar(values, tile.data() + j * cols, cols, norms[j]);
+            } else {
+                std::memcpy(tile.data() + j * cols, values, cols * sizeof(float));
+            }
+        }
+        ScalarQuantizationTrainer block(static_cast<int32_t>(cols), bits_);
+        block.trunc_rate_ = trunc_rate_;
+        if (mode == CLASSIC) {
+            block.classic_train(tile.data(), samples, upper + begin, lower + begin);
+        } else {
+            block.trunc_bound_train(tile.data(), samples, upper + begin, lower + begin);
+        }
+    }
+}
+
+void
+ScalarQuantizationTrainer::TrainUniformRows(
+    const TrainingRows& input, float& upper, float& lower, bool normalize, SQTrainMode mode) {
+    if (dim_ <= 0 || input.Dim() != dim_) {
+        throw std::invalid_argument("uniform row dimension mismatch");
+    }
+    if (const auto* contiguous = input.ContiguousFP32()) {
+        TrainUniform(contiguous, input.Count(), upper, lower, normalize, mode);
+        return;
+    }
+    std::vector<float> uppers(dim_);
+    std::vector<float> lowers(dim_);
+    TrainRows(input, uppers.data(), lowers.data(), normalize, mode);
+    if (mode == CLASSIC) {
+        upper = *std::max_element(uppers.begin(), uppers.end());
+        lower = *std::min_element(lowers.begin(), lowers.end());
+    } else {
+        upper = *std::min_element(uppers.begin(), uppers.end());
+        lower = *std::max_element(lowers.begin(), lowers.end());
+        if (lower > upper) {
+            std::swap(lower, upper);
+        }
+    }
+}
+
+void
+ScalarQuantizationTrainer::TrainUniformHalf(const uint16_t* data,
+                                            uint64_t count,
+                                            bool bf16,
+                                            float& upper,
+                                            float& lower,
+                                            bool normalize,
+                                            SQTrainMode mode) {
+    if (dim_ <= 0 || count > static_cast<uint64_t>(PTRDIFF_MAX) / sizeof(uint16_t) / dim_) {
+        throw std::invalid_argument("invalid uniform half training extent");
+    }
+    const auto bytes = static_cast<uint64_t>(dim_) * sizeof(uint16_t);
+    const TrainingRows input(data,
+                             count,
+                             dim_,
+                             bf16 ? DataTypes::DATA_TYPE_BF16 : DataTypes::DATA_TYPE_FP16,
+                             bytes,
+                             count * bytes);
+    TrainUniformRows(input, upper, lower, normalize, mode);
 }
 
 void

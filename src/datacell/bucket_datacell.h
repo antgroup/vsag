@@ -107,6 +107,63 @@ public:
 
     void
     Train(const void* data, uint64_t count) override;
+    bool
+    SupportsTrainingRows() const override {
+        return this->quantizer_->CanTrainRows();
+    }
+    void
+    TrainRows(const TrainingRows& rows) override {
+        if (!this->SupportsTrainingRows())
+            throw std::invalid_argument("bucket quantizer rejects TrainingRows");
+        if (rows.Dim() != this->quantizer_->GetDim() || rows.Count() == 0)
+            throw std::invalid_argument("invalid bucket TrainingRows shape");
+        if (!use_residual_) {
+            if (!this->quantizer_->TrainRows(rows))
+                throw std::runtime_error("bucket TrainingRows training failed");
+            return;
+        }
+        if (strategy_ == nullptr)
+            throw std::invalid_argument("residual TrainingRows requires partition strategy");
+        const auto width = static_cast<uint64_t>(rows.Dim());
+        if (rows.Count() > static_cast<uint64_t>(PTRDIFF_MAX) / sizeof(float) / width)
+            throw std::invalid_argument("residual TrainingRows assignment extent overflow");
+        // Preserve native classifier assignment shape. This full decoded assignment
+        // slab is algorithm workspace, NOT a bounded reader claim; it is freed
+        // before scalar training. Residuals themselves are never materialized N*D.
+        Vector<BucketIdType> labels(allocator_);
+        {
+            Vector<float> assignment(rows.Count() * rows.Dim(), allocator_);
+            for (uint64_t i = 0; i < rows.Count(); ++i) {
+                float* row = assignment.data() + i * rows.Dim();
+                rows.Read(i, row);
+                if (metric_ == MetricType::METRIC_TYPE_COSINE)
+                    Normalize(row, row, rows.Dim());
+            }
+            labels = strategy_->ClassifyDatas(assignment.data(), rows.Count(), 1, nullptr);
+            if (labels.size() != rows.Count())
+                throw std::runtime_error("residual TrainingRows classifier count mismatch");
+        }
+        struct Context {
+            const TrainingRows& source;
+            const Vector<BucketIdType>& labels;
+            BucketDataCell* bucket;
+        } context{rows, labels, this};
+        TrainingRows residual(
+            rows.Count(),
+            rows.Dim(),
+            [](const void* opaque, uint64_t i, float* out) {
+                const auto& c = *static_cast<const Context*>(opaque);
+                c.source.Read(i, out);
+                if (c.bucket->metric_ == MetricType::METRIC_TYPE_COSINE)
+                    Normalize(out, out, c.source.Dim());
+                Vector<float> centroid(c.source.Dim(), c.bucket->allocator_);
+                c.bucket->strategy_->GetCentroid(c.labels[i], centroid);
+                for (int64_t d = 0; d < c.source.Dim(); ++d) out[d] -= centroid[d];
+            },
+            &context);
+        if (!this->quantizer_->TrainRows(residual))
+            throw std::runtime_error("residual bucket TrainingRows training failed");
+    }
 
     InnerIdType
     InsertVector(const void* vector, BucketIdType bucket_id, InnerIdType inner_id) override;

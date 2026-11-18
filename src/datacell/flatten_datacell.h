@@ -66,6 +66,18 @@ public:
 
     void
     Train(const void* data, uint64_t count) override;
+    bool
+    SupportsTrainingRows() const override {
+        return this->quantizer_->CanTrainRows();
+    }
+    void
+    TrainRows(const TrainingRows& rows) override {
+        if (!this->SupportsTrainingRows())
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "flatten quantizer rejects TrainingRows");
+        if (!this->quantizer_->TrainRows(rows))
+            throw std::runtime_error("flatten TrainingRows training failed");
+    }
 
     void
     InsertVector(const void* vector, InnerIdType idx) override;

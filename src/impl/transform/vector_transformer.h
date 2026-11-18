@@ -83,6 +83,12 @@ public:
     virtual void
     Train(const float* data, uint64_t count) {};
 
+    // Opt in only when Train never reads input values or uses the sample count.
+    virtual bool
+    IsTrainingDataIndependent() const {
+        return false;
+    }
+
     virtual void
     InverseTransform(const float* input_vec, float* output_vec) const;
 

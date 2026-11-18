@@ -354,6 +354,10 @@ public:
     [[nodiscard]] virtual std::string
     GetStats() const;
 
+    // Public FP32 export bridge; GetVectorByInnerId retains its native dtype contract.
+    virtual void
+    GetFloat32VectorByInnerId(InnerIdType inner_id, float* data) const;
+
     virtual void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
@@ -581,6 +585,9 @@ public:
     }
 
 protected:
+    void
+    expand_native_half_row(const void* native_data, float* data) const;
+
     DatasetPtr
     get_data_by_ids_with_flag(const int64_t* ids,
                               int64_t count,

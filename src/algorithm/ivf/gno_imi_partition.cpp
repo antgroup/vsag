@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "algorithm/inner_index_interface.h"
+#include "gno_residual_rows.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/blas/blas_function.h"
 #include "impl/cluster/kmeans_cluster.h"
@@ -89,6 +90,26 @@ GNOIMIPartition::GNOIMIPartition(const IndexCommonParam& common_param,
 
 void
 GNOIMIPartition::Train(const DatasetPtr dataset) {
+    if (common_param_.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
+        if (dataset == nullptr || dataset->GetDim() != dim_ || dataset->GetNumElements() <= 0 ||
+            (common_param_.data_type_ != DataTypes::DATA_TYPE_FP16 &&
+             common_param_.data_type_ != DataTypes::DATA_TYPE_BF16)) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid GNO typed dataset");
+        }
+        const auto count = static_cast<uint64_t>(dataset->GetNumElements());
+        const auto stride = static_cast<uint64_t>(dim_) * sizeof(uint16_t);
+        if (dim_ <= 0 || dim_ > INT32_MAX || count > static_cast<uint64_t>(PTRDIFF_MAX) / stride) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "GNO typed extent overflow");
+        }
+        TrainingRows input(dataset->GetFloat16Vectors(),
+                           count,
+                           static_cast<int32_t>(dim_),
+                           common_param_.data_type_,
+                           stride,
+                           count * stride);
+        this->TrainRows(input);
+        return;
+    }
     auto dim = this->dim_;
     auto centroids_s = Dataset::Make();
     auto centroids_t = Dataset::Make();
@@ -138,6 +159,152 @@ GNOIMIPartition::Train(const DatasetPtr dataset) {
         auto build_result = route_index.Build(centroids);
         auto assign = this->inner_classify_datas(route_index, residuals.data(), num_element);
         this->GetResidual(num_element, vectors, residuals.data(), data_centroids, assign.data());
+    };
+
+    // train loop
+    double min_err = std::numeric_limits<double>::max();
+    for (uint64_t i = 0; i < 2; ++i) {
+        double err_to_s = 0.0;
+        double err_to_t = 0.0;
+        train_and_get_residual(centroids_s, data_centroids_s_tmp.data(), &err_to_s);
+        logger::info("gnoimi train iter: {}, err of centroids_s: {}", i, err_to_s);
+
+        train_and_get_residual(centroids_t, data_centroids_t_tmp.data(), &err_to_t);
+        logger::info("gnoimi train iter: {}, err of centroids_t: {}", i, err_to_t);
+
+        if (err_to_t < min_err) {
+            min_err = err_to_t;
+            std::copy(data_centroids_s_tmp.begin(),
+                      data_centroids_s_tmp.end(),
+                      data_centroids_s_.begin());
+            std::copy(data_centroids_t_tmp.begin(),
+                      data_centroids_t_tmp.end(),
+                      data_centroids_t_.begin());
+        }
+    }
+
+    for (BucketIdType i = 0; i < bucket_count_s_; ++i) {
+        auto norm_sqr = FP32ComputeIP(
+            data_centroids_s_.data() + i * dim_, data_centroids_s_.data() + i * dim_, dim_);
+        norms_s_[i] = norm_sqr / 2;
+    }
+
+    Vector<std::pair<float, BucketIdType>> norms_t(bucket_count_t_, this->allocator_);
+    for (BucketIdType i = 0; i < bucket_count_t_; ++i) {
+        auto norm_sqr = FP32ComputeIP(
+            data_centroids_t_.data() + i * dim_, data_centroids_t_.data() + i * dim_, dim_);
+        norms_t[i].first = norm_sqr / 2;
+        norms_t[i].second = i;
+    }
+
+    // Rearrange data_centroids_t_ based on ascending order of their norms.
+    std::sort(norms_t.begin(), norms_t.end(), std::greater<>());
+    std::vector<float> temp_data(bucket_count_t_ * dim_, 0.0);
+    for (BucketIdType i = 0; i < bucket_count_t_; ++i) {
+        BucketIdType src_idx = norms_t[i].second;
+        uint64_t src_offset = src_idx * dim_;
+        uint64_t dst_offset = i * dim_;
+        std::copy(data_centroids_t_.data() + src_offset,
+                  data_centroids_t_.data() + src_offset + dim_,
+                  temp_data.data() + dst_offset);
+        norms_t_[i] = norms_t[i].first;
+    }
+    std::copy(temp_data.begin(), temp_data.end(), data_centroids_t_.data());
+
+    Vector<float> ip_st(static_cast<long>(bucket_count_s_) * bucket_count_t_, allocator_);
+    matmul(data_centroids_s_.data(),
+           data_centroids_t_.data(),
+           ip_st.data(),
+           bucket_count_s_,
+           bucket_count_t_,
+           dim_);
+    for (BucketIdType i = 0; i < bucket_count_s_ * bucket_count_t_; ++i) {
+        BucketIdType cur_bucket_id_t = i % bucket_count_t_;
+        precomputed_terms_st_[i] = norms_t_[cur_bucket_id_t] + ip_st[i];
+    }
+
+    this->is_trained_ = true;
+}
+
+void
+GNOIMIPartition::TrainRows(const TrainingRows& input) {
+    auto dim = this->dim_;
+    auto centroids_s = Dataset::Make();
+    auto centroids_t = Dataset::Make();
+    if (dim_ <= 0 || input.Dim() != dim_ ||
+        input.Count() < std::max(bucket_count_s_, bucket_count_t_) ||
+        input.Count() > static_cast<uint64_t>(PTRDIFF_MAX) / sizeof(float) / dim_) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid GNO TrainingRows shape");
+    }
+    if (ivf_partition_strategy_param_->enable_gpu_build) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "GNO TrainingRows GPU is unsupported");
+    }
+    const auto num_element = input.Count();
+    GNOResidualRows residual_context(
+        input, metric_type_ == MetricType::METRIC_TYPE_COSINE, allocator_);
+    TrainingRows residuals(num_element, input.Dim(), GNOResidualRows::Read, &residual_context);
+
+    Vector<LabelType> ids_centroids_s(this->bucket_count_s_, allocator_);
+    Vector<LabelType> ids_centroids_t(this->bucket_count_t_, allocator_);
+    Vector<float> data_centroids_s_tmp(this->bucket_count_s_ * dim_, allocator_);
+    Vector<float> data_centroids_t_tmp(this->bucket_count_t_ * dim_, allocator_);
+
+    std::iota(ids_centroids_s.begin(), ids_centroids_s.end(), 0);
+    std::iota(ids_centroids_t.begin(), ids_centroids_t.end(), 0);
+    centroids_s->Ids(ids_centroids_s.data())
+        ->Dim(dim)
+        ->Float32Vectors(data_centroids_s_tmp.data())
+        ->NumElements(this->bucket_count_s_)
+        ->Owner(false);
+    centroids_t->Ids(ids_centroids_t.data())
+        ->Dim(dim)
+        ->Float32Vectors(data_centroids_t_tmp.data())
+        ->NumElements(this->bucket_count_t_)
+        ->Owner(false);
+
+    KMeansCluster cls(static_cast<int32_t>(dim), this->allocator_);
+
+    auto train_and_get_residual = [&, this](const DatasetPtr& centroids,
+                                            float* data_centroids,
+                                            double* err) {
+        cls.Run(centroids->GetNumElements(),
+                residuals,
+                ivf_partition_strategy_param_->GetKMeansIterCount(),
+                err);
+        std::memcpy(
+            data_centroids, cls.k_centroids_, dim * centroids->GetNumElements() * sizeof(float));
+        // Routing centroids and decoded residual queries are FP32, irrespective of
+        // the original input dtype. Keep original BF metric and external-ID routing.
+        auto route_common = common_param_;
+        route_common.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+        BruteForce route_index(param_ptr_, route_common);
+        auto build_result = route_index.Build(centroids);
+        if (!build_result.empty()) {
+            throw VsagException(ErrorType::INTERNAL_ERROR, "GNO centroid BF build failed");
+        }
+        Vector<BucketIdType> assign(num_element, allocator_);
+        Vector<float> row(dim_, allocator_);
+        for (uint64_t i = 0; i < num_element; ++i) {
+            residuals.Read(i, row.data());
+            auto query = Dataset::Make()
+                             ->Dim(dim_)
+                             ->NumElements(1)
+                             ->Float32Vectors(row.data())
+                             ->Owner(false);
+            auto result = route_index.KnnSearch(query, 1, "{}", nullptr);
+            if (!result || result->GetDim() != 1 || result->GetIds() == nullptr ||
+                result->GetIds()[0] < 0 ||
+                static_cast<uint64_t>(result->GetIds()[0]) >=
+                    static_cast<uint64_t>(centroids->GetNumElements())) {
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    "invalid GNO centroid BF assignment");
+            }
+            assign[i] = static_cast<BucketIdType>(result->GetIds()[0]);
+        }
+        // Run and every synchronous BF query have completed before replacement.
+        // Own the latest centroid snapshot: s/t temporary buffers may be overwritten
+        // by a subsequent Run. Read always starts from original normalized X.
+        residual_context.Replace(data_centroids, centroids->GetNumElements(), std::move(assign));
     };
 
     // train loop

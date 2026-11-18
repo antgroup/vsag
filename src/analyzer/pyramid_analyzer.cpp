@@ -1171,6 +1171,9 @@ PyramidAnalyzer::calculate_node_recall(const IndexNode* node,
             gt_set.insert(gt_data[i].second);
         }
 
+        while (search_result->Size() > topk_) {
+            search_result->Pop();
+        }
         uint32_t hit_count = 0;
         const auto* sr_data = search_result->GetData();
         uint32_t check_count = std::min(static_cast<uint32_t>(search_result->Size()), topk_);
