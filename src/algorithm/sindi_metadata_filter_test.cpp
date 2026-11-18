@@ -1001,6 +1001,9 @@ TEST_CASE("SINDI host route skips windows between disjoint ranges", "[ut][SINDI]
     auto query = Dataset::Make()->NumElements(1)->StringMetadata("host", &query_host)->Owner(false);
     const auto route = host_filter.Classify(query);
     REQUIRE(route.kind == SindiHostRouteKind::WINDOW);
+    REQUIRE(route.ranges.empty());
+    REQUIRE(route.begin == 0);
+    REQUIRE(route.end == 12);
 
     int64_t min_window_id = 0;
     int64_t max_window_id = 5;
@@ -1271,14 +1274,16 @@ TEST_CASE("SINDI host selector keeps literal and missing-host semantics", "[ut][
         INFO(selection);
         auto query =
             Dataset::Make()->NumElements(1)->StringMetadata("host", &selection)->Owner(false);
-        const auto route = hosts.Classify(query);
+        auto route = hosts.Classify(query);
         if (expected.empty()) {
             REQUIRE(route.kind == SindiHostRouteKind::EMPTY);
             continue;
         }
         REQUIRE(route.kind == SindiHostRouteKind::WINDOW);
+        REQUIRE(route.ranges.empty() == (selection.find('|') == std::string::npos));
         FilterPtr filter;
         hosts.ApplyFilter(route, filter);
+        route = {};
         REQUIRE(filter != nullptr);
         for (int64_t id = 0; id < static_cast<int64_t>(values.size()); ++id) {
             REQUIRE(filter->CheckValid(id) == (expected.count(id) != 0));

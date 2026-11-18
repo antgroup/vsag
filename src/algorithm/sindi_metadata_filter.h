@@ -98,6 +98,9 @@ struct SindiHostRange {
 struct SindiHostSearchRoute {
     SindiHostRouteKind kind{SindiHostRouteKind::UNFILTERED};
     std::vector<SindiHostRange> ranges;
+    uint32_t begin{0};
+    uint32_t end{0};
+    uint32_t host_index{0};
 };
 
 class SindiHostBuildPlan {
