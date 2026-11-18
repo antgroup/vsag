@@ -20,8 +20,43 @@
 #include "simd/fp32_simd.h"
 #include "simd/normalize.h"
 #include "simd/simd.h"
+#include "typing.h"
 
 namespace vsag {
+
+namespace {
+bool
+cosine_exceptional(float value) {
+    uint32_t bits;
+    std::memcpy(&bits, &value, sizeof(bits));
+    // IEEE classification remains valid under -ffast-math.
+    return (bits & 0x7fffffffU) == 0U or (bits & 0x7f800000U) == 0x7f800000U;
+}
+
+bool
+cosine_non_finite(float value) {
+    uint32_t bits;
+    std::memcpy(&bits, &value, sizeof(bits));
+    return (bits & 0x7f800000U) == 0x7f800000U;
+}
+
+bool
+cosine_zero(float value) {
+    uint32_t bits;
+    std::memcpy(&bits, &value, sizeof(bits));
+    return (bits & 0x7fffffffU) == 0U;
+}
+
+float
+normalized_code_similarity(const float* codes,
+                           const float* normalized_query,
+                           uint64_t dim,
+                           Allocator* allocator) {
+    Vector<float> normalized(dim, allocator);
+    Normalize(codes, normalized.data(), dim);
+    return FP32ComputeIP(normalized.data(), normalized_query, dim);
+}
+}  // namespace
 
 template <MetricType metric>
 FP32Quantizer<metric>::FP32Quantizer(int dim, Allocator* allocator)
@@ -63,6 +98,11 @@ FP32Quantizer<metric>::EncodeOneImpl(const float* data, uint8_t* codes) {
             // Store the mold for cosine similarity
             const auto* data_float = reinterpret_cast<const float*>(data);
             float mold = std::sqrt(FP32ComputeIP(data_float, data_float, this->dim_));
+            // Match Normalize's zero-vector divisor without changing nonfinite
+            // propagation. Existing serialized zero molds are not rewritten.
+            if (mold == 0.0F) {
+                mold = 1.0F;
+            }
             std::memcpy(codes, data, this->dim_ * sizeof(float));
             std::memcpy(codes + this->dim_ * sizeof(float), &mold, sizeof(float));
         } else {
@@ -119,7 +159,20 @@ FP32Quantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2)
         if (this->hold_molds_) {
             const auto* mold1 = reinterpret_cast<const float*>(codes1 + this->dim_ * sizeof(float));
             const auto* mold2 = reinterpret_cast<const float*>(codes2 + this->dim_ * sizeof(float));
-            similarity /= mold1[0] * mold2[0];
+            const float dot = similarity;
+            const float product = mold1[0] * mold2[0];
+            similarity /= product;
+            if (cosine_exceptional(mold1[0]) or cosine_exceptional(mold2[0]) or
+                cosine_exceptional(product) or cosine_non_finite(dot) or
+                cosine_non_finite(similarity)) {
+                // Match the existing normalized-storage path on exceptional
+                // finite arithmetic, without changing stored raw rows.
+                Vector<float> row1(this->dim_, this->allocator_);
+                Vector<float> row2(this->dim_, this->allocator_);
+                Normalize(reinterpret_cast<const float*>(codes1), row1.data(), this->dim_);
+                Normalize(reinterpret_cast<const float*>(codes2), row2.data(), this->dim_);
+                similarity = FP32ComputeIP(row1.data(), row2.data(), this->dim_);
+            }
         }
         return 1.0F - similarity;
     }
@@ -178,7 +231,17 @@ FP32Quantizer<metric>::ComputeDistImpl(Computer<FP32Quantizer<metric>>& computer
                                         this->dim_);
         if (this->hold_molds_) {
             const auto* mold = reinterpret_cast<const float*>(codes + this->dim_ * sizeof(float));
+            const float dot = similarity;
             similarity /= mold[0];
+            if (cosine_exceptional(mold[0]) or cosine_non_finite(dot) or
+                cosine_non_finite(similarity)) {
+                // The computer query was normalized by ProcessQueryImpl already.
+                similarity =
+                    normalized_code_similarity(reinterpret_cast<const float*>(codes),
+                                               reinterpret_cast<const float*>(computer.buf_),
+                                               this->dim_,
+                                               this->allocator_);
+            }
         }
         *dists = 1.0F - similarity;
     } else if (metric == MetricType::METRIC_TYPE_L2SQR) {
@@ -217,6 +280,7 @@ FP32Quantizer<metric>::ComputeDistsBatch4Impl(Computer<FP32Quantizer<metric>>& c
         dists3 = 1.0F - dists3;
         dists4 = 1.0F - dists4;
     } else if (metric == MetricType::METRIC_TYPE_COSINE) {
+        const float initial[4] = {dists1, dists2, dists3, dists4};
         FP32ComputeIPBatch4(reinterpret_cast<const float*>(computer.buf_),
                             this->dim_,
                             reinterpret_cast<const float*>(codes1),
@@ -236,6 +300,21 @@ FP32Quantizer<metric>::ComputeDistsBatch4Impl(Computer<FP32Quantizer<metric>>& c
             dists2 /= mold2[0];
             dists3 /= mold3[0];
             dists4 /= mold4[0];
+            const uint8_t* rows[4] = {codes1, codes2, codes3, codes4};
+            const float norms[4] = {mold1[0], mold2[0], mold3[0], mold4[0]};
+            float* outputs[4] = {&dists1, &dists2, &dists3, &dists4};
+            for (uint64_t i = 0; i < 4; ++i) {
+                // FlattenDataCell zeroes its outputs. Low-level callers may
+                // accumulate: retain their original hold-molds result exactly.
+                if (cosine_zero(initial[i]) and
+                    (cosine_exceptional(norms[i]) or cosine_non_finite(*outputs[i]))) {
+                    *outputs[i] =
+                        normalized_code_similarity(reinterpret_cast<const float*>(rows[i]),
+                                                   reinterpret_cast<const float*>(computer.buf_),
+                                                   this->dim_,
+                                                   this->allocator_);
+                }
+            }
         }
         dists1 = 1.0F - dists1;
         dists2 = 1.0F - dists2;

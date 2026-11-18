@@ -43,6 +43,11 @@ public:
     void
     Train(const float* data, uint64_t count) override;
 
+    bool
+    IsTrainingDataIndependent() const override {
+        return true;
+    }
+
     void
     Train();
 

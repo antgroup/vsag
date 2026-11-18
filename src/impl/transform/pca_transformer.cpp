@@ -22,6 +22,7 @@
 #include <limits>
 #include <random>
 
+#include "common.h"
 #include "impl/blas/blas_function.h"
 #include "vsag_exception.h"
 
@@ -62,6 +63,40 @@ PCATransformer::Train(const float* data, uint64_t count) {
     ComputeCovarianceMatrix(centralized_data.data(), count, covariance_matrix.data());
 
     // 4. eigen decomposition (stored in pca_matrix_)
+    PerformEigenDecomposition(covariance_matrix.data());
+}
+
+void
+PCATransformer::TrainRows(const TrainingRows& rows) {
+    // Partial memory optimization: retain the original centralized N*D matrix,
+    // covariance D*D matrix, original SGEMM shape and eigen decomposition.
+    const bool valid_shape = rows.Dim() == input_dim_ && input_dim_ > 0 &&
+                             input_dim_ <= std::numeric_limits<int32_t>::max() && output_dim_ > 0 &&
+                             output_dim_ <= input_dim_ && rows.Count() >= 2;
+    CHECK_ARGUMENT(valid_shape, "invalid PCA TrainingRows shape");
+    const bool valid_extent =
+        rows.Count() <= static_cast<uint64_t>(PTRDIFF_MAX) / sizeof(float) / input_dim_ &&
+        static_cast<uint64_t>(input_dim_) <=
+            static_cast<uint64_t>(PTRDIFF_MAX) / sizeof(float) / input_dim_;
+    CHECK_ARGUMENT(valid_extent, "PCA TrainingRows allocation overflow");
+    Vector<float> centralized_data(rows.Count() * input_dim_, 0.0F, allocator_);
+    Vector<float> covariance_matrix(input_dim_ * input_dim_, 0.0F, allocator_);
+    Vector<float> row(input_dim_, 0.0F, allocator_);
+    std::fill(mean_.begin(), mean_.end(), 0.0F);
+    for (uint64_t i = 0; i < rows.Count(); ++i) {
+        rows.Read(i, row.data());
+        for (uint64_t j = 0; j < input_dim_; ++j) {
+            mean_[j] += row[j];
+        }
+    }
+    for (uint64_t j = 0; j < input_dim_; ++j) {
+        mean_[j] /= static_cast<float>(rows.Count());
+    }
+    for (uint64_t i = 0; i < rows.Count(); ++i) {
+        rows.Read(i, row.data());
+        CentralizeData(row.data(), centralized_data.data() + i * input_dim_);
+    }
+    ComputeCovarianceMatrix(centralized_data.data(), rows.Count(), covariance_matrix.data());
     PerformEigenDecomposition(covariance_matrix.data());
 }
 

@@ -17,6 +17,7 @@
 
 #include <cmath>
 #include <memory>
+#include <stdexcept>
 #include <type_traits>
 
 #include "quantization/computer.h"
@@ -88,10 +89,40 @@ QuantizerAdapter<QuantT, DataT>::TrainImpl(const float* data, uint64_t count) {
         return this->is_trained_;
     } else if constexpr (std::is_same_v<DataT, uint16_t>) {
         if constexpr (RaBitQHalfTrainingTraits<QuantT>::ENABLED) {
-            this->is_trained_ = this->inner_quantizer_->ReTrainHalf(data, count, data_type_);
-            return this->is_trained_;
+            if (not this->inner_quantizer_->UsesPcaForTraining() or data == nullptr or count == 0) {
+                this->is_trained_ = this->inner_quantizer_->ReTrainHalf(data, count, data_type_);
+                return this->is_trained_;
+            }
         }
         const auto* data_fp16 = reinterpret_cast<const uint16_t*>(data);
+        if constexpr (requires(QuantT& q) { q.ReTrainHalf(data_fp16, count, false); }) {
+            if (data_type_ == DataTypes::DATA_TYPE_FP16 ||
+                data_type_ == DataTypes::DATA_TYPE_BF16) {
+                this->is_trained_ = this->inner_quantizer_->ReTrainHalf(
+                    data_fp16, count, data_type_ == DataTypes::DATA_TYPE_BF16);
+                return this->is_trained_;
+            }
+        }
+
+        if constexpr (QuantT::SupportsTrainingRows()) {
+            if (this->inner_quantizer_->CanTrainRows() && data != nullptr && count != 0) {
+                if (this->dim_ == 0) {
+                    throw std::invalid_argument("invalid half training dimension");
+                }
+                const auto stride = this->dim_ * sizeof(uint16_t);
+                if (count > static_cast<uint64_t>(PTRDIFF_MAX) / stride) {
+                    throw std::invalid_argument("half training extent overflow");
+                }
+                TrainingRows rows(data, count, this->dim_, data_type_, stride, count * stride);
+                this->inner_quantizer_->ValidateTrainingRowsShape(rows);
+                this->is_trained_ = false;
+                this->is_trained_ = this->inner_quantizer_->ReTrainRows(rows);
+                return this->is_trained_;
+            }
+        }
+        if (data_fp16 == nullptr && count != 0) {
+            return false;
+        }
         Vector<float> vec(this->dim_ * count, this->allocator_);
         for (int64_t i = 0; i < this->dim_ * count; ++i) {
             if (data_type_ == DataTypes::DATA_TYPE_FP16) {
@@ -161,15 +192,38 @@ QuantizerAdapter<QuantT, DataT>::EncodeBatchImpl(const float* data,
                 return this->inner_quantizer_->EncodeBatchHalf(data_fp16, codes, count);
             }
         }
-        Vector<float> vec(this->dim_ * count, this->allocator_);
-        for (int64_t i = 0; i < this->dim_ * count; ++i) {
-            if (data_type_ == DataTypes::DATA_TYPE_FP16) {
-                vec[i] = FP16ToFloat(data_fp16[i]);
-            } else {
-                vec[i] = BF16ToFloat(data_fp16[i]);
+        if constexpr (requires { QuantT::BOUNDED_HALF_BATCH; }) {
+            if (count == 0) {
+                return this->inner_quantizer_->EncodeBatchImpl(nullptr, codes, 0);
             }
+            if (this->dim_ <= 0 ||
+                count > static_cast<uint64_t>(PTRDIFF_MAX) / sizeof(uint16_t) / this->dim_) {
+                throw std::invalid_argument("invalid scalar half batch extent");
+            }
+            const uint64_t rows =
+                std::min<uint64_t>(count, std::max<uint64_t>(1, (1UL << 18) / this->dim_));
+            Vector<float> vec(this->dim_ * rows, this->allocator_);
+            for (uint64_t begin = 0; begin < count; begin += rows) {
+                const auto batch = std::min(rows, count - begin);
+                for (uint64_t i = 0; i < this->dim_ * batch; ++i) {
+                    const auto value = data_fp16[begin * this->dim_ + i];
+                    vec[i] = data_type_ == DataTypes::DATA_TYPE_FP16 ? FP16ToFloat(value)
+                                                                     : BF16ToFloat(value);
+                }
+                if (!this->inner_quantizer_->EncodeBatchImpl(
+                        vec.data(), codes + begin * this->code_size_, batch)) {
+                    return false;
+                }
+            }
+            return true;
+        } else {
+            Vector<float> vec(this->dim_ * count, this->allocator_);
+            for (uint64_t i = 0; i < this->dim_ * count; ++i) {
+                vec[i] = data_type_ == DataTypes::DATA_TYPE_FP16 ? FP16ToFloat(data_fp16[i])
+                                                                 : BF16ToFloat(data_fp16[i]);
+            }
+            return this->inner_quantizer_->EncodeBatchImpl(vec.data(), codes, count);
         }
-        return this->inner_quantizer_->EncodeBatchImpl(vec.data(), codes, count);
     }
 }
 
@@ -221,19 +275,43 @@ QuantizerAdapter<QuantT, DataT>::DecodeBatchImpl(const uint8_t* codes,
         }
         return true;
     } else if constexpr (std::is_same_v<DataT, uint16_t>) {
-        Vector<float> vec(this->dim_ * count, this->allocator_);
-        if (!this->inner_quantizer_->DecodeBatchImpl(codes, vec.data(), count)) {
-            return false;
-        }
-        auto* data_fp16 = reinterpret_cast<uint16_t*>(data);
-        for (int64_t i = 0; i < this->dim_ * count; i++) {
-            if (data_type_ == DataTypes::DATA_TYPE_FP16) {
-                data_fp16[i] = FloatToFP16(vec[i]);
-            } else {
-                data_fp16[i] = FloatToBF16(vec[i]);
+        if constexpr (requires { QuantT::BOUNDED_HALF_BATCH; }) {
+            if (count == 0) {
+                return this->inner_quantizer_->DecodeBatchImpl(codes, nullptr, 0);
             }
+            if (this->dim_ <= 0 ||
+                count > static_cast<uint64_t>(PTRDIFF_MAX) / sizeof(uint16_t) / this->dim_) {
+                throw std::invalid_argument("invalid scalar half batch extent");
+            }
+            const uint64_t rows =
+                std::min<uint64_t>(count, std::max<uint64_t>(1, (1UL << 18) / this->dim_));
+            Vector<float> vec(this->dim_ * rows, this->allocator_);
+            auto* data_fp16 = reinterpret_cast<uint16_t*>(data);
+            for (uint64_t begin = 0; begin < count; begin += rows) {
+                const auto batch = std::min(rows, count - begin);
+                if (!this->inner_quantizer_->DecodeBatchImpl(
+                        codes + begin * this->code_size_, vec.data(), batch)) {
+                    return false;
+                }
+                for (uint64_t i = 0; i < this->dim_ * batch; ++i) {
+                    data_fp16[begin * this->dim_ + i] = data_type_ == DataTypes::DATA_TYPE_FP16
+                                                            ? FloatToFP16(vec[i])
+                                                            : FloatToBF16(vec[i]);
+                }
+            }
+            return true;
+        } else {
+            Vector<float> vec(this->dim_ * count, this->allocator_);
+            if (!this->inner_quantizer_->DecodeBatchImpl(codes, vec.data(), count)) {
+                return false;
+            }
+            auto* out = reinterpret_cast<uint16_t*>(data);
+            for (uint64_t i = 0; i < this->dim_ * count; ++i) {
+                out[i] = data_type_ == DataTypes::DATA_TYPE_FP16 ? FloatToFP16(vec[i])
+                                                                 : FloatToBF16(vec[i]);
+            }
+            return true;
         }
-        return true;
     }
 }
 template <typename QuantT, typename DataT>

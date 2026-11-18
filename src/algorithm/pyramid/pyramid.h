@@ -287,6 +287,9 @@ public:
     void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
 
+    void
+    GetFloat32VectorByInnerId(InnerIdType inner_id, float* data) const override;
+
     friend class PyramidAnalyzer;
     friend class PyramidDuplicateTestPeer;
     friend class PyramidOptimizedBuildSession;
