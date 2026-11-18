@@ -525,6 +525,13 @@ VSAG draws on the following works for graph construction, vector quantization, f
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/159753a52">
+                    <img src="https://avatars.githubusercontent.com/u/137481623?v=4" width="100" alt="159753a52"/>
+                    <br />
+                    <sub><b>Zelong Fang</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/antfin-oss">
                     <img src="https://avatars.githubusercontent.com/u/48939886?v=4" width="100" alt="antfin-oss"/>
                     <br />
@@ -543,13 +550,6 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <img src="https://avatars.githubusercontent.com/u/86393801?v=4" width="100" alt="thlurte"/>
                     <br />
                     <sub><b>Adheeb Ahmed</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/159753a52">
-                    <img src="https://avatars.githubusercontent.com/u/137481623?v=4" width="100" alt="159753a52"/>
-                    <br />
-                    <sub><b>Zelong Fang</b></sub>
                 </a>
             </td>
             <td align="center">
