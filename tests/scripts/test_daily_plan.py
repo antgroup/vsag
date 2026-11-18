@@ -709,6 +709,38 @@ class DailyNamedCountTests(unittest.TestCase):
         self.assertEqual(counts["selected"], 0)
         self.assertEqual(counts["command_groups"], {"linux": "passed"})
 
+    def test_summary_requires_extra_proposal_when_planner_succeeded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dp.write(root / "result.json", self.named_result())
+            command = [sys.executable, str(ROOT / "scripts/testing/daily_report.py"),
+                       str(root / "result.json"), "--expected-lanes", "x86",
+                       "--extra-proposal", str(root / "missing-proposal.json"),
+                       "--summary", str(root / "summary.md"), "--json", str(root / "summary.json")]
+            for planner_result in ("skipped", "success"):
+                with self.subTest(planner_result=planner_result):
+                    base_result = "failure" if planner_result == "skipped" else "success"
+                    env = {**os.environ, "NEEDS_JSON": json.dumps({
+                        "daily_test_asan_x86": {"result": base_result},
+                        "daily-extra-plan": {"result": planner_result},
+                        "daily-extra-x86": {"result": "skipped" if base_result == "failure" else "success"},
+                    })}
+                    process = subprocess.run(command, env=env, capture_output=True)
+                    self.assertEqual(process.returncode, 1, process.stderr)
+                    summary = dp.load(root / "summary.json")
+                    self.assertEqual(summary["status"], "failed")
+                    self.assertEqual(summary["case_counts"]["selected"], 1)
+                    self.assertNotIn("extra_coverage", summary)
+                    if planner_result == "skipped":
+                        self.assertIn("Workflow dependency daily_test_asan_x86: failure", summary["failures"])
+                        self.assertEqual(summary["coverage_gaps"], [])
+                        self.assertFalse(summary["incomplete"])
+                    else:
+                        self.assertTrue(summary["incomplete"])
+                        self.assertEqual(len(summary["coverage_gaps"]), 1)
+                        self.assertIn("Supplemental stage:", summary["coverage_gaps"][0])
+                        self.assertIn("missing-proposal.json", summary["coverage_gaps"][0])
+
     def test_missing_lane_preserves_counts_and_fails(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
