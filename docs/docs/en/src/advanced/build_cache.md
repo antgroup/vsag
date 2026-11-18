@@ -74,11 +74,14 @@ both snapshots are warm-started from cached neighbors; unmatched records are tre
 misses and refined by the normal build path. Calling cache-assisted `Build()` without
 `Dataset::SourceID` returns an invalid-argument error.
 
-When cache misses exist, a final connectivity pass joins missed nodes left outside the graph
-entry's reachable component. It preserves the degree limit and keeps previously reachable nodes reachable. This
-pass scans the graph and uses temporary memory proportional to the snapshot's node count;
-include that work when measuring rebuild time and peak memory. Unchanged all-hit snapshots
-retain their warm-start fast path.
+When cache misses exist, a final serial connectivity pass first scans the entry's reachable
+component, then runs a fresh entry-point construction search for each miss that is still
+unreachable. It looks for capacity in the reachable component, protecting its spanning tree
+and entry backlinks while respecting the degree limit. Each successful join also traverses
+the newly reachable component. A miss can remain unreachable if no safe backlink is found;
+this pass does not guarantee full reachability. Temporary memory is proportional to the
+snapshot's node count. Include the traversal and per-unreachable-miss searches when measuring
+rebuild time and peak memory. Unchanged all-hit snapshots retain their warm-start fast path.
 
 ## Persisting source IDs with the index
 

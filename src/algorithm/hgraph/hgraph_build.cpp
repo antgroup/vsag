@@ -1847,7 +1847,7 @@ HGraph::refine_nodes_two_phase(
     const bool use_parallel =
         this->thread_pool_ != nullptr && this->build_thread_count_ > 1 && ids_to_refine.size() > 1;
 
-    constexpr size_t block_size = 128;
+    constexpr uint64_t block_size = cache_refine_block_size_;
     const size_t num_blocks =
         use_parallel ? (ids_to_refine.size() + block_size - 1) / block_size : 1;
     const size_t effective_parallelism =
@@ -2383,6 +2383,8 @@ HGraph::cache_warm_start_and_classify(BuildCachePlan& plan) {
 // entry may reject every stale reverse candidate, leaving that miss unreachable. Join such
 // misses after refinement drains, protecting a spanning tree of the entry's component so
 // installing a backlink cannot disconnect an existing reachable node or exceed its degree.
+// Requires exclusive bulk-build access (no external queries or mutations), and all warm-start
+// and refinement workers joined. Draining workers alone does not exclude external visitors.
 template <typename CandidateCollector>
 static void
 connect_cache_misses(const GraphInterfacePtr& graph,
@@ -2404,6 +2406,7 @@ connect_cache_misses(const GraphInterfacePtr& graph,
         queue.push_back(start);
         for (uint64_t cursor = 0; cursor < queue.size(); ++cursor) {
             const auto id = queue[cursor];
+            neighbors.clear();
             graph->GetNeighbors(id, neighbors);
             for (auto neighbor : neighbors) {
                 if (parent[neighbor] == unseen) {
@@ -2440,6 +2443,7 @@ connect_cache_misses(const GraphInterfacePtr& graph,
             if (not seen.insert(neighbor).second) {
                 continue;
             }
+            neighbors.clear();
             graph->GetNeighbors(neighbor, neighbors);
             if (neighbors.size() < graph->MaximumDegree()) {
                 neighbors.push_back(missed);
@@ -2533,6 +2537,8 @@ HGraph::cache_run_refine_two_phase(const DatasetPtr& data, BuildCachePlan& plan)
                                  /*use_self_as_entry=*/unchanged_cache_membership,
                                  flatten_codes,
                                  plan.inner_id_to_input_idx);
+    // Both refinement calls have joined all workers. As in PublishNode(), bulk Build
+    // requires no concurrent external search; the helper relies on both preconditions.
     connect_cache_misses(
         this->bottom_graph_,
         plan.missed_ids,

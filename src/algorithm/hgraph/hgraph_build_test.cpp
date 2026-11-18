@@ -102,16 +102,21 @@ class CacheCandidateScheduleMutex final : public MutexArray {
     bool first_ready_ = false, prefix_ready_ = false, first_block_done_ = false;
     bool first_lock_ = true, start_gate_ = true, prefix_gate_ = true, trace_gate_ = true;
     std::function<void(int)> trace_;
+    uint32_t block_size_;
     void
     wait(std::unique_lock<std::mutex>& lock, const std::function<bool()>& ready) {
         if (not cv_.wait_for(lock, std::chrono::seconds(10), ready)) {
-            throw std::runtime_error("cache candidate schedule timed out");
+            throw std::runtime_error(
+                "cache candidate schedule timed out: requires two contiguous refine blocks, "
+                "with node 0 paused until the second block completes its first 32 nodes");
         }
     }
 
 public:
-    CacheCandidateScheduleMutex(MutexArrayPtr wrapped, std::function<void(int)> trace)
-        : wrapped_(std::move(wrapped)), trace_(std::move(trace)) {
+    CacheCandidateScheduleMutex(MutexArrayPtr wrapped,
+                                uint32_t block_size,
+                                std::function<void(int)> trace)
+        : wrapped_(std::move(wrapped)), trace_(std::move(trace)), block_size_(block_size) {
     }
     void
     Lock(uint32_t id) override {
@@ -129,7 +134,7 @@ public:
     void
     Unlock(uint32_t id) override {
         wrapped_->Unlock(id);
-        if (id == 127) {
+        if (id == block_size_ - 1) {
             std::lock_guard lock(mutex_);
             first_block_done_ = true;
             cv_.notify_all();
@@ -139,11 +144,11 @@ public:
     SharedLock(uint32_t id) override {
         {
             std::unique_lock lock(mutex_);
-            if (id == 128 && start_gate_) {
+            if (id == block_size_ && start_gate_) {
                 start_gate_ = false;
                 wait(lock, [&] { return first_ready_; });
             }
-            if (id == 160 && prefix_gate_) {
+            if (id == block_size_ + 32 && prefix_gate_) {
                 prefix_gate_ = false;
                 trace_(0);
                 prefix_ready_ = true;
@@ -222,10 +227,16 @@ public:
         // Match the failing GCC level entry while keeping the witness independent
         // of the standard library's level distribution and upper-layer RNG
         // implementation.
+        // This data/entry witness needs two 128-node blocks: 127 finishes block one,
+        // 128 starts block two, and 160 gates it after the prefix 128..159. Fail
+        // explicitly if blocking changes instead of silently losing the race witness.
+        REQUIRE(HGraph::cache_refine_block_size_ == 128);
         graph.mult_ = 0.0;
         graph.entry_point_id_ = 66;
         graph.neighbors_mutex_ = std::make_shared<CacheCandidateScheduleMutex>(
-            graph.neighbors_mutex_, [&graph, &full_entry, &orphaned](int stage) {
+            graph.neighbors_mutex_,
+            HGraph::cache_refine_block_size_,
+            [&graph, &full_entry, &orphaned](int stage) {
                 Vector<InnerIdType> neighbors(graph.allocator_);
                 graph.bottom_graph_->GetNeighbors(graph.entry_point_id_, neighbors);
                 if (stage == 0) {
