@@ -23,7 +23,7 @@ jobs:
       image: ${{ steps.route.outputs.image }}
     steps:
       # No PR checkout or PR-provided executable code in this routing job.
-      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         id: route
         with:
           script: |
@@ -111,13 +111,31 @@ jobs:
     name: CI Routing Tests
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
+      - name: Test SIMD check selection
+        run: |
+          python3 -m venv "$RUNNER_TEMP/check-selection-tests"
+          "$RUNNER_TEMP/check-selection-tests/bin/pip" install --disable-pip-version-check -r scripts/ci/check-selection-requirements.txt
+          "$RUNNER_TEMP/check-selection-tests/bin/python" -m unittest tests.scripts.test_simd_check_selection
       - run: node --test tests/scripts/ci_runner_route.test.cjs
+      - name: Python packaging helper regressions (no native build)
+        run: >-
+          python3 -m unittest
+          tests/scripts/test_local_build_wheel.py
+          tests/scripts/test_macos_wheel_audit.py
+          tests/scripts/test_macos_openmp.py
+          tests/scripts/test_python_license.py
+          tests/scripts/test_python_ci.py
+          tests/scripts/test_workflow_entries.py
+          tests/scripts/test_daily_plan.py
+          tests/scripts/test_daily_workflow.py
+          tests/scripts/test_team_test_shards.py
 
   community:
-    if: always() && needs.select-checks.result == 'success' && (needs.route.result == 'success' || needs.route.result == 'skipped')
+    # A superseding push must cancel the entire hosted branch, including wheel builds.
+    if: ${{ !cancelled() && needs.select-checks.result == 'success' && (needs.route.result == 'success' || needs.route.result == 'skipped') }}
     name: Community
     needs: [route, select-checks]
     uses: ./.github/workflows/pr-ci-community.yml
@@ -154,13 +172,13 @@ jobs:
       simd: ${{ steps.select.outputs.simd }}
       lite: ${{ steps.select.outputs.lite }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           persist-credentials: false
       - name: Select original event and path scopes
         id: select
-        run: python3 scripts/ci/checks_policy.py
+        run: bash scripts/ci/select_checks.sh
 
   gate:
     # Always instantiate one named context, including out-of-scope runs.

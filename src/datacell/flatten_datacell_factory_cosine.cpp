@@ -19,7 +19,8 @@ namespace vsag {
 FlattenInterfacePtr
 make_flatten_data_cell_cosine(const FlattenInterfaceParamPtr& param,
                               const IndexCommonParam& common_param) {
-    return MakeFlattenDataCellForMetric<MetricType::METRIC_TYPE_COSINE>(param, common_param);
+    return FlattenFactoryImpl<FlattenInputKind::Native>::MakeForMetric<
+        MetricType::METRIC_TYPE_COSINE>(param, common_param);
 }
 
 }  // namespace vsag

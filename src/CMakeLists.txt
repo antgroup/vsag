@@ -103,6 +103,8 @@ if (TARGET vsag_openmp)
     vsag_link_openmp_private (vsag_static)
 endif ()
 
+include (${PROJECT_SOURCE_DIR}/cmake/VSAGPythonBindings.cmake)  # Optional pyvsag C library.
+
 maybe_add_dependencies (vsag antlr4 roaring)
 maybe_add_dependencies (vsag_static antlr4 roaring)
 maybe_add_dependencies (vsag_objects antlr4 roaring)

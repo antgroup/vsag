@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -25,13 +26,12 @@
 #include "datacell/flatten_interface.h"
 #include "datacell/immutable_sindi_term_datacell.h"
 #include "datacell/mutable_sindi_term_datacell.h"
-#include "impl/searcher/sindi_search_options.h"
 #include "vsag/allocator.h"
 
 namespace vsag {
 
 class ReasoningContext;
-struct SindiWindowSearchProfile;
+struct SindiParallelState;
 
 /**
  * @brief SINDI: Sparse INverted Index with windowed term lists.
@@ -176,6 +176,14 @@ public:
     SetImmutable() override;
 
 private:
+    DatasetPtr
+    knn_search_impl(const DatasetPtr& query,
+                    int64_t k,
+                    const std::string& parameters,
+                    const FilterPtr& filter,
+                    Allocator* allocator,
+                    std::chrono::steady_clock::time_point entered) const;
+
     static constexpr float K_TERM_LISTS_HEAP_INSERT_PRUNE_THRESHOLD = 0.1F;
 
     /**
@@ -201,9 +209,7 @@ private:
                 SearchStatistics* statistics = nullptr,
                 const uint64_t* filter_callback_remaining = nullptr,
                 const SindiMetadataSearchRoute& metadata_route = {},
-                uint64_t worker_n_candidate = 0,
-                const SindiSearchOptions& window_options = {},
-                SindiWindowSearchProfile* window_profile = nullptr) const;
+                SindiParallelState* parallel = nullptr) const;
 
     bool
     UseTermListsHeapInsert(const SINDISearchParameter& search_param,
@@ -219,9 +225,6 @@ private:
      */
     std::pair<int64_t, int64_t>
     get_min_max_window_id(const FilterPtr& filter) const;
-
-    mutable std::once_flag search_thread_pool_once_;
-    mutable SafeThreadPoolPtr search_thread_pool_{nullptr};
 
     MetadataPtr
     collect_streaming_header() const override;

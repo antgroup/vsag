@@ -148,12 +148,13 @@ LazyHGraph 只支持 `dtype: "float32"`。搜索参数使用 `hgraph` 对象，�
 ```json
 {
     "ivf": {
-        "nlist": 4096,
-        "base_quantization_type": "sq8",
-        "nprobe": 32
+        "buckets_count": 4096,
+        "base_quantization_type": "sq8"
     }
 }
 ```
+
+完整构建参数表见 [IVF 索引页](../indexes/ivf.md)。
 
 ## Brute Force
 
@@ -161,7 +162,8 @@ LazyHGraph 只支持 `dtype: "float32"`。搜索参数使用 `hgraph` 对象，�
 {"brute_force": {}}
 ```
 
-无需额外参数。
+量化、IO 和线程池参数均可在 `index_param` 下配置，
+完整参数表见 [BruteForce 索引页](../indexes/brute_force.md)。
 
 ## Pyramid
 
@@ -238,6 +240,21 @@ SINDI_V2 兼容 SINDI 的全部功能，并支持内存与磁盘 I/O。
 
 构建参数及 `n_candidate`、`filter_callback_limit` 等检索参数详见
 [SINDI_V2 页面](../indexes/sindi_v2.md)。
+
+## SIMQ（多向量检索）
+
+SIMQ 要求顶层 `dim > 0`、`dtype: "float32"`、`metric_type: "ip"`；
+可用 `repr: "multi_vector"` 显式描述布局。全部 15 个公开构建字段位于 `index_param`：
+`base_io_type`、`base_file_path`、`base_enable_read_cache`、`base_cache_total_size`、
+`quantization_type`、`build_thread_count`、`init_cluster_ratio`、`max_cluster_size`、
+`split_start_idx`、`random_seed`、`coarse_k`、`rerank_k`、`split_delay_seconds`、
+`support_duplicate`、`deduplicate_storage`。
+
+KNN 和范围搜索均接受 `simq.coarse_k`、`simq.rerank_k`（省略或非正值回退构建默认值）
+以及软预算 `simq.timeout_ms`。根级有限 `threshold` 仅限制 KNN 最终距离；范围搜索使用
+`radius`。共享的 `parallelism`、`factor`、`enable_reorder` 可在 `simq` 内解析但不生效，
+不能关闭 MaxSim 精排。默认值、约束、存储/量化限制及输入 dtype 与存储格式的区别，
+详见 [SIMQ 参数表](../indexes/simq.md)。
 
 ## 运行期参数
 

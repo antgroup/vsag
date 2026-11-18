@@ -65,6 +65,7 @@ DEFINE_POINTER(SafeThreadPool);
 DEFINE_POINTER(AnalyzerBase);
 
 class IndexCommonParam;
+class SearchExecutionContext;
 struct AnalyzerParam;
 
 class InnerIndexInterface {
@@ -761,6 +762,7 @@ protected:
     int64_t train_sample_count_{65536L};
 
     std::shared_ptr<SafeThreadPool> thread_pool_{nullptr};
+    std::shared_ptr<SearchExecutionContext> search_resources_;
 
     AttrInvertedInterfacePtr attr_filter_index_{nullptr};
 };

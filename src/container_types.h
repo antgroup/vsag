@@ -31,10 +31,11 @@ template <typename T>
 using Deque = std::deque<T, vsag::AllocatorWrapper<T>>;
 
 struct CompareByFirst {
+    bool stable_ties{false};
     constexpr bool
     operator()(std::pair<float, InnerIdType> const& a,
                std::pair<float, InnerIdType> const& b) const noexcept {
-        return a.first < b.first;
+        return stable_ties ? a < b : a.first < b.first;
     }
 };
 

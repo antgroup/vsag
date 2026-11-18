@@ -368,10 +368,14 @@ TEMPLATE_TEST_CASE("Local SQ HGraph rerank and Tune persistence",
                                 ->Owner(false);
         auto invalid_index = Factory::CreateIndex("hgraph", parameters).value();
         REQUIRE_FALSE(invalid_index->Build(invalid_base).has_value());
-        for (auto dtype : {"int8", "float16", "bfloat16"}) {
-            auto invalid = JsonType::Parse(parameters);
-            invalid["dtype"].SetString(dtype);
-            REQUIRE_FALSE(Factory::CreateIndex("hgraph", invalid.Dump()).has_value());
+        auto invalid = JsonType::Parse(parameters);
+        invalid["dtype"].SetString("int8");
+        REQUIRE_FALSE(Factory::CreateIndex("hgraph", invalid.Dump()).has_value());
+        // Half inputs now support the same legal local-SQ configurations as FP32.
+        for (auto dtype : {"float16", "bfloat16"}) {
+            auto supported = JsonType::Parse(parameters);
+            supported["dtype"].SetString(dtype);
+            REQUIRE(Factory::CreateIndex("hgraph", supported.Dump()).has_value());
         }
     }
     for (const auto& target_base : std::vector<std::string>{TestType::NameImpl(), "rabitq"}) {

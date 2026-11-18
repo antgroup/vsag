@@ -136,7 +136,9 @@ collect_seed_inner_ids(const FilterPtr& filter,
     const auto total = static_cast<uint64_t>(label_table->GetTotalCount());
     const auto deleted = identity ? label_table->GetDeletedIdsReadView() : nullptr;
     for (uint64_t i = 0; i < sampled_count; ++i) {
-        const auto offset = i * static_cast<uint64_t>(valid_count) / sampled_count;
+        const auto offset = sampled_count == static_cast<uint64_t>(valid_count)
+                                ? i
+                                : i * static_cast<uint64_t>(valid_count) / sampled_count;
         const auto label = valid_labels[offset];
         if (identity) {
             if (label >= 0 and static_cast<uint64_t>(label) < total and
@@ -719,17 +721,20 @@ HGraph::try_mci_search(const SearchRequest& request,
     }
     // Keep the deletion set stable throughout traversal; no per-visited-node reader lock.
     // This is acquired after seed label lookup and released before result label conversion.
-    auto query_filter = std::make_shared<CombinedFilter>();
+    FilterPtr query_filter;
     if (params.use_extra_info_filter and this->extra_infos_ != nullptr) {
-        query_filter->AppendFilter(
-            std::make_shared<ExtraInfoWrapperFilter>(request.filter_, this->extra_infos_));
+        query_filter =
+            std::make_shared<ExtraInfoWrapperFilter>(request.filter_, this->extra_infos_);
     } else {
-        query_filter->AppendFilter(
-            std::make_shared<InnerIdWrapperFilter>(request.filter_, *this->label_table_));
+        query_filter = std::make_shared<InnerIdWrapperFilter>(request.filter_, *this->label_table_);
     }
     mci_param.deleted_ids_filter = this->label_table_->GetDeletedIdsReadView();
-    query_filter->AppendFilter(mci_param.deleted_ids_filter);
     auto mci_search_param = search_param;
+    if (this->use_conjugate_graph_ and params.use_conjugate_graph_search) {
+        // Conjugate search consumes the larger candidate set, even with complete seeds.
+        mci_search_param.rerank_topk =
+            std::max<int64_t>(search_param.topk, static_cast<int64_t>(search_param.ef));
+    }
     mci_search_param.is_inner_id_allowed = query_filter;
     result.result = this->mci_searcher_->Search(
         this->mci_cliques_, precise_flatten, query, mci_search_param, mci_param, ctx);

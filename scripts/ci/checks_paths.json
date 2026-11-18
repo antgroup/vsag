@@ -34,7 +34,13 @@
     "scripts/ci/checks_policy.py",
     "scripts/ci/checks_paths.json",
     ".github/workflows/pr-ci.yml",
-    ".github/workflows/pr-ci-community.yml"
+    ".github/workflows/pr-ci-community.yml",
+    "src/quantization/scalar_quantization/local_scalar_quantizer*",
+    "include/vsag/**",
+    "scripts/ci/action_revision_diff.py",
+    "tests/scripts/test_simd_check_selection.py",
+    "scripts/ci/check-selection-requirements.txt",
+    "scripts/ci/select_checks.sh"
   ],
   "lite": [
     "include/vsag/**",

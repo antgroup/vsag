@@ -19,6 +19,10 @@ use the normal [Serialization](serialization.md) APIs to persist a searchable in
 The numeric label in `Dataset::Ids` may change between snapshots. Cache matching uses the
 corresponding `SourceID` string instead.
 
+Pass the complete current snapshot to each `Build()`. Records may be added, removed, or reordered;
+retained records keep their stable Source IDs. Importing a cache supplies graph seeds, not vectors
+from the previous snapshot.
+
 ## First build and cache export
 
 Provide one source ID per vector when building the source index:
@@ -103,6 +107,9 @@ After the warm-started build, call `GetStats()` and inspect:
 | `build_cache_hit_rate` | Fraction of nodes warm-started from the imported cache |
 | `build_cache_hit_nodes` | Matched node count |
 | `build_cache_missed_nodes` | Nodes built without a matching cache entry |
+
+A 100% hit rate can also occur when the current snapshot is a subset of the previous one: the
+rate measures reuse of the current input, not retention of every old record.
 
 When no imported cache participated in the last build, the statistics include a
 `skipped_reason` instead. See [Index Analysis](../resources/analyze_index.md) for the rest of the

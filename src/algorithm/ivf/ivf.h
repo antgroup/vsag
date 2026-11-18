@@ -179,6 +179,10 @@ public:
     GetMemoryUsage() const override;
 
 private:
+    // Collect into caller-owned statistics without attaching JSON to internal child results.
+    DatasetPtr
+    search_with_request(const SearchRequest& request, SearchStatistics& stats) const;
+
     std::vector<int64_t>
     add(const DatasetPtr& base, bool try_optimized_build);
 

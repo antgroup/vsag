@@ -13,15 +13,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
-import sys
-
-_cur_file_dir = os.path.dirname(os.path.realpath(__file__))
-sys.path.append(_cur_file_dir)
-
-from _pyvsag import *
+from ._index import Index, _check
+from ._lib import lib as _lib
 from ._version import __version__
 
-import _pyvsag
-__doc__ = _pyvsag.__doc__
+_LOG_LEVELS = {"off": _lib.VSAG_LOG_OFF, "info": _lib.VSAG_LOG_INFO, "debug": _lib.VSAG_LOG_DEBUG}
+
+
+def _set_log_level(name):
+    _check(_lib.vsag_set_log_level(_LOG_LEVELS[name]), "set log level failed")
+
+
+def set_logger_off():
+    """Disable all logging output from the VSAG library."""
+    _set_log_level("off")
+
+
+def set_logger_info():
+    """Set logger level to INFO. Only important information will be logged."""
+    _set_log_level("info")
+
+
+def set_logger_debug():
+    """Set logger level to DEBUG. Detailed debug information will be logged."""
+    _set_log_level("debug")
+
+
+__all__ = ["Index", "set_logger_off", "set_logger_info", "set_logger_debug", "__version__"]
 

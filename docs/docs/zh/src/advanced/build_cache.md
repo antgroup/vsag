@@ -18,6 +18,9 @@ HGraph 可以从一次构建中导出图邻居信息，并在下一次 `Build()`
 不同快照中的 `Dataset::Ids` 数字 label 可以变化；缓存使用对应的 `SourceID`
 字符串匹配。
 
+每次 `Build()` 都应传入完整的当前快照。记录可以新增、删除或重新排序，保留的记录继续
+使用稳定的 Source ID。导入缓存只提供图的初始邻居信息，不会导入上一快照的向量。
+
 ## 首次构建并导出缓存
 
 构建源索引时，为每个向量提供一个 Source ID：
@@ -99,6 +102,9 @@ warm-start 构建完成后调用 `GetStats()`，检查：
 | `build_cache_hit_rate` | 构建节点中成功匹配并从导入缓存 warm-start 的比例 |
 | `build_cache_hit_nodes` | 成功匹配的节点数量 |
 | `build_cache_missed_nodes` | 没有匹配缓存条目、按正常路径构建的节点数量 |
+
+当前快照是上一快照的子集时，命中率也可能达到 100%；该比率衡量当前输入的复用情况，
+不表示上一快照中的所有记录都被保留。
 
 如果上一次构建没有使用导入缓存，统计会输出 `skipped_reason`。其他 HGraph
 指标见[索引分析](../resources/analyze_index.md)。

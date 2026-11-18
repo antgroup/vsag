@@ -24,6 +24,11 @@ public:
         : Resource(nullptr, nullptr), resource_(resource), owned_(owned) {
     }
 
+    Resource*
+    GetResource() const {
+        return resource_;
+    }
+
     std::shared_ptr<Allocator>
     GetAllocator() const override {
         return resource_->GetAllocator();

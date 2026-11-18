@@ -19,12 +19,15 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <cmath>
+#include <numeric>
 #include <random>
 #include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "json_types.h"
 #include "json_wrapper.h"
 #include "simd/bf16_simd.h"
 #include "simd/fp16_simd.h"
@@ -288,20 +291,143 @@ TEST_CASE("Pyramid half storage serializes smaller than fp32 storage",
     REQUIRE(sizes[0] < sizes[1]);
 }
 
-TEST_CASE("Pyramid half input rejects PiPNN and missing vectors",
+// The local SQ factories reject TQ, so they are ordinary configurations only.
+TEST_CASE("Pyramid PiPNN half input covers FP32 quantizers and split3+5",
+          "[ft][pyramid][pipnn][half_input][half_quantization][quantizer_matrix]") {
+    const bool bf16 = GENERATE(false, true);
+    const std::string metric = GENERATE("l2", "ip", "cosine");
+    const std::string configuration = GENERATE("fp32",
+                                               "fp16",
+                                               "bf16",
+                                               "sq8",
+                                               "sq4",
+                                               "sq8_uniform",
+                                               "sq4_uniform",
+                                               "sq8_local",
+                                               "sq4_local",
+                                               "pq",
+                                               "pqfs",
+                                               "rabitq",
+                                               "saq",
+                                               "rom, fp32",
+                                               "rom, fp16",
+                                               "rom, bf16",
+                                               "rom, sq8",
+                                               "rom, sq4",
+                                               "rom, sq8_uniform",
+                                               "rom, sq4_uniform",
+                                               "rom, pq",
+                                               "rom, pqfs",
+                                               "rom, rabitq",
+                                               "rom, saq",
+                                               "pca, rom, sq8_uniform",
+                                               "fht, sq8_uniform",
+                                               "mrle, fp32",
+                                               "split3+5",
+                                               "mrle, split3+5");
+    CAPTURE(bf16, metric, configuration);
+    constexpr int64_t count = 544;
+    constexpr int64_t dim = 32;
+    std::vector<float> decoded(count * dim);
+    std::vector<uint16_t> halves(count * dim);
+    std::vector<int64_t> ids(count);
+    std::vector<std::string> paths(count, "all/half/leaf");
+    std::mt19937 rng(20261104);
+    for (int64_t row = 0; row < count; ++row) {
+        ids[row] = 1000 + row * 7;
+        float norm = 0;
+        for (int64_t d = 0; d < dim; ++d) {
+            // Independent unit directions have a large nearest-neighbor margin.
+            // Avoid zero/subnormal inputs to the legacy generic FP16 converter.
+            const auto sample = static_cast<int>(rng() % 2000) - 1000;
+            const float value = (sample < 0 ? sample : sample + 1) / 1001.0F;
+            decoded[row * dim + d] = value;
+            norm += value * value;
+        }
+        norm = std::sqrt(norm);
+        for (int64_t d = 0; d < dim; ++d) {
+            const float value = decoded[row * dim + d] / norm;
+            auto& bits = halves[row * dim + d];
+            bits = bf16 ? generic::FloatToBF16(value) : generic::FloatToFP16(value);
+            decoded[row * dim + d] = bf16 ? generic::BF16ToFloat(bits) : generic::FP16ToFloat(bits);
+        }
+    }
+    const auto dataset = [&](int64_t row, int64_t size, bool half) {
+        auto data = Dataset::Make()
+                        ->NumElements(size)
+                        ->Dim(dim)
+                        ->Ids(ids.data() + row)
+                        ->Paths(paths.data() + row)
+                        ->Owner(false);
+        return half ? data->Float16Vectors(halves.data() + row * dim)
+                    : data->Float32Vectors(decoded.data() + row * dim);
+    };
+    const auto parameters = [&](bool half) {
+        auto json = JsonWrapper::Parse(HalfPyramidParam(
+            half ? (bf16 ? "bfloat16" : "float16") : "float32", "fp32", "pipnn", true, dim));
+        json["metric_type"].SetString(metric);
+        auto param = json["index_param"];
+        param["ef_construction"].SetInt(64);
+        // Pyramid public parameters do not expose the HGraph training sample count.
+        param["base_pq_dim"].SetInt(8);
+        const bool split = configuration.find("split3+5") != std::string::npos;
+        const bool transform = configuration.find(',') != std::string::npos;
+        param["base_quantization_type"].SetString(transform ? "tq"
+                                                            : (split ? "rabitq" : configuration));
+        if (transform) {
+            param["tq_chain"].SetString(split ? "mrle, rabitq" : configuration);
+            param["rabitq_pca_dim"].SetInt(configuration.find("pca") != std::string::npos ? 16 : 0);
+            // Full rank isolates input plumbing from MRLE projection loss.
+            param["mrle_dim"].SetInt(dim);
+        }
+        if (split) {
+            // x=3 filter + y=5 supplement, exactly as original FP32 tests.
+            param["precise_quantization_type"].SetString("rabitq");
+            param["rabitq_bits_per_dim_base"].SetInt(3);
+            param["rabitq_bits_per_dim_precise"].SetInt(5);
+            param["rabitq_bits_per_dim_query"].SetInt(32);
+        }
+        return json.Dump();
+    };
+    auto half_param = parameters(true);
+    auto half_index = MakeHalfIndex(half_param);
+    auto control = MakeHalfIndex(parameters(false));
+    for (const bool half : {true, false}) {
+        auto target = half ? half_index : control;
+        auto built = target->Build(dataset(0, count, half));
+        REQUIRE(built.has_value());
+        REQUIRE(built.value().empty());
+        REQUIRE(target->GetNumElements() == count);
+    }
+    const auto check = [&](const auto& target, bool half) {
+        for (const int64_t row : {int64_t{0}, int64_t{257}, count - 1}) {
+            CAPTURE(row, half);
+            auto result =
+                target->KnnSearch(dataset(row, 1, half), 1, R"({"pyramid":{"ef_search":1000}})");
+            REQUIRE(result.has_value());
+            REQUIRE(result.value()->GetDim() == 1);
+            REQUIRE(std::isfinite(result.value()->GetDistances()[0]));
+            // Lossy distances need not be exact or nonnegative (IP).
+            REQUIRE(result.value()->GetIds()[0] == ids[row]);
+        }
+    };
+    check(half_index, true);
+    check(control, false);  // Same quantizer and identical decoded coordinates.
+    for (const bool half : {true, false}) {
+        auto binary = (half ? half_index : control)->Serialize();
+        REQUIRE(binary.has_value());
+        auto restored = MakeHalfIndex(half ? half_param : parameters(false));
+        REQUIRE(restored->Deserialize(binary.value()).has_value());
+        REQUIRE(restored->GetNumElements() == count);
+        check(restored, half);
+    }
+}
+
+TEST_CASE("Pyramid half input rejects missing vectors",
           "[ft][pyramid][fp16][bf16][half_input][negative]") {
     const bool bf16 = GENERATE(false, true);
     const std::string dtype = bf16 ? "bfloat16" : "float16";
     const std::string quantization = bf16 ? "bf16" : "fp16";
-    CAPTURE(dtype);
-    SECTION("PiPNN requires float32") {
-        const auto param = HalfPyramidParam(dtype, quantization, "pipnn");
-        auto made = Factory::CreateIndex("pyramid", param);
-        REQUIRE_FALSE(made.has_value());
-        INFO("Pyramid factory error: " << made.error().message);
-        REQUIRE(made.error().type == ErrorType::INVALID_ARGUMENT);
-        REQUIRE(made.error().message.find("PiPNN") != std::string::npos);
-    }
     SECTION("Missing half buffer is rejected") {
         HalfInputFixture data(bf16);
         auto index = MakeHalfIndex(HalfPyramidParam(dtype, quantization));
@@ -487,6 +613,101 @@ TEST_CASE("Pyramid half input validates Build and Add before mutation",
         REQUIRE(index->Add(empty).has_value());
         REQUIRE(index->GetNumElements() == BUILD_COUNT);
     }
+}
+
+TEST_CASE("Pyramid analyzer preserves native half queries above the graph statistics threshold",
+          "[ft][pyramid][fp16][bf16][analyzer]") {
+    const std::string dtype = GENERATE("float32", "float16", "bfloat16");
+    CAPTURE(dtype);
+    constexpr int64_t dim = 32;
+    constexpr int64_t count = 10000;
+    std::vector<float> floats(count * dim);
+    std::vector<uint16_t> halves(count * dim);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 1000);
+    std::vector<std::string> paths(count, "all/half/leaf");
+    std::mt19937 random(20261112);
+    for (uint64_t i = 0; i < floats.size(); ++i) {
+        const auto value = (1 + random() % 128) / 129.0F;
+        const bool bf16 = dtype == "bfloat16";
+        halves[i] = bf16 ? generic::FloatToBF16(value) : generic::FloatToFP16(value);
+        floats[i] = bf16 ? generic::BF16ToFloat(halves[i]) : generic::FP16ToFloat(halves[i]);
+    }
+    const auto input = [&](uint64_t row, uint64_t size) {
+        auto data = Dataset::Make()
+                        ->NumElements(size)
+                        ->Dim(dim)
+                        ->Owner(false)
+                        ->Ids(ids.data() + row)
+                        ->Paths(paths.data() + row);
+        if (dtype == "float32") {
+            data->Float32Vectors(floats.data() + row * dim);
+        } else {
+            data->Float16Vectors(halves.data() + row * dim);
+        }
+        return data;
+    };
+    const auto parameters = std::string(R"({"dtype":")") + dtype +
+                            R"(","metric_type":"l2","dim":32,"index_param":{"max_degree":16,
+        "ef_construction":64,"build_thread_count":1,"index_min_size":8,
+        "base_quantization_type":"sq8","precise_quantization_type":"fp32",
+        "use_reorder":true,"graph_storage_type":"compressed"}})";
+    auto index = MakeHalfIndex(parameters);
+    auto built = index->Build(input(0, count));
+    REQUIRE(built.has_value());
+    REQUIRE(built.value().empty());
+    // Smaller fixtures skip leaf graph recall analysis and miss the null query.
+    const auto stats = JsonType::Parse(index->GetStats());
+    REQUIRE(stats["graph_node_count"].GetInt() == 1);
+    REQUIRE(stats["skipped_node_count"].GetInt() == 0);
+    REQUIRE(std::isfinite(stats["recall_base"].GetFloat()));
+    REQUIRE(stats["recall_base"].GetFloat() > 0.5F);
+
+    SearchRequest request;
+    request.query_ = input(0, 2);
+    request.topk_ = 5;
+    request.params_str_ = R"({"pyramid":{"ef_search":500}})";
+    const auto batch = JsonType::Parse(index->AnalyzeIndexBySearch(request));
+    REQUIRE(std::isfinite(batch["quantization_error_query"].GetFloat()));
+    REQUIRE(batch["recall_query"].GetFloat() > 0.5F);
+    float mean_distance = 0;
+    float mean_recall = 0;
+    float mean_quantization_error = 0;
+    for (uint64_t row = 0; row < 2; ++row) {
+        request.query_ = input(row, 1);
+        const auto single = JsonType::Parse(index->AnalyzeIndexBySearch(request));
+        mean_distance += single["avg_distance_query"].GetFloat() / 2;
+        mean_recall += single["recall_query"].GetFloat() / 2;
+        auto distances = index->CalcDistancesById(request.query_, ids.data(), count, true);
+        REQUIRE(distances.has_value());
+        const auto* values = distances.value()->GetDistances();
+        std::vector<float> sorted(values, values + count);
+        std::sort(sorted.begin(), sorted.end());
+        const auto reference = std::accumulate(sorted.begin(), sorted.begin() + 5, 0.0F) / 5;
+        REQUIRE(single["avg_distance_query"].GetFloat() == Catch::Approx(reference));
+
+        auto neighbors = index->KnnSearch(request.query_, 5, request.params_str_);
+        REQUIRE(neighbors.has_value());
+        REQUIRE(neighbors.value()->GetDim() == 5);
+        auto base_distances =
+            index->CalcDistancesById(request.query_, neighbors.value()->GetIds(), 5, false);
+        auto precise_distances =
+            index->CalcDistancesById(request.query_, neighbors.value()->GetIds(), 5, true);
+        REQUIRE(base_distances.has_value());
+        REQUIRE(precise_distances.has_value());
+        float reference_error = 0;
+        for (uint64_t i = 0; i < 5; ++i) {
+            reference_error += std::abs(base_distances.value()->GetDistances()[i] -
+                                        precise_distances.value()->GetDistances()[i]) /
+                               5;
+        }
+        REQUIRE(single["quantization_error_query"].GetFloat() == Catch::Approx(reference_error));
+        mean_quantization_error += reference_error / 2;
+    }
+    REQUIRE(batch["avg_distance_query"].GetFloat() == Catch::Approx(mean_distance));
+    REQUIRE(batch["recall_query"].GetFloat() == Catch::Approx(mean_recall));
+    REQUIRE(mean_quantization_error > 0.0F);
+    REQUIRE(batch["quantization_error_query"].GetFloat() == Catch::Approx(mean_quantization_error));
 }
 
 }  // namespace vsag

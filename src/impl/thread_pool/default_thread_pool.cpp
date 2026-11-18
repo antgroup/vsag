@@ -15,6 +15,7 @@
 
 #include "default_thread_pool.h"
 
+#include "thread_pool_startup.h"
 #include "vsag/options.h"
 
 namespace vsag {
@@ -38,6 +39,7 @@ private:
 
 DefaultThreadPool::DefaultThreadPool(std::uint64_t threads) {
     pool_ = std::make_unique<progschj::ThreadPool>(threads);
+    ConfirmThreadPoolWorkers(*this, static_cast<uint32_t>(threads));
 }
 
 std::future<void>

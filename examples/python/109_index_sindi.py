@@ -118,7 +118,7 @@ def sindi_test():
             "metric_type": "ip",
             "index_param": {
                 "doc_prune_ratio": 0.0,
-                "window_size": 100000,
+                "window_size": 50000,
                 "use_reorder": True,
                 "rerank_type": "fp32",
             },

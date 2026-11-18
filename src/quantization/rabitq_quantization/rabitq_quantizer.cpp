@@ -16,6 +16,7 @@
 #include "rabitq_quantizer.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -26,17 +27,39 @@
 
 #include "impl/transform/transformer_headers.h"
 #include "quantization/caq_encoder.h"
+#include "simd/bf16_simd.h"
 #include "simd/fp32_simd.h"
 #include "simd/normalize.h"
 #include "simd/pqfs_simd.h"
 #include "simd/rabitq_simd.h"
 #include "typing.h"
 #include "utils/float_utils.h"
+#include "utils/half_input.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
 
 namespace {
+
+struct ScalarUnpackEntry {
+    std::array<uint8_t, 8> lanes{};
+    uint8_t population{0};
+};
+
+constexpr std::array<ScalarUnpackEntry, 256>
+make_scalar_unpack_table() {
+    std::array<ScalarUnpackEntry, 256> table{};
+    for (uint64_t value = 0; value < table.size(); ++value) {
+        for (uint64_t lane = 0; lane < 8; ++lane) {
+            const auto bit = static_cast<uint8_t>((value >> lane) & 1U);
+            table[value].lanes[lane] = bit;
+            table[value].population += bit;
+        }
+    }
+    return table;
+}
+
+constexpr auto SCALAR_UNPACK_TABLE = make_scalar_unpack_table();
 
 uint64_t&
 fast_scan_fallback_random_state() {
@@ -299,7 +322,14 @@ RaBitQuantizer<metric>::TrainImpl(const float* data, uint64_t count) {
         centroid_[d] = centroid_[d] / (float)count;
     }
 
-    rom_->Train(data, count);
+    return this->finish_training(data, count);
+}
+
+template <MetricType metric>
+bool
+RaBitQuantizer<metric>::finish_training(const float* rotation_input, uint64_t count) {
+    // Both ROM and FHT train only their rotations; neither reads input rows.
+    rom_->Train(rotation_input, count);
 
     // transform centroid
     Vector<float> rp_centroids(this->dim_, 0, this->allocator_);
@@ -308,6 +338,66 @@ RaBitQuantizer<metric>::TrainImpl(const float* data, uint64_t count) {
 
     this->is_trained_ = true;
     return true;
+}
+
+template <MetricType metric>
+bool
+RaBitQuantizer<metric>::TrainHalf(const void* data, uint64_t count, DataTypes data_type) {
+    // Match Quantizer::Train: an already trained model does not inspect the input.
+    if (this->is_trained_) {
+        return true;
+    }
+    if (count == 0 or data == nullptr) {
+        return false;
+    }
+    const bool supported_type =
+        data_type == DataTypes::DATA_TYPE_FP16 or data_type == DataTypes::DATA_TYPE_BF16;
+    CHECK_ARGUMENT(supported_type, "RaBitQ half training requires FP16 or BF16 input");
+    const auto dim = static_cast<uint64_t>(this->original_dim_);
+    CHECK_ARGUMENT(dim != 0, "RaBitQ input element count overflows");
+    CHECK_ARGUMENT(count <= std::numeric_limits<uint64_t>::max() / dim,
+                   "RaBitQ input element count overflows");
+    CHECK_ARGUMENT(count * dim <= std::numeric_limits<size_t>::max() / sizeof(float),
+                   "RaBitQ converted input size overflows");
+    constexpr uint64_t train_block_rows = 4096;
+    const uint64_t rows =
+        pca_dim_ == this->original_dim_ ? std::min(count, train_block_rows) : count;
+    Vector<float> scratch(rows * dim, this->allocator_);
+    const auto* bytes = static_cast<const uint8_t*>(data);
+    const auto decode = [&](uint64_t begin, uint64_t size) {
+        for (uint64_t i = 0; i < size; ++i) {
+            uint16_t value;
+            std::memcpy(&value, bytes + (begin * dim + i) * sizeof(value), sizeof(value));
+            scratch[i] = data_type == DataTypes::DATA_TYPE_FP16 ? half_input::FP16ToFloat(value)
+                                                                : generic::BF16ToFloat(value);
+        }
+    };
+    if (pca_dim_ != this->original_dim_) {
+        decode(0, count * dim);
+        return this->TrainImpl(scratch.data(), count);
+    }
+    std::fill(centroid_.begin(), centroid_.end(), 0.0F);
+    for (uint64_t begin = 0; begin < count; begin += rows) {
+        const auto block_rows = std::min(rows, count - begin);
+        decode(begin, block_rows * dim);
+        for (uint64_t row = 0; row < block_rows; ++row) {
+            for (uint64_t d = 0; d < dim; ++d) {
+                centroid_[d] += scratch[row * dim + d];
+            }
+        }
+    }
+    for (uint64_t d = 0; d < dim; ++d) {
+        centroid_[d] = centroid_[d] / static_cast<float>(count);
+    }
+    // Non-null bounded buffer: current ROM/FHT Train implementations ignore input contents.
+    return this->finish_training(scratch.data(), count);
+}
+
+template <MetricType metric>
+bool
+RaBitQuantizer<metric>::ReTrainHalf(const void* data, uint64_t count, DataTypes data_type) {
+    this->is_trained_ = false;
+    return this->TrainHalf(data, count, data_type);
 }
 
 template <MetricType metric>
@@ -1151,16 +1241,32 @@ RaBitQuantizer<metric>::unpack_scalar_code(const uint8_t* codes, uint8_t* scalar
     memset(scalar_code, 0, GetScalarCodeSize());
     const uint64_t plane_bytes = PlaneBytes();
     const auto* planes = codes + offset_code_;
+    std::array<const uint8_t*, 8> stored_planes{};
+    for (uint32_t bit = 0; bit < num_bits_per_dim_base_; ++bit) {
+        stored_planes[bit] = GetStoredPlane(planes, bit, plane_bytes);
+    }
     uint64_t code_sum = 0;
-    for (uint64_t d = 0; d < this->dim_; ++d) {
+    uint64_t d = 0;
+    for (; d + 8 <= this->dim_; d += 8) {
+        uint64_t packed_lanes = 0;
+        for (uint32_t bit = 0; bit < num_bits_per_dim_base_; ++bit) {
+            const auto& entry = SCALAR_UNPACK_TABLE[stored_planes[bit][d >> 3]];
+            uint64_t expanded = 0;
+            // Each byte is 0 or 1, so shifting cannot carry into an adjacent lane. Byte copies
+            // preserve dimension order on either endianness and avoid unaligned/aliasing loads.
+            memcpy(&expanded, entry.lanes.data(), sizeof(expanded));
+            packed_lanes |= expanded << bit;
+            code_sum += static_cast<uint64_t>(entry.population) << bit;
+        }
+        memcpy(scalar_code + d, &packed_lanes, sizeof(packed_lanes));
+    }
+    for (; d < this->dim_; ++d) {
         const uint64_t byte_idx = d >> 3;
-        const auto bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        const auto bit_shift = static_cast<uint32_t>(d & 7);
         uint8_t value = 0;
         for (uint32_t bit = 0; bit < num_bits_per_dim_base_; ++bit) {
-            const auto* plane = GetStoredPlane(planes, bit, plane_bytes);
-            if ((plane[byte_idx] & bit_mask) != 0) {
-                value |= static_cast<uint8_t>(1U << bit);
-            }
+            value |=
+                static_cast<uint8_t>(((stored_planes[bit][byte_idx] >> bit_shift) & 1U) << bit);
         }
         scalar_code[d] = value;
         code_sum += value;

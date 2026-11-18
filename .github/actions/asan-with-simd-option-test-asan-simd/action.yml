@@ -16,7 +16,7 @@ runs:
       shell: sh
       run: rm -rf ./build
     - name: Download Test
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@v7
       with:
         name: test-x86-${{ inputs.matrix-simd-key }}-${{ github.run_id }}
         path: ./build/

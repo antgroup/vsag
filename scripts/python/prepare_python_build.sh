@@ -7,14 +7,7 @@ set -e
 # It handles version generation and config file patching based on the Python version.
 
 # --- Input Validation ---
-if [ -z "$1" ]; then
-  echo "❌ Error: Python version must be provided as the first argument."
-  echo "Usage: $0 <python_version>"
-  exit 1
-fi
-
-PY_VERSION=$1
-echo "🚀 Preparing build for Python ${PY_VERSION}..."
+echo "🚀 Preparing pyvsag wheel build..."
 
 # --- Main Logic ---
 
@@ -41,4 +34,4 @@ print(f'   - Version generated: {version}')
 "
 
 # 2. Done
-echo "✅ Build preparation complete for Python ${PY_VERSION}."
+echo "✅ Build preparation complete."

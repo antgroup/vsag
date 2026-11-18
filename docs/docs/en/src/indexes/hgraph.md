@@ -127,7 +127,7 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 | `use_conjugate_graph` | bool | `false` | Enable `Feedback`/`Pretrain` graph enhancement; see [Graph Index Enhancement](../advanced/enhance_graph.md). |
 | `resize_increase_count_bit` | int | `10` | `log2` of the slot-growth batch. Valid range is `1` to `31`; `1` grows in 2-slot batches and `10` in 1,024-slot batches. Smaller values reduce preallocation but can increase reallocations. |
 
-`sq8_local` and `sq4_local` support float32 L2/IP/cosine base and precise stores (including RaBitQ + local SQ4/SQ8 reranking). See [layout, numeric limits and Tune compatibility](../quantization/sq.md#local-sq4--sq8-float32-l2-ip-and-cosine).
+`sq8_local` and `sq4_local` support float32/float16/bfloat16 input with L2/IP/cosine base and precise stores (including RaBitQ + local SQ4/SQ8 reranking). See [layout, numeric limits and Tune compatibility](../quantization/sq.md#local-sq4--sq8-float32-l2-ip-and-cosine).
 
 `use_reverse_edges` is intended for workloads that need fast incoming-neighbor inspection, graph
 analysis, or future graph-maintenance algorithms. It is disabled by default because maintaining
@@ -140,8 +140,15 @@ before changing it.
 ### PiPNN build boundary
 
 Set `graph_type: "pipnn"` to use [PiPNN](https://arxiv.org/abs/2602.21247) for the initial,
-full `Build`. The PiPNN builder accepts dense `float32` input with `metric_type` set to `"l2"`,
-`"ip"`, or `"cosine"`. It builds the bottom graph from the original build vectors, then reuses
+full `Build`. The PiPNN builder accepts dense `dtype: "float32"`, `"float16"`, or `"bfloat16"`
+input with `metric_type` set to `"l2"`, `"ip"`, or `"cosine"`; sparse and `int8` inputs are not
+supported. For FP16/BF16 input, it borrows the full input rows in their original half format
+rather than materializing a full FP32 input copy. Bounded, local partition/leaf operands are
+converted to FP32 for BLAS matrix operations, with FP32 accumulation; this is not a native
+half-precision matrix backend. Final vector-storage quantization is configured independently
+of the input dtype, subject to the index and quantizer support restrictions.
+Quantizer training is separate from PiPNN graph construction: training may still materialize the full selected training sample in an FP32 buffer (potentially the full dataset when all rows are selected). Borrowing half input therefore does not guarantee that the complete build avoids a full-sample FP32 buffer. Validation of these half-input paths is in progress; no performance or non-regression claim is made.
+It builds the bottom graph from the original build vectors, then reuses
 HGraph's route layers, storage, search, filtering, reordering, incremental `Add`, removal, and
 serialization paths. The persistent base storage may use a supported quantizer such as `sq8`,
 including RaBitQ with SQ8 reorder. Cache-assisted build is not supported with PiPNN.
@@ -288,6 +295,8 @@ A runnable FP16 example is
 > **Note.** The header comment at the top of `321_index_fp16_hgraph.cpp` currently mentions a
 > `BFloat16Vectors()` setter, but no such setter exists — `Float16Vectors` is the single entry
 > point for both FP16 and BF16. Use it for both `dtype: "float16"` and `dtype: "bfloat16"`.
+
+FP16/BF16 input supports the same originally legal FP32 storage-quantizer configurations, not a separate limited quantizer list: `fp32`, `fp16`, `bf16`, ordinary `sq4`/`sq8`, `sq4_uniform`/`sq8_uniform`, `sq4_local`/`sq8_local`, `pq`, `pqfs`, `rabitq`, and eligible `tq` chains. This applies to base storage and, when enabled, precise storage; it does not make every base/precise combination legal. Existing metric, dimension, training, graph, and IO restrictions still apply. Local SQ4/SQ8 remain prohibited inside TQ chains. Split RaBitQ supports 3+5 bits, including MRLE; a split TQ chain is restricted to `"mrle, rabitq"`. HGraph fused RaBitQ remains L2/IP-only, requires flat in-memory graph storage and its existing IO constraints, and does not support TQ. Half input does not relax any of these restrictions.
 
 ### Choosing an input type
 

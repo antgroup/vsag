@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <string_view>
+
 #include "vsag/constants.h"
 
 namespace vsag {
@@ -93,6 +95,18 @@ const char* const DEFAULT_FILE_PATH_VALUE = "./default_file_path";
 
 // quantization params key
 const char* const QUANTIZATION_PARAMS_KEY = "quantization_params";
+// Strip only the exact adapter prefix; callers retain ownership of the input name.
+inline constexpr std::string_view QUANTIZATION_ADAPTER_NAME_PREFIX = "QUANTIZATION_ADAPTER_";
+
+inline std::string_view
+GetBaseQuantizerName(std::string_view name) {
+    if (name.compare(
+            0, QUANTIZATION_ADAPTER_NAME_PREFIX.size(), QUANTIZATION_ADAPTER_NAME_PREFIX) == 0) {
+        name.remove_prefix(QUANTIZATION_ADAPTER_NAME_PREFIX.size());
+    }
+    return name;
+}
+
 // quantization type
 const char* const QUANTIZATION_TYPE_VALUE_SQ8 = "sq8";
 const char* const QUANTIZATION_TYPE_VALUE_SQ4_LOCAL = "sq4_local";
@@ -180,6 +194,7 @@ const char* const BUCKET_USE_RESIDUAL_KEY = "use_residual";
 const char* const IVF_TRAIN_TYPE_KEY = "ivf_train_type";
 const char* const IVF_TRAIN_TYPE_RANDOM = "random";
 const char* const IVF_TRAIN_TYPE_KMEANS = "kmeans";
+const char* const IVF_TRAIN_TYPE_E_MEANS = "e_means";
 
 const char* const TRAIN_SAMPLE_COUNT_KEY =
     "train_sample_count";  // used after v0.18 for both Hgraph and IVF
@@ -195,6 +210,7 @@ const char* const IVF_GPU_DEVICE_ID_KEY = "gpu_device_id";
 const char* const IVF_GPU_MEMORY_BUDGET_KEY = "gpu_memory_budget";
 const char* const IVF_GPU_MIN_WORK_THRESHOLD_KEY = "gpu_min_work_threshold";
 const char* const IVF_KMEANS_ITER_COUNT_KEY = "kmeans_iter_count";
+const char* const IVF_E_MEANS_EPOCHS_KEY = "e_means_epochs";
 
 const char* const GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY = "first_order_buckets_count";
 const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY = "second_order_buckets_count";

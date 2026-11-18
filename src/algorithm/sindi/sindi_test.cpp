@@ -19,6 +19,7 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <future>
 #include <map>
 #include <set>
 #include <sstream>
@@ -26,12 +27,14 @@
 
 #include "algorithm/sparse_distance.h"
 #include "impl/allocator/safe_allocator.h"
+#include "impl/searcher/search_execution_context.h"
 #include "index_common_param.h"
 #include "simd/fp16_simd.h"
 #include "storage/serialization_tags.h"
 #include "storage/serialization_template_test.h"
 #include "storage/streaming_serialization_test_utils.h"
 #include "unittest.h"
+#include "vsag_exception.h"
 using namespace vsag;
 
 namespace {
@@ -69,6 +72,11 @@ namespace vsag {
 
 class SINDITestAccess {
 public:
+    static std::unique_lock<std::shared_mutex>
+    LockStructure(SINDI& index) {
+        return std::unique_lock<std::shared_mutex>(index.global_mutex_);
+    }
+
     static bool
     UseTermListsHeapInsert(const SINDI& index,
                            const SINDISearchParameter& search_param,
@@ -1665,6 +1673,7 @@ TEST_CASE("SINDI Immutable Build Search And Serialize Test", "[ut][SINDI]") {
     mutable_param->FromJson(vsag::JsonType::Parse(mutable_param_str));
     auto immutable_param = std::make_shared<vsag::SINDIParameter>();
     immutable_param->FromJson(vsag::JsonType::Parse(immutable_param_str));
+    common_param.search_resources_ = std::make_shared<SearchExecutionContext>(15);
     auto mutable_index = std::make_unique<SINDI>(mutable_param, common_param);
     auto immutable_index = std::make_unique<SINDI>(immutable_param, common_param);
 
@@ -1703,14 +1712,15 @@ TEST_CASE("SINDI Immutable Build Search And Serialize Test", "[ut][SINDI]") {
         auto expected = mutable_index->KnnSearch(query, 10, search_param_str, nullptr);
         auto built = immutable_index->KnnSearch(query, 10, search_param_str, nullptr);
         const auto parallel_param = R"({"sindi":{"query_prune_ratio":0,"term_prune_ratio":0,
-            "n_candidate":40,"window_parallelism":2}})";
-        auto parallel_mutable = mutable_index->KnnSearch(query, 10, parallel_param, nullptr);
+            "n_candidate":40,"window_parallelism":2,"parallel_n_candidate_ratio":16}})";
+        REQUIRE_THROWS_AS(mutable_index->KnnSearch(query, 10, parallel_param, nullptr),
+                          vsag::VsagException);
         auto parallel_immutable = immutable_index->KnnSearch(query, 10, parallel_param, nullptr);
         const auto reduced_param = R"({"sindi":{"query_prune_ratio":0,"term_prune_ratio":0,
-            "n_candidate":40,"window_parallelism":4,"worker_n_candidate":20}})";
+            "n_candidate":40,"window_parallelism":4,"parallel_n_candidate_ratio":1}})";
         auto reduced = immutable_index->KnnSearch(query, 10, reduced_param, nullptr);
         const auto eight_worker_param = R"({"sindi":{"query_prune_ratio":0,
-            "n_candidate":40,"window_parallelism":8,"worker_n_candidate":10}})";
+            "n_candidate":40,"window_parallelism":8,"parallel_n_candidate_ratio":1}})";
         auto eight_worker = immutable_index->KnnSearch(query, 10, eight_worker_param, nullptr);
         const auto insufficient_param = R"({"sindi":{"n_candidate":40,
             "window_parallelism":2,"worker_n_candidate":19}})";
@@ -1719,18 +1729,14 @@ TEST_CASE("SINDI Immutable Build Search And Serialize Test", "[ut][SINDI]") {
         auto immutable_roundtrip =
             immutable_from_immutable->KnnSearch(query, 10, search_param_str, nullptr);
         REQUIRE(built->GetDim() == expected->GetDim());
-        REQUIRE(parallel_mutable->GetDim() == expected->GetDim());
         REQUIRE(parallel_immutable->GetDim() == expected->GetDim());
         REQUIRE(reduced->GetDim() == expected->GetDim());
         REQUIRE(eight_worker->GetDim() == expected->GetDim());
         REQUIRE(immutable_roundtrip->GetDim() == expected->GetDim());
         for (int64_t j = 0; j < expected->GetDim(); ++j) {
             REQUIRE(built->GetIds()[j] == expected->GetIds()[j]);
-            REQUIRE(parallel_mutable->GetIds()[j] == expected->GetIds()[j]);
             REQUIRE(parallel_immutable->GetIds()[j] == expected->GetIds()[j]);
             REQUIRE(immutable_roundtrip->GetIds()[j] == expected->GetIds()[j]);
-            REQUIRE(std::abs(parallel_mutable->GetDistances()[j] - expected->GetDistances()[j]) <
-                    1e-3);
             REQUIRE(std::abs(parallel_immutable->GetDistances()[j] - expected->GetDistances()[j]) <
                     1e-3);
             REQUIRE(std::abs(built->GetDistances()[j] - expected->GetDistances()[j]) < 1e-3);
@@ -2856,4 +2862,54 @@ TEST_CASE("SINDI validates terms before document pruning", "[ut][SINDI]") {
             REQUIRE(index.GetNumElements() == 0);
         }
     }
+}
+
+TEST_CASE("SINDI parallel deadlines include structural lock wait at both entry points",
+          "[ut][SINDI][SINDILockDeadline]") {
+    const bool request_api = GENERATE(false, true);
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.allocator_ = allocator;
+    common.metric_ = MetricType::METRIC_TYPE_IP;
+    common.search_resources_ = std::make_shared<SearchExecutionContext>(0);
+    auto parameters = std::make_shared<SINDIParameter>();
+    parameters->immutable = true;
+    parameters->window_size = 4;
+    parameters->term_id_limit = 4;
+    SINDI index(parameters, common);
+    uint32_t term = 1;
+    float value = 1;
+    int64_t label = 42;
+    SparseVector vector{1, &term, &value};
+    auto data = Dataset::Make()->NumElements(1)->SparseVectors(&vector)->Ids(&label)->Owner(false);
+    REQUIRE(index.Build(data).empty());
+    SearchRequest request;
+    request.query_ = data;
+    request.topk_ = 1;
+    request.params_str_ = R"({"sindi":{"window_parallelism":4,"timeout_ms":10000}})";
+    const auto search = [&] {
+        return request_api ? index.SearchWithRequest(request)
+                           : index.KnnSearch(data, 1, request.params_str_, nullptr);
+    };
+    REQUIRE(search()->GetDim() == 1);
+    request.params_str_ = R"({"sindi":{"window_parallelism":4,"timeout_ms":10}})";
+    auto lock = SINDITestAccess::LockStructure(index);
+    std::promise<void> started;
+    auto pending = std::async(std::launch::async, [&]() -> std::optional<Error> {
+        started.set_value();
+        try {
+            search();
+            return std::nullopt;
+        } catch (const VsagException& error) {
+            return error.error_;
+        }
+    });
+    started.get_future().wait();
+    const auto waiting = pending.wait_for(std::chrono::milliseconds(100));
+    lock.unlock();  // Always release before assertions/future destruction.
+    REQUIRE(waiting == std::future_status::timeout);
+    const auto error = pending.get();
+    REQUIRE(error.has_value());
+    REQUIRE(error->type == ErrorType::INTERNAL_ERROR);
+    REQUIRE(error->message.find("deadline") != std::string::npos);
 }

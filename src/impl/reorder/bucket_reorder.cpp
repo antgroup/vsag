@@ -52,6 +52,8 @@ BucketReorder::Reorder(const DistHeapPtr& input,
     }
 
     if (ctx.stats != nullptr) {
+        ctx.stats->reorder_candidate_count.fetch_add(static_cast<uint32_t>(candidate_count),
+                                                     std::memory_order_relaxed);
         ctx.stats->reorder_distance_count.fetch_add(static_cast<uint32_t>(candidate_count),
                                                     std::memory_order_relaxed);
     }
@@ -66,12 +68,15 @@ BucketReorder::Reorder(const DistHeapPtr& input,
         bucket_ids[i] = bucket_id;
         offset_ids[i] = offset_id;
     }
-    bucket_->Query(precise_distances.data(),
-                   computer,
-                   bucket_ids.data(),
-                   offset_ids.data(),
-                   static_cast<InnerIdType>(candidate_count),
-                   &ctx);
+    {
+        ScopedDistancePhase scoped_phase(ctx, DistanceEvaluationPhase::RERANK);
+        bucket_->Query(precise_distances.data(),
+                       computer,
+                       bucket_ids.data(),
+                       offset_ids.data(),
+                       static_cast<InnerIdType>(candidate_count),
+                       &ctx);
+    }
     for (uint64_t i = 0; i < candidate_count; ++i) {
         const auto [coarse_distance, inner_id] = candidates[i];
         const auto precise_distance = precise_distances[i];

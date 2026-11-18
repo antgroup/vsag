@@ -255,18 +255,48 @@ Search-time parameters live under the `sindi` sub-object:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `n_candidate` | int | `0` | Candidate heap size. When `0`, defaults to `SPARSE_AMPLIFICATION_FACTOR · topk` (500×). If set, must satisfy `1 ≤ n_candidate ≤ SPARSE_AMPLIFICATION_FACTOR · topk`. |
-| `window_parallelism` | int | `1` | Number of window-search workers (`1` to `16`). Workers run in a reusable thread pool and steal pending windows from one another. The merged heap keeps up to `n_candidate` candidates before reranking. When this is greater than `1`, KNN search ignores `timeout_ms`; window scanning for queries with a filter, active callback limit, or reasoning trace still uses one worker. |
-| `worker_n_candidate` | int | `n_candidate` | Requested per-worker candidate heap capacity; omit to inherit the effective final candidate count. The actual capacity is at least the query top-k, so one matching window can still supply top-k results. If set, it must be positive and `worker_n_candidate × window_parallelism ≥` the final candidate count. For example, `n_candidate=500`, `window_parallelism=2`, and `worker_n_candidate=300` are valid. Reducing this value can lower recall when top candidates are unevenly distributed across workers; the aggregate capacity bound does not guarantee retaining the global top candidates. |
-| `window_scheduler` | string | `"count_deque"` | Parallel KNN window scheduling: `count_deque` retains the count-based deque/try-lock implementation; `count_atomic` uses count-based contiguous ranges and shared atomic cursors; `cost_atomic` balances contiguous ranges by the sum of query-pruned, term-pruned posting scan counts, then uses atomic cursors. Each atomic worker drains its range and then visits other ranges in cyclic order. |
+| `n_candidate` | int | `0` | Approximate candidate budget; the effective size is `N = max(n_candidate, topk)`. Omitted or zero therefore uses topk, not 500. Set a larger budget explicitly to retain more candidates for reranking at additional cost; exact recall or serial/parallel equality is not guaranteed. |
+| `window_parallelism` | int | `1` | Maximum execution slots, including the caller (`1` to `16`). Omitted or `1` uses the original serial candidate heap. Greater values select the fixed-partition approximate executor, supported for immutable in-memory KNN only. Actual slots may be reduced by resource admission without changing the candidate plan. |
+| `parallel_n_candidate_ratio` | number | `2` | Finite value ≥1. Total local heap capacity is `ceil(ratio × max(n_candidate, topk))`; capacity is distributed over fixed logical partitions independently of the execution slot count. Larger capacity retains more candidates at additional cost; it does not guarantee the serial candidate set or a particular recall. Validated but unapplied in serial mode. |
+| `profile_cpu` | bool | `false` | Diagnostic only, for serial and parallel KNN. Measures calling-thread CPU after parameter parsing and before statistics serialization, plus background window-worker CPU. Disabled requests do not read thread CPU clocks. |
 | `filter_callback_limit` | uint64 | `0` | Maximum user `Filter::CheckValid` callback invocations for one filtered search request. A value of `0` disables the limit. Internal checks such as the deleted-ID filter do not count. Reaching a positive limit stops candidate and window scanning after processing the final callback result and returns the already filtered candidates, so the result may be partial. The limit applies to KNN and range search through both the regular APIs and `SearchWithRequest`. |
 | `query_prune_ratio` | float | `0.0` | Fraction of lowest-weight query terms skipped (`[0.0, 1.0)`). |
 | `term_prune_ratio` | float | `0.0` | Fraction of the lowest-value postings skipped from each term list (`[0.0, 1.0)`). |
 | `term_retain_threshold` | uint64 | `0` | Maximum postings for one term across all windows. A value of `0` disables this limit; positive values allow each non-empty window posting list to scan at most `max(1, floor(threshold / window_count))` postings. |
 
-FP32/FP16 sparse KNN reranking automatically uses count-based static batches with the same parallelism as `window_parallelism` (capped by the candidate count). The caller participates using the same query thread pool; each worker writes distances at independent candidate positions, and final top-k selection follows the original candidate order. A single worker processes one batch. Reasoning queries, DMQ8 and range search retain scalar reranking. Library distance counters and result statistics remain enabled.
+The partition count is capped by `floor(total_capacity / topk)`, so each local heap can retain at least TopK candidates without exceeding the total budget. A small candidate budget can therefore reduce useful execution slots.
 
-Parallel windows and reranking share one lazy index-owned query pool, capped at 16 threads and reported hardware concurrency (at least one). Query tasks are isolated from caller-supplied pools: those pools may contain writers waiting for the read lock held by the query. Parallel workers use thread-safe default scratch allocation for computers, score buffers, contexts and local heaps; request-allocator calls and final result allocation stay on the calling thread.
+For example, omitting `n_candidate` uses N=topk. With the default ratio 2, even P4/P8/P16 is limited to at most two partitions and two active slots (fewer if windows or resources are limited). With topk=100, n_candidate=500 and ratio=2, the capacity is 1000 and at most ten partitions are available, allowing P4/P8 when resources permit. P is an upper bound; requesting more slots does not automatically increase the candidate budget. To make more partitions available, explicitly increase N or the ratio and evaluate the result quality and additional work. These partition counts differ from the earlier benchmark build; historical P4/P8 performance figures are not a benchmark of the current revision.
+
+
+Parallel KNN through either entry point retains the original invocation start, including time waiting for the structural index lock. Delegation from `SearchWithRequest` does not reset the timeout. Parallel candidate-insertion loops poll the shared stop condition, including when remaining scores cannot trigger another filter callback; the final permitted callback result is processed before stopping. Uncancellable insertion keeps the original specialized loops.
+
+### Parallel candidate quality and tuning
+
+Parallel search changes candidate selection as well as execution. A serial query uses one global candidate heap; parallel queries distribute `ceil(parallel_n_candidate_ratio * N)` capacity over fixed partitions, then merge to N candidates before the same reranking stage. A concentrated group of good candidates can exceed one partition quota. Approximate-distance ties can also select different documents whose reranked distances differ. Setting `query_prune_ratio=0` removes query-term pruning but does not remove partition quotas, build-time pruning or quantization; it is not a guarantee of identical serial and parallel results.
+
+Tune one dimension at a time while keeping the query, filter, output top-k and deadlines fixed:
+
+- `window_parallelism` changes execution slots; it does not enlarge the candidate plan.
+- `parallel_n_candidate_ratio` enlarges local heaps and can alleviate partition quota loss. It does not enlarge the final N-candidate cutoff, so increasing it may not resolve approximate-score ties there.
+- `n_candidate` enlarges both the local budget and the final pool reaching reranking. It can improve the returned scores while increasing work and latency, and may change serial results too.
+- Lower `query_prune_ratio` retains more query terms at extra cost. It changes the quality baseline, so compare serial and parallel with the same pruning setting and N.
+
+For accuracy comparisons, distinguish identical results, equal-score document substitutions, and changes in ranked scores. Verify a representative workload before changing defaults; higher returned scores are not by themselves a measurement of ground-truth recall or business relevance. A tuning example can establish a mitigation for that example without establishing a universal setting.
+
+The parallel executor keeps reranking serial, including DMQ8. It uses up to `min(16, selected_windows, max(n_candidate, topk))` stable contiguous candidate partitions; tasks exchange ownership at four-window chunk boundaries. Candidate heaps belong to partitions rather than operating-system threads. Range, reasoning and mutable/disk datacells are rejected in parallel mode.
+
+Filtered parallel calls require a `Filter` that also implements the optional `ConcurrentFilterProvider` capability from `vsag/concurrent_filter.h`. Its nonblocking lease supplies independent evaluators in label space, each exclusive to one logical slot. Unsupported providers fail explicitly. One invocation shares the callback budget across all partitions. A deadline stops new work and returns an error after workers drain; callback-budget exhaustion may return already validated candidates.
+
+An explicitly shared query resource bounds additional workers using CPU affinity, readable cgroup CPU quota and active callers in that resource group. `SearchResourceOptions::max_background_workers` can lower the worker budget. `VSAG_SINDI_MAX_CANDIDATES` sets the per-invocation heap-capacity limit (default 1,048,576), read when a plan is created. Scratch is isolated from caller-owned arenas. These controls cover this executor, not all service CPU or memory usage. Validate quality and P95/P99 under the intended concurrency before selecting production parameters.
+
+CPU admission resolves the process membership and cgroup mounts, and takes the minimum readable quota across its visible ancestors (v1 or v2). Pool limits are a startup snapshot, not a service-wide CPU limiter or dynamic resize policy.
+
+Parallel result statistics include `sindi_requested_slots`, `sindi_granted_slots`, `sindi_filter_slots` (the initial filter-lease capacity), `sindi_cpu_slots`, `sindi_worker_limit`, `sindi_partitions`, `sindi_candidate_capacity`, `sindi_n_candidate`, `sindi_windows_processed`, `sindi_execution_complete` and `sindi_stop_reason`. The existing `complete` field describes distance-counter coverage and is false when approximate work is untracked; it does not mean that the window plan failed to finish. Deadline and worker failures still fail the search after all workers drain. Deadline polling is cooperative at window boundaries and every 32 filter callbacks; the callback permit limit is checked on every callback.
+
+A successful parallel result reports `sindi_stop_reason=none` or `callback_limit`. Deadline and worker errors return no result Dataset; their internal stop state is not a promise of returned failure statistics. In contrast, the original serial timeout path can return partial results with `is_timeout=true`. Parallel deadline failures use `ErrorType::INTERNAL_ERROR` with a deadline message, after joining workers. `VSAG_SINDI_MAX_CANDIDATES` must contain unsigned decimal digits and fit a positive uint32.
+
+With `profile_cpu:true`, `sindi_cpu_time_enabled` and `sindi_cpu_time_complete` describe availability; `sindi_search_cpu_us` sums caller and background-worker CPU and `sindi_worker_cpu_us` reports the background part. CPU values are omitted if unavailable. They exclude caller-side SQL/filter preparation, statistics serialization and the final threshold-result wrapper, and are not whole SQL request CPU costs. Keep the same profiling setting in a serial/parallel comparison and measure service CPU separately.
 
 After combining the ratio and threshold limits, SINDI scans at least one posting from every
 non-empty term list.
@@ -365,3 +395,22 @@ is not physically reclaimed.
 The index creation parameters also accept `term_prune_ratio` (float in `[0, 1)`, default `0`) and `term_retain_threshold` (non-negative integer, default `0`). Both default to disabled. During `Build`, each term's postings in each window are sorted by stored weight and permanently trimmed to the smaller of `floor(posting_count * (1 - term_prune_ratio))` and `floor(term_retain_threshold / window_count)`; a zero threshold imposes no cap, and non-empty lists retain at least one posting. Mutable and immutable builds support FP32, FP16 and SQ8. Rerank vectors and document labels are preserved. Search-time pruning operates on the retained postings; it cannot restore removed postings. Subsequent `Add` calls do not apply build-time pruning.
 
 For example, set `"term_prune_ratio": 0.2, "term_retain_threshold": 0` inside the index's build parameters to remove the lowest-weight 20% of each posting list per window.
+
+### Search resource preparation
+
+Construct `vsag::SearchResource` from a common `vsag::Resource` during runtime initialization and pass it to `vsag::Engine` before creating indices. This index-independent resource owns a query execution group separate from the common pool. Construction confirms every worker has started before returning; failures throw and the caller can retry construction. `SearchResourceOptions::max_background_workers` is optional (visible CPU budget minus the caller, capped at 512); zero creates a ready group without background workers. SINDI itself still limits a request to 16 slots.
+
+Keep the resource alive while Engine borrows it. Indices retain the query group; its final owner releases the pool. Separate SearchResource objects create independent groups. To share admission and query workers with different common resources, construct `SearchResource(other_common, existing_search_resource)`. Ordinary Resource users acquire no query workers. The integration layer decides process-wide ownership; VSAG has no hidden global query pool.
+
+Queries never create the pool. Until preparation succeeds, a KNN request with P>1
+uses effective P1 and follows the original serial search path: one global candidate
+heap, the original filter callback budget and serial timeout handling. The parallel
+candidate ratio is not applied and no partition candidate plan is created. A
+concurrent filter provider leases one evaluator for that serial call.
+Diagnostics report serial strategy, requested slots, granted=1 and
+`sindi_resources_ready=false`. Serial fallback results should be compared with
+explicit P1, not assumed identical to the prepared parallel candidate plan.
+Serial requests need no preparation. VSAG does not read VecBase online policy JSON.
+
+
+Each independent SearchResource synchronously creates its own worker group during construction. Hosts with several index groups should set `max_background_workers` explicitly and reuse a shared SearchResource where appropriate; VSAG does not enforce a process-wide thread budget across independent groups.
