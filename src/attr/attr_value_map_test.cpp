@@ -16,7 +16,11 @@
 #include "attr/attr_value_map.h"
 
 #include <catch2/catch_all.hpp>
+#include <new>
+#include <sstream>
+#include <unordered_set>
 
+#include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
 #include "storage/serialization_template_test.h"
 #include "unittest.h"
@@ -74,4 +78,82 @@ TEST_CASE("AttrValueMap Basic Test", "[ut][AttrValueMap]") {
     TestAttrValueMap<uint16_t>();
     TestAttrValueMap<uint8_t>();
     TestAttrValueMap<std::string>();
+}
+
+namespace {
+
+class FailingAttrAllocator : public DefaultAllocator {
+public:
+    void*
+    Allocate(uint64_t size) override {
+        if (++calls == fail_at) {
+            throw std::bad_alloc();
+        }
+        auto* pointer = DefaultAllocator::Allocate(size);
+        live.insert(pointer);
+        return pointer;
+    }
+
+    void
+    Deallocate(void* pointer) override {
+        live.erase(pointer);
+        DefaultAllocator::Deallocate(pointer);
+    }
+
+    uint64_t calls{0};
+    uint64_t fail_at{0};
+    std::unordered_set<void*> live;
+};
+
+}  // namespace
+
+TEST_CASE("AttrValueMap retains ownership on insertion failure", "[ut][AttrValueMap]") {
+    const bool string_key = GENERATE(false, true);
+    const bool replace = GENERATE(false, true);
+    const auto type =
+        GENERATE(ComputableBitsetType::SparseBitset, ComputableBitsetType::FastBitset);
+    auto source_allocator = SafeAllocator::FactoryDefaultAllocator();
+    AttrValueMap source(source_allocator.get(), type);
+    if (string_key) {
+        source.Insert(std::string("key"), 7);
+    } else {
+        source.Insert(int64_t{42}, 7);
+    }
+    std::stringstream output;
+    IOStreamWriter writer(output);
+    source.Serialize(writer);
+    const auto bytes = output.str();
+    uint64_t allocations = 0;
+    for (uint64_t failure = 0; failure <= allocations + 1; ++failure) {
+        FailingAttrAllocator allocator;
+        bool threw = false;
+        {
+            AttrValueMap restored(&allocator, type);
+            if (replace) {
+                std::istringstream initial_input(bytes);
+                IOStreamReader initial_reader(initial_input);
+                restored.Deserialize(initial_reader);
+            }
+            allocator.calls = 0;
+            allocator.fail_at = failure;
+            std::istringstream input(bytes);
+            IOStreamReader reader(input);
+            try {
+                restored.Deserialize(reader);
+            } catch (const std::bad_alloc&) {
+                threw = true;
+            }
+            allocator.fail_at = 0;
+            if (failure == 0) {
+                allocations = allocator.calls;
+                REQUIRE(allocations > 0);
+            }
+            REQUIRE(threw == (failure > 0 && failure <= allocations));
+        }
+        CAPTURE(string_key, replace, type, failure, allocations);
+        REQUIRE(allocator.live.empty());
+        if (failure == allocations + 1) {
+            break;
+        }
+    }
 }

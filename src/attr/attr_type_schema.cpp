@@ -50,6 +50,7 @@ void
 AttrTypeSchema::Deserialize(LvalueOrRvalue<StreamReader> reader) {
     uint64_t size;
     StreamReader::ReadObj(reader, size);
+    reader->ValidateCount(size, sizeof(uint64_t) + sizeof(int64_t));
     this->schema_.reserve(size);
     std::string key;
     int64_t value;

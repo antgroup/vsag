@@ -226,10 +226,10 @@ LabelTable::MarkRemove(const std::vector<LabelType>& labels) {
 }
 
 void
-LabelTable::Deserialize(StreamReader& reader) {
+LabelTable::Deserialize(StreamReader& reader, uint64_t max_labels) {
     std::scoped_lock wlock(delete_ids_mutex_);
     std::scoped_lock slock(storage_mutex_);
-    StreamReader::ReadVector(reader, label_table_);
+    StreamReader::ReadVector(reader, label_table_, max_labels);
     MarkLabelsMutated();
     // Locked helper: both locks are already held.
     RebuildActivePaddingLabelIdsLocked();

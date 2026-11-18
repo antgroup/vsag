@@ -15,12 +15,19 @@
 
 #include "scalar_quantizer.h"
 
+#include <array>
+#include <catch2/matchers/catch_matchers.hpp>
 #include <cmath>
+#include <cstring>
 #include <limits>
+#include <sstream>
+#include <stdexcept>
 #include <vector>
 
 #include "impl/allocator/safe_allocator.h"
 #include "quantization/quantizer_test.h"
+#include "storage/serialization.h"
+#include "storage/tlv_section.h"
 #include "unittest.h"
 using namespace vsag;
 
@@ -204,5 +211,147 @@ TEST_CASE("SQ8 Serialize and Deserialize", "[ut][SQ8Quantizer]") {
             TestSerializeAndDeserializeMetricSQ8<metrics[1]>(dim, count, error);
             TestSerializeAndDeserializeMetricSQ8<metrics[2]>(dim, count, error);
         }
+    }
+}
+
+namespace {
+// Record requests before forwarding to an actually truncated source. The modest geometry
+// keeps the unpatched negative control bounded too (16 KiB, never multi-GiB).
+class ModelReadCounter : public StreamReader {
+public:
+    explicit ModelReadCounter(StreamReader& source) : source_(source) {
+    }
+    void
+    Read(char* data, uint64_t size) override {
+        largest = std::max(largest, size);
+        source_.Read(data, size);
+    }
+    void
+    Seek(uint64_t /*cursor*/) override {
+        throw std::logic_error("model source is forward only");
+    }
+    [[nodiscard]] uint64_t
+    GetCursor() const override {
+        return source_.GetCursor();
+    }
+    uint64_t largest{0};
+
+private:
+    StreamReader& source_;
+};
+}  // namespace
+
+TEST_CASE("SQ model forward loading checks geometry and consumed bytes",
+          "[ut][SQ8Quantizer][sq_model_bounds]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    const uint64_t dim = GENERATE(uint64_t{16}, uint64_t{257}, uint64_t{1025});
+    const bool sq4 = GENERATE(false, true);
+    auto verify = [&](auto& original, auto& restored) {
+        std::vector<float> train(dim * 4);
+        for (uint64_t i = 0; i < train.size(); ++i) {
+            train[i] = static_cast<float>(i);
+        }
+        REQUIRE(original.Train(train.data(), 4));
+        std::ostringstream output;
+        IOStreamWriter writer(output);
+        original.Serialize(writer);
+        const auto model = output.str();
+        // Read the real writer's header to locate the first model count.
+        std::istringstream header_input(model);
+        ForwardStreamReader header_reader(header_input);
+        uint64_t stored_dim = 0;
+        MetricType stored_metric;
+        uint64_t stored_code_size = 0;
+        bool trained = false;
+        StreamReader::ReadObj(header_reader, stored_dim);
+        StreamReader::ReadObj(header_reader, stored_metric);
+        StreamReader::ReadObj(header_reader, stored_code_size);
+        StreamReader::ReadObj(header_reader, trained);
+        const auto count_offset = header_reader.GetCursor();
+        REQUIRE(stored_dim == dim);
+        REQUIRE(trained);
+
+        SECTION("valid roundtrip restores serialized dimension and exact model bytes") {
+            std::istringstream input(model + "next");
+            ForwardStreamReader source(input);
+            StreamBlockHeader header;
+            header.value_len = model.size();
+            header.payload_checksum = StreamHeader::CalculateChecksum(model);
+            ReadForwardBlockPayload(
+                source, header, [&](StreamReader& block) { restored.Deserialize(block); });
+            std::ostringstream roundtrip;
+            IOStreamWriter roundtrip_writer(roundtrip);
+            restored.Serialize(roundtrip_writer);
+            REQUIRE(roundtrip.str() == model);
+            std::vector<uint8_t> expected(original.GetCodeSize());
+            std::vector<uint8_t> actual(restored.GetCodeSize());
+            REQUIRE(original.EncodeOne(train.data(), expected.data()));
+            REQUIRE(restored.EncodeOne(train.data(), actual.data()));
+            REQUIRE(actual == expected);
+            REQUIRE(source.GetCursor() == model.size());
+            std::array<char, 4> next;
+            source.Read(next.data(), next.size());
+            REQUIRE(std::string(next.data(), next.size()) == "next");
+        }
+        SECTION("valid geometry still verifies checksum") {
+            std::istringstream input(model);
+            ForwardStreamReader source(input);
+            StreamBlockHeader header;
+            header.value_len = model.size();
+            header.payload_checksum = StreamHeader::CalculateChecksum(model) ^ 1;
+            REQUIRE_THROWS_WITH(
+                ReadForwardBlockPayload(
+                    source, header, [&](StreamReader& block) { restored.Deserialize(block); }),
+                "streaming block payload checksum mismatch");
+        }
+        SECTION("matching large serialized geometry still reads before growing") {
+            const uint64_t declared_dim = 4096;
+            auto corrupt = model.substr(0, count_offset + sizeof(uint64_t));
+            std::memcpy(corrupt.data(), &declared_dim, sizeof(declared_dim));
+            const uint64_t declared_code_size = sq4 ? declared_dim / 2 : declared_dim;
+            std::memcpy(corrupt.data() + sizeof(stored_dim) + sizeof(stored_metric),
+                        &declared_code_size,
+                        sizeof(declared_code_size));
+            std::memcpy(corrupt.data() + count_offset, &declared_dim, sizeof(declared_dim));
+            std::istringstream input(corrupt);
+            ForwardStreamReader forward(input);
+            ModelReadCounter source(forward);
+            StreamBlockHeader header;
+            header.value_len = corrupt.size() + declared_dim * sizeof(float);
+            REQUIRE_THROWS_AS(
+                ReadForwardBlockPayload(
+                    source, header, [&](StreamReader& block) { restored.Deserialize(block); }),
+                VsagException);
+            REQUIRE(source.largest <= 1024);
+            REQUIRE(source.GetCursor() == corrupt.size());
+        }
+        SECTION("invalid truncated diff or lower bound count is rejected at count") {
+            const bool lower = GENERATE(false, true);
+            const auto offset = count_offset + (lower ? sizeof(uint64_t) + dim * sizeof(float) : 0);
+            // A modest count is intentional: the unpatched negative control allocates only 16 KiB.
+            const uint64_t invalid_count = GENERATE_COPY(uint64_t{4096}, uint64_t{0}, dim - 1);
+            auto corrupt = model.substr(0, offset + sizeof(invalid_count));
+            std::memcpy(corrupt.data() + offset, &invalid_count, sizeof(invalid_count));
+            std::istringstream input(corrupt);
+            ForwardStreamReader source(input);
+            StreamBlockHeader header;
+            header.value_len = corrupt.size() + invalid_count * sizeof(float);
+            REQUIRE_THROWS_WITH(
+                ReadForwardBlockPayload(
+                    source, header, [&](StreamReader& block) { restored.Deserialize(block); }),
+                "scalar model count does not match dimension");
+            REQUIRE(source.GetCursor() == corrupt.size());
+        }
+    };
+    if (sq4) {
+        SQ4Quantizer<MetricType::METRIC_TYPE_L2SQR> original(static_cast<int>(dim),
+                                                             allocator.get());
+        SQ4Quantizer<MetricType::METRIC_TYPE_L2SQR> restored(1, allocator.get());
+        verify(original, restored);
+    } else {
+        SQ8Quantizer<MetricType::METRIC_TYPE_L2SQR> original(static_cast<int>(dim),
+                                                             allocator.get());
+        SQ8Quantizer<MetricType::METRIC_TYPE_L2SQR> restored(1, allocator.get());
+        verify(original, restored);
     }
 }

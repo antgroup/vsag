@@ -535,10 +535,11 @@ auto deserialized = loaded->Deserialize(in);
 
 The split datacell serializes, in order:
 
-1. Base datacell state and supplement IO type.
-2. Filter storage.
-3. Supplement storage.
-4. RaBitQ quantizer state.
+1. Base datacell state and the explicit supplement IO type string.
+2. Supplement layout descriptor (marker, version, dimension, bit width, record size).
+3. Filter storage.
+4. Supplement storage.
+5. RaBitQ quantizer state.
 
 Create the destination index with parameters compatible with the serialized
 index, especially `dim`, `metric_type`, x/y bit widths, and query bits.
@@ -549,6 +550,42 @@ For a fused index, the codec model is serialized with the split datacell and
 the per-node codes are serialized once as part of the bottom-graph slab.
 Ordinary and streaming round trips preserve this layout without creating a
 second count-scaled copy of the split codes.
+
+### Supported persisted forms
+
+PR #2932 intentionally retires two legacy read forms, following the maintainer's
+2026-11-04 compatibility decision. This applies to ordinary seekable `Deserialize`
+and `DeserializeStreaming`/`Load`, because they share the RaBitQ split parser
+(including Pyramid's buffered streaming path).
+
+| Destination | Accepted payload after the base datacell state | Rejected legacy form |
+| --- | --- | --- |
+| Ordinary split storage | Explicit `supplement_io_type` string, supplement descriptor v1, both code layouts, quantizer | Descriptor immediately after base state, with the IO-type field omitted |
+| Attached fused storage | Model-only marker `0x524246534D4F444C`, model version **1**, matching code sizes, quantizer; paired with the fused bottom-graph slab | Detached split-code layouts, even when paired with a matching fused graph slab |
+
+The IO string has a `uint64_t` length followed by that many bytes. Length zero is
+an explicit shared-IO value and remains supported; a nonempty value must name a
+known IO type and be at most 64 bytes. The supplement descriptor starts with
+`SUPPLEMENT_STORAGE_MAGIC = 0x3150505553514252` and version **1**. An omitted IO
+field exposes that marker where the string length belongs and now fails with
+`INVALID_BINARY`; it is never reinterpreted as shared IO. A non-model-only prefix
+in attached fused storage also fails with `INVALID_BINARY`, without retrying a
+seekable decoder.
+
+These are payload-shape support boundaries, not new release-version or container
+version boundaries. The existing serializers already emit the accepted forms;
+this retirement changes no serialized bytes or version constants. In particular,
+supplement descriptor v1 does **not** distinguish an omitted field from an
+explicit one. The fused model-only v1 marker is independent of the fused graph
+slab wire version (**2**). Streaming `base_codes` and `bottom_graph` TLV block
+versions remain **1**; passing a container/block version check does not make a
+retired inner payload supported. No writer format migration or version bump is
+needed for this read-support removal.
+
+Rebuild retired artifacts from the original vectors using a supported current
+configuration before loading them with this implementation. Direct legacy
+split-to-fused conversion during deserialization is no longer supported. Discard
+a destination after a failed load.
 
 ## Implementation map
 

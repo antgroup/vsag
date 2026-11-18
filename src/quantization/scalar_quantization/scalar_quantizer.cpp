@@ -15,6 +15,8 @@
 
 #include "scalar_quantizer.h"
 
+#include <algorithm>
+#include <array>
 #include <cstring>
 
 #include "scalar_quantization_trainer.h"
@@ -236,8 +238,28 @@ ScalarQuantizer<metric, bit>::SerializeImpl(StreamWriter& writer) {
 template <MetricType metric, int bit>
 void
 ScalarQuantizer<metric, bit>::DeserializeImpl(StreamReader& reader) {
-    StreamReader::ReadVector(reader, this->diff_);
-    StreamReader::ReadVector(reader, this->lower_bound_);
+    auto read_model = [&](std::vector<float>& values) {
+        uint64_t count = 0;
+        StreamReader::ReadObj(reader, count);
+        if (count != this->dim_ || count > values.max_size()) {
+            throw VsagException(ErrorType::INVALID_BINARY,
+                                "scalar model count does not match dimension");
+        }
+        reader.ValidateCount(count, sizeof(float));
+        values.clear();
+        // The loaded dimension and TLV length are both untrusted. Consume a bounded
+        // chunk before growing the model, even when those declarations agree.
+        std::array<float, 256> buffer;
+        uint64_t offset = 0;
+        while (offset < count) {
+            const auto current = std::min<uint64_t>(buffer.size(), count - offset);
+            reader.Read(reinterpret_cast<char*>(buffer.data()), current * sizeof(float));
+            values.insert(values.end(), buffer.data(), buffer.data() + current);
+            offset += current;
+        }
+    };
+    read_model(this->diff_);
+    read_model(this->lower_bound_);
 }
 
 template class ScalarQuantizer<MetricType::METRIC_TYPE_L2SQR, 8>;

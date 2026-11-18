@@ -59,3 +59,12 @@ index->Serialize([&](const void* buf, uint64_t offset, uint64_t size) {
 - 跨大版本升级时请关注 [版本日志](../resources/release_notes.md) 中的兼容性说明。
 - 示例参考：`examples/cpp/318_feature_tune.cpp`、`examples/cpp/401_persistent_kv.cpp`、
   `examples/cpp/402_persistent_streaming.cpp`。
+
+## RaBitQ 持久化格式支持
+
+PR #2932 有意停止兼容的两种旧形式对普通可 seek 加载和 streaming 加载同样生效：
+split payload 必须包含 `supplement_io_type`（显式空字符串仍然有效），
+已挂接 fused storage 必须使用 model-only v1，不能加载 detached split code。
+确切标记、独立的 payload/block 版本和重建说明见
+[RaBitQ 支持的持久化形式](../quantization/rabitq_split.md#支持的持久化形式)。
+现有写入格式和版本常量不变。

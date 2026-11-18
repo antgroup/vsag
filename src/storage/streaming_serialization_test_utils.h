@@ -14,15 +14,42 @@
 
 #pragma once
 
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
 #include <cstring>
 #include <string>
 #include <vector>
 
+#include "impl/allocator/default_allocator.h"
 #include "serialization_tags.h"
 
 namespace vsag::test {
+
+// Refuse excessive test allocations before touching memory, while recording attempted sizes.
+class GuardedAllocator : public DefaultAllocator {
+public:
+    void*
+    Allocate(uint64_t size) override {
+        largest_request = std::max(largest_request, size);
+        if (size > limit) {
+            throw std::bad_alloc();
+        }
+        return DefaultAllocator::Allocate(size);
+    }
+
+    void*
+    Reallocate(void* pointer, uint64_t size) override {
+        largest_request = std::max(largest_request, size);
+        if (size > limit) {
+            throw std::bad_alloc();
+        }
+        return DefaultAllocator::Reallocate(pointer, size);
+    }
+
+    uint64_t largest_request{0};
+    uint64_t limit{1024 * 1024};
+};
 
 constexpr uint64_t STREAM_MAGIC_SIZE = 8;
 constexpr uint64_t STREAM_VERSION_OFFSET = STREAM_MAGIC_SIZE;

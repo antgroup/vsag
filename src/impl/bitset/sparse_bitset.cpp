@@ -105,7 +105,12 @@ SparseBitset::Deserialize(StreamReader& reader) {
     if (size == 0) {
         return;
     }
-    std::vector<char> buffer(size);
+    reader.ValidateCount(size, sizeof(char));
+    std::vector<char> buffer;
+    if (size > buffer.max_size()) {
+        throw VsagException(ErrorType::INVALID_BINARY, "serialized sparse bitset is too large");
+    }
+    buffer.resize(static_cast<std::size_t>(size));
     reader.Read(buffer.data(), size);
     r_ = roaring::Roaring::readSafe(buffer.data(), size);
 }
