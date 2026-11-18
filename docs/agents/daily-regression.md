@@ -225,6 +225,12 @@ mixed contexts and duplicate results remain rejected; if no trustworthy summary 
 formed the four fields show **unknown**, never fabricated zeroes. The JSON artifact
 contains the same `case_counts` values for local analysis.
 
+When a required job fails or is cancelled and both x86 supplemental jobs are
+skipped, Nightly Summary reports the supplemental stage as skipped. It retains
+the required job failure. Missing required results, missing evidence from an
+attempted supplemental stage, and unexplained supplemental skips still fail
+reconciliation.
+
 macOS full examples execute in an independent step after successful artifact download,
 even when unit tests fail. Cancellation still stops further work. Their outcome remains
 part of the final expected-lane completeness check.

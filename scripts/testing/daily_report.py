@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from collections import Counter
 import math
 import os
@@ -119,7 +120,10 @@ def summarize(results, allow_incomplete=False):
             "status": "failed" if failures or incomplete else "passed"}
 
 
-def extra_markdown(extra):
+def extra_markdown(extra, blocked=False):
+    if blocked:
+        return ["### X86 Extra Coverage — separate quota", "",
+                "Skipped after a required job failed or was cancelled.", ""]
     if extra is None:
         return ["### X86 Extra Coverage — separate quota", "", "No supplemental execution evidence available.", ""]
     return ["### X86 Extra Coverage — separate quota", "",
@@ -147,7 +151,7 @@ def markdown(report):
              f"Execution budget: **{window['execution_minutes'] / 60:g} hours**, with **{window['cleanup_minutes']} minutes** reserved for cleanup and reporting.",
              "Cumulative test execution below is a separate resource-consumption diagnostic.",
              "Compilation, lint, queueing and transfer count toward elapsed time, but not cumulative test consumption.", "",
-             *extra_markdown(report.get("extra_coverage")),
+             *extra_markdown(report.get("extra_coverage"), report.get("extra_coverage_blocked", False)),
              *daily_job_report.markdown(report.get("job_reports", [])),
              *python_ci.markdown(report.get("python_reports", []), report.get("job_metrics", [])),
              "<details><summary>Mandatory test consumption by area (extras excluded)</summary>", "",
@@ -242,28 +246,39 @@ def main():
     try:
         paths = args.results + ([str(path) for path in Path(args.collect).rglob("daily-result.json")] if args.collect else [])
         results = [dp.load(path) for path in paths]
+        needs = json.loads(os.environ.get("NEEDS_JSON", "{}"))
+        extra_jobs = {"daily-extra-plan", "daily-extra-x86"}
+        extra_blocked = (
+            all(needs.get(name, {}).get("result") == "skipped" for name in extra_jobs)
+            and any(job.get("result") in {"failure", "cancelled"} for job in needs.values())
+        )
         evidence_gaps = []
         if args.expected_file:
             try:
                 args.expected_lanes = dp.load(args.expected_file)
             except FileNotFoundError:
                 evidence_gaps.append("Expected-lane manifest missing; completeness is unverified")
-        if args.expected_lanes and Counter(r["lane"] for r in results) != Counter(args.expected_lanes):
+        lane_error = None
+        if args.expected_lanes:
             actual = Counter(r["lane"] for r in results)
-            expected = Counter(args.expected_lanes)
-            lane_error = ("Selected workflow lanes did not all report; missing=" +
-                          str(list((expected - actual).elements())) + "; unexpected=" +
-                          str(list((actual - expected).elements())))
-        else:
-            lane_error = None
+            expected = Counter(lane for lane in args.expected_lanes
+                               if not (extra_blocked and re.fullmatch(
+                                   r"daily-extra-x86-functests-shard[0-9]+", lane)))
+            if actual != expected:
+                lane_error = ("Selected workflow lanes did not all report; missing=" +
+                              str(list((expected - actual).elements())) + "; unexpected=" +
+                              str(list((actual - expected).elements())))
         report = summarize(results, allow_incomplete=True)
         report["coverage_gaps"].extend(evidence_gaps)
         if lane_error:
             report["coverage_gaps"].append(lane_error)
             report["status"] = "failed"
         report["incomplete"] = bool(report["coverage_gaps"])
-        needs = __import__("json").loads(os.environ.get("NEEDS_JSON", "{}"))
+        if extra_blocked:
+            report["extra_coverage_blocked"] = True
         for name, job in needs.items():
+            if extra_blocked and name in extra_jobs:
+                continue
             if job.get("result") != "success":
                 report["failures"].append("Workflow dependency " + name + ": " + str(job.get("result")))
                 report["status"] = "failed"

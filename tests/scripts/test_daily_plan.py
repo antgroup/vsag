@@ -741,6 +741,47 @@ class DailyNamedCountTests(unittest.TestCase):
                         self.assertIn("Supplemental stage:", summary["coverage_gaps"][0])
                         self.assertIn("missing-proposal.json", summary["coverage_gaps"][0])
 
+    def test_summary_reconciles_extra_lanes_when_required(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dp.write(root / "result.json", self.named_result())
+            extra_lanes = [f"daily-extra-x86-functests-shard{i}" for i in range(4)]
+            command = [sys.executable, str(ROOT / "scripts/testing/daily_report.py"),
+                       str(root / "result.json"), "--expected-file", str(root / "expected.json"),
+                       "--summary", str(root / "summary.md"), "--json", str(root / "summary.json")]
+            for upstream, planner, supplemental, missing_base in (
+                    ("failure", "skipped", "skipped", False),
+                    ("cancelled", "skipped", "skipped", True),
+                    ("success", "success", "failure", False),
+                    ("success", "skipped", "skipped", False)):
+                with self.subTest(upstream=upstream, planner=planner, supplemental=supplemental):
+                    mandatory = ["x86", "required-lane"] if missing_base else ["x86"]
+                    dp.write(root / "expected.json", mandatory + extra_lanes)
+                    env = {**os.environ, "NEEDS_JSON": json.dumps({
+                        "daily_test_asan_x86": {"result": upstream},
+                        "daily-extra-plan": {"result": planner},
+                        "daily-extra-x86": {"result": supplemental},
+                    })}
+                    process = subprocess.run(command, env=env, capture_output=True)
+                    self.assertEqual(process.returncode, 1, process.stderr)
+                    result = dp.load(root / "summary.json")
+                    self.assertEqual(result["status"], "failed")
+                    self.assertEqual(result["case_counts"]["selected"], 1)
+                    gaps = " ".join(result["coverage_gaps"])
+                    blocked = upstream != "success"
+                    self.assertEqual(result.get("extra_coverage_blocked", False), blocked)
+                    self.assertEqual(result["incomplete"], missing_base or not blocked)
+                    self.assertEqual("required-lane" in gaps, missing_base)
+                    for lane in extra_lanes:
+                        self.assertEqual(lane in gaps, not blocked)
+                    if blocked:
+                        self.assertEqual(result["failures"], [
+                            "Workflow dependency daily_test_asan_x86: " + upstream])
+                        self.assertIn("Skipped after a required job", (root / "summary.md").read_text())
+                    else:
+                        self.assertIn("Workflow dependency daily-extra-x86: " + supplemental,
+                                      result["failures"])
+
     def test_missing_lane_preserves_counts_and_fails(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
