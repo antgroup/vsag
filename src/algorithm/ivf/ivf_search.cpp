@@ -44,6 +44,7 @@
 #include "impl/reorder/flatten_reorder.h"
 #include "inner_string_params.h"
 #include "ivf.h"  // IWYU pragma: keep
+#include "ivf_input.h"
 #include "query_context.h"
 #include "simd/normalize.h"
 #include "utils/search_threshold.h"
@@ -223,12 +224,31 @@ IVF::create_search_param(const std::string& parameters, const FilterPtr& filter)
 DatasetPtr
 IVF::route_buckets_only(const DatasetPtr& query,
                         const InnerSearchParam& param,
-                        QueryContext& ctx) const {
+                        QueryContext& ctx,
+                        DataTypes query_type) const {
     const auto num_queries = query->GetNumElements();
-    const auto* query_data = query->GetFloat32Vectors();
+    const IVFInput input(query, query_type);
     const auto buckets_per_query = param.scan_bucket_size;
-    const auto candidate_buckets =
-        partition_strategy_->ClassifyDatasForSearch(query_data, num_queries, param, &ctx);
+    Vector<BucketIdType> candidate_buckets(num_queries * buckets_per_query, allocator_);
+    Vector<float> route_buffer(allocator_);
+    if (query_type == DataTypes::DATA_TYPE_FLOAT) {
+        candidate_buckets = partition_strategy_->ClassifyDatasForSearch(
+            query->GetFloat32Vectors(), num_queries, param, &ctx);
+    } else {
+        // Typed queries are decoded in a bounded block and classified in one call, the
+        // same shape IVF::add uses. The decode scratch is contiguous for the block rather
+        // than resized per query, and the classification entry point that runs a loop per
+        // row is entered once per block instead of once per query.
+        constexpr int64_t route_block_queries = 256;
+        for (int64_t first = 0; first < num_queries; first += route_block_queries) {
+            const auto count = std::min(route_block_queries, num_queries - first);
+            auto assigned = partition_strategy_->ClassifyDatasForSearch(
+                input.Rows(first, count, route_buffer), count, param, &ctx);
+            std::copy(assigned.begin(),
+                      assigned.end(),
+                      candidate_buckets.begin() + first * buckets_per_query);
+        }
+    }
 
     auto result = Dataset::Make();
     if (num_queries == 0 || buckets_per_query == 0) {
@@ -246,7 +266,7 @@ IVF::route_buckets_only(const DatasetPtr& query,
     Vector<float> norm_query(dim, allocator_);
     Vector<float> norm_centroid(dim, allocator_);
     for (int64_t q = 0; q < num_queries; ++q) {
-        const auto* query_vec = query_data + q * dim;
+        const auto* query_vec = input.Rows(q, 1, route_buffer);
         if (metric == MetricType::METRIC_TYPE_COSINE) {
             Normalize(query_vec, norm_query.data(), dim);
         }
@@ -723,10 +743,24 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
                        "a SearchProfile cannot be shared by simultaneous requests");
     }
     ProfileRequestGuard profile_guard(profile);
-    SearchStatistics stats;
-    auto result = this->search_with_request(request, stats);
-    // Only the public boundary serializes statistics, including all early-return paths.
-    result->Statistics(stats.Dump());
+    auto execute = [&]() -> DatasetPtr {
+        if (common_param_.data_type_ == DataTypes::DATA_TYPE_FLOAT or request.query_ == nullptr or
+            request.query_->GetNumElements() != 1) {
+            return search_float_request(request, common_param_.data_type_);
+        }
+        CHECK_ARGUMENT(request.query_->GetDim() == dim_,
+                       "query dimension must match index dimension");
+        const IVFInput input(request.query_, common_param_.data_type_);
+        Vector<float> row(select_query_allocator(request.search_allocator_, allocator_));
+        auto float_request = request;
+        float_request.query_ = Dataset::Make()
+                                   ->NumElements(1)
+                                   ->Dim(request.query_->GetDim())
+                                   ->Float32Vectors(input.Rows(0, 1, row))
+                                   ->Owner(false);
+        return search_float_request(float_request, DataTypes::DATA_TYPE_FLOAT);
+    };
+    auto result = execute();
     if (profile != nullptr) {
         profile->complete = true;
     }
@@ -734,7 +768,18 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
 }
 
 DatasetPtr
-IVF::search_with_request(const SearchRequest& request, SearchStatistics& stats) const {
+IVF::search_float_request(const SearchRequest& request, DataTypes query_type) const {
+    SearchStatistics stats;
+    auto result = this->search_with_request(request, stats, query_type);
+    // Only the public boundary serializes statistics, including all early-return paths.
+    result->Statistics(stats.Dump());
+    return result;
+}
+
+DatasetPtr
+IVF::search_with_request(const SearchRequest& request,
+                         SearchStatistics& stats,
+                         DataTypes query_type) const {
     auto* profile = request.profile_.get();
     if (profile != nullptr) {
         CHECK_ARGUMENT(request.distance_batch_func_ != nullptr,
@@ -769,8 +814,7 @@ IVF::search_with_request(const SearchRequest& request, SearchStatistics& stats) 
                                    "got {} bucket lists for {} queries",
                                    request.bucket_ids_.size(),
                                    query_check->GetNumElements()));
-        CHECK_ARGUMENT(query_check->GetFloat32Vectors() != nullptr,
-                       "query float32 vectors cannot be null");
+        const IVFInput checked_input(query_check, query_type);
         CHECK_ARGUMENT(query_check->GetDim() == this->dim_,
                        "query dimension must match index dimension");
         CHECK_ARGUMENT(not param.disable_bucket_scan,
@@ -813,12 +857,12 @@ IVF::search_with_request(const SearchRequest& request, SearchStatistics& stats) 
         CHECK_ARGUMENT(query != nullptr, "query dataset cannot be null");
         CHECK_ARGUMENT(query->GetNumElements() >= 1,
                        "disable bucket scan requires at least one query");
-        CHECK_ARGUMENT(query->GetFloat32Vectors() != nullptr,
-                       "query float32 vectors cannot be null");
+        const IVFInput route_input(query, query_type);
         CHECK_ARGUMENT(query->GetDim() == this->dim_, "query dimension must match index dimension");
         CHECK_ARGUMENT(not request.threshold_.has_value(),
                        "threshold filtering is not supported with disable_bucket_scan");
-        auto result = this->route_buckets_only(query, param, ctx);
+        auto result = this->route_buckets_only(query, param, ctx, query_type);
+
         return result;
     }
 
@@ -829,9 +873,8 @@ IVF::search_with_request(const SearchRequest& request, SearchStatistics& stats) 
         CHECK_ARGUMENT(request.expected_labels_.empty(),
                        "IVF batch search does not support expected labels");
         CHECK_ARGUMENT(request.topk_ > 0, "topk must be greater than 0");
-        CHECK_ARGUMENT(query->GetFloat32Vectors() != nullptr,
-                       "query float32 vectors cannot be null");
         CHECK_ARGUMENT(query->GetDim() == this->dim_, "query dimension must match index dimension");
+        const IVFInput batch_input(query, query_type);
 
         const auto num_queries = query->GetNumElements();
         const auto total_slots = num_queries * request.topk_;
@@ -841,17 +884,17 @@ IVF::search_with_request(const SearchRequest& request, SearchStatistics& stats) 
         std::fill_n(ids, total_slots, -1);
         std::fill_n(distances, total_slots, std::numeric_limits<float>::infinity());
 
-        const auto* query_data = query->GetFloat32Vectors();
         auto base_request = request;
         base_request.expected_labels_.clear();
         if (not request.bucket_ids_.empty()) {
             base_request.bucket_ids_.clear();
         }
         auto search_func = [&](int64_t query_idx) -> void {
+            Vector<float> row(allocator_);
             auto one_query = Dataset::Make();
             one_query->NumElements(1)
                 ->Dim(query->GetDim())
-                ->Float32Vectors(query_data + query_idx * query->GetDim())
+                ->Float32Vectors(batch_input.Rows(query_idx, 1, row))
                 ->Owner(false);
 
             auto one_request = base_request;
@@ -866,7 +909,8 @@ IVF::search_with_request(const SearchRequest& request, SearchStatistics& stats) 
             one_request.params_str_ = json.Dump();
             // Keep each child isolated until its workers finish, then reduce without JSON.
             SearchStatistics one_stats;
-            auto one_result = this->search_with_request(one_request, one_stats);
+            auto one_result =
+                this->search_with_request(one_request, one_stats, DataTypes::DATA_TYPE_FLOAT);
             // Relaxed reads are safe after child workers finish; atomic destination updates
             // allow sibling reductions to overlap. Preserve legacy wrapping and 64-bit saturation.
             auto add_legacy_counter = [&](const std::atomic<uint32_t>& child_counter,
@@ -917,6 +961,7 @@ IVF::search_with_request(const SearchRequest& request, SearchStatistics& stats) 
             if (not one_stats.complete.load(std::memory_order_relaxed)) {
                 stats.complete.store(false, std::memory_order_relaxed);
             }
+
             const auto count = std::min(request.topk_, one_result->GetDim());
             if (count > 0) {
                 std::copy_n(one_result->GetIds(), count, ids + query_idx * request.topk_);

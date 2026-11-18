@@ -209,6 +209,91 @@ SAQQuantizer<metric>::TrainImpl(const float* data, uint64_t count) {
 }
 
 template <MetricType metric>
+bool
+SAQQuantizer<metric>::TrainRowsImpl(const TrainingRows& rows) {
+    ValidateTrainingRowsShapeImpl(rows);
+    const uint64_t training_count = std::min(rows.Count(), MAX_TRAINING_SAMPLES);
+    struct SelectedContext {
+        const TrainingRows* input;
+        uint64_t count;
+        Allocator* allocator;
+    } context{&rows, training_count, this->allocator_};
+    TrainingRows selected(
+        training_count,
+        this->dim_,
+        [](const void* ptr, uint64_t i, float* output) {
+            const auto& c = *static_cast<const SelectedContext*>(ptr);
+            const uint64_t n = c.input->Count();
+            const uint64_t index = i * (n / c.count) + i * (n % c.count) / c.count;
+            if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
+                c.input->Read(index, output);
+                // The original helper finishes the full double-precision norm before
+                // writing any lane, so input/output aliasing preserves its arithmetic.
+                normalize_for_cosine(output, output, c.input->Dim());
+            } else {
+                c.input->Read(index, output);
+            }
+        },
+        &context);
+    Vector<float> row(this->dim_, this->allocator_);
+    PCATransformer pca(this->allocator_, this->dim_, this->dim_);
+    pca.TrainRows(selected);
+    projection_matrix_.resize(this->dim_ * this->dim_);
+    pca.CopyPCAMatrix(projection_matrix_.data());
+    if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
+        Vector<float> mean(this->dim_, this->allocator_);
+        pca.CopyMean(mean.data());
+        projected_mean_.resize(this->dim_);
+        BlasFunction::Sgemv(BlasFunction::RowMajor,
+                            BlasFunction::NoTrans,
+                            static_cast<int32_t>(this->dim_),
+                            static_cast<int32_t>(this->dim_),
+                            1.0F,
+                            projection_matrix_.data(),
+                            static_cast<int32_t>(this->dim_),
+                            mean.data(),
+                            1,
+                            0.0F,
+                            projected_mean_.data(),
+                            1);
+    } else {
+        projected_mean_.clear();
+    }
+
+    Vector<float> means(this->dim_, this->allocator_);
+    Vector<float> squared_differences(this->dim_, this->allocator_);
+    Vector<float> projected(this->dim_, this->allocator_);
+    std::fill(means.begin(), means.end(), 0.0F);
+    std::fill(squared_differences.begin(), squared_differences.end(), 0.0F);
+    for (uint64_t i = 0; i < training_count; ++i) {
+        selected.Read(i, row.data());
+        project_global(row.data(), projected.data());
+        const auto sample_count = static_cast<float>(i + 1);
+        for (uint64_t d = 0; d < this->dim_; ++d) {
+            const float delta = projected[d] - means[d];
+            means[d] += delta / sample_count;
+            squared_differences[d] += delta * (projected[d] - means[d]);
+        }
+    }
+
+    Vector<float> variances(this->dim_, this->allocator_);
+    for (uint64_t d = 0; d < this->dim_; ++d) {
+        if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
+            variances[d] = squared_differences[d] / static_cast<float>(training_count - 1);
+        } else {
+            // Uncentered metrics retain the mean, so allocate bits using the second moment.
+            variances[d] =
+                squared_differences[d] / static_cast<float>(training_count) + means[d] * means[d];
+        }
+    }
+    build_plan(variances);
+    initialize_segment_layout();
+    initialize_rotations(true);
+    this->is_trained_ = true;
+    return true;
+}
+
+template <MetricType metric>
 void
 SAQQuantizer<metric>::project_global(const float* data, float* projected) const {
     BlasFunction::Sgemv(BlasFunction::RowMajor,

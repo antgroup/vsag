@@ -1535,10 +1535,24 @@ public:
         if (this->quantizer_) {
             // Do not bypass TransformQuantizer chains, even dimension-preserving ones.
             if constexpr (std::is_same_v<QuantizerT, typename Accessor::BottomQuantizerType>) {
-                if (this->dense_input_element_size() == sizeof(uint16_t)) {
+                if (this->dense_input_element_size() == sizeof(uint16_t) and
+                    (not this->quantizer_->UsesPcaForTraining() or data == nullptr or count == 0)) {
                     this->quantizer_->TrainHalf(data, count, this->common_param_.data_type_);
                     return;
                 }
+            }
+            const auto type = this->common_param_.data_type_;
+            if ((type == DataTypes::DATA_TYPE_FP16 or type == DataTypes::DATA_TYPE_BF16) and
+                this->quantizer_->CanTrainRows()) {
+                CHECK_ARGUMENT(this->common_param_.dim_ > 0, "invalid split training dimension");
+                const uint64_t stride =
+                    static_cast<uint64_t>(this->common_param_.dim_) * sizeof(uint16_t);
+                CHECK_ARGUMENT(count <= static_cast<uint64_t>(PTRDIFF_MAX) / stride,
+                               "split training extent overflows");
+                TrainingRows rows(
+                    data, count, this->common_param_.dim_, type, stride, count * stride);
+                CHECK_ARGUMENT(this->quantizer_->TrainRows(rows), "split provider training failed");
+                return;
             }
             Vector<float> input_scratch(this->allocator_);
             this->quantizer_->Train(this->prepare_dense_input(data, count, input_scratch), count);

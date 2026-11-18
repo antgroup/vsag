@@ -91,6 +91,30 @@ public:
 
     bool
     TrainImpl(const float* data, uint64_t count);
+    static constexpr bool TRAINING_ROWS_SUPPORTED = true;
+    bool
+    CanTrainRowsImpl() const {
+        return true;
+    }
+    void
+    ValidateTrainingRowsShapeImpl(const TrainingRows& rows) const {
+        if (rows.Dim() != original_dim_ || original_dim_ <= 0 || rows.Count() == 0)
+            throw std::invalid_argument("invalid RaBitQ TrainingRows shape");
+        if (pca_dim_ != original_dim_ &&
+            (rows.Count() < 2 || original_dim_ > INT32_MAX ||
+             rows.Count() > static_cast<uint64_t>(PTRDIFF_MAX) / sizeof(float) / original_dim_ ||
+             static_cast<uint64_t>(original_dim_) >
+                 static_cast<uint64_t>(PTRDIFF_MAX) / sizeof(float) / original_dim_))
+            throw std::invalid_argument("invalid RaBitQ PCA TrainingRows span");
+    }
+
+    bool
+    TrainRowsImpl(const TrainingRows& rows);
+
+    bool
+    UsesPcaForTraining() const {
+        return pca_dim_ != original_dim_;
+    }
 
     // Internal typed-input training. PCA retains the original dense conversion fallback.
     bool

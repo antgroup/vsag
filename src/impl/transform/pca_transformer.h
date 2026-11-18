@@ -14,7 +14,7 @@
 // limitations under the License.
 
 #pragma once
-
+#include "utils/training_rows.h"
 #include "vector_transformer.h"
 
 namespace vsag {
@@ -55,6 +55,9 @@ public:
 
     void
     Train(const float* data, uint64_t count) override;
+
+    void
+    TrainRows(const TrainingRows& rows);
 
     void
     Serialize(StreamWriter& writer) const override;
