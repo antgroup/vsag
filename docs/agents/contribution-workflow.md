@@ -110,6 +110,9 @@ Every pull request **must** have two labels before it can be merged:
 - A `version/*` label matching the target release line; do not copy a version
   from an old PR or documentation example.
 
+`kind/epic` is reserved for maintainer-managed epic tracking issues. AI agents
+must never apply it to a pull request or issue.
+
 `vsag-bot` automatically applies these labels. Create the PR without requiring
 manual `--label` arguments, then inspect the labels after automation runs. If a
 label is missing or inaccurate, add or correct it when authorized, or ask a

@@ -82,6 +82,7 @@ project's templates and labelling policy, then submit it via `gh`.
     Labels come from the chosen template's front matter (e.g. `kind/bug,bug`).
     Add the selected `module/*` and `area/*` values when those labels exist.
     Do not add labels for `not applicable` or `other`.
+    Never add `kind/epic`; it is reserved for maintainers.
     On `gh` failure, fall back to `gh issue create --web --title ... --body-file ...`
     so the user can finish in a browser.
 
