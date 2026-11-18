@@ -99,6 +99,12 @@ four-number Catch/C++ logical-case inventory; they do not inflate that inventory
   This first version
   deliberately does not remove repeated TestGeneral assertions without a measured
   replacement contract.
+  Nightly Reader IO, Duplicate, and Multi-Query Knn Search keep their original
+  metric/dimension groups for weekly selection and exact quarantines. After
+  selection, each supported quantizer in a group executes independently with
+  the 30-minute limit. The test shapes, assertions, and job deadlines apply
+  as before. The Summary counts each selected execution unit and still
+  counts each Catch2 test name once.
 * Pyramid and SINDI finite GENERATE axes are explicitly enumerated. The first
   configuration of every case is core; remaining configurations are assigned to
   seven disjoint slots. SECTION branches remain intact and are recorded in XML.

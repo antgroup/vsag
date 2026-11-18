@@ -87,6 +87,49 @@ class DailyPlanTests(unittest.TestCase):
         with self.assertRaises(dp.PlanError):
             dp.quarantine_extensions([bad], [rule, rule])
 
+    def test_execution_parts_keep_the_parent_rotation_and_quarantine(self):
+        rules = dp.load(dp.HERE / "daily_matrix.json")["quarantine"]
+        rule = next(rule for rule in rules if rule["case"] == "(Daily) HGraph Duplicate")
+        core = {**self.unit(), "tests": [{"name": "core", "source_file": "tests/core.cpp",
+                                         "tags": "[build]"}]}
+        date = dt.date.fromisoformat(self.context()["logical_date"])
+        strata = dp.load(dp.HERE / "daily_matrix.json")["architecture_policy"]["arm_extension_strata"]
+        bucket = (date.toordinal() // 7) % strata
+        key = next(f"arm-{i}" for i in range(1000)
+                   if int(dp.digest(f"arm-{i}")[:8], 16) % strata == bucket)
+        sibling = {**core, "key": key,
+                   "tests": [{"name": "second core", "source_file": "tests/core.cpp"}]}
+        parent = {**self.unit("parent"), "mode": "rotation", "tests": [{"name": rule["case"]}]}
+        peer = {**parent, "key": "peer"}
+        excluded = {**parent, "key": rule["key"]}
+        parts = [{**parent, "key": key} for key in ("part-a", "part-b")]
+        excluded_part = {**excluded, "key": "excluded-part"}
+        for environment in ("env/Linux/x86_64", "env/Linux/aarch64"):
+            with self.subTest(environment=environment):
+                baseline = dp.build_plan(self.context(), environment, [core.copy(), sibling.copy()],
+                                         [parent.copy(), peer.copy(), excluded.copy()])
+                split = dp.build_plan(self.context(), environment, [core.copy(), sibling.copy()],
+                                      [{**parent, "execution_parts": parts}, peer.copy(),
+                                       {**excluded, "execution_parts": [excluded_part]}])
+                self.assertEqual(split["quarantines"], baseline["quarantines"])
+                self.assertEqual(split["architecture_scope"], baseline["architecture_scope"])
+                for old, new in zip(baseline["rotation"], split["rotation"]):
+                    projected = list(dict.fromkeys(u.get("parent_key", u["key"]) for u in new))
+                    self.assertEqual(projected, [u["key"] for u in old])
+                    self.assertNotIn("excluded-part", [u["key"] for u in new])
+                    self.assertTrue(all(u["mode"] == "rotation" for u in new))
+                if environment.endswith("/aarch64"):
+                    self.assertTrue(any(u["key"] == key for day in split["rotation"] for u in day))
+                for old, new in zip(baseline["rotation"], split["rotation"]):
+                    if any(u["key"] == "parent" for u in old):
+                        self.assertEqual([u["key"] for u in new if u.get("parent_key") == "parent"],
+                                         ["part-a", "part-b"])
+                day = split["context"]["slot"]
+                self.assertEqual(split["selected"], split["core"] + split["rotation"][day])
+                shard_keys = [u["key"] for index in range(4)
+                              for u in dp.shard_plan(split, index, 4)["selected"]]
+                self.assertCountEqual(shard_keys, [u["key"] for u in split["selected"]])
+
     def test_quarantine_is_not_duplicated_in_four_shard_summary(self):
         rule = dp.load(dp.HERE / "daily_matrix.json")["quarantine"][0]
         bad = {**self.unit(rule["key"]), "mode": "rotation", "tests": [{"name": rule["case"]}]}
