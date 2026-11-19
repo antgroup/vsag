@@ -544,6 +544,30 @@ PyramidSearchParameters::FromJson(const std::string& json_string) {
                        fmt::format("rabitq_error_rate must be finite and positive, got {}",
                                    obj.rabitq_error_rate));
     }
+    const auto& search_json = params[INDEX_PYRAMID];
+    const auto parse_uint32 = [&](const char* name, uint32_t minimum, uint32_t& value) {
+        if (search_json.Contains(name)) {
+            const auto& json = *search_json[name].GetInnerJson();
+            CHECK_ARGUMENT(json.is_number_integer() and json >= minimum and
+                               json <= std::numeric_limits<uint32_t>::max(),
+                           fmt::format("{} must be an integer in [{}, {}]",
+                                       name,
+                                       minimum,
+                                       std::numeric_limits<uint32_t>::max()));
+            value = json.get<uint32_t>();
+        }
+    };
+    parse_uint32(PYRAMID_PARAMETER_TAIL_START_AFTER, 0, obj.tail_search.start_after);
+    parse_uint32(PYRAMID_PARAMETER_TAIL_BATCH_SIZE, 1, obj.tail_search.batch_size);
+    if (search_json.Contains(PYRAMID_PARAMETER_TAIL_RELATIVE_GAP)) {
+        const auto& json = *search_json[PYRAMID_PARAMETER_TAIL_RELATIVE_GAP].GetInnerJson();
+        CHECK_ARGUMENT(json.is_number() and json >= 0 and json <= std::numeric_limits<float>::max(),
+                       "tail_relative_gap must be finite and nonnegative");
+        const auto gap = json.get<float>();
+        CHECK_ARGUMENT(std::isfinite(gap) and gap >= 0,
+                       "tail_relative_gap must be finite and nonnegative");
+        obj.tail_search.relative_gap = gap;
+    }
     std::unordered_set<std::string> seen_names;
     if (params[INDEX_PYRAMID].Contains(PYRAMID_PARAMETER_HIERARCHIES)) {
         const auto& hierarchies_json = params[INDEX_PYRAMID][PYRAMID_PARAMETER_HIERARCHIES];

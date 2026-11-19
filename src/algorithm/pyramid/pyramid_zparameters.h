@@ -28,6 +28,7 @@
 #include "datacell/graph_interface.h"
 #include "impl/adaptive_pruning.h"
 #include "impl/odescent/odescent_graph_parameter.h"
+#include "impl/searcher/graph_tail_search_parameters.h"
 #include "index_common_param.h"
 #include "typing.h"
 #include "utils/pointer_define.h"
@@ -106,6 +107,7 @@ public:
     HasHierarchySelector() const;
 
 public:
+    GraphTailSearchParameters tail_search;
     uint64_t ef_search{100};
     uint64_t subindex_ef_search{50};
     uint32_t hops_limit{std::numeric_limits<uint32_t>::max()};

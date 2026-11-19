@@ -15,6 +15,9 @@
 
 
 set (SEARCHER_SRC
+    batched_graph_search.cpp
+    batched_graph_search.h
+    graph_tail_search_parameters.h
     basic_searcher.cpp
     basic_searcher.h
     hgraph_rabitq_searcher.cpp

@@ -39,6 +39,8 @@ last-reviewed: 2026-05-12
 
 VSAG is a vector indexing library used for similarity search. The indexing algorithm allows users to search through various sizes of vector sets, especially those that cannot fit in memory. The library also provides methods for generating parameters based on vector dimensions and data scale, allowing developers to use it without understanding the algorithm’s principles. VSAG is written in C++ and provides a Python wrapper package called [pyvsag](https://pypi.org/project/pyvsag/) and a Node.js/TypeScript binding package called `vsag`.
 
+Pyramid supports opt-in batched tail expansion and relative-gap early stopping through ordinary `KnnSearch`; see the [Pyramid search guide](docs/docs/en/src/indexes/pyramid.md#batched-tail-expansion-and-gap-stopping).
+
 HGraph and Pyramid support experimental, opt-in adaptive alpha for PiPNN L2 builds; see the [HGraph parameter guide](docs/docs/en/src/indexes/hgraph.md) and [Pyramid parameter guide](docs/docs/en/src/indexes/pyramid.md#adaptive-pipnn-pruning).
 
 ## Performance
