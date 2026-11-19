@@ -181,6 +181,21 @@ class JobDiagnosticsTests(unittest.TestCase):
         self.assertIsNone(jobs.cache_statistics("cache_hit_direct 0\ncache_hit_preprocessed 0\ncache_miss 0")["hit_percent"])
         self.assertFalse(jobs.cache_statistics("unrelated 0")["available"])
 
+    def test_current_cache_counters_feed_summary_and_require_complete_evidence(self):
+        machine_stats = "direct_cache_hit\t86\npreprocessed_cache_hit\t2\ncache_miss\t18313\ncalled_for_link\t327\n"
+        cache = jobs.cache_statistics(machine_stats)
+        self.assertTrue(cache["available"])
+        self.assertEqual((cache["hits"], cache["misses"], cache["cacheable_calls"]), (88, 18313, 18401))
+        self.assertAlmostEqual(cache["hit_percent"], 100 * 88 / 18401)
+        report = {"job": "daily_build_asan_x86", "matrix": None, "coverage": {"available": False},
+                  "status_before_upload": "success", "cache": cache}
+        self.assertIn("0.48%", "\n".join(jobs.markdown([report])))
+
+        self.assertFalse(jobs.cache_statistics("direct_cache_hit 86\ncache_miss 18313\n")["available"])
+        self.assertFalse(jobs.cache_statistics("direct_cache_hit 86\npreprocessed_cache_hit 2\n")["available"])
+        self.assertIsNone(jobs.cache_statistics(
+            "direct_cache_hit 0\npreprocessed_cache_hit 0\ncache_miss 0\n")["hit_percent"])
+
     def test_scoped_coverage_is_separate_from_job_success(self):
         c=jobs.coverage_statistics("SF:src/x.cpp\nLF:100\nLH:85\nend_of_record\n")
         self.assertEqual(c["line_percent"],85)

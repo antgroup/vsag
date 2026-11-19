@@ -144,8 +144,8 @@ jobs:
         with:
           job-summary: ${{ env.VSAG_DAILY_AGGREGATE != '1' && 'CCache Statistics' || '' }}
           max-size: "2G"
-          save: false
-          key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+          save: ${{ github.event_name == 'schedule' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main' }}
+          key: build-x86-asan-openblas-source-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Download frozen Nightly plan
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
