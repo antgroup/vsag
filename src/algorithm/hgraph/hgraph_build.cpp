@@ -2012,7 +2012,7 @@ HGraph::refine_nodes_two_phase(
             std::vector<std::future<void>> futures;
             futures.reserve((ids_to_refine.size() + block_size - 1) / block_size);
             for (size_t i = 0; i < ids_to_refine.size(); i += block_size) {
-                const auto end = std::min(i + block_size, ids_to_refine.size());
+                const auto end = std::min<uint64_t>(i + block_size, ids_to_refine.size());
                 futures.emplace_back(this->thread_pool_->GeneralEnqueue(
                     [&refine_one_node, &ids_to_refine, i, end]() {
                         for (size_t idx = i; idx < end; ++idx) {
