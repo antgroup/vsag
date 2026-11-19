@@ -120,6 +120,10 @@ These are all 15 public SIMQ build fields. Other keys under `index_param` are re
 | `max_cluster_size` | int | `64` | Must be `> 1`; token-count threshold for splitting a partition, not a document-count limit. |
 | `split_start_idx` | int | `32` | Must be in `(1, max_cluster_size)`; start of the new partition in the distance-sorted overflowing partition. |
 | `random_seed` | int | `42` | Seed for initial token shuffle and bounded document-model training sample; no additional SIMQ range check. |
+| `split_mode` | string | `"online"` | `"online"` preserves insertion-time splitting; `"post_kmeans"` assigns all tokens first and recursively splits oversized clusters with local K=2 K-means. |
+| `kmeans_k` | int | `2` | Number of local K-means partitions for `post_kmeans`; currently must be `2`. |
+| `kmeans_iters` | int | `8` | Iterations per local K-means split. |
+| `kmeans_seed` | int | `42` | Deterministic seed/offset for local K-means initialization. |
 | `coarse_k` | int | `8` | Must be `> 0`; default number of nearest representative clusters per query token, capped by available clusters at search time. |
 | `rerank_k` | int | `100` | Must be `> 0`; default maximum candidate documents for MaxSim reranking, capped by document count at search time. |
 | `split_delay_seconds` | float | `0.0` | Must be `>= 0`; delay after first overflow before incremental `Add` splits become eligible. `0` is immediate. Pending splits are checked during `Add`, not by a background timer; this does not delay initial Build clustering. |
@@ -142,6 +146,13 @@ FP32 workflow, and validate storage accuracy on your data.
 > faster coarse search at the cost of recall. Start with
 > `init_cluster_ratio = 0.1`–`0.2` and `max_cluster_size = 2 ×`
 > `split_start_idx`, then tune with the search parameters.
+
+For parallel construction, use `post_kmeans`: the initial HGraph assigns all
+tokens first, then oversized partitions are recursively split with local K=2
+K-means without further graph search. The resulting partitions are used to
+build the representative HGraph. The default `online` mode preserves the
+historical insertion-time splitting behavior; `kmeans_k`, `kmeans_iters`, and
+`kmeans_seed` have no effect in that mode.
 
 ## Search parameters
 
