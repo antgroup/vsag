@@ -107,7 +107,10 @@ def build_term_vocabulary(
             are inspected; weights may be any numeric value. Empty
             mappings are rejected with ``ValueError`` for the same reason
             as :func:`term_weights_to_csr`: SINDI silently drops empty
-            documents on ``add`` and rejects empty queries.
+            documents on ``add`` and rejects empty queries. To convert the
+            same corpus again after building its vocabulary, pass a sequence
+            that supports repeated iteration, not a one-shot iterator; the
+            iterator will already be exhausted.
 
     Returns:
         A ``dict[str, int]`` whose IDs are contiguous from ``0`` to
@@ -275,7 +278,9 @@ def term_weights_to_csr(
     Args:
         documents: Iterable (or sequence) of ``{term: weight}`` mappings.
             Empty mappings are rejected with ``ValueError`` (see the
-            ``Raises`` section).
+            ``Raises`` section). When converting the same corpus more than
+            once, pass a sequence that supports repeated iteration, not a
+            one-shot iterator.
         vocabulary: Mapping returned by :func:`build_term_vocabulary` (or
             an equivalent ``str -> int`` mapping). Every term used by a
             document must be present; IDs must fit in ``uint32``. IDs must

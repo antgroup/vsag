@@ -220,7 +220,7 @@ pyvsag.set_logger_debug()   # 输出详细调试信息
 | `TermVocabulary(vocabulary)` | 可复用的映射 | 包装 `build_term_vocabulary` 的结果并只校验一次 ID。同一份词表需要转换大量查询时传入它而不是原始字典，查询转换的耗时便只与查询词条数相关，而不再随词表大小增长。 |
 | `term_weights_to_csr(documents, vocabulary)` | `(index_pointers, indices, values)` | 返回 `uint32` / `uint32` / `float32` 数组，可直接传给 `index.build(...)` 和 `index.knn_search(...)`。每行按词条 ID 排序。**空映射被拒绝**（引发 `ValueError`），因为 SINDI::add 在添加时会静默丢弃空文档，而 SINDI::KnnSearch 排斥空查询。**词表中的 ID 必须唯一**——重复 ID 会引发 `ValueError`。 |
 
-两个函数都接受任意可迭代的映射序列，因此文档和查询可以复用同一份词表。查询中出现词表之外的词条会抛出 `KeyError`；非字符串词条、非整数 ID、超出 `uint32` 范围的 ID、非有限权重以及无法用 `float32` 表示的权重都会被显式拒绝，不会被静默截断。
+两个函数都接受任意可迭代的映射序列，因此文档和查询可以复用同一份词表。同一语料需要多次转换时（例如先传给 `build_term_vocabulary`，再传给 `term_weights_to_csr`），必须传入可重复迭代的 sequence，不能传一次性 iterator。构建词表会耗尽一次性 iterator，再把已耗尽的 iterator 传给 CSR 转换会静默产生零行。查询中出现词表之外的词条会抛出 `KeyError`；非字符串词条、非整数 ID、超出 `uint32` 范围的 ID、非有限权重以及无法用 `float32` 表示的权重都会被显式拒绝，不会被静默截断。
 
 ```python
 import json

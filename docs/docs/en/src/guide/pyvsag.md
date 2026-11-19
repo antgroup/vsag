@@ -158,10 +158,15 @@ are pure Python and only require NumPy, which `pyvsag` already uses.
 | `term_weights_to_csr(documents, vocabulary)` | `(index_pointers, indices, values)` | Returns `uint32` / `uint32` / `float32` arrays for `index.build(...)` and `index.knn_search(...)`. Rows are ordered by term ID. **Empty mappings are rejected** (raise `ValueError`) because SINDI::add silently drops empty documents and SINDI::KnnSearch rejects empty queries. **Vocabulary IDs must be unique** — duplicate IDs raise `ValueError`. |
 
 Both helpers accept any iterable of mappings, so the same vocabulary can be
-reused for documents and queries. A term that is absent from the vocabulary
-raises `KeyError`; non-string terms, non-integer IDs, IDs outside the `uint32`
-range, and non-finite weights are rejected instead of being silently
-truncated. Weights that do not fit in `float32` are also rejected.
+reused for documents and queries. When the same corpus must be converted more
+than once—for example, first by `build_term_vocabulary` and then by
+`term_weights_to_csr`—pass a sequence that supports repeated iteration, not a
+one-shot iterator. Building the vocabulary consumes a one-shot iterator, so
+passing that exhausted iterator to the CSR conversion silently produces no rows.
+A term that is absent from the vocabulary raises `KeyError`; non-string terms,
+non-integer IDs, IDs outside the `uint32` range, and non-finite weights are
+rejected instead of being silently truncated. Weights that do not fit in
+`float32` are also rejected.
 
 ```python
 import json

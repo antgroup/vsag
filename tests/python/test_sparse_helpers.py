@@ -81,6 +81,16 @@ def test_build_term_vocabulary_rejects_non_mapping_documents():
         build_term_vocabulary([["not", "a", "mapping"]])
 
 
+def test_term_weights_to_csr_rejects_non_mapping_documents():
+    with pytest.raises(TypeError, match="must be a mapping"):
+        term_weights_to_csr([["not", "a", "mapping"]], {"a": 0})
+
+
+def test_term_weights_to_csr_rejects_non_string_terms():
+    with pytest.raises(TypeError, match="non-string term"):
+        term_weights_to_csr([{1: 1.0}], {"a": 0})
+
+
 def test_term_weights_to_csr_builds_expected_arrays():
     documents = [
         {"search": 0.5, "vector": 1.0},
