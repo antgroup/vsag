@@ -25,6 +25,9 @@ set (SEARCHER_SRC
     mci_searcher.h
     parallel_searcher.cpp
     parallel_searcher.h
+    sindi_parallel_search.cpp
+    sindi_parallel_search.h
+    sindi_cpu_timer.h
 )
 
 add_library (searcher OBJECT ${SEARCHER_SRC})

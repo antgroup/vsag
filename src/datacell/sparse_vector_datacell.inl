@@ -37,7 +37,9 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
     }
     CHECK_ARGUMENT(idx != nullptr, "SparseVectorDataCell query ids are null");
 
-    const auto load_location = [this](InnerIdType id) {
+    auto* profile = ctx ? ctx->sparse_profile : nullptr;
+    const auto load_location = [this, profile](InnerIdType id) {
+        QueryProfileTimer timer(profile ? &profile->read_ns : nullptr);
         const auto location = layout_.ReadLocation(id);
         if (not layout_.IsValidLocation(location)) {
             throw VsagException(ErrorType::READ_ERROR,
@@ -49,14 +51,24 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
     std::shared_lock lock(mutex_);
 
     const auto compute_direct = [&](const DocLocation& location, InnerIdType result_index) {
-        auto lease = layout_.Acquire(location);
+        auto lease = [&] {
+            QueryProfileTimer timer(profile ? &profile->read_ns : nullptr);
+            return layout_.Acquire(location);
+        }();
+        if (profile) {
+            profile->read_bytes += location.length;
+            ++profile->read_ranges;
+        }
         if (not lease) {
             throw VsagException(ErrorType::READ_ERROR,
                                 "SparseVectorDataCell failed to read vector codes");
         }
+        QueryProfileTimer timer(profile ? &profile->compute_ns : nullptr);
         computer->ComputeDist(lease.Data(), result_dists + result_index);
     };
 
+    if (profile)
+        profile->io_strategy = "direct_read";
     if (query_io_strategy_ == QueryIOStrategy::DIRECT_READ) {
         for (InnerIdType i = 0; i < id_count; ++i) {
             const auto location = load_location(idx[i]);
@@ -82,6 +94,8 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
         return lhs.result_index < rhs.result_index;
     });
 
+    if (profile)
+        profile->io_strategy = "sorted_direct_read";
     if (query_io_strategy_ == QueryIOStrategy::SORTED_DIRECT_READ) {
         for (const auto& item : locations) {
             compute_direct(item.location, item.result_index);
@@ -132,12 +146,20 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
     }
 
     Vector<uint8_t> scratch(scratch_size, query_allocator);
-    if (not layout_.Payload().MultiRead(
-            read_offsets.data(), read_sizes.data(), range_count, scratch.data())) {
-        throw VsagException(ErrorType::READ_ERROR,
-                            "SparseVectorDataCell failed to read vector-code batch");
+    if (profile) {
+        profile->io_strategy = "merged_batch_read";
+        profile->read_bytes += scratch_size;
+        profile->read_ranges += range_count;
     }
-
+    {
+        QueryProfileTimer timer(profile ? &profile->read_ns : nullptr);
+        if (not layout_.Payload().MultiRead(
+                read_offsets.data(), read_sizes.data(), range_count, scratch.data())) {
+            throw VsagException(ErrorType::READ_ERROR,
+                                "SparseVectorDataCell failed to read vector-code batch");
+        }
+    }
+    QueryProfileTimer compute_timer(profile ? &profile->compute_ns : nullptr);
     for (uint64_t range_index = 0; range_index < range_count; ++range_index) {
         const auto& range = ranges[range_index];
         const auto* range_data = scratch.data() + scratch_offsets[range_index];
@@ -202,7 +224,8 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::Deserialize(LvalueOrRvalue<StreamReader
                                             legacy_offset_io_size));
         }
         const uint64_t doc_count = legacy_offset_io_size / legacy_entry_size;
-        if (doc_count > std::numeric_limits<InnerIdType>::max() || doc_count < total_count_.load(std::memory_order_relaxed)) {
+        if (doc_count > std::numeric_limits<InnerIdType>::max() ||
+            doc_count < total_count_.load(std::memory_order_relaxed)) {
             throw VsagException(
                 ErrorType::INVALID_ARGUMENT,
                 fmt::format("invalid legacy SparseVectorDataCell document count: {}", doc_count));
@@ -298,7 +321,8 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerI
     quantizer_->EncodeOne((const float*)vector, codes.data());
     {
         std::lock_guard lock(mutex_);
-        total_count_.store(std::max(total_count_.load(std::memory_order_relaxed), idx + 1), std::memory_order_release);
+        total_count_.store(std::max(total_count_.load(std::memory_order_relaxed), idx + 1),
+                           std::memory_order_release);
         max_code_size_ = std::max(max_code_size_, code_size);
         layout_.Write(idx, codes.data(), code_size);
     }

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <functional>
@@ -11,8 +12,8 @@
 #include <string>
 #include <vector>
 
-#include "algorithm/sindi_metadata_filter.h"
 #include "datacell/sindi_search_term_datacell.h"
+#include "json_types.h"
 #include "query_context.h"
 #include "vsag/concurrent_filter.h"
 
@@ -44,8 +45,9 @@ struct SindiPartitionSearchRequest {
     const SindiSearchTermDataCellPtr& datacell;
     const SparseTermComputerPtr& computer;
     const InnerSearchParam& search;
-    const SindiMetadataFilter& metadata_filter;
-    const SindiMetadataSearchRoute& route;
+    // Read-only policy, invoked concurrently; captures outlive all workers.
+    // Empty means posting pruning is allowed for every selected window.
+    std::function<bool(uint32_t)> term_prune_enabled;
     Allocator* allocator;
     uint64_t window_size;
     uint64_t element_count;
@@ -61,6 +63,40 @@ struct SindiParallelPlan {
     uint64_t capacity{0};
     std::vector<uint64_t> boundaries;
     std::vector<uint64_t> quotas;
+};
+
+struct SindiSlotStatistics {
+    uint64_t computed{0};
+    uint64_t attempted{0};
+    uint64_t consumed{0};
+    uint64_t compute_ns{0};
+    uint64_t consume_ns{0};
+    uint64_t clear_ns{0};
+    uint64_t filter_ns{0};
+    uint64_t filter_calls{0};
+    uint64_t postings{0};
+    uint64_t compute_max_ns{0};
+    uint32_t slowest_window{0};
+    uint64_t slowest_postings{0};
+    std::array<uint64_t, 6> histogram{};
+};
+
+struct SindiPartitionStatistics {
+    uint64_t windows{0};
+    uint64_t candidates{0};
+    uint64_t wall_ns{0};
+};
+
+// Optional, invocation-owned diagnostics. The index chooses whether to collect
+// basic counters and whether to enable detailed timing. Never shared by queries.
+struct SindiParallelStatistics {
+    bool profile_search{false};
+    uint64_t admission_ns{0};
+    uint64_t slot_prepare_ns{0};
+    uint64_t wait_ns{0};
+    uint64_t merge_ns{0};
+    std::vector<SindiSlotStatistics> slots;
+    std::vector<SindiPartitionStatistics> partitions;
 };
 
 // One invocation, shared only until its workers have joined. Never shared with another query.
@@ -80,6 +116,11 @@ struct SindiParallelState {
     std::unique_ptr<ConcurrentFilterLease> lease;
     std::function<FilterPtr(const FilterPtr&)> map_filter;
     double ratio{2};
+    uint64_t planning_topk{0};
+    bool clear_window_scratch{false};
+    // Borrowed until SearchSindiPartitions drains. Null keeps the original
+    // SINDI path free of the optional diagnostics allocations and counters.
+    SindiParallelStatistics* diagnostics{nullptr};
     uint32_t requested{1};
     // Internal A/B/C test control, never parsed from request JSON.
     uint32_t execution_limit{16};

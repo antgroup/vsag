@@ -33,13 +33,13 @@
 #include "impl/filter/filter_callback_limiter.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/reasoning/reasoning_context.h"
+#include "impl/searcher/sindi_cpu_timer.h"
+#include "impl/searcher/sindi_parallel_search.h"
 #include "index_feature_list.h"
 #include "io/memory_block_io/memory_block_io_parameter.h"
 #include "quantization/sparse_quantization/sparse_quantizer_parameter.h"
 #include "simd/bf16_simd.h"
 #include "simd/fp16_simd.h"
-#include "sindi_cpu_timer.h"
-#include "sindi_parallel_search.h"
 #include "storage/serialization.h"
 #include "storage/serialization_tags.h"
 #include "storage/tlv_section.h"
@@ -956,17 +956,20 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
             }
             windows.push_back(static_cast<uint32_t>(cur));
         }
-        const SindiPartitionSearchRequest request{windows,
-                                                  term_datacell_,
-                                                  computer,
-                                                  inner_param,
-                                                  metadata_filter_,
-                                                  metadata_route,
-                                                  search_allocator,
-                                                  window_size_,
-                                                  static_cast<uint64_t>(cur_element_count_.load()),
-                                                  use_term_lists_heap_insert,
-                                                  statistics};
+        const SindiPartitionSearchRequest request{
+            windows,
+            term_datacell_,
+            computer,
+            inner_param,
+            [this, &metadata_route](uint32_t window) {
+                return not metadata_filter_.RequiresFullTermScan(
+                    metadata_route, window, window_size_);
+            },
+            search_allocator,
+            window_size_,
+            static_cast<uint64_t>(cur_element_count_.load()),
+            use_term_lists_heap_insert,
+            statistics};
         SearchSindiPartitions(request, *parallel, heap);
     } else {
         Vector<float> dists(window_size_, 0.0F, search_allocator);

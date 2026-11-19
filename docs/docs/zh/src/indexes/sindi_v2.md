@@ -131,6 +131,11 @@ SINDI_V2 仍保留 term-first posting 布局。发布时间过滤支持 mutable�
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `n_candidate` | int | `0` | 粗排候选数量；`0` 使用根据 `topk` 推导的索引默认值。 |
+| `window_parallelism` | integer | `1` | 请求执行槽位数，包含调用线程，范围 `[1,16]`；符合条件的immutable内存KNN在分区内完成累分、过滤和候选维护。 |
+| `parallel_n_candidate_ratio` | number | `2` | 总局部容量倍率R，有限且>=1；归并精排候选仍不超过N。 |
+| `profile_search` | bool | `false` | 采集阶段墙钟、window 工作量、批次摘要及精排逻辑读取量。 |
+| `diagnose_search` | bool | `false` | 采集有界候选堆和最终结果摘要，用于受控一致性对比；摘要相同不能代替逐项比较。 |
+| `profile_cpu` | bool | `false` | 采集调用线程及后台worker CPU时间；时钟不可用时明确标识。 |
 | `filter_callback_limit` | uint64 | `0` | 单次带过滤检索最多调用用户 `Filter::CheckValid` 回调的次数；`0` 表示不限制。达到正数上限时，在正常处理最后一次回调结果后停止候选及后续 window 扫描，并返回此前已经通过过滤的候选，因此结果可能不完整。该限制适用于常规 KNN 和范围检索 API。 |
 | `query_prune_ratio` | float | `0.0` | 跳过最低权重查询 term 的比例，范围为 `[0.0, 1.0)`。 |
 | `term_prune_ratio` | float | `0.0` | 每条 term list 中跳过最低存储权重的比例，范围为 `[0.0, 1.0)`。 |
@@ -141,6 +146,28 @@ SINDI_V2 仍保留 term-first posting 布局。发布时间过滤支持 mutable�
 SINDI V2 会根据构建阶段的 `doc_prune_ratio` 与检索阶段的 `query_prune_ratio`
 自动选择堆插入策略。按当前 `0.1` 阈值，当两个比例都 `<= 0.1` 时，使用基于距离数组的
 入堆路径；只要任一比例大于 `0.1`，就使用基于 term-list 的入堆路径。
+
+### 分区并行 KNN
+
+创建/加载索引前通过Engine注入共享SearchResource，请求示例：
+`{"sindi_v2":{"window_parallelism":4,"parallel_n_candidate_ratio":2}}`。
+P1、无资源、mutable/文件posting、范围和reasoning保持串行；符合条件但实际仅获准1槽时仍保留分区计划与deadline。
+
+每分区持有局部候选堆，少量持久槽位完成累分、独立Filter和候选维护，调用线程归并最多N个候选，
+沿用原精排。非空并行Filter必须实现ConcurrentFilterProvider，串行回退租借1个evaluator，不能用全局锁伪装独立Filter。
+
+C=ceil(R*N)，W为路由window数，K_plan通常为K、带distance threshold时为N。
+规划G=min(16,W,floor(C/K_plan))，配额之和为C；16是上限，并不保证恰好16区。
+分区数与请求、瞬时获准槽位数独立，槽位准入不改变G与配额。
+局部截断、剪枝及同分边界可能造成结果差异；串行近似结果不是真值。P1不启用分区与倍率。
+
+并行deadline覆盖锁等待、准备、执行、归并、精排和输出；取消是协作式，异常前先drain。
+回调预算在一次VSAG调用的所有分区间共享；额度耗尽可返回部分候选。
+
+profile_search记录分区墙钟、累计累分/消费/清零/Filter、join等待、归并及精排读算。
+累计工作时间与墙钟重叠，不能相加。profile_cpu记录caller及后台worker CPU。
+diagnose_search只摘要有界候选与结果，不再哈希全window距离数组。默认均关闭。
+execution_complete表示扫描完整性，原complete只描述距离计数覆盖。
 
 ## 如何选择 SINDI 与 SINDI_V2
 
