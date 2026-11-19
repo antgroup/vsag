@@ -43,6 +43,7 @@ constexpr const char* EMPTY_QUERY_PATH = "empty";
 constexpr const char* QUERY_DATA_TYPE_AUTO = "auto";
 constexpr const char* QUERY_DATA_TYPE_DENSE = "dense";
 constexpr const char* QUERY_DATA_TYPE_SPARSE = "sparse";
+constexpr uint64_t LAZY_HGRAPH_MAGIC = 0x4C415A5948475246ULL;  // "LAZYHGRF"
 
 std::streamsize
 ToStreamSize(uint64_t bytes) {
@@ -226,6 +227,17 @@ OpenBinaryFile(const std::string& path, const std::string& what) {
         throw std::runtime_error(fmt::format("failed to open {} '{}'", what, path));
     }
     return stream;
+}
+
+bool
+HasLazyHGraphWrapper(std::istream& stream) {
+    uint64_t magic = 0;
+    stream.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+    const bool has_wrapper =
+        static_cast<uint64_t>(stream.gcount()) == sizeof(magic) and magic == LAZY_HGRAPH_MAGIC;
+    stream.clear();
+    stream.seekg(0, std::ios::beg);
+    return has_wrapper;
 }
 
 DatasetPtr
@@ -449,6 +461,12 @@ private:
     void
     LoadIndex() {
         auto stream = OpenBinaryFile(options_.index_path, "index file");
+        if (options_.build_parameter == DEFAULT_BUILD_PARAM and HasLazyHGraphWrapper(stream)) {
+            throw std::runtime_error(fmt::format(
+                "serialized index '{}' uses a LazyHGraph serialization wrapper; pass its outer "
+                "build_parameter because its footer describes only the embedded index",
+                options_.index_path));
+        }
         this->ParseMetadata(stream);
         this->ResolveIndexType();
 
@@ -542,7 +560,8 @@ private:
         // still report the correct metric type.
         if (has_metric) {
             metric_type_ = static_cast<MetricType>(basic_info_["metric"].GetInt());
-        } else if (metadata_source_ == "build_parameter" and options_.build_parameter != DEFAULT_BUILD_PARAM) {
+        } else if (metadata_source_ == "build_parameter" and
+                   options_.build_parameter != DEFAULT_BUILD_PARAM) {
             // metric_type_ was already set from build_parameter in ResolveIndexType();
             // keep it rather than overwriting with analyzer default.
         }

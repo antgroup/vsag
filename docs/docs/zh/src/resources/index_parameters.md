@@ -148,12 +148,13 @@ LazyHGraph 只支持 `dtype: "float32"`。搜索参数使用 `hgraph` 对象，�
 ```json
 {
     "ivf": {
-        "nlist": 4096,
-        "base_quantization_type": "sq8",
-        "nprobe": 32
+        "buckets_count": 4096,
+        "base_quantization_type": "sq8"
     }
 }
 ```
+
+完整构建参数表见 [IVF 索引页](../indexes/ivf.md)。
 
 ## Brute Force
 
@@ -161,7 +162,8 @@ LazyHGraph 只支持 `dtype: "float32"`。搜索参数使用 `hgraph` 对象，�
 {"brute_force": {}}
 ```
 
-无需额外参数。
+量化、IO 和线程池参数均可在 `index_param` 下配置，
+完整参数表见 [BruteForce 索引页](../indexes/brute_force.md)。
 
 ## Pyramid
 

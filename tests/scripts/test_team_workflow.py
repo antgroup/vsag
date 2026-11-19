@@ -344,7 +344,7 @@ class TeamWorkflowTest(unittest.TestCase):
 
     def test_consumers_bootstrap_exact_run_source_without_checkout_or_importing_it_first(self):
         build, tests = job(TEAM, 'build'), job(TEAM, 'tests')
-        self.assertIn('actions/checkout@v4', build)
+        self.assertIn('actions/checkout@v5', build)
         self.assertIn('persist-credentials: false', build)
         self.assertIn('python3 scripts/ci/team_source.py', build)
         self.assertIn('--destination "$TEAM_ARTIFACTS/source"', build)

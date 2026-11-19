@@ -19,10 +19,12 @@ if (APPLE)
         add_library (vsag_openmp INTERFACE)
     endif ()
 
+    option (VSAG_OPENMP_STATIC "Link the macOS wheel's OpenMP runtime statically" OFF)
+
     # Prefer Homebrew's libomp when using AppleClang.
     find_program (BREW_EXECUTABLE brew)
-    set (LIBOMP_PREFIX "")
-    if (BREW_EXECUTABLE)
+    set (LIBOMP_PREFIX "" CACHE PATH "Prefix of a custom macOS OpenMP installation")
+    if (BREW_EXECUTABLE AND NOT LIBOMP_PREFIX AND NOT VSAG_OPENMP_STATIC)
         execute_process (
             COMMAND ${BREW_EXECUTABLE} --prefix libomp
             OUTPUT_VARIABLE LIBOMP_PREFIX
@@ -35,8 +37,19 @@ if (APPLE)
         endif ()
     endif ()
 
-    find_package (OpenMP QUIET COMPONENTS CXX)
-    if (OpenMP_CXX_FOUND)
+    # The Python wheel hides all but vsag_* symbols. Link libomp into that same image so
+    # Mach-O weak C++ symbols cannot coalesce with another package's OpenMP runtime.
+    # Normal C++ builds retain the dynamic runtime.
+    if (NOT VSAG_OPENMP_STATIC)
+        find_package (OpenMP QUIET COMPONENTS CXX)
+    endif ()
+    if (VSAG_OPENMP_STATIC)
+        if (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+            message (FATAL_ERROR "VSAG_OPENMP_STATIC requires Clang on macOS")
+        endif ()
+        include (${CMAKE_CURRENT_LIST_DIR}/VSAGMacOSOpenMP.cmake)
+        vsag_configure_private_openmp ()
+    elseif (OpenMP_CXX_FOUND)
         message (STATUS "Found OpenMP via CMake: ${OpenMP_CXX_LIB_NAMES}")
         target_link_libraries (vsag_openmp INTERFACE OpenMP::OpenMP_CXX)
         foreach (_openmp_lib IN LISTS OpenMP_CXX_LIBRARIES)
@@ -55,7 +68,7 @@ if (APPLE)
         target_link_libraries (vsag_openmp INTERFACE "${LIBOMP_PREFIX}/lib/libomp.dylib")
         target_link_options (vsag_openmp INTERFACE "-Wl,-rpath,${LIBOMP_PREFIX}/lib")
     else ()
-        message (FATAL_ERROR "OpenMP not found on macOS. Install dependencies via scripts/deps/install_deps.sh.")
+        message (FATAL_ERROR "OpenMP not found on macOS. Run brew install libomp, or configure with -DLIBOMP_PREFIX=/path/to/libomp (containing include/omp.h and lib/libomp.dylib).")
     endif ()
 
     # Find LAPACK - will automatically use Accelerate framework on macOS

@@ -1,4 +1,4 @@
-name: Refresh Daily execution window
+name: Refresh Nightly execution window
 description: Keep immutable source/date selection while refreshing the current retry attempt clock.
 outputs:
   remaining_minutes:
@@ -7,7 +7,7 @@ outputs:
 runs:
   using: composite
   steps:
-    - uses: actions/github-script@v7
+    - uses: actions/github-script@v8
       with:
         retries: 3
         script: |

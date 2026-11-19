@@ -90,6 +90,13 @@ public:
     bool
     TrainImpl(const float* data, uint64_t count);
 
+    // Internal typed-input training. PCA retains the original dense conversion fallback.
+    bool
+    TrainHalf(const void* data, uint64_t count, DataTypes data_type);
+
+    bool
+    ReTrainHalf(const void* data, uint64_t count, DataTypes data_type);
+
     void
     SetCentroid(const float* centroid);
 
@@ -661,6 +668,9 @@ public:
     AlignCodeField(uint64_t size) const;
 
 private:
+    bool
+    finish_training(const float* rotation_input, uint64_t count);
+
     struct FastScan32Layout {
         uint64_t packed_size{0};
         uint64_t metadata_record_offset{0};

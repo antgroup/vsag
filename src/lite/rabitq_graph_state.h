@@ -890,6 +890,11 @@ public:
         incoming_counts_valid_ = false;
     }
 
+    void
+    InitializeIncomingCountsForReplay() {
+        prepare_incoming_counts();
+    }
+
     [[nodiscard]] uint64_t
     IncomingCountRebuilds() const {
         return incoming_count_rebuilds_;

@@ -2,6 +2,10 @@
 import copy
 import importlib.util
 import json
+import os
+import subprocess
+import tempfile
+import textwrap
 from pathlib import Path
 import re
 import sys
@@ -12,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts/ci'))
 from branch_entry_policy import select
 from check_job_results import validate
+from checks_policy import matches
 
 
 def job(file, name):
@@ -30,9 +35,9 @@ def condition(file, name, values):
 
 def expression(text, values):
     text = text.removeprefix('${{').removesuffix('}}').strip()
-    text = text.replace('always()', 'True').replace('cancelled()', 'False')
+    text = text.replace('always()', 'True').replace('cancelled()', repr(bool(values.get('cancelled()', False))))
     # Evaluate this documented condition subset; never execute workflow shell code.
-    token = r"'(?:[^']|'')*'|\b(?:needs|github|inputs)\.[\w.-]+|\b(?:true|false)\b"
+    token = r"'(?:[^']|'')*'|\b(?:needs|github|inputs|steps)\.[\w.-]+|\b(?:true|false)\b"
     def value(match):
         word = match[0]
         if word.startswith("'"):
@@ -48,6 +53,156 @@ def expression(text, values):
 
 
 class EntryTests(unittest.TestCase):
+    def test_community_cancels_with_superseded_run_but_keeps_manual_checks(self):
+        for cancelled in (False, True):
+            for route in ('success', 'skipped', 'failure', 'cancelled'):
+                for selected in ('success', 'skipped', 'failure', 'cancelled'):
+                    values = {'cancelled()': cancelled, 'needs.route.result': route,
+                              'needs.select-checks.result': selected}
+                    with self.subTest(cancelled=cancelled, route=route, selected=selected):
+                        self.assertEqual(condition('pr-ci.yml', 'community', values),
+                                         not cancelled and selected == 'success'
+                                         and route in ('success', 'skipped'))
+                        # Final reporting must still expose incomplete/cancelled results.
+                        self.assertTrue(condition('pr-ci.yml', 'gate', values))
+        self.assertIn('cancel-in-progress: true', (ROOT / '.github/workflows/pr-ci.yml').read_text())
+
+    def test_python_pr_paths_select_build_inputs_not_unrelated_ci_helpers(self):
+        changes = job('pr-ci-community.yml', 'changes')
+        def paths(name):
+            block = re.search(r'(?ms)^            ' + name + r':\n(.*?)(?=^            [\w-]+:|\Z)', changes)[1]
+            return re.findall(r"^              - '([^']+)'", block, re.M)
+        filters = {name: paths(name) for name in ('python', 'cmake', 'wheel', 'cpp')}
+        selected = [
+            'python/pyproject.toml', 'python/setup.py', 'python/setup.cfg',
+            'python/MANIFEST.in', 'python/requirements-build.txt',
+            'python/pyvsag/_index.py', 'python/pyvsag/_version.py.in', 'python/LICENSE',
+            'python/NOTICE', 'python/licenses/LLVM-OpenMP.txt', 'README.md',
+            'tests/python/test_index.py', 'include/vsag/vsag_c_api.h', 'src/vsag_c_api.cpp',
+            'include/vsag/index.h', 'include/vsag/expected.hpp', 'src/version.h.in',
+            'cmake/vsag_c.map', 'CMakeLists.txt', 'Makefile', 'cmake/VSAGOptions.cmake',
+            'extern/openblas/openblas.cmake', 'src/CMakeLists.txt', 'src/index/CMakeLists.txt',
+            'src/index/options.cmake', '.github/actions/python-wheel-build/action.yml',
+            '.github/actions/python-wheel-test/action.yml', 'scripts/python/check_wheel_libs.py',
+            'scripts/python/prepare_python_build.sh', 'scripts/python/local_build_wheel.sh',
+            'scripts/deps/install_deps_centos.sh', 'scripts/ci/python_ci.py',
+            'scripts/ci/collect_python_cache.sh', '.github/workflows/pr-ci-community.yml',
+        ]
+        unrelated = [
+            'python/README.md', 'python/docs/guide.md', 'docs/docs/en/src/guide/pyvsag.md',
+            'scripts/testing/daily_measure.py', 'scripts/testing/daily_plan.py',
+            'scripts/testing/team_test_shards.py', 'scripts/testing/daily_report.py',
+            'scripts/testing/team_test_timings.py', 'tests/scripts/test_python_ci.py',
+            'tests/scripts/test_python_license.py', 'tests/scripts/test_local_build_wheel.py',
+            'tests/scripts/test_daily_plan.py', 'tests/scripts/test_daily_workflow.py',
+            'scripts/deps/install_deps_ubuntu.sh',
+            'scripts/python/check_macos_wheel.py', 'docker/Dockerfile.x86.base',
+            'scripts/ci/daily_budget.py', 'scripts/coverage/check_cov.sh',
+            'scripts/linters/prepare_lint_base.py', 'src/algorithm/hgraph.cpp',
+            'src/algorithm/hgraph_test.cpp', 'tests/test_hgraph.cpp', 'examples/cpp/101_index.cpp',
+            '.github/workflows/pr-ci.yml',
+            '.github/workflows/main-ci.yml', '.github/workflows/daily_test.yml',
+            '.github/workflows/pyvsag-testpypi.yml', '.github/workflows/pr-ci-team.yml',
+            '.github/workflows/release.yml', '.github/workflows/pr-issue-link.yml',
+            '.github/actions/python-macos-wheel-build/action.yml',
+            '.github/actions/check-format/action.yml', 'docs/agents/ci-routing.md',
+        ]
+        # Use the existing matcher on the actual positive paths-filter globs. A mixed
+        # list selects if any path matches; status (added/modified/deleted) is unrestricted.
+        cases = [(True, [p]) for p in selected] + [(False, [p]) for p in unrelated]
+        cases += [(False, unrelated), (True, unrelated + ['python/setup.cfg']), (False, [])]
+        for expected, files in cases:
+            for team in (False, True):
+                outputs = {'github.event_name': 'pull_request', 'github.base_ref': 'main',
+                           'inputs.team-linux': team, 'needs.changes.result': 'success'}
+                for name, patterns in filters.items():
+                    outputs[f'needs.changes.outputs.{name}'] = str(any(
+                        matches(path, pattern) for path in files for pattern in patterns)).lower()
+                outputs['needs.format.result'] = ('success' if condition(
+                    'pr-ci-community.yml', 'format', outputs) else 'skipped')
+                outputs['needs.build-python-x86.result'] = 'success' if expected else 'skipped'
+                for name in ('build-python-x86', 'test-python-x86'):
+                    with self.subTest(files=files, team=team, job=name):
+                        self.assertEqual(condition('pr-ci-community.yml', name, outputs), expected)
+                        for failure in ('failure', 'cancelled', 'skipped'):
+                            self.assertFalse(condition('pr-ci-community.yml', name,
+                                dict(outputs, **{'needs.changes.result': failure})))
+                        self.assertFalse(condition('pr-ci-community.yml', name,
+                                                   dict(outputs, **{'cancelled()': True})))
+                for failed in ('failure', 'cancelled'):
+                    self.assertFalse(condition('pr-ci-community.yml', 'build-python-x86',
+                        dict(outputs, **{'needs.format.result': failed})))
+                for failed in ('failure', 'cancelled', 'skipped'):
+                    self.assertFalse(condition('pr-ci-community.yml', 'test-python-x86',
+                        dict(outputs, **{'needs.build-python-x86.result': failed})))
+
+    def test_python_gate_requires_selected_jobs_and_accepts_inapplicable_skips(self):
+        body = job('pr-ci-community.yml', 'python-result')
+        self.assertIn('needs: [changes, build-python-x86, test-python-x86]', body)
+        self.assertTrue(condition('pr-ci-community.yml', 'python-result', {'cancelled()': True}))
+        script = textwrap.dedent(body.split('        run: |\n', 1)[1])
+        selection = re.search(r'RUN_PYTHON: (.+)', body)[1]
+        for core, selected in ((True, True), (True, False), (False, False)):
+            values = {'github.event_name': 'pull_request', 'github.base_ref': 'main',
+                      'needs.changes.outputs.wheel': str(selected).lower(),
+                      # Legacy filters must not reselect an excluded main PR.
+                      'needs.changes.outputs.python': 'true', 'needs.changes.outputs.cmake': 'true'}
+            enabled = expression(selection, values)
+            expected = 'success' if core and selected else 'skipped'
+            env = dict(os.environ, CORE=str(core).lower(), RUN_PYTHON=str(enabled).lower(),
+                       CHANGES_RESULT='success' if core else 'skipped',
+                       BUILD_RESULT=expected, TEST_RESULT=expected)
+            def run(overrides):
+                return subprocess.run(['bash', '-e', '-c', script], env={**env, **overrides},
+                                      capture_output=True, timeout=10).returncode
+            self.assertEqual(run({}), 0)
+            for key in ('BUILD_RESULT', 'TEST_RESULT'):
+                for bad in ('failure', 'cancelled', '', 'skipped' if selected else 'success'):
+                    self.assertNotEqual(run({key: bad}), 0)
+            if core:
+                for bad in ('failure', 'cancelled', 'skipped', ''):
+                    self.assertNotEqual(run({'CHANGES_RESULT': bad}), 0)
+
+    def test_wheel_helper_regressions_run_without_a_native_artifact(self):
+        body = job('pr-ci.yml', 'routing-tests')
+        for module in ('test_python_ci', 'test_workflow_entries', 'test_daily_plan', 'test_daily_workflow',
+                       'test_team_test_shards', 'test_local_build_wheel', 'test_python_license'):
+            self.assertIn('tests/scripts/' + module + '.py', body)
+        self.assertNotIn('download-artifact', body)
+        self.assertNotIn('python-wheel-build', body)
+        self.assertNotIn('needs:', body)
+        team = job('pr-ci-team.yml', 'checks')
+        self.assertIn('python3 -m unittest tests/scripts/test_daily_workflow.py', team)
+
+    def test_renamed_and_deleted_wheel_inputs_remain_selected(self):
+        # The existing no-renames diff contract presents both endpoints, including
+        # deleted paths. Exercise it with a real repository instead of basename guesses.
+        from scripts.ci.checks_policy import changed_paths
+        with tempfile.TemporaryDirectory() as tmp:
+            def git(*args):
+                return subprocess.check_output(['git', '-C', tmp, *args], text=True).strip()
+            git('init', '-q')
+            git('config', 'user.name', 'Test')
+            git('config', 'user.email', 'test@example.com')
+            Path(tmp, 'python').mkdir()
+            Path(tmp, 'python/setup.cfg').write_text('metadata\n')
+            git('add', '.')
+            git('commit', '-qm', 'base')
+            base = git('rev-parse', 'HEAD')
+            Path(tmp, 'python/setup.cfg').rename(Path(tmp, 'notes.md'))
+            git('add', '-A')
+            git('commit', '-qm', 'move out of scope')
+            head = git('rev-parse', 'HEAD')
+            event = {'action': 'synchronize', 'pull_request': {
+                'base': {'sha': base}, 'head': {'sha': head}}}
+            with patch('scripts.ci.checks_policy.git',
+                       side_effect=lambda *args: subprocess.check_output(['git', '-C', tmp, *args])):
+                paths = changed_paths('pull_request', event)
+            self.assertEqual(set(paths), {'python/setup.cfg', 'notes.md'})
+            block = job('pr-ci-community.yml', 'changes').split('            wheel:\n', 1)[1]
+            patterns = re.findall(r"^              - '([^']+)'", block, re.M)
+            self.assertTrue(any(matches(path, pat) for path in paths for pat in patterns))
+
     def test_exact_workflow_files_and_local_workflow_targets_exist(self):
         expected = {'pr-ci.yml', 'pr-ci-team.yml', 'pr-ci-community.yml', 'pr-issue-link.yml',
                     'main-ci.yml', 'daily_test.yml', 'manual-checks.yml', 'release.yml',
@@ -66,14 +221,34 @@ class EntryTests(unittest.TestCase):
         self.assertRegex(text, r'publish:\n(?:.*\n)*?\s+default: true')
         self.assertIn("vars.PYVSAG_NIGHTLY_PUBLISH != 'false'", text)
         self.assertNotRegex(text, r'^\s+arch:\s*\n\s+description', re.M)
+        # A nightly is skipped when the last successful nightly already built this main commit.
+        self.assertIn('event=schedule&status=success', text)
+        self.assertIn("needs.resolve-source.outputs.skip != 'true'", text)
         # The matrix context is not available in jobs.<id>.if; GitHub rejects the workflow.
         for condition in re.findall(r'^    if: (.*)$', text, re.M):
             self.assertNotIn('matrix', condition)
         for arch in ('x86_64', 'aarch64'):
             self.assertIn('{arch: %s,' % arch, text)
+        # Callers share container construction, but retain their own source selection.
+        self.assertIn("uses: ./.github/actions/python-wheel-build", text)
+        self.assertIn("source-sha: ${{ needs.resolve-source.outputs.sha }}", text)
+        # Trusted Publishing: the environment name must match the TestPyPI publisher entry.
+        for name in ('publish-linux', 'publish-macos'):
+            body = job('pyvsag-testpypi.yml', name)
+            self.assertIn('name: testpypi', body)
+            self.assertIn('id-token: write', body)
+            self.assertNotIn('password:', body)
+            self.assertNotIn('secrets.', body)
+        text = (ROOT / ".github/actions/python-wheel-build/action.yml").read_text()
+        self.assertIn('scripts/python/check_wheel_libs.py', text)
+        self.assertIn('VSAG_USE_SYSTEM_DEPS=OFF', text)
+        self.assertLess(text.index('name: Check wheel libraries'), text.index('name: Record wheel provenance'))
         # The ccache directory must be mounted into the container and enabled for the build.
-        self.assertIn('create_args: -v ${{ runner.temp }}/ccache:/ccache', text)
+        self.assertIn('create_args: -v ${{ runner.temp }}/pyvsag-ccache:/ccache', text)
         self.assertIn('VSAG_ENABLE_CCACHE=ON CCACHE_DIR=/ccache', text)
+        self.assertIn('CCACHE_BASEDIR=/project CCACHE_NOHASHDIR=1', text)
+        # Bound shared cache size; only the Nightly workflow publishes weekly snapshots.
+        self.assertIn('CCACHE_MAXSIZE=3G CCACHE_COMPRESS=1', text)
 
     def test_pypi_publish_action_uses_existing_ref(self):
         # pypa/gh-action-pypi-publish has no `v1` tag; the moving ref is the release/v1 branch.
@@ -108,19 +283,19 @@ class EntryTests(unittest.TestCase):
                 'needs.entry-scope.outputs.simd': 'false',
                 'needs.changes.result': 'skipped' if version else 'success',
                 'needs.changes.outputs.heavy': '' if version else str(heavy).lower(),
-                'needs.changes.outputs.python': '' if version else 'false',
+                'needs.changes.outputs.python': '' if version else str(heavy).lower(),
                 'needs.changes.outputs.lint': '' if version else ('full' if heavy else 'none')}
 
-    def test_main_keeps_smoke_and_omits_full_x86_and_python(self):
+    def test_main_keeps_smoke_and_python_x86_only(self):
         values = self.context()
         for name in ('platforms-build-asan-aarch64', 'platforms-build-asan-macos-arm64',
-                     'lint-clang-tidy-check'):
+                     'lint-clang-tidy-check', 'python-build-python-wheel-x86'):
             self.assertTrue(condition('main-ci.yml', name, values), name)
-        for name in ('platforms-build-asan-x86', 'python-build-python-wheel-x86', 'python-build-python-wheel-aarch64',
+        for name in ('platforms-build-asan-x86', 'python-build-python-wheel-aarch64',
                      'coverage-changes', 'compatibility-compatibility', 'simd-build-asan-simd'):
             self.assertFalse(condition('main-ci.yml', name, values), name)
 
-    def test_python_pause_covers_all_jobs_but_preserves_manual_and_version(self):
+    def test_python_main_x86_and_manual_version_scope(self):
         names = ('python-build-python-wheel-x86', 'python-build-python-wheel-aarch64',
                  'python-test-python-x86', 'python-test-python-aarch64', 'python-clean-up', 'python')
         for scope in ('main', 'version', 'manual', 'manual-full'):
@@ -131,7 +306,7 @@ class EntryTests(unittest.TestCase):
             for name in names:
                 values['needs.' + name + '.result'] = 'success'
             for name in names:
-                expected = scope in ('version', 'manual') or (scope == 'manual-full' and name in
+                expected = scope in ('version', 'manual') or (scope in ('main', 'manual-full') and name in
                     ('python-build-python-wheel-x86', 'python-test-python-x86', 'python-clean-up', 'python'))
                 self.assertEqual(condition('main-ci.yml', name, values), expected, (scope, name))
         self.assertIn('python: ${{ steps.policy.outputs.python }}', job('main-ci.yml', 'changes'))
@@ -163,16 +338,65 @@ class EntryTests(unittest.TestCase):
         values['needs.platforms-build-asan-aarch64.result'] = 'success'
         self.assertTrue(condition('main-ci.yml', 'platforms-test-asan-aarch64', values))
 
-    def test_schedules_select_performance_only(self):
+    def test_nightly_schedule_selects_complete_regression_only(self):
         text = (ROOT / '.github/workflows/daily_test.yml').read_text()
-        self.assertEqual(re.findall(r'(?m)^    - cron: [\"\x27]([^\"\x27]+)', text),
-                         ['01 08 * * 1-5', '23 3 * * 1'])
-        for cron, selected in [('01 08 * * 1-5', 'performance-performance'),
-                               ('23 3 * * 1', 'build-performance-benchmark-x86')]:
-            values = {'github.event_name': 'schedule', 'github.event.schedule': cron,
-                      'github.ref': 'refs/heads/main', 'github.repository': 'antgroup/vsag'}
-            for name in re.findall(r'(?m)^  ([\w-]+):$', text.split('jobs:\n', 1)[1]):
-                self.assertEqual(condition('daily_test.yml', name, values), name == selected, name)
+        self.assertEqual(re.findall(r"(?m)^    - cron: ['\"]([^'\"]+)", text),
+                         ['0 14 * * *', '23 3 * * 1'])
+        names = re.findall(r'(?m)^  ([\w-]+):$', text.split('jobs:\n', 1)[1])
+        benchmarks = {'performance-performance', 'build-performance-benchmark-x86'}
+        regression = set(names) - benchmarks
+        aggregate = re.search(r'(?m)^  VSAG_DAILY_AGGREGATE: (.+)$', text)[1]
+        for cron, repo, ref, selected in (
+            ('0 14 * * *', 'antgroup/vsag', 'refs/heads/main', regression),
+            ('23 3 * * 1', 'antgroup/vsag', 'refs/heads/main', {'build-performance-benchmark-x86'}),
+            ('01 08 * * 1-5', 'antgroup/vsag', 'refs/heads/main', set()),
+            ('0 15 * * *', 'antgroup/vsag', 'refs/heads/main', set()),
+            ('0 14 * * *', 'contributor/vsag', 'refs/heads/main', set()),
+            ('0 14 * * *', 'antgroup/vsag', 'refs/heads/1.1', set()),
+            ('23 3 * * 1', 'contributor/vsag', 'refs/heads/main', set()),
+        ):
+            with self.subTest(cron=cron, repo=repo, ref=ref):
+                values = {'github.event_name': 'schedule', 'github.event.schedule': cron,
+                          'github.ref': ref, 'github.repository': repo}
+                # Evaluate routing with successful dependencies; dependency failures
+                # are separately checked below and by the final result reconciler.
+                values.update({f'needs.{name}.result': 'success' for name in names})
+                for name in names:
+                    self.assertEqual(condition('daily_test.yml', name, values), name in selected, name)
+                self.assertEqual(expression(aggregate, values), '1' if selected == regression else '0')
+
+    def test_nightly_manual_and_reusable_profiles_keep_their_scope(self):
+        text = (ROOT / '.github/workflows/daily_test.yml').read_text()
+        names = re.findall(r'(?m)^  ([\w-]+):$', text.split('jobs:\n', 1)[1])
+        benchmarks = {'performance-performance', 'build-performance-benchmark-x86'}
+        for event in ('workflow_dispatch', 'push'):
+            for profile in ('', 'regression', 'performance', 'build-performance'):
+                with self.subTest(event=event, profile=profile):
+                    selected = (set(names) - benchmarks if profile in ('', 'regression') else
+                                {'performance-performance' if profile == 'performance' else
+                                 'build-performance-benchmark-x86'})
+                    values = {'github.event_name': event, 'inputs.profile': profile,
+                              'github.repository': 'antgroup/vsag', 'github.ref': 'refs/heads/main',
+                              'needs.full-coverage-changes.outputs.non_markdown': 'true'}
+                    values.update({f'needs.{name}.result': 'success' for name in names})
+                    for name in names:
+                        self.assertEqual(condition('daily_test.yml', name, values), name in selected, name)
+        # Manual regression replay of a PR/validation branch remains available.
+        values.update({'github.event_name': 'workflow_dispatch', 'inputs.profile': 'regression',
+                       'github.ref': 'refs/heads/validation'})
+        for name in names:
+            self.assertEqual(condition('daily_test.yml', name, values), name not in benchmarks, name)
+
+    def test_nightly_summary_is_selected_even_after_upstream_failure(self):
+        values = {'github.event_name': 'schedule', 'github.event.schedule': '0 14 * * *',
+                  'github.repository': 'antgroup/vsag', 'github.ref': 'refs/heads/main'}
+        for result in ('failure', 'cancelled', 'skipped'):
+            values['needs.daily-plan.result'] = result
+            values['needs.daily-extra-x86.result'] = result
+            self.assertTrue(condition('daily_test.yml', 'daily-summary', values))
+        self.assertIn('always()', job('daily_test.yml', 'daily-summary'))
+        self.assertIn('NEEDS_JSON: ${{ toJSON(needs) }}', job('daily_test.yml', 'daily-summary'))
+        self.assertIn('--expected-file', job('daily_test.yml', 'daily-summary'))
 
     def test_gate_rejects_missing_failed_cancelled_and_unexpected_skip(self):
         good = {'build': {'result': 'success'}, 'tests': {'result': 'success'}, 'unused': {'result': 'skipped'}}
@@ -232,7 +456,7 @@ class EntryTests(unittest.TestCase):
                     values = {'github.event_name': event, 'github.ref': ref,
                               'github.repository': repo, 'inputs.profile': 'performance',
                               'github.event.schedule': '01 08 * * 1-5'}
-                    expected = event != 'pull_request' and ref == 'refs/heads/main' and repo == 'antgroup/vsag'
+                    expected = event in ('workflow_dispatch', 'push') and ref == 'refs/heads/main' and repo == 'antgroup/vsag'
                     self.assertEqual(condition('daily_test.yml', 'performance-performance', values), expected)
 
     def test_runtime_benchmark_uses_shared_ref_validation_and_independent_runs(self):

@@ -26,6 +26,7 @@
 #include "vsag/dataset.h"
 #include "vsag/filter.h"
 #include "vsag/iterator_context.h"
+#include "vsag/search_profile.h"
 
 namespace vsag {
 
@@ -250,6 +251,15 @@ public:
      *          over parsing attribute_filter_str_. Appended to preserve aggregate initialization.
      */
     ExprPtr expression_{nullptr};
+
+    /**
+     * @brief Optional profiling for IVF single-query custom-distance KNN search.
+     * Null disables profiling, including all profiling clock reads. Other IVF paths reject
+     * a non-null profile. Other index implementations do not collect this profile.
+     * Use one object per simultaneous request. Read/serialize only after search returns,
+     * including on failure; sequential reuse resets the previous report.
+     */
+    std::shared_ptr<SearchProfile> profile_{nullptr};
 };
 
 }  // namespace vsag

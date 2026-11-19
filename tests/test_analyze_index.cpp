@@ -53,6 +53,21 @@ constexpr const char* kHGraphIndexParam = R"({
     }
 })";
 
+constexpr const char* kLazyHGraphIndexParam = R"({
+    "dtype": "float32",
+    "metric_type": "l2",
+    "dim": 4,
+    "lazy_hgraph": {
+        "transition_threshold": 16,
+        "hgraph": {
+            "base_quantization_type": "fp32",
+            "max_degree": 8,
+            "ef_construction": 16,
+            "build_thread_count": 1
+        }
+    }
+})";
+
 constexpr const char* kCosineIndexParam = R"({
     "type": "brute_force",
     "dtype": "float32",
@@ -339,6 +354,21 @@ TEST_CASE("AnalyzeIndex returns a structured static report", "[analyze_index]") 
     REQUIRE(report["warnings"].IsArray());
     REQUIRE(report["compatibility"]["schema_version"].GetString() ==
             vsag::INDEX_ANALYSIS_SCHEMA_VERSION);
+}
+
+TEST_CASE("AnalyzeIndex rejects a LazyHGraph wrapper before trusted BruteForce loading",
+          "[analyze_index]") {
+    fixtures::TempDir temp_dir("analyze_index_lazy_hgraph_wrapper");
+    const std::string index_path =
+        BuildAndSaveIndex(temp_dir.path + "index.vsag", kLazyHGraphIndexParam, "lazy_hgraph");
+
+    vsag::IndexAnalysisOptions options;
+    options.index_path = index_path;
+
+    REQUIRE_THROWS_WITH(
+        vsag::AnalyzeIndex(options),
+        Catch::Matchers::ContainsSubstring(
+            "uses a LazyHGraph serialization wrapper; pass its outer build_parameter"));
 }
 
 TEST_CASE("AnalyzeIndex loads legacy brute-force metadata without metric", "[analyze_index]") {

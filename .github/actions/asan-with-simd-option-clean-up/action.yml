@@ -12,7 +12,7 @@ runs:
       shell: bash -e {0}
       run: touch /tmp/clean_up
     - name: Overwrite Test Artifact
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         path: /tmp/clean_up
         name: test-x86-${{ inputs.matrix-simd-key }}-${{ github.run_id }}

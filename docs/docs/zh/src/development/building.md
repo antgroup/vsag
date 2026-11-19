@@ -2,7 +2,7 @@
 
 VSAG 使用 CMake 构建。Full VSAG 的内部 CPU 源码使用 C++20，Linux 保留 GCC 9.4.0+ / Clang 13.0.0+ 的源码编译器基线，开发和 CI 固定使用 GCC 13 / Clang 20，并单独验证旧基线。公开头文件和 API 保持 C++17 可用；CUDA 源文件、Node.js 绑定和独立 Lite 继续使用 C++17。clang-format 和 clang-tidy 固定为版本 20。
 
-支持的平台包括 Ubuntu 20.04+、CentOS 7+，以及 Apple Silicon 上的 macOS 14+。
+支持的平台包括 Ubuntu 20.04+、CentOS 7+，以及 Apple Silicon 上的 macOS 15+。
 macOS 使用 Xcode Command Line Tools 提供的 Apple Clang 和 Homebrew 依赖；当前支持范围是
 arm64 核心 C++ 构建，预编译 C++ 包与 Python wheel 仍以 Linux 为主。首次构建前运行：
 
@@ -92,9 +92,9 @@ stamp、日志和元数据不计入 `local_bytes`，也不计入准备阶段表�
 
 > **[ #2899 ](https://github.com/antgroup/vsag/pull/2899) 修复前，旧版 no-op 测量不可信。** 独立工作流会对缺少受支持 schema 3 `true_noop` 报告能力的 collector 明确预检失败。拆分 PR 构建本身并不修复 collector；前置 PR 尚未合并时，定时任务会失败，而不是发布误导性的旧版基线。
 
-PR CI 的 **ASan Build X86** 只运行一次 `make asan COMPILE_JOBS=3`，保留 Ninja、compile commands、system OpenBLAS、examples 和 tools。Makefile 仍启用 tests、Sanitize 和 ASan/UBSan，changed-source lint、下游测试、兼容性检查及构建产物契约保持不变。`ccache --zero-stats` 只重置统计，**不删除缓存对象**。构建步骤记录耗时，always 步骤输出 verbose/兼容回退缓存诊断，不掩盖真实构建失败；ccache 仍启用并使用一次性 GitHub-hosted VM 上的默认目录，不跨 job 恢复或保存编译缓存。PR X86 的依赖归档缓存有意从恢复并保存改为**只恢复**（`actions/cache/restore@v4`），防止 PR 上下文将归档写回共享缓存；这项策略并不只适用于独立 benchmark。
+PR CI 的 **ASan Build X86** 只运行一次 `make asan COMPILE_JOBS=3`，保留 Ninja、compile commands、system OpenBLAS、examples 和 tools。Makefile 仍启用 tests、Sanitize 和 ASan/UBSan，changed-source lint、下游测试、兼容性检查及构建产物契约保持不变。`ccache --zero-stats` 只重置统计，**不删除缓存对象**。构建步骤记录耗时，always 步骤输出 verbose/兼容回退缓存诊断，不掩盖真实构建失败；ccache 仍启用并使用一次性 GitHub-hosted VM 上的默认目录，不跨 job 恢复或保存编译缓存。PR X86 的依赖归档缓存有意从恢复并保存改为**只恢复**（`actions/cache/restore@v5`），防止 PR 上下文将归档写回共享缓存；这项策略并不只适用于独立 benchmark。
 
-**Daily CI / Build Performance X86** 配置（`.github/workflows/daily_test.yml`, `profile=build-performance`）每周一 UTC 03:23 测 upstream `main`，也可通过 Actions 手动运行。它不是 PR required check，使用独立 concurrency、Ubuntu 24.04 hosted runner、180 分钟超时和 14 天报告保留期。工作流进入默认分支后，可运行：
+**Nightly CI / Build Performance X86** 配置（`.github/workflows/daily_test.yml`, `profile=build-performance`）每周一 UTC 03:23 测 upstream `main`，也可通过 Actions 手动运行。它不是 PR required check，使用独立 concurrency、Ubuntu 24.04 hosted runner、180 分钟超时和 14 天报告保留期。工作流进入默认分支后，可运行：
 
 ```bash
 gh workflow run daily_test.yml --ref main -f profile=build-performance -f ref=main
@@ -191,7 +191,7 @@ pip install wheelhouse/pyvsag-*.whl
 
 `make pyvsag` 在仓库根目录运行 `scripts/python/local_build_wheel.sh`，并把 wheel 写入 `wheelhouse/`。
 有 Docker 时通过 cibuildwheel 在 `manylinux_2_28` 镜像中构建，并在镜像内运行 `tests/python` 的一部分用例，
-不会改动宿主机环境。没有 Docker 时退回普通的 `python -m build`，把 wheel 安装到当前虚拟环境，并针对它运行
+不会改动宿主机环境，随后运行 `scripts/python/check_wheel_libs.py`，如果 wheel 打包或链接了 libgfortran、libquadmath、libaio、liburing 就会失败（当 `VSAG_USE_SYSTEM_DEPS` 不是 `OFF` 时跳过，因为系统 OpenBLAS 会引入 libgfortran）。没有 Docker 时退回普通的 `python -m build`，把 wheel 安装到当前虚拟环境，并针对它运行
 `tests/python`；这样得到的 wheel 带 `linux_<arch>` 标签，而不是 `manylinux_2_28`。如果当前不在虚拟环境中，
 脚本会在仓库内创建 `.venv/`。
 

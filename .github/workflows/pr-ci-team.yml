@@ -31,10 +31,10 @@ jobs:
     outputs:
       cpp: ${{ steps.changes.outputs.cpp }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v4
         id: changes
         with:
           filters: |
@@ -71,7 +71,7 @@ jobs:
     steps:
       - name: Prepare writable check home
         run: mkdir -p "$HOME"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -93,6 +93,7 @@ jobs:
           python3 -m unittest tests/scripts/test_asan_artifact_workflow.py
           python3 -m unittest tests/scripts/test_toolchain_compatibility.py
           python3 -m unittest tests/scripts/test_python_license.py
+          python3 -m unittest tests/scripts/test_daily_workflow.py
           python3 -m unittest tests/scripts/test_team_test_shards.py
           python3 -m unittest tests/scripts/test_team_test_timings.py
           python3 -m unittest tests/scripts/test_team_mixed.py
@@ -128,7 +129,7 @@ jobs:
     steps:
       - name: Prepare writable job home
         run: mkdir -p "$HOME"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -308,7 +309,7 @@ jobs:
           pending.rename(meta / 'complete.json')
           PY
       - name: Upload small test plan
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: team-plan-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -321,7 +322,7 @@ jobs:
           retention-days: 3
       - name: Upload build diagnostics
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: team-build-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: ci-logs/
@@ -482,7 +483,7 @@ jobs:
           PY
       - name: Upload small test results
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: team-results-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -492,7 +493,7 @@ jobs:
           retention-days: 3
       - name: Upload test diagnostics
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: team-test-diagnostics-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -554,7 +555,7 @@ jobs:
           PY
       - name: Upload small compatibility result
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: team-compatibility-result-${{ github.run_id }}-${{ github.run_attempt }}
           path: ci-logs/compatibility-result.json
@@ -562,7 +563,7 @@ jobs:
           retention-days: 3
       - name: Upload compatibility diagnostics
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: team-compatibility-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: ci-logs/
@@ -589,26 +590,26 @@ jobs:
       - name: Report skipped Team checks
         if: needs.changes.result == 'success' && needs.changes.outputs.cpp == 'false'
         run: echo 'Team Linux checks skipped because no relevant files changed.' >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         if: needs.changes.outputs.cpp == 'true'
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
       - name: Download small test plan
         if: needs.changes.outputs.cpp == 'true' && needs.build.result == 'success'
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: team-plan-${{ github.run_id }}-${{ github.run_attempt }}
           path: ci-summary/plan
       - name: Download small test results
         if: needs.changes.outputs.cpp == 'true' && needs.build.result == 'success'
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           pattern: team-results-*-${{ github.run_id }}-${{ github.run_attempt }}
           path: ci-summary/results
       - name: Download small compatibility result
         if: needs.changes.outputs.cpp == 'true' && needs.build.result == 'success'
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: team-compatibility-result-${{ github.run_id }}-${{ github.run_attempt }}
           path: ci-summary/compatibility
@@ -656,7 +657,7 @@ jobs:
             --output-dir ci-summary/timings
       - name: Upload case and example timing CSVs
         if: ${{ always() && hashFiles('ci-summary/timings/test-timings.csv') != '' }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: team-test-timings-${{ github.run_id }}-${{ github.run_attempt }}
           path: ci-summary/timings/*.csv
@@ -664,7 +665,7 @@ jobs:
           retention-days: 30
       - name: Upload merged test summary
         if: ${{ !cancelled() && hashFiles('ci-summary/summary.json') != '' }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: team-summary-${{ github.run_id }}-${{ github.run_attempt }}
           path: ci-summary/summary.json
@@ -673,7 +674,7 @@ jobs:
       - name: Download build timing diagnostics
         if: always() && needs.changes.outputs.cpp == 'true'
         continue-on-error: true
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: team-build-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: ci-summary/build

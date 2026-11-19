@@ -13,7 +13,13 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <condition_variable>
 #include <functional>
+#include <mutex>
+#include <numeric>
+#include <random>
 #include <sstream>
 #include <thread>
 #include <utility>
@@ -89,6 +95,87 @@ TEST_CASE("HGraph batch build stays searchable without an upper level",
 namespace vsag {
 namespace {
 
+class CacheCandidateScheduleMutex final : public MutexArray {
+    MutexArrayPtr wrapped_;
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    bool first_ready_ = false, prefix_ready_ = false, first_block_done_ = false;
+    bool first_lock_ = true, start_gate_ = true, prefix_gate_ = true, trace_gate_ = true;
+    std::function<void(int)> trace_;
+    uint32_t block_size_;
+    void
+    wait(std::unique_lock<std::mutex>& lock, const std::function<bool()>& ready) {
+        if (not cv_.wait_for(lock, std::chrono::seconds(10), ready)) {
+            throw std::runtime_error(
+                "cache candidate schedule timed out: requires two contiguous refine blocks, "
+                "with node 0 paused until the second block completes its first 32 nodes");
+        }
+    }
+
+public:
+    CacheCandidateScheduleMutex(MutexArrayPtr wrapped,
+                                uint32_t block_size,
+                                std::function<void(int)> trace)
+        : wrapped_(std::move(wrapped)), trace_(std::move(trace)), block_size_(block_size) {
+    }
+    void
+    Lock(uint32_t id) override {
+        {
+            std::unique_lock lock(mutex_);
+            if (id == 0 && first_lock_) {
+                first_lock_ = false;
+                first_ready_ = true;
+                cv_.notify_all();
+                wait(lock, [&] { return prefix_ready_; });
+            }
+        }
+        wrapped_->Lock(id);
+    }
+    void
+    Unlock(uint32_t id) override {
+        wrapped_->Unlock(id);
+        if (id == block_size_ - 1) {
+            std::lock_guard lock(mutex_);
+            first_block_done_ = true;
+            cv_.notify_all();
+        }
+    }
+    void
+    SharedLock(uint32_t id) override {
+        {
+            std::unique_lock lock(mutex_);
+            if (id == block_size_ && start_gate_) {
+                start_gate_ = false;
+                wait(lock, [&] { return first_ready_; });
+            }
+            if (id == block_size_ + 32 && prefix_gate_) {
+                prefix_gate_ = false;
+                trace_(0);
+                prefix_ready_ = true;
+                cv_.notify_all();
+                wait(lock, [&] { return first_block_done_; });
+            }
+            if (id == 1 && trace_gate_) {
+                trace_gate_ = false;
+                trace_(1);
+            }
+        }
+        wrapped_->SharedLock(id);
+    }
+    void
+    SharedUnlock(uint32_t id) override {
+        wrapped_->SharedUnlock(id);
+    }
+    void
+    Resize(uint32_t count) override {
+        wrapped_->Resize(count);
+    }
+    uint64_t
+    GetMemoryUsage() override {
+        return wrapped_->GetMemoryUsage();
+    }
+};
+
 // Schedule a competing reverse-edge update at the first point where the forward writer
 // releases its node lock. This makes the lost-update interleaving reproducible without sleeps.
 class CacheRefineInterleavingMutex final : public MutexArray {
@@ -135,6 +222,32 @@ private:
 
 class HGraphCacheTestAccess {
 public:
+    static void
+    ScheduleStaleCandidate(HGraph& graph, bool& full_entry, bool& orphaned) {
+        // Match the failing GCC level entry while keeping the witness independent
+        // of the standard library's level distribution and upper-layer RNG
+        // implementation.
+        // This data/entry witness needs two 128-node blocks: 127 finishes block one,
+        // 128 starts block two, and 160 gates it after the prefix 128..159. Fail
+        // explicitly if blocking changes instead of silently losing the race witness.
+        REQUIRE(HGraph::cache_refine_block_size_ == 128);
+        graph.mult_ = 0.0;
+        graph.entry_point_id_ = 66;
+        graph.neighbors_mutex_ = std::make_shared<CacheCandidateScheduleMutex>(
+            graph.neighbors_mutex_,
+            HGraph::cache_refine_block_size_,
+            [&graph, &full_entry, &orphaned](int stage) {
+                Vector<InnerIdType> neighbors(graph.allocator_);
+                graph.bottom_graph_->GetNeighbors(graph.entry_point_id_, neighbors);
+                if (stage == 0) {
+                    full_entry = neighbors.size() == graph.bottom_graph_->MaximumDegree();
+                } else {
+                    orphaned = std::find(neighbors.begin(), neighbors.end(), 0) == neighbors.end();
+                }
+            });
+        graph.searcher_->SetMutexArray(graph.neighbors_mutex_);
+    }
+
     static void
     DisableUpperLevels(HGraph& graph) {
         graph.mult_ = 0.0;
@@ -343,6 +456,118 @@ TEST_CASE("HGraph cache refinement joins missed and warm components",
             CHECK(result->GetIds()[0] == ids[i]);
             CHECK(result->GetDistances()[0] == 0.0F);
             CHECK(result->GetDim() == count);
+        }
+    }
+}
+
+TEST_CASE("HGraph cache build connects a miss rejected by stale reverse candidates",
+          "[ut][hgraph][cache][concurrent]") {
+    const auto threads = GENERATE(2, 4);
+    const auto degree_limit = GENERATE(4, 16);
+    constexpr int64_t count = 200;
+    constexpr int64_t dim = 32;
+    vsag::IndexCommonParam common;
+    common.dim_ = dim;
+    common.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto json = vsag::JsonType::Parse(R"({
+        "base_quantization_type":"fp32", "max_degree":16,
+        "ef_construction":50, "build_thread_count":1
+    })");
+    json["max_degree"].SetInt(degree_limit);
+    auto source_params = vsag::HGraph::CheckAndMappingExternalParam(json, common);
+    vsag::HGraph source(source_params, common);
+    std::mt19937 rng(7);
+    std::vector<float> vectors(count * dim);
+    for (auto& value : vectors) {
+        // Pin the original GCC uniform[-1,1] input without relying on the library's
+        // uniform_real_distribution implementation on other platforms.
+        value = std::ldexp(static_cast<float>(rng()), -31) - 1.0F;
+    }
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 1);
+    std::vector<std::string> source_ids(count);
+    for (int64_t i = 0; i < count; ++i) {
+        source_ids[i] = "A_" + std::to_string(i);
+    }
+    auto data = MakeBuildDataset(ids, vectors, count, dim);
+    data->SourceID(source_ids.data());
+    REQUIRE(source.Build(data).empty());
+    std::stringstream cache;
+    source.ExportCache(cache);
+    for (int64_t i = 0; i < count; ++i) {
+        source_ids[i] = "B_" + std::to_string(i);
+    }
+    json["build_thread_count"].SetInt(threads);
+    auto target_params = vsag::HGraph::CheckAndMappingExternalParam(json, common);
+    vsag::HGraph target(target_params, common);
+    target.ImportCache(cache);
+    bool full_entry = false;
+    bool orphaned = false;
+    vsag::HGraphCacheTestAccess::ScheduleStaleCandidate(target, full_entry, orphaned);
+    REQUIRE(target.Build(data).empty());
+    // Node 0 selected the empty entry. The other worker completed nodes128..159
+    // before its forward write; the now-full entry pruned its only proposed
+    // backlink. Nodes 160..199 wait until the first block finishes, making this a
+    // real two-worker schedule.
+    if (degree_limit == 16) {
+        REQUIRE(full_entry);
+        REQUIRE(orphaned);
+    }
+    const auto stats = vsag::JsonType::Parse(target.GetStats());
+    CHECK(stats["build_cache_hit_nodes"].GetUint64() == 0);
+    CHECK(stats["build_cache_missed_nodes"].GetUint64() == count);
+    std::vector<uint64_t> incoming(count);
+    for (uint64_t id = 0; id < count; ++id) {
+        const auto neighbors = vsag::HGraphCacheTestAccess::Neighbors(target, id);
+        CHECK(neighbors.size() <= static_cast<uint64_t>(degree_limit));
+        for (auto neighbor : neighbors) {
+            REQUIRE(neighbor < count);
+            CHECK(neighbor != id);
+            ++incoming[neighbor];
+        }
+    }
+    for (auto degree : incoming) {
+        CHECK(degree > 0);
+    }
+    // A saturated degree-four graph also exercises repairs that must preserve the
+    // entry's existing spanning tree. Every miss must be reachable after the build.
+    std::vector<bool> reachable(count);
+    std::vector<vsag::InnerIdType> frontier{66};
+    reachable[66] = true;
+    for (uint64_t cursor = 0; cursor < frontier.size(); ++cursor) {
+        for (auto neighbor : vsag::HGraphCacheTestAccess::Neighbors(target, frontier[cursor])) {
+            if (not reachable[neighbor]) {
+                reachable[neighbor] = true;
+                frontier.push_back(neighbor);
+            }
+        }
+    }
+    CHECK(frontier.size() == count);
+    std::stringstream serialized;
+    vsag::IOStreamWriter writer(serialized);
+    target.Serialize(writer);
+    vsag::HGraph restored(target_params, common);
+    vsag::IOStreamReader reader(serialized);
+    restored.Deserialize(reader);
+    for (const auto* index : {&target, &restored}) {
+        // Preserve the original ef50 self-query assertion. The degree16 witness also
+        // checks the complete query set; degree4 checks the same first query plus the
+        // full structural reachability invariant above, without assuming exact ANN recall.
+        const auto query_count = degree_limit == 16 ? count : 1;
+        for (int64_t i = 0; i < query_count; ++i) {
+            auto query = vsag::Dataset::Make();
+            query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data() + i * dim)->Owner(false);
+            CHECK(index->CalcDistanceById(vectors.data() + i * dim, ids[i]) == 0.0F);
+            auto result = index->KnnSearch(query, 10, R"({"hgraph":{"ef_search":50}})", nullptr);
+            bool found_self = false;
+            for (int64_t k = 0; k < result->GetDim(); ++k) {
+                if (result->GetIds()[k] == ids[i]) {
+                    CHECK(result->GetDistances()[k] < 1e-4F);
+                    found_self = true;
+                }
+            }
+            INFO("query label=" << ids[i]);
+            CHECK(found_self);
         }
     }
 }

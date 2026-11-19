@@ -55,7 +55,7 @@ jobs:
     outputs:
       sha: ${{ steps.source.outputs.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.branch }}
           persist-credentials: false
@@ -85,7 +85,7 @@ jobs:
           swap-storage: true
 
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ needs.resolve-source.outputs.sha }}
           fetch-depth: 0
@@ -169,7 +169,7 @@ jobs:
           done
 
       - name: Create GitHub Release and Upload Assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ inputs.tag_name }}
           name: ${{ inputs.tag_name }}
@@ -192,7 +192,7 @@ jobs:
           - clang20
         abi: [0, 1]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.workflow_sha }}
           persist-credentials: false
@@ -224,7 +224,7 @@ jobs:
           - clang13
         abi: [0, 1]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.workflow_sha }}
           persist-credentials: false
@@ -250,7 +250,7 @@ jobs:
           - {arch: x86_64, runner: ubuntu-latest}
           - {arch: aarch64, runner: ubuntu-24.04-arm}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Prepare build environment
@@ -264,7 +264,7 @@ jobs:
           CIBW_ARCHS: ${{ matrix.arch }}
           CIBW_ENVIRONMENT: ${{ matrix.arch == 'x86_64' && 'VSAG_OPENBLAS_TARGET=GENERIC' || '' }}
           CIBW_TEST_COMMAND: pip install numpy pytest && python /project/tests/python/run_test.py && python /project/scripts/python/smoke_test_wheel.py
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         if: ${{ github.event_name == 'release' || inputs.arch == '' || inputs.arch == matrix.arch }}
         with:
           name: wheels-${{ matrix.arch }}
@@ -277,7 +277,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'wheels')) && (github.event_name == 'release' && github.event.action == 'published' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')) }}
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v7
         with:
           path: dist
           merge-multiple: true
@@ -300,7 +300,7 @@ jobs:
           verbose: true
       - name: Upload to GitHub Release
         if: steps.list_files.outputs.should_publish == 'true'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*.whl
   index-generate:
@@ -312,7 +312,7 @@ jobs:
       image: ghcr.io/antgroup/vsag:ci-main-openblas
     steps:
       - name: Get Repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: '0'
       - name: Determine version to use
@@ -348,7 +348,7 @@ jobs:
             --pattern "random_512d_10K.bin" \
             || echo "Test dataset not found in release, will be generated"
       - name: Fetch Tag Branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ steps.set-version.outputs.version }}
           path: vsag_tag

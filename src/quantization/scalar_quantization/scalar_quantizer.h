@@ -73,6 +73,17 @@ public:
     ComputeDistImpl(Computer<ScalarQuantizer>& computer, const uint8_t* codes, float* dists) const;
 
     void
+    ComputeDistsBatch4Impl(Computer<ScalarQuantizer>& computer,
+                           const uint8_t* codes1,
+                           const uint8_t* codes2,
+                           const uint8_t* codes3,
+                           const uint8_t* codes4,
+                           float& dist1,
+                           float& dist2,
+                           float& dist3,
+                           float& dist4) const;
+
+    void
     SerializeImpl(StreamWriter& writer);
 
     void

@@ -27,12 +27,14 @@
 
 #include "impl/transform/transformer_headers.h"
 #include "quantization/caq_encoder.h"
+#include "simd/bf16_simd.h"
 #include "simd/fp32_simd.h"
 #include "simd/normalize.h"
 #include "simd/pqfs_simd.h"
 #include "simd/rabitq_simd.h"
 #include "typing.h"
 #include "utils/float_utils.h"
+#include "utils/half_input.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
@@ -320,7 +322,14 @@ RaBitQuantizer<metric>::TrainImpl(const float* data, uint64_t count) {
         centroid_[d] = centroid_[d] / (float)count;
     }
 
-    rom_->Train(data, count);
+    return this->finish_training(data, count);
+}
+
+template <MetricType metric>
+bool
+RaBitQuantizer<metric>::finish_training(const float* rotation_input, uint64_t count) {
+    // Both ROM and FHT train only their rotations; neither reads input rows.
+    rom_->Train(rotation_input, count);
 
     // transform centroid
     Vector<float> rp_centroids(this->dim_, 0, this->allocator_);
@@ -329,6 +338,66 @@ RaBitQuantizer<metric>::TrainImpl(const float* data, uint64_t count) {
 
     this->is_trained_ = true;
     return true;
+}
+
+template <MetricType metric>
+bool
+RaBitQuantizer<metric>::TrainHalf(const void* data, uint64_t count, DataTypes data_type) {
+    // Match Quantizer::Train: an already trained model does not inspect the input.
+    if (this->is_trained_) {
+        return true;
+    }
+    if (count == 0 or data == nullptr) {
+        return false;
+    }
+    const bool supported_type =
+        data_type == DataTypes::DATA_TYPE_FP16 or data_type == DataTypes::DATA_TYPE_BF16;
+    CHECK_ARGUMENT(supported_type, "RaBitQ half training requires FP16 or BF16 input");
+    const auto dim = static_cast<uint64_t>(this->original_dim_);
+    CHECK_ARGUMENT(dim != 0, "RaBitQ input element count overflows");
+    CHECK_ARGUMENT(count <= std::numeric_limits<uint64_t>::max() / dim,
+                   "RaBitQ input element count overflows");
+    CHECK_ARGUMENT(count * dim <= std::numeric_limits<size_t>::max() / sizeof(float),
+                   "RaBitQ converted input size overflows");
+    constexpr uint64_t train_block_rows = 4096;
+    const uint64_t rows =
+        pca_dim_ == this->original_dim_ ? std::min(count, train_block_rows) : count;
+    Vector<float> scratch(rows * dim, this->allocator_);
+    const auto* bytes = static_cast<const uint8_t*>(data);
+    const auto decode = [&](uint64_t begin, uint64_t size) {
+        for (uint64_t i = 0; i < size; ++i) {
+            uint16_t value;
+            std::memcpy(&value, bytes + (begin * dim + i) * sizeof(value), sizeof(value));
+            scratch[i] = data_type == DataTypes::DATA_TYPE_FP16 ? half_input::FP16ToFloat(value)
+                                                                : generic::BF16ToFloat(value);
+        }
+    };
+    if (pca_dim_ != this->original_dim_) {
+        decode(0, count * dim);
+        return this->TrainImpl(scratch.data(), count);
+    }
+    std::fill(centroid_.begin(), centroid_.end(), 0.0F);
+    for (uint64_t begin = 0; begin < count; begin += rows) {
+        const auto block_rows = std::min(rows, count - begin);
+        decode(begin, block_rows * dim);
+        for (uint64_t row = 0; row < block_rows; ++row) {
+            for (uint64_t d = 0; d < dim; ++d) {
+                centroid_[d] += scratch[row * dim + d];
+            }
+        }
+    }
+    for (uint64_t d = 0; d < dim; ++d) {
+        centroid_[d] = centroid_[d] / static_cast<float>(count);
+    }
+    // Non-null bounded buffer: current ROM/FHT Train implementations ignore input contents.
+    return this->finish_training(scratch.data(), count);
+}
+
+template <MetricType metric>
+bool
+RaBitQuantizer<metric>::ReTrainHalf(const void* data, uint64_t count, DataTypes data_type) {
+    this->is_trained_ = false;
+    return this->TrainHalf(data, count, data_type);
 }
 
 template <MetricType metric>
