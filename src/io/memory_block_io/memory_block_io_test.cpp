@@ -65,3 +65,37 @@ TEST_CASE("MemoryBlockIO Shrink Test", "[ut][MemoryBlockIO]") {
     io->Shrink(2000);
     REQUIRE(io->Size() == 1000);
 }
+
+TEST_CASE("MemoryBlockIO blocks start on a cache line boundary", "[ut][MemoryBlockIO]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    for (const uint64_t block_size : {1024ULL, 4096ULL, 1024ULL * 1024ULL}) {
+        constexpr uint64_t block_count = 3;
+        auto io = std::make_unique<MemoryBlockIO>(block_size, allocator.get());
+        std::vector<uint8_t> data(block_count * block_size);
+        for (uint64_t i = 0; i < data.size(); ++i) {
+            data[i] = static_cast<uint8_t>(i % 251);
+        }
+        io->Write(data.data(), data.size(), 0);
+
+        for (uint64_t block = 0; block < block_count; ++block) {
+            CAPTURE(block_size, block);
+            // A read inside one block borrows the stored bytes, so its address is the block start.
+            auto lease = io->Acquire(block * block_size, 64);
+            REQUIRE(lease);
+            const auto address = reinterpret_cast<uintptr_t>(lease.Data());
+            REQUIRE(address % BlockMemoryBackend::kBlockAlignment == 0);
+            REQUIRE(memcmp(lease.Data(), data.data() + block * block_size, 64) == 0);
+        }
+
+        // Dropping blocks and growing again releases and aligns the right pointers.
+        io->Shrink(block_size);
+        io->Write(data.data(), data.size(), 0);
+        std::vector<uint8_t> read_data(data.size());
+        io->Read(read_data.size(), 0, read_data.data());
+        REQUIRE(read_data == data);
+        auto lease = io->Acquire((block_count - 1) * block_size, 64);
+        REQUIRE(lease);
+        const auto address = reinterpret_cast<uintptr_t>(lease.Data());
+        REQUIRE(address % BlockMemoryBackend::kBlockAlignment == 0);
+    }
+}
