@@ -9,6 +9,9 @@ on:
       runner:
         type: string
         default: vsag-linux-x64
+      slot-app-id:
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -104,11 +107,112 @@ jobs:
           python3 -m unittest tests/scripts/test_compatibility_inputs.py
           python3 -m unittest tests/scripts/test_compatibility_cache.py
 
+  slot:
+    name: Acquire Team CI slot
+    needs: changes
+    if: inputs.slot-app-id != '' && needs.changes.outputs.cpp == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      checks: read
+    outputs:
+      runner: ${{ steps.wait.outputs.runner }}
+    steps:
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        id: wait
+        env:
+          SLOT_APP_ID: ${{ inputs.slot-app-id }}
+        with:
+          script: |
+            const expected = {
+              appId: process.env.SLOT_APP_ID,
+              repository: `${context.repo.owner}/${context.repo.repo}`,
+              repositoryId: String(context.payload.repository?.id),
+              pullRequest: String(context.payload.pull_request?.number),
+              runId: process.env.GITHUB_RUN_ID,
+              attempt: process.env.GITHUB_RUN_ATTEMPT,
+              headSha: process.env.TEAM_HEAD_SHA,
+              testSha: process.env.TEAM_TEST_SHA,
+            };
+            const decimal = /^[1-9][0-9]{0,19}$/;
+            const sha = /^[a-f0-9]{40}$/;
+            if (context.eventName !== "pull_request" || expected.repository !== "antgroup/vsag" ||
+                context.payload.pull_request?.base?.ref !== "main" ||
+                !["appId", "repositoryId", "pullRequest", "runId", "attempt"].every(k => decimal.test(expected[k])) ||
+                !sha.test(expected.headSha) || !sha.test(expected.testSha)) {
+              throw new Error("Invalid Team CI slot context");
+            }
+
+            // BEGIN SLOT RECEIPT
+            function readAllocation(checks, expected, nowMs) {
+              const name = "Team CI slot allocation";
+              const id = `pr/${expected.repositoryId}/${expected.runId}/${expected.attempt}`;
+              const selected = checks.filter(check =>
+                check.name === name && String(check.app?.id) === expected.appId && check.external_id === id
+              );
+              if (selected.length > 1) throw new Error("Duplicate Team CI allocation receipts");
+              if (selected.length === 0) return null;
+              const check = selected[0];
+              if (check.head_sha !== expected.testSha || check.status !== "completed" || check.conclusion !== "neutral") {
+                throw new Error("Team CI receipt has an invalid check identity");
+              }
+              const text = check.output?.text;
+              if (typeof text !== "string" || text.length > 4096) throw new Error("Invalid Team CI receipt size");
+              const value = JSON.parse(text);
+              const keys = ["repository", "repositoryId", "pullRequest", "runId", "attempt", "headSha", "testSha"];
+              if (value?.schemaVersion !== 1 || keys.some(key => value[key] !== expected[key])) {
+                throw new Error("Team CI assignment does not match this PR attempt");
+              }
+              if (!Number.isSafeInteger(value.observedAtMs) || !Number.isSafeInteger(value.expiresAtMs) ||
+                  value.observedAtMs <= 0 || value.observedAtMs > nowMs || value.expiresAtMs <= value.observedAtMs ||
+                  typeof value.runner !== "string" || value.runner.length > 63 ||
+                  !/^vsag-linux-[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value.runner) ||
+                  typeof value.slot !== "string" || !/^[a-z][a-z0-9-]{0,63}$/.test(value.slot) ||
+                  typeof value.allocationId !== "string" || !/^[a-f0-9]{32}$/.test(value.allocationId)) {
+                throw new Error("Malformed Team CI allocation receipt");
+              }
+              if (nowMs >= value.expiresAtMs) return null;
+              return {runner: value.runner, slot: value.slot, allocationId: value.allocationId};
+            }
+            // END SLOT RECEIPT
+
+            const deadline = Date.now() + 55 * 60 * 1000;
+            const retryable = new Set([404, 408, 429, 500, 502, 503, 504]);
+            core.info("Waiting for the trusted Team CI dispatcher to allocate a slot.");
+            while (Date.now() < deadline) {
+              let checks;
+              try {
+                checks = await github.paginate(github.rest.checks.listForRef, {
+                  ...context.repo,
+                  ref: expected.testSha,
+                  check_name: "Team CI slot allocation",
+                  app_id: Number(expected.appId),
+                  filter: "all",
+                  per_page: 100,
+                });
+              } catch (error) {
+                if (!retryable.has(error.status)) throw error;
+              }
+              if (checks) {
+                const receipt = readAllocation(checks, expected, Date.now());
+                if (receipt) {
+                  core.setOutput("runner", receipt.runner);
+                  core.info(`Assigned Team CI slot ${receipt.slot}`);
+                  return;
+                }
+              }
+              await new Promise(resolve => setTimeout(resolve, 30000));
+            }
+            throw new Error("Team CI slot wait expired. Verify the dispatcher and rerun all jobs.");
+
   build:
     name: Team ASan Build
-    needs: changes
-    if: needs.changes.outputs.cpp == 'true'
-    runs-on: ${{ inputs.runner }}
+    needs: [changes, slot]
+    if: >-
+      !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.cpp == 'true' &&
+      ((inputs.slot-app-id == '' && needs.slot.result == 'skipped') ||
+       (inputs.slot-app-id != '' && needs.slot.result == 'success' && needs.slot.outputs.runner != ''))
+    runs-on: ${{ inputs.slot-app-id != '' && needs.slot.outputs.runner || inputs.runner }}
     timeout-minutes: 120
     container:
       image: ${{ inputs.image }}
@@ -332,8 +436,9 @@ jobs:
 
   tests:
     name: Team Test shard ${{ matrix.shard }}
-    needs: build
-    runs-on: ${{ inputs.runner }}
+    needs: [build, slot]
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    runs-on: ${{ inputs.slot-app-id != '' && needs.slot.outputs.runner || inputs.runner }}
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -506,8 +611,9 @@ jobs:
 
   compatibility:
     name: Team Index Compatibility
-    needs: build
-    runs-on: ${{ inputs.runner }}
+    needs: [build, slot]
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    runs-on: ${{ inputs.slot-app-id != '' && needs.slot.outputs.runner || inputs.runner }}
     timeout-minutes: 120
     container:
       image: ${{ inputs.image }}

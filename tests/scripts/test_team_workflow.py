@@ -309,7 +309,7 @@ class TeamWorkflowTest(unittest.TestCase):
         for name in ('Upload build diagnostics', 'Upload test diagnostics', 'Upload small test results'):
             self.assertIn('if: always()', step(TEAM, name))
         self.assertNotIn('Format and helper checks', job(TEAM, 'build'))
-        self.assertIn('if: needs.changes.outputs.cpp == \'true\'', job(TEAM, 'build'))
+        self.assertIn('needs.changes.outputs.cpp == \'true\'', job(TEAM, 'build'))
 
     def test_diagnostics_keep_logs_and_results_but_exclude_example_working_files(self):
         upload = step(TEAM, 'Upload test diagnostics')
@@ -496,7 +496,7 @@ class TeamWorkflowTest(unittest.TestCase):
                        'test_compatibility_cache.py'):
             self.assertIn('python3 -m unittest tests/scripts/' + script, body)
         self.assertIn("unittest discover -s scripts/linters -p 'test_*.py'", body)
-        self.assertIn('needs: changes', job(TEAM, 'build'))
+        self.assertIn('needs: [changes, slot]', job(TEAM, 'build'))
         self.assertNotIn('needs: [changes, checks]', job(TEAM, 'build'))
         self.assertIn('needs: [changes, checks, build, tests, compatibility]', job(TEAM, 'summary'))
         self.assertIn('CHECK_RESULT: ${{ needs.checks.result }}', job(TEAM, 'summary'))
@@ -529,7 +529,7 @@ class TeamWorkflowTest(unittest.TestCase):
         compatibility = job(TEAM, 'compatibility')
         tests = job(TEAM, 'tests')
         self.assertIn('name: Team Index Compatibility', compatibility)
-        self.assertIn('needs: build', compatibility)
+        self.assertIn('needs: [build, slot]', compatibility)
         self.assertNotIn('needs: tests', compatibility)
         self.assertNotIn('Check index compatibility', tests)
         self.assertNotIn('COMPATIBILITY_OUTCOME', tests)
