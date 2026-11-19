@@ -4,10 +4,10 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <stdexcept>
 #include <vector>
 
 #include "lite/rabitq_constants.h"
+#include "lite/rabitq_transform.h"
 #include "simd/kernels/rabitq_pack.h"
 
 // Encoded record data structures and the SoA (structure-of-arrays) storage
@@ -65,9 +65,9 @@ struct EncodedRecords {
 
     void
     Append(Encoded code) {
-        if (code.filter.size() != FilterBytes() or code.supplement.size() != SupplementBytes()) {
-            throw std::runtime_error("invalid encoded record");
-        }
+        codec_require(
+            code.filter.size() == FilterBytes() and code.supplement.size() == SupplementBytes(),
+            "invalid encoded record");
         metadata.push_back({code.norm,
                             code.code_norm,
                             code.error,
@@ -80,10 +80,9 @@ struct EncodedRecords {
 
     void
     Replace(uint64_t slot, Encoded code) {
-        if (slot >= Size() or code.filter.size() != FilterBytes() or
-            code.supplement.size() != SupplementBytes()) {
-            throw std::runtime_error("invalid encoded replacement");
-        }
+        codec_require(slot < Size() and code.filter.size() == FilterBytes() and
+                          code.supplement.size() == SupplementBytes(),
+                      "invalid encoded replacement");
         metadata[slot] = {code.norm,
                           code.code_norm,
                           code.error,
@@ -98,9 +97,7 @@ struct EncodedRecords {
 
     void
     RemoveSwap(uint64_t slot) {
-        if (slot >= Size()) {
-            throw std::runtime_error("encoded removal outside storage");
-        }
+        codec_require(slot < Size(), "encoded removal outside storage");
         const uint64_t last = Size() - 1;
         if (slot != last) {
             metadata[slot] = metadata[last];
@@ -118,9 +115,7 @@ struct EncodedRecords {
 
     [[nodiscard]] EncodedView
     At(uint64_t id) const {
-        if (id >= Size()) {
-            throw std::runtime_error("encoded record outside storage");
-        }
+        codec_require(id < Size(), "encoded record outside storage");
         return {filters.data() + id * FilterBytes(),
                 supplements.data() + id * SupplementBytes(),
                 metadata[id]};

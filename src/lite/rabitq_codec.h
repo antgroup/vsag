@@ -12,6 +12,8 @@
 //
 // Include just the header(s) you need when only a subset of the codec is used.
 
+#include <numeric>
+
 #include "lite/rabitq_constants.h"
 #include "lite/rabitq_decode.h"
 #include "lite/rabitq_encode.h"
