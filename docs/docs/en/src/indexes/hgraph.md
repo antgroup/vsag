@@ -478,46 +478,20 @@ auto result = index->KnnSearch(
 
 An optional `early_stop` object lets a query finish before it spends the whole
 `ef_search` budget, once the remaining candidates are clearly farther than the results it
-already holds:
+already holds. The simplest form turns it on with the default `alpha`:
+
+```json
+{"hgraph":{"ef_search":600,"early_stop":{"type":"distance"}}}
+```
+
+When `alpha` is omitted, it is chosen from `k`: `1.5` at `k = 10`, `1.15` for `k >= 100`,
+linear in `log10(k)` in between and rising to `1.85` at `k = 1`. To set it yourself, give it
+inside `early_stop`. `alpha` must be finite and at least 1; other keys inside `early_stop` are
+rejected.
 
 ```json
 {"hgraph":{"ef_search":600,"early_stop":{"type":"distance","alpha":1.1}}}
 ```
-
-Once the search holds `k` eligible results, it stops when the nearest candidate still
-waiting to be expanded is at least `alpha` times as far as the current kth result.
-Candidate admission and the normal fixed-ef termination are unchanged, so a query that never
-meets this condition runs exactly as it would without `early_stop`. Distances are VSAG
-scores: squared distance for `l2` and `1 - cosine` for `cosine`. For normalized vectors
-`1 - cosine` is half the squared L2 distance, so an `alpha` means the same for both metrics.
-A kth score of zero or below (`k` copies of the query already found; cosine rounding can make
-it slightly negative) ends the search at the next check. A distance `threshold`, if set, still
-filters the selected results afterwards and may return fewer than `k`.
-
-`alpha` must be finite and at least 1; other keys inside `early_stop` are rejected. For the
-same `ef_search`, a larger `alpha` follows the same traversal and stops later, so with FP32
-base codes and no reordering it never returns worse results. With quantized base codes the rule
-compares the traversal's approximate distances, and with reordering fewer candidates reach the
-reorder stage, so recall need not be monotone in `alpha`; calibrate it for each quantization
-and reorder setting.
-
-When `alpha` is omitted, it is chosen from `k`: `1.5` at `k = 10`, `1.15` for `k >= 100`,
-linear in `log10(k)` in between and rising to `1.85` at `k = 1`. A larger `k` puts the kth
-distance farther out, so the same ratio stops later. On three public datasets with 1M vectors
-and `cosine` scores (`k` = 10 and 100, recall targets 0.80 to 0.95, with 90%, 95% or 99% of
-queries required to reach the target), the defaults kept recall and query coverage wherever the
-fixed `ef_search` did, except in one configuration that required all ten of ten neighbours for
-99% of queries. Values calibrated per configuration ranged from 1.13 to 1.54 at `k = 10` (1.85
-in that configuration) and from 1.03 to 1.15 at `k = 100`; those below the default saved more
-work. Calibration and the check used separate queries: choose `alpha` on one set under the
-required recall and query coverage, then check quality and end-to-end time on another (see
-#2941).
-
-The rule is skipped when the search width (`ef_search`, raised to at least `k`) is at most
-1.25 times `k`: the search runs as if `early_stop` were absent, and the index logs a warning
-the first time this happens. That close to `k` the rule rarely ends a search early, while its
-own top-k state still costs time; in our measurements it saved under 2% of distance
-computations and lowered single-thread QPS by up to 7.4%.
 
 `early_stop` works with KNN search on `l2` or `cosine`, any base quantization, reordering (the
 rule acts on the traversal's base-code distances and the reorder stage then rescores the
@@ -528,11 +502,46 @@ same ranking), custom distance callbacks, range search, iterator search, search 
 fused RaBitQ split storage. When an MCI, hybrid-traversal or brute-force route answers the
 query, the search runs as before.
 
+On three public datasets with 1M vectors and `cosine` scores (`k` = 10 and 100, recall targets
+0.80 to 0.95, with 90%, 95% or 99% of queries required to reach the target), the defaults kept
+recall and query coverage wherever the fixed `ef_search` did, except in one configuration that
+required all ten of ten neighbours for 99% of queries. Values calibrated per configuration
+ranged from 1.13 to 1.54 at `k = 10` (1.85 in that configuration) and from 1.03 to 1.15 at
+`k = 100`; those below the default saved more work.
+
+The rule is skipped when the search width (`ef_search`, raised to at least `k`) is at most
+1.25 times `k`: the search runs as if `early_stop` were absent, and the index logs a warning
+the first time this happens. That close to `k` the rule rarely ends a search early, while its
+own top-k state still costs time; in our measurements it saved under 2% of distance
+computations and lowered single-thread QPS by up to 7.4%.
+
 A search that runs the rule reports `early_stop_count` in its statistics: 1 if the rule ended
 it and 0 if not; a batch reports how many of its queries the rule ended. The count is absent
 when the rule did not run: not requested, skipped near `k`, or answered by a route other than
 the graph traversal. In the search reasoning report, a search the rule ended gives
 `distance_early_stop` as its termination reason.
+
+To check quality, use separate queries for calibration and for the check, as the measurements
+above did: choose `alpha` on one set under the required recall and query coverage, then check
+quality and end-to-end time on another (see #2941). With quantized base codes or reordering,
+calibrate it for each quantization and reorder setting; the next paragraphs explain why.
+
+Once the search holds `k` eligible results, it stops when the nearest candidate still
+waiting to be expanded is at least `alpha` times as far as the current kth result.
+Candidate admission and the normal fixed-ef termination are unchanged, so a query that never
+meets this condition runs exactly as it would without `early_stop`. Distances are VSAG
+scores: squared distance for `l2` and `1 - cosine` for `cosine`. For normalized vectors
+`1 - cosine` is half the squared L2 distance, so an `alpha` means the same for both metrics.
+A kth score of zero or below (`k` copies of the query already found; cosine rounding can make
+it slightly negative) ends the search at the next check. A distance `threshold`, if set, still
+filters the selected results afterwards and may return fewer than `k`. A larger `k` puts the
+kth distance farther out, so the same ratio stops later; this is why the default `alpha` falls
+as `k` grows.
+
+For the same `ef_search`, a larger `alpha` follows the same traversal and stops later, so with
+FP32 base codes and no reordering it never returns worse results. With quantized base codes the
+rule compares the traversal's approximate distances, and with reordering fewer candidates reach
+the reorder stage, so recall need not be monotone in `alpha`.
 
 The rule is adapted from [Distance Adaptive Beam Search, Algorithm 2](https://arxiv.org/html/2505.15636v1#A2).
 This implementation keeps VSAG's fixed-width traversal and distance scores, so the paper's
