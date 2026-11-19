@@ -1,7 +1,8 @@
 # Index Parameters
 
-This page summarises the commonly used parameters for every VSAG index type. For the full
-enumeration, consult the source:
+This page summarises cross-index defaults and the top-level common fields. Each index page
+carries the complete list of public build and search keys for that index; the source remains
+the final authority:
 
 - Build parameter keys: `src/constants.cpp`
 - Public constants: `include/vsag/constants.h`
@@ -94,7 +95,7 @@ When `graph_type` is `pipnn`, HGraph and Pyramid also accept the following build
 The existing `alpha` field controls PiPNN's final robust pruning. `ef_construction` only tunes NSW
 and has no effect on PiPNN.
 
-HGraph additionally supports the experimental L2-only options `pipnn_adaptive_pruning` (default `false`) and `pipnn_adaptive_pruning_adjust_step` (default `0.06`). They adapt the final per-point pruning threshold during initial `Build`; see [HGraph adaptive PiPNN pruning](../indexes/hgraph.md). These options are not exposed by Pyramid.
+HGraph additionally supports the experimental L2-only options `pipnn_adaptive_pruning` (default `false`) and `pipnn_adaptive_pruning_adjust_step` (default `0.06`). They adapt the final per-point pruning threshold during initial `Build`; see [HGraph adaptive PiPNN pruning](../indexes/hgraph.md). Pyramid exposes the same two options; see its [build parameter table](../indexes/pyramid.md#build-parameters).
 
 At search time:
 
@@ -206,8 +207,11 @@ persistence semantics.
 
 MRLE with split RaBitQ uses `base_quantization_type: "tq"`,
 `tq_chain: "mrle, rabitq"`, `mrle_dim`, and the
-`rabitq_bits_per_dim_base`/`rabitq_bits_per_dim_precise` pair. It automatically reorders from the
-split base codes and retains original FP32 vectors for decode-only operations. See the
+`rabitq_bits_per_dim_base`/`rabitq_bits_per_dim_precise` pair. It reorders from the split base codes. Original FP32 vectors are **not** retained for this
+combination: Pyramid only auto-enables `store_raw_vector` when the transform quantizer needs raw
+vectors *and* the case is not MRLE with a RaBitQ split (`RequiresRawVectorForTransformQuantizer`
+and not `RequiresRawVectorForMRLERaBitQSplit`). HGraph differs and does auto-enable it for this
+exact combination. See the
 [Pyramid page](../indexes/pyramid.md#mrle-with-split-rabitq) for a complete configuration and
 storage/recall tradeoffs.
 
