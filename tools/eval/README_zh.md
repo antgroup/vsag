@@ -7,3 +7,4 @@
 - 网站：<https://vsag.io/docs/resources/eval.html>
 - 中文网站：<https://vsag.io/docs/zh/resources/eval.html>
 - 配置模板：[eval_template.yaml](eval_template.yaml)
+- Python 用法（`pyvsag.eval`、`pyvsag-eval`）：见上述中文文档的“Python 使用”章节

@@ -14,21 +14,15 @@
 # limitations under the License.
 
 
+include (${CMAKE_CURRENT_SOURCE_DIR}/eval_core_sources.cmake)
+
 set (eval_srcs
-    case/eval_case.cpp
-    case/search_eval_case.cpp
-    case/build_eval_case.cpp
+    ${VSAG_EVAL_CORE_SRCS}
     exporter/exporter.cpp
     exporter/formatter.cpp
-    monitor/monitor.cpp
-    monitor/latency_monitor.cpp
-    monitor/recall_monitor.cpp
-    monitor/memory_peak_monitor.cpp
-    monitor/duration_monitor.cpp
     monitor/http_server_monitor.cpp
-    eval_config.cpp
-    eval_dataset.cpp
-    evaluator.cpp
+    eval_config_loader.cpp
+    eval_dataset_hdf5.cpp
     eval_job.cpp)
 
 add_library (vsag_eval_common INTERFACE)
@@ -75,4 +69,18 @@ if (ENABLE_TESTS)
         ${HDF5_C_STATIC_LIBRARY}
         z dl)
     add_dependencies (eval_dataset_test hdf5 Catch2)
+
+    add_executable (vsag_eval_c_api_test
+        vsag_eval_c_api_test.cpp
+        ${VSAG_EVAL_CORE_SRCS}
+        vsag_eval_c_api.cpp)
+    target_include_directories (vsag_eval_c_api_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries (vsag_eval_c_api_test PRIVATE
+        Catch2::Catch2WithMain
+        vsag
+        simd
+        vsag_eval_common
+        vsag_src_common)
+    add_dependencies (vsag_eval_c_api_test Catch2)
 endif ()

@@ -134,6 +134,47 @@ global:
 可使用 [ann-benchmarks](https://github.com/erikbern/ann-benchmarks) 提供的 HDF5 格式数据集
 （如 `sift-128-euclidean.hdf5`、`gist-960-euclidean.hdf5`）。
 
+## Python 使用（`pyvsag.eval`）
+
+同一套测量内核也可以通过 `pyvsag` 在 Python 中使用。HDF5 与 YAML 支持为可选依赖：
+
+```bash
+pip install "pyvsag[eval]"   # 额外安装 h5py 与 pyyaml
+```
+
+### 编程接口
+
+```python
+import pyvsag
+from pyvsag.eval import EvalDataset, evaluate_build, evaluate_search, num_threads_building
+
+dataset = EvalDataset.from_hdf5("sift-128-euclidean.hdf5")      # 或 EvalDataset.from_arrays(...)
+with num_threads_building(4):                                    # 需在创建索引之前设置
+    index = pyvsag.Index("hgraph", build_param_json)
+    build = evaluate_build(index, dataset)
+search = evaluate_search(index, dataset, top_k=10, search_param=search_param_json)
+print(search["qps"], search["recall_avg"])
+```
+
+`evaluate_build` / `evaluate_search` 返回的字典与 `eval_performance` 输出的 JSON 一致。数据集缺少
+ground truth 时，可用 `EvalDataset.with_ground_truth(k)` 通过 numpy 计算精确近邻。
+
+### 命令行与 YAML 任务
+
+`pyvsag-eval`（或 `python -m pyvsag.eval`）支持与 `eval_performance` 相同的 YAML 任务格式：
+
+```bash
+pyvsag-eval job.yaml
+```
+
+支持全局选项与具名 case、`build`/`search`/`build,search` 动作，以及 `json`、`table`、`text`、
+`line_protocol` 格式和 `stdout`、`file://`、`appendfile://`、`influxdb://` 目标。注意：
+
+- `build,search` 在内存中直接复用索引，不经过 `index_path`。
+- `http_server` 会被忽略并给出警告；未知的 case 字段同样会给出警告。
+- 内存指标读取 `/proc`，仅在 Linux 上有意义（macOS 上为 0）。
+- `num_threads_building` 必须在创建索引前设置，任务运行器已自动处理。
+
 ## 参考
 
 - 源码：`tools/eval/`

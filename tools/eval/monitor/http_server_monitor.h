@@ -26,15 +26,16 @@
 #include <vector>
 
 #include "../common.h"
+#include "progress_listener.h"
 
 namespace vsag::eval {
 
-class HttpServerMonitor {
+class HttpServerMonitor : public ProgressListener {
 public:
     using TimePoint = std::chrono::steady_clock::time_point;
 
     explicit HttpServerMonitor(int port = 8080);
-    ~HttpServerMonitor();
+    ~HttpServerMonitor() override;
 
     // Server control
     void
@@ -57,20 +58,20 @@ public:
     SetTotalCases(int total);
 
     void
-    SetCurrentCase(const std::string& name);
+    SetCurrentCase(const std::string& name) override;
 
     void
     SetCaseStatus(const std::string& status);  // "pending", "running", "completed", "failed"
 
     void
-    MarkCaseCompleted();
+    MarkCaseCompleted() override;
 
     // Metrics update - called by EvalCase during execution
     void
-    UpdateMetrics(const JsonType& metrics);
+    UpdateMetrics(const JsonType& metrics) override;
 
     void
-    UpdateProgress(float percent_complete);  // 0.0 - 100.0
+    UpdateProgress(float percent_complete) override;  // 0.0 - 100.0
 
     // Static files
     void

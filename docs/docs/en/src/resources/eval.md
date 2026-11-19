@@ -141,6 +141,50 @@ global:
 Any HDF5 dataset from [ann-benchmarks](https://github.com/erikbern/ann-benchmarks)
 (e.g. `sift-128-euclidean.hdf5`, `gist-960-euclidean.hdf5`) works out of the box.
 
+## Python Usage (`pyvsag.eval`)
+
+The same measurement core is available from Python through the `pyvsag` wheel. HDF5 and YAML
+support are optional extras:
+
+```bash
+pip install "pyvsag[eval]"   # adds h5py and pyyaml
+```
+
+### Programmatic API
+
+```python
+import pyvsag
+from pyvsag.eval import EvalDataset, evaluate_build, evaluate_search, num_threads_building
+
+dataset = EvalDataset.from_hdf5("sift-128-euclidean.hdf5")      # or EvalDataset.from_arrays(...)
+with num_threads_building(4):                                    # set before creating the index
+    index = pyvsag.Index("hgraph", build_param_json)
+    build = evaluate_build(index, dataset)
+search = evaluate_search(index, dataset, top_k=10, search_param=search_param_json)
+print(search["qps"], search["recall_avg"])
+```
+
+`evaluate_build` / `evaluate_search` return the same result dictionaries as the JSON produced by
+`eval_performance`. `EvalDataset.with_ground_truth(k)` computes exact neighbours with numpy when
+the dataset has none.
+
+### Command line and YAML jobs
+
+`pyvsag-eval` (or `python -m pyvsag.eval`) runs the YAML job format of `eval_performance`:
+
+```bash
+pyvsag-eval job.yaml
+```
+
+Supported are the global options and named cases, `build`, `search` and `build,search` actions,
+and the `json`, `table`, `text` and `line_protocol` formats with `stdout`, `file://`,
+`appendfile://` and `influxdb://` destinations. Notes:
+
+- `build,search` keeps the index in memory instead of going through `index_path`.
+- `http_server` is ignored with a warning, and unknown case keys produce a warning.
+- Memory metrics read `/proc` and are therefore only meaningful on Linux (0 on macOS).
+- `num_threads_building` must be set before the index is created; the job runner does this.
+
 ## References
 
 - Source: `tools/eval/`
