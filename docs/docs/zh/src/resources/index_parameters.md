@@ -89,7 +89,7 @@ HGraph float32 L2/IP/cosine 的 `base_quantization_type` 和 `precise_quantizati
 现有的 `alpha` 字段控制 PiPNN 的最终 robust pruning。`ef_construction` 只调节 NSW，
 对 PiPNN 不生效。
 
-HGraph 还支持实验性的 L2 参数 `pipnn_adaptive_pruning`（默认 `false`）和 `pipnn_adaptive_pruning_adjust_step`（默认 `0.06`），在首次 `Build` 时逐点调整最终剪枝阈值。详情见 [HGraph 动态 PiPNN 剪枝](../indexes/hgraph.md)。Pyramid 未暴露这两个选项。
+HGraph 还支持实验性的 L2 参数 `pipnn_adaptive_pruning`（默认 `false`）和 `pipnn_adaptive_pruning_adjust_step`（默认 `0.06`），在首次 `Build` 时逐点调整最终剪枝阈值。详情见 [HGraph 动态 PiPNN 剪枝](../indexes/hgraph.md)。Pyramid 也公开了这两个选项，见其[构建参数表](../indexes/pyramid.md#构建参数)。
 
 搜索时：
 
@@ -193,8 +193,9 @@ Pyramid 构建参数同样放在 `index_param` 下：
 
 MRLE 与 split RaBitQ 组合使用 `base_quantization_type: "tq"`、
 `tq_chain: "mrle, rabitq"`、`mrle_dim`，以及
-`rabitq_bits_per_dim_base`/`rabitq_bits_per_dim_precise`。该配置会自动从 split base codes
-精排，并保留原始 FP32 向量供仅解码路径使用。完整配置及存储/召回权衡见
+`rabitq_bits_per_dim_base`/`rabitq_bits_per_dim_precise`。该配置会从 split base codes 精排，且 **不** 保留原始 FP32 向量：Pyramid 只在变换量化器需要 raw 向量
+**且** 不是「MRLE + RaBitQ split」这一组合时才自动打开 `store_raw_vector`（`RequiresRawVectorForTransformQuantizer`
+为真而 `RequiresRawVectorForMRLERaBitQSplit` 为假）。HGraph 在该组合下则会自动打开。完整配置及存储/召回权衡见
 [Pyramid 页面](../indexes/pyramid.md)。
 
 ## SINDI（稀疏向量）

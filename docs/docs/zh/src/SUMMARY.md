@@ -24,6 +24,7 @@
 - [SIMQ](indexes/simq.md)
 - [Pyramid](indexes/pyramid.md)
 - [BruteForce](indexes/brute_force.md)
+- [WARP](indexes/warp.md)
 
 # 量化
 
