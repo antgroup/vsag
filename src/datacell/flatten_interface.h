@@ -45,6 +45,27 @@ namespace vsag {
 
 DEFINE_POINTER(FlattenInterface);
 
+class BatchNodeReadGuard {
+public:
+    BatchNodeReadGuard(MutexArray& mutexes,
+                       const InnerIdType* ids,
+                       InnerIdType count,
+                       uint64_t total_count);
+    ~BatchNodeReadGuard();
+
+    BatchNodeReadGuard(const BatchNodeReadGuard&) = delete;
+    BatchNodeReadGuard&
+    operator=(const BatchNodeReadGuard&) = delete;
+
+private:
+    void
+    unlock_acquired() noexcept;
+
+    MutexArray& mutexes_;
+    std::vector<InnerIdType> ids_;
+    uint64_t acquired_{0};
+};
+
 class FlattenCodesLease {
 public:
     FlattenCodesLease() = default;

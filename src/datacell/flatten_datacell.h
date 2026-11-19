@@ -54,25 +54,7 @@ public:
           QueryContext* ctx = nullptr) override {
         auto comp = static_cast<Computer<QuantTmpl>*>(computer.get());
         if (external_read_mutex_ and id_count > 0) {
-            // Deduplicate batched IDs to avoid recursively locking a shared_mutex.
-            std::vector<InnerIdType> ids(idx, idx + id_count);
-            std::sort(ids.begin(), ids.end());
-            ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
-            std::vector<NodeReadLock> nodes;
-            nodes.reserve(ids.size());
-            const auto total = this->TotalCount();
-            for (const auto id : ids) {
-                if (id >= total) {
-                    throw VsagException(ErrorType::READ_ERROR, "invalid internal id for node lock");
-                }
-                nodes.push_back({external_read_mutex_.get(), id});
-            }
-            std::vector<std::shared_lock<NodeReadLock>> guards;
-            guards.reserve(nodes.size());
-            for (auto& node : nodes) {
-                guards.emplace_back(node);
-            }
-            // Guards span the actual code reads and SIMD distance computation.
+            BatchNodeReadGuard guard(*external_read_mutex_, idx, id_count, this->TotalCount());
             this->query(result_dists, comp, idx, id_count, ctx);
             return;
         }
