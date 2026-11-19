@@ -13,6 +13,12 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/daily_test.yml"
 
 
+def job_dependencies(body):
+    body = re.sub(r"(?m)[ \t]+#.*$", "", body)
+    match = re.search(r"(?m)^    needs:[ \t]*(\[[^]]*\]|(?:\n      - [^\n]+)+|[^\n]*)", body)
+    return set(re.findall(r"[a-z0-9_][a-z0-9_-]*", match[1])) if match else set()
+
+
 class DailyWorkflowTests(unittest.TestCase):
     def test_extra_stage_is_separate_bounded_and_reuses_the_original_build(self):
         plan = job_text(WORKFLOW, "daily-extra-plan")
@@ -34,11 +40,20 @@ class DailyWorkflowTests(unittest.TestCase):
         self.assertNotIn("continue-on-error", download)
         self.assertIn("--job-reports", summary)
 
+    def test_job_dependencies_accepts_scalar_block_and_multiline_flow(self):
+        for needs, expected in (
+                ("daily-plan", {"daily-plan"}),
+                ("\n      - daily-plan\n      - daily_build_asan_x86", {"daily-plan", "daily_build_asan_x86"}),
+                ("[daily-plan, daily_build_asan_x86]", {"daily-plan", "daily_build_asan_x86"}),
+                ("[daily-plan,\n      daily_build_asan_x86 # build status\n    ]",
+                 {"daily-plan", "daily_build_asan_x86"})):
+            with self.subTest(needs=needs):
+                self.assertEqual(job_dependencies(f"    needs: {needs}\n    steps:\n"), expected)
+        self.assertEqual(job_dependencies("    steps:\n"), set())
+
     def test_summary_receives_all_supplemental_prerequisite_results(self):
         def dependencies(name):
-            body = job_text(WORKFLOW, name)
-            match = re.search(r"(?m)^    needs:([^\n]*(?:\n      - [^\n]+)*)", body)
-            return set(re.findall(r"[a-z0-9_][a-z0-9_-]*", match[1])) if match else set()
+            return job_dependencies(job_text(WORKFLOW, name))
 
         prerequisites = dependencies("daily-extra-x86")
         pending = list(prerequisites)
@@ -46,6 +61,8 @@ class DailyWorkflowTests(unittest.TestCase):
             unseen = dependencies(pending.pop()) - prerequisites
             prerequisites.update(unseen)
             pending.extend(unseen)
+        self.assertIn("daily_build_asan_x86", prerequisites)
+        self.assertIn("full-platform-build-asan-macos-arm64", prerequisites)
         self.assertLessEqual(prerequisites | {"daily-extra-x86"}, dependencies("daily-summary"))
 
     def test_only_final_regression_job_publishes_cache_summary(self):
