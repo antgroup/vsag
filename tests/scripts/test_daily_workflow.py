@@ -34,6 +34,20 @@ class DailyWorkflowTests(unittest.TestCase):
         self.assertNotIn("continue-on-error", download)
         self.assertIn("--job-reports", summary)
 
+    def test_summary_receives_all_supplemental_prerequisite_results(self):
+        def dependencies(name):
+            body = job_text(WORKFLOW, name)
+            match = re.search(r"(?m)^    needs:([^\n]*(?:\n      - [^\n]+)*)", body)
+            return set(re.findall(r"[a-z0-9_][a-z0-9_-]*", match[1])) if match else set()
+
+        prerequisites = dependencies("daily-extra-x86")
+        pending = list(prerequisites)
+        while pending:
+            unseen = dependencies(pending.pop()) - prerequisites
+            prerequisites.update(unseen)
+            pending.extend(unseen)
+        self.assertLessEqual(prerequisites | {"daily-extra-x86"}, dependencies("daily-summary"))
+
     def test_only_final_regression_job_publishes_cache_summary(self):
         workflow = WORKFLOW.read_text()
         self.assertIn("VSAG_DAILY_AGGREGATE:", workflow)
