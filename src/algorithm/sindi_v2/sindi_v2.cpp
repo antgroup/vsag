@@ -2232,7 +2232,7 @@ SINDIV2::CalcDistanceById(const DatasetPtr& vector,
 
     auto [success, inner_id] = this->label_table_->TryGetIdByLabel(id);
     if (not success) {
-        return -1.0F;
+        ThrowLabelNotFound(id);
     }
 
     if (use_reorder_ && calculate_precise_distance) {
@@ -2306,7 +2306,7 @@ SINDIV2::CalcDistancesById(const DatasetPtr& query,
                 const auto [success, inner_id] =
                     this->label_table_->TryGetIdByLabel(row_ids[index]);
                 if (not success) {
-                    row_distances[index] = -1.0F;
+                    row_distances[index] = std::numeric_limits<float>::quiet_NaN();
                     continue;
                 }
                 validity[validity_offset + static_cast<uint64_t>(index)] = true;
@@ -2331,7 +2331,7 @@ SINDIV2::CalcDistancesById(const DatasetPtr& query,
         for (int64_t index = 0; index < count; ++index) {
             const auto [success, inner_id] = this->label_table_->TryGetIdByLabel(row_ids[index]);
             if (not success) {
-                row_distances[index] = -1.0F;
+                row_distances[index] = std::numeric_limits<float>::quiet_NaN();
                 continue;
             }
             validity[validity_offset + static_cast<uint64_t>(index)] = true;
@@ -2341,6 +2341,7 @@ SINDIV2::CalcDistancesById(const DatasetPtr& query,
     }
 
     if (topk == -1) {
+        AttachValids(result, validity, allocator_);
         return result;
     }
     return ApplyTopkWithValidity(distances, ids, count, num_queries, topk, validity, allocator_);

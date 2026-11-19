@@ -177,12 +177,15 @@ TEST_CASE("SINDI DMQ Rerank DataCell Test", "[ut][SINDI]") {
     float self_distance = index->CalcDistanceById(query, 10, true);
     float serialized_self_distance = another_index->CalcDistanceById(query, 10, true);
     REQUIRE(std::abs(self_distance - serialized_self_distance) < 1e-6F);
-    REQUIRE(index->CalcDistanceById(query, 999, true) == -1.0F);
+    REQUIRE_THROWS_AS(index->CalcDistanceById(query, 999, true), vsag::VsagException);
 
     int64_t distance_ids[] = {10, 999};
     auto distances = index->CalcDistancesById(query, distance_ids, 2, true);
     REQUIRE(std::abs(distances->GetDistances()[0] - self_distance) < 1e-6F);
-    REQUIRE(distances->GetDistances()[1] == -1.0F);
+    REQUIRE(std::isnan(distances->GetDistances()[1]));
+    REQUIRE(distances->GetValids() != nullptr);
+    REQUIRE(distances->GetValids()[0]);
+    REQUIRE_FALSE(distances->GetValids()[1]);
 
     SparseVector decoded;
     index->GetSparseVectorByInnerId(0, &decoded, allocator.get());

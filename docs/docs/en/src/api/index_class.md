@@ -220,15 +220,23 @@ error). See [Range Search](../advanced/range_search.md) and `examples/cpp/302_fe
 
 | Method | Signature | Notes |
 |--------|-----------|-------|
-| `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const float* vector, int64_t id, bool calculate_precise_distance = true) const` | Distance from a dense query to the stored vector `id`. |
-| `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const DatasetPtr& vector, int64_t id, bool calculate_precise_distance = true) const` | Same, accepting one native query: dense Float32Vectors, sparse SparseVectors, or WARP/SIMQ MultiVectors with MultiVectorDim. |
-| `CalcDistancesById` | `tl::expected<DatasetPtr, Error> CalcDistancesById(const float* query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true, int64_t topk = -1) const` | Canonical batch variant; `topk > 0` returns sorted smallest distances with IDs, and missing IDs are ordered last (valid distances may also be negative). |
-| `CalcDistancesById` | `tl::expected<DatasetPtr, Error> CalcDistancesById(const DatasetPtr& query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true, int64_t topk = -1) const` | Canonical DatasetPtr batch variant. For `query->GetNumElements() > 1`, indexes must advertise `SUPPORT_BATCH_CALC_DISTANCE_BY_ID`; `ids` contains `NumElements * count` row-major entries. With `topk > 0`, each query returns `min(topk, count)` sorted distances with matching IDs. |
+| `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const float* vector, int64_t id, bool calculate_precise_distance = true) const` | Distance from a dense query to the stored vector `id`. Returns `INVALID_ARGUMENT` if `id` does not exist or was removed (no `-1` sentinel). |
+| `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const DatasetPtr& vector, int64_t id, bool calculate_precise_distance = true) const` | Same, accepting one native query: dense Float32Vectors, sparse SparseVectors, or WARP/SIMQ MultiVectors with MultiVectorDim. Missing/removed `id` also yields `INVALID_ARGUMENT`. |
+| `CalcDistancesById` | `tl::expected<DatasetPtr, Error> CalcDistancesById(const float* query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true, int64_t topk = -1) const` | Canonical batch variant; `topk > 0` returns sorted smallest distances with IDs, and missing IDs are ordered last. Missing IDs hold a `NaN` distance with `GetValids()[i] == false`. |
+| `CalcDistancesById` | `tl::expected<DatasetPtr, Error> CalcDistancesById(const DatasetPtr& query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true, int64_t topk = -1) const` | Canonical DatasetPtr batch variant. For `query->GetNumElements() > 1`, indexes must advertise `SUPPORT_BATCH_CALC_DISTANCE_BY_ID`; `ids` contains `NumElements * count` row-major entries. With `topk > 0`, each query returns `min(topk, count)` sorted distances with matching IDs. Missing IDs hold a `NaN` distance with `GetValids()[i] == false`. |
 | `CalDistanceById` | Same signatures as `CalcDistancesById` | Deprecated public forwarding alias to the canonical virtual `CalcDistancesById`; new implementations override the canonical name. See [C++ implementation migration](../advanced/calc_distance_by_id.md#c-implementation-migration). |
 
 `calculate_precise_distance = true` may load full-precision vectors (possibly from disk) instead of
 quantized codes. See [Calculate Distance by ID](../advanced/calc_distance_by_id.md) and
 `examples/cpp/306_feature_calculate_distance_by_id.cpp`.
+
+Batch results carry a per-entry validity mask on the returned `Dataset`, written through
+`Dataset::Valids(const bool*)` and read through `const bool* Dataset::GetValids() const`. A `false`
+entry means the requested ID did not exist or had been removed at lookup time, and its distance is
+`NaN` (`std::numeric_limits<float>::quiet_NaN()`). With `topk == -1` the mask has
+`NumElements() * count` entries aligned with the input ID order (row-major for multi-query); with
+`topk > 0` it has `NumElements() * Dim()` entries aligned with the output order. Callers must use
+the mask rather than the distance value to detect missing IDs.
 
 ## Conjugate-graph enhancement
 

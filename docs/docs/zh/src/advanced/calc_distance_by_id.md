@@ -81,7 +81,9 @@ SINDI immutable 存储也支持单 ID 和批量距离，包括反序列化后的
 
 N 行 query、每行 `count` 个候选 ID 时，必须按行优先提供 N × count 个 ID（`ids[q * count + j]`），不会隐式广播一份候选列表。新代码推荐使用 `CalcDistancesById`；`CalDistanceById` 保留为兼容别名。
 
-缺失 label 返回 `-1`，但有效内积距离也可能为负数（包括 `-1`）。top-k 根据 label 是否有效判断排序优先级，而不是根据距离的符号或数值判断。
+缺失 label 指索引中不存在或已被标记删除的 ID，在查询时判定。批量结果通过
+`Dataset::GetValids()` 返回的逐项有效性标记告知缺失项，其距离为 `NaN`。距离值不再是 `-1`，
+也不能用来判断 ID 是否缺失。top-k 根据 label 是否有效判断排序优先级，而不是根据距离的符号或数值判断。
 
 IVF PQFS 支持单 ID 和批量距离，复用整桶扫描所用的打包编码查表。单 ID 查询会读取所在的 32 向量数据包并取出对应结果，因此工作量可能高于标量量化的单 ID 查询，磁盘存储下尤其如此。
 
@@ -89,14 +91,34 @@ PQFS 可用于 IVF 基础桶编码，但不能用于 flat 重排编码，因为�
 
 ### 返回值含义
 
-- 单 ID 重载返回 `float` 距离值。
+- 单 ID 重载返回 `float` 距离值。如果 ID 不存在或已被删除，所有索引类型都返回错误（`tl::unexpected`，
+  `ErrorType::INVALID_ARGUMENT`），不再返回 `-1`。
+- 批量结果携带逐项有效性标记：由 `Dataset::Valids(const bool*)` 写入，通过公开的
+  `const bool* Dataset::GetValids() const` 访问器读取。`GetValids()[i] == false` 表示该 ID 在查询时
+  不存在（或已删除），对应距离为 `NaN`（`std::numeric_limits<float>::quiet_NaN()`）。判断 ID 是否缺失
+  必须使用 `GetValids()`，不能依赖距离值。
 - `topk == -1` 时，裸指针批量重载返回一行 `count` 个距离；`DatasetPtr` 重载返回
-  `NumElements()` 行、每行 `count` 个距离。两者都保持输入顺序，且不返回 ID。
+  `NumElements()` 行、每行 `count` 个距离。两者都保持输入顺序，且不返回 ID。`GetValids()` 包含
+  `NumElements() * count` 个条目，与输入 ID 顺序对齐（多查询时为 row-major）。
 - `topk > 0` 时，批量重载每个 query 返回按距离升序排列的最小 `min(topk, count)` 个
-  距离，`GetIds()` 包含对应 ID。缺失 ID（距离为 `-1`）排在所有有效距离之后，不受有效距离的符号影响，仅在有效 ID
-  不足时才出现在结果中。
+  距离，`GetIds()` 包含对应 ID。`GetValids()` 包含 `NumElements() * Dim()` 个条目，与输出顺序对齐。
+  缺失 ID 排在所有有效距离之后，不受有效距离的符号影响，仅在有效 ID 不足 `topk` 时才出现在结果中，
+  其距离为 `NaN`、`Valids` 为 false。
 - 距离的语义由建索引时设置的 `metric_type`（IP / L2 / cosine）决定，参见
   [度量语义](../resources/metric_semantics.md)。
+
+## 缺失 ID 的处理
+
+```cpp
+auto result = index->CalcDistancesById(query, ids, count).value();
+const float* dists = result->GetDistances();
+const bool* valids = result->GetValids();
+for (int64_t i = 0; i < count; ++i) {
+    if (!valids[i]) { /* id not found or removed; dists[i] is NaN */ }
+}
+auto single = index->CalcDistanceById(query, missing_id);
+if (!single.has_value()) { /* single.error().type == vsag::ErrorType::INVALID_ARGUMENT */ }
+```
 
 ## 基本用法
 
@@ -118,9 +140,10 @@ std::vector<int64_t> ids = { 1, 2, 3, 4, 5 };
 auto result = index->CalcDistancesById(query_vector.data(), ids.data(), ids.size());
 if (result.has_value()) {
     const float* dists = result.value()->GetDistances();
-    for (size_t i = 0; i < ids.size(); ++i) {
-        if (dists[i] == -1.0f) {
-            std::cout << ids[i] << " -> 无效 ID" << std::endl;
+    const bool* valids = result.value()->GetValids();
+    for (int64_t i = 0; i < ids.size(); ++i) {
+        if (!valids[i]) {
+            std::cout << ids[i] << " -> 无效 ID（距离为 NaN）" << std::endl;
         } else {
             std::cout << ids[i] << " -> " << dists[i] << std::endl;
         }
@@ -163,8 +186,9 @@ if (index->CheckFeature(vsag::SUPPORT_BATCH_CALC_DISTANCE_BY_ID)) {
 ```
 
 `topk == -1` 时，`GetDim()` 等于 `count`，位置 `q * count + j` 对应输入 ID
-`ids[q * count + j]`。`topk` 为正数时，行跨度为 `GetDim()`；每行先放最近的有效候选，
-只有有效 ID 少于 `topk` 时才会在行尾保留无效 ID。
+`ids[q * count + j]`。`topk` 为正数时，行跨度为 `GetDim()`，每行先放最近的有效候选，
+只有有效 ID 少于 `topk` 时才会在行尾保留无效 ID。两种模式下 `GetValids()` 的布局都与
+`GetDistances()` 一致；请逐项检查 `GetValids()` 而不是比较距离值，因为无效项的距离是 `NaN`。
 
 可运行的完整示例见
 [`examples/cpp/306_feature_calculate_distance_by_id.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/306_feature_calculate_distance_by_id.cpp)。
@@ -198,4 +222,6 @@ auto d = index->CalcDistanceById(query, /*id=*/42);
 
 - 稠密重载中，查询向量的维度必须与索引维度一致。
 - 批量重载存在默认实现：循环调用单 ID 接口；部分索引会重写以做批量优化。
+- 绑定层（Python、Node.js、C API）的接口签名保持不变：批量调用中缺失 ID 的距离为 `NaN`，
+  单 ID 调用遇到缺失 ID 时返回错误。
 - 与 VSAG 其他只读接口一样，这些方法可以与 `KnnSearch` 等只读操作并发调用。

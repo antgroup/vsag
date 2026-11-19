@@ -943,7 +943,7 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
     auto mock_filter = std::make_shared<MockFilter>();
     auto mock_valid_filter = std::make_shared<MockValidIdFilter>();
     query->NumElements(1)->SparseVectors(sv_base.data())->Owner(false);
-    REQUIRE(index->CalcDistanceById(query, -1, true) == -1.0F);
+    REQUIRE_THROWS_AS(index->CalcDistanceById(query, -1, true), vsag::VsagException);
     int64_t valid_count = static_cast<int64_t>(num_base * 0.5);
     std::vector<int64_t> valid_ids(valid_count, 0);
     valid_ids.push_back(invalid_term_id);
@@ -1433,7 +1433,13 @@ TEST_CASE("SINDI Immutable Sparse Deserialize KNN Test", "[ut][SINDI]") {
         REQUIRE(std::abs(immutable->CalcDistanceById(query, ids[i]) -
                          distances->GetDistances()[i]) < 1e-3F);
     }
-    REQUIRE(immutable->CalcDistanceById(query, -1, false) == -1.0F);
+    REQUIRE_THROWS_AS(immutable->CalcDistanceById(query, -1, false), vsag::VsagException);
+    int64_t missing_ids[] = {ids[0], -1};
+    auto mixed = immutable->CalcDistancesById(query, missing_ids, 2);
+    REQUIRE(mixed->GetValids() != nullptr);
+    REQUIRE(mixed->GetValids()[0]);
+    REQUIRE_FALSE(mixed->GetValids()[1]);
+    REQUIRE(std::isnan(mixed->GetDistances()[1]));
 
     for (auto& item : sv_base) {
         delete[] item.vals_;

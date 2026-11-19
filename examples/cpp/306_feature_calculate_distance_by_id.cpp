@@ -86,9 +86,25 @@ main(int argc, char** argv) {
     }
 
     /******************* Print Search Result *****************/
+    // GetValids() reports per-entry validity: missing or removed IDs carry a NaN distance.
+    const float* distances = result.value()->GetDistances();
+    const bool* valids = result.value()->GetValids();
     std::cout << "results: " << std::endl;
     for (int64_t i = 0; i < ids_new.size(); ++i) {
-        std::cout << ids_new[i] << " " << result.value()->GetDistances()[i] << std::endl;
+        if (not valids[i]) {
+            std::cout << ids_new[i] << " ID not found or removed, distance is NaN" << std::endl;
+            continue;
+        }
+        std::cout << ids_new[i] << " " << distances[i] << std::endl;
+    }
+
+    /******************* Calculate distance by id(single) For HGraph Index *****************/
+    // A missing ID makes the single-ID call fail with ErrorType::INVALID_ARGUMENT.
+    auto single = index->CalcDistanceById(query_vector.data(), num_vectors + 1);
+    if (not single.has_value()) {
+        std::cout << "Failed to cal distance by id: " << single.error().message << std::endl;
+    } else {
+        std::cout << "distance to id " << num_vectors + 1 << " = " << single.value() << std::endl;
     }
 
     engine.Shutdown();
