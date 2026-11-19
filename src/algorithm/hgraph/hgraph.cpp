@@ -979,9 +979,11 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
 
 void
 HGraph::SetClusterVectorNodeLocks(bool enabled) {
-    CHECK_ARGUMENT(rabitq_fused_datacell_ == nullptr and not mci_parameters_.enabled and
-                       not using_dedup_storage() and not create_new_raw_vector_,
-                   "cluster vector node locks require a plain, non-MCI graph");
+    if (rabitq_fused_datacell_ != nullptr or mci_parameters_.enabled or using_dedup_storage() or
+        create_new_raw_vector_) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "cluster vector node locks require a plain, non-MCI graph");
+    }
     auto mutexes = enabled ? neighbors_mutex_ : nullptr;
     basic_flatten_codes_->SetExternalReadMutexArray(mutexes);
     if (has_precise_reorder()) {
@@ -998,13 +1000,15 @@ HGraph::AcquireClusterNodeWriteLock(int64_t label) {
         std::shared_lock label_lock(label_lookup_mutex_);
         id = label_table_->GetIdByLabel(label);
     }
-    return LockGuard(neighbors_mutex_, id);
+    return {neighbors_mutex_, id};
 }
 
 bool
 HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
-    CHECK_ARGUMENT(not cluster_vector_node_locks_ or force_update,
-                   "externally locked node updates must use force_update");
+    if (cluster_vector_node_locks_ and not force_update) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "externally locked node updates must use force_update");
+    }
     std::shared_lock<std::shared_mutex> force_remove_rlock;
     if (this->support_force_remove()) {
         force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
