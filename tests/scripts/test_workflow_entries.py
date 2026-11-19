@@ -365,6 +365,27 @@ class EntryTests(unittest.TestCase):
                     self.assertEqual(condition('daily_test.yml', name, values), name in selected, name)
                 self.assertEqual(expression(aggregate, values), '1' if selected == regression else '0')
 
+    def test_nightly_openblas_uses_its_own_cache_and_only_canonical_schedule_can_save(self):
+        body = job('daily_test.yml', 'daily_build_asan_x86')
+        cache = body.split('- name: Load Cache\n', 1)[1].split('- name:', 1)[0]
+        key = re.search(r'(?m)^          key: (.+)$', cache)[1]
+        self.assertTrue(key.startswith('build-x86-asan-openblas-source-'), key)
+        self.assertIn("hashFiles('./CMakeLists.txt')", key)
+        self.assertIn("hashFiles('./.circleci/fresh_ci_cache.commit')", key)
+        self.assertNotIn('restore-keys:', cache)
+        save = re.search(r'(?m)^          save: (.+)$', cache)[1]
+        for event, repository, ref, expected in (
+                ('schedule', 'antgroup/vsag', 'refs/heads/main', True),
+                ('workflow_dispatch', 'antgroup/vsag', 'refs/heads/main', False),
+                ('pull_request', 'antgroup/vsag', 'refs/heads/main', False),
+                ('push', 'antgroup/vsag', 'refs/heads/main', False),
+                ('schedule', 'contributor/vsag', 'refs/heads/main', False),
+                ('schedule', 'antgroup/vsag', 'refs/heads/1.2', False),
+                ('schedule', 'antgroup/vsag', 'refs/tags/main', False)):
+            with self.subTest(event=event, repository=repository, ref=ref):
+                values = {'github.event_name': event, 'github.repository': repository, 'github.ref': ref}
+                self.assertIs(expression(save, values), expected)
+
     def test_nightly_manual_and_reusable_profiles_keep_their_scope(self):
         text = (ROOT / '.github/workflows/daily_test.yml').read_text()
         names = re.findall(r'(?m)^  ([\w-]+):$', text.split('jobs:\n', 1)[1])
