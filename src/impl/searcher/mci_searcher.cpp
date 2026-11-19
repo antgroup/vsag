@@ -318,6 +318,8 @@ search_clique_view(const CliqueDataCellSearchView& view,
         }
         batch_count = 0;
     };
+    const bool optimize_static = mci_param.optimize_clique_expansion and view.static_csr;
+    bool consume_seen = false;
     auto accept_node = [&](InnerIdType id, bool known_valid) {
         if (id >= total) {
             return false;
@@ -333,6 +335,9 @@ search_clique_view(const CliqueDataCellSearchView& view,
         // Remember rejected fallback IDs too: overlapping cliques must not repeat user
         // callbacks or deletion lookups. Byte/packed rejection above remains a cheap probe.
         visited_nodes.Set(id);
+        if (consume_seen) {
+            packed.MarkSeen(id);
+        }
         if ((mci_param.revalidate_predicate or (not known_valid and valid_bitmap == nullptr)) and
             inner_search_param.is_inner_id_allowed != nullptr and
             not inner_search_param.is_inner_id_allowed->CheckValid(id)) {
@@ -405,6 +410,19 @@ search_clique_view(const CliqueDataCellSearchView& view,
                             (mci_param.valid_inner_ids != nullptr or valid_bitmap != nullptr);
     if (use_packed) {
         packed.Build(total, valid_bitmap, mci_param.valid_inner_ids, mci_param.valid_inner_count);
+        consume_seen = optimize_static;
+        if (consume_seen and mci_param.seed_inner_ids != nullptr) {
+            // Seed visits predate Build. Clear only sampled seeds that reached the epoch mark;
+            // keep that mark to catch duplicates within a single packed row as well.
+            const auto& ids = *mci_param.seed_inner_ids;
+            const auto sampled = std::min<uint64_t>(seed_target, ids.size());
+            for (uint64_t i = 0; i < sampled; ++i) {
+                const auto id = ids[i * ids.size() / sampled];
+                if (visited_nodes.Get(id)) {
+                    packed.MarkSeen(id);
+                }
+            }
+        }
     }
     uint32_t hops = 0;
     uint64_t idle = 0;
@@ -425,7 +443,7 @@ search_clique_view(const CliqueDataCellSearchView& view,
         }
         const auto accepted_before = accepted;
         uint64_t considered = 0;
-        view.ForEachNodeClique(id, [&](InnerIdType cid) {
+        auto visit_clique = [&](InnerIdType cid) {
             if (mci_param.activation_cap != 0 and considered++ >= mci_param.activation_cap) {
                 return false;
             }
@@ -454,7 +472,37 @@ search_clique_view(const CliqueDataCellSearchView& view,
                 });
             }
             return hops < mci_param.hops_limit;
-        });
+        };
+        if (optimize_static and id < view.base_node_count) {
+            const uint64_t end = view.p_node_to_cid[id + 1];
+            for (uint64_t pos = view.p_node_to_cid[id]; pos < end; ++pos) {
+                constexpr uint64_t lookahead = 4;
+                // Fetch row metadata and epoch first, then issue just one member-line hint
+                // for a nonempty, as-yet-unvisited row closer to the traversal cursor.
+                if (pos + 2 * lookahead < end) {
+                    const auto cid = view.node_to_cids[pos + 2 * lookahead];
+                    if (cid < view.total_clique_count) {
+                        __builtin_prefetch(visited_cliques.marks.data() + cid, 0, 1);
+                        __builtin_prefetch(view.p_maxc + cid, 0, 1);
+                    }
+                }
+                if (pos + lookahead < end) {
+                    const auto cid = view.node_to_cids[pos + lookahead];
+                    if (cid < view.total_clique_count and not visited_cliques.Get(cid)) {
+                        const auto begin = view.p_maxc[cid];
+                        if (begin < view.p_maxc[cid + 1]) {
+                            __builtin_prefetch(view.maxcs + begin, 0, 1);
+                        }
+                    }
+                }
+                const auto cid = view.node_to_cids[pos];
+                if (cid < view.total_clique_count and not visit_clique(cid)) {
+                    break;
+                }
+            }
+        } else {
+            view.ForEachNodeClique(id, visit_clique);
+        }
         // All distances of this parent must be visible before choosing the next parent.
         flush();
         idle = accepted == accepted_before ? idle + 1 : 0;

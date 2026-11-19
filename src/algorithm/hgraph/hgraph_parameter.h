@@ -137,6 +137,7 @@ public:
     bool mci_batch_distance{true};
     // Opt-in MCI traversal using resident RaBitQ base codes; precise IO is deferred to reorder.
     bool mci_use_memory_quantization{false};
+    bool mci_optimize_clique_expansion{false};
     uint32_t mci_activation_cap{0};
     uint32_t mci_hops_limit{std::numeric_limits<uint32_t>::max()};
     uint64_t mci_expansion_idle_window{0};

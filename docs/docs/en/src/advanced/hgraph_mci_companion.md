@@ -571,6 +571,12 @@ seeds are deduplicated before scoring, and any partial batch is submitted before
 selecting the next parent. This route passes base codes to the distance backend;
 precise codes are accessed only by final reorder.
 
+Set `mci_optimize_clique_expansion: true` to optimize static CSR traversal on this
+path. It prefetches member data four cliques ahead and, when packed filtering
+is active, uses the query’s private bitmap to discard already visited members earlier. The option defaults to `false` and is ignored outside the MCI
+memory-quantization path. It does not change seed selection, the scoring backend,
+or final reorder, and does not require rebuilding the index.
+
 The selected MCI path rejects non-RaBitQ bases and bases that are not fully
 resident, including split RaBitQ with a disk-backed supplement. It never falls
 back to precise reads to score seeds. Other routes keep their existing behavior.
