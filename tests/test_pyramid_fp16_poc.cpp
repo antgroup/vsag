@@ -20,12 +20,14 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <cmath>
+#include <numeric>
 #include <random>
 #include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "json_types.h"
 #include "json_wrapper.h"
 #include "simd/bf16_simd.h"
 #include "simd/fp16_simd.h"
@@ -611,6 +613,101 @@ TEST_CASE("Pyramid half input validates Build and Add before mutation",
         REQUIRE(index->Add(empty).has_value());
         REQUIRE(index->GetNumElements() == BUILD_COUNT);
     }
+}
+
+TEST_CASE("Pyramid analyzer preserves native half queries above the graph statistics threshold",
+          "[ft][pyramid][fp16][bf16][analyzer]") {
+    const std::string dtype = GENERATE("float32", "float16", "bfloat16");
+    CAPTURE(dtype);
+    constexpr int64_t dim = 32;
+    constexpr int64_t count = 10000;
+    std::vector<float> floats(count * dim);
+    std::vector<uint16_t> halves(count * dim);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 1000);
+    std::vector<std::string> paths(count, "all/half/leaf");
+    std::mt19937 random(20261112);
+    for (uint64_t i = 0; i < floats.size(); ++i) {
+        const auto value = (1 + random() % 128) / 129.0F;
+        const bool bf16 = dtype == "bfloat16";
+        halves[i] = bf16 ? generic::FloatToBF16(value) : generic::FloatToFP16(value);
+        floats[i] = bf16 ? generic::BF16ToFloat(halves[i]) : generic::FP16ToFloat(halves[i]);
+    }
+    const auto input = [&](uint64_t row, uint64_t size) {
+        auto data = Dataset::Make()
+                        ->NumElements(size)
+                        ->Dim(dim)
+                        ->Owner(false)
+                        ->Ids(ids.data() + row)
+                        ->Paths(paths.data() + row);
+        if (dtype == "float32") {
+            data->Float32Vectors(floats.data() + row * dim);
+        } else {
+            data->Float16Vectors(halves.data() + row * dim);
+        }
+        return data;
+    };
+    const auto parameters = std::string(R"({"dtype":")") + dtype +
+                            R"(","metric_type":"l2","dim":32,"index_param":{"max_degree":16,
+        "ef_construction":64,"build_thread_count":1,"index_min_size":8,
+        "base_quantization_type":"sq8","precise_quantization_type":"fp32",
+        "use_reorder":true,"graph_storage_type":"compressed"}})";
+    auto index = MakeHalfIndex(parameters);
+    auto built = index->Build(input(0, count));
+    REQUIRE(built.has_value());
+    REQUIRE(built.value().empty());
+    // Smaller fixtures skip leaf graph recall analysis and miss the null query.
+    const auto stats = JsonType::Parse(index->GetStats());
+    REQUIRE(stats["graph_node_count"].GetInt() == 1);
+    REQUIRE(stats["skipped_node_count"].GetInt() == 0);
+    REQUIRE(std::isfinite(stats["recall_base"].GetFloat()));
+    REQUIRE(stats["recall_base"].GetFloat() > 0.5F);
+
+    SearchRequest request;
+    request.query_ = input(0, 2);
+    request.topk_ = 5;
+    request.params_str_ = R"({"pyramid":{"ef_search":500}})";
+    const auto batch = JsonType::Parse(index->AnalyzeIndexBySearch(request));
+    REQUIRE(std::isfinite(batch["quantization_error_query"].GetFloat()));
+    REQUIRE(batch["recall_query"].GetFloat() > 0.5F);
+    float mean_distance = 0;
+    float mean_recall = 0;
+    float mean_quantization_error = 0;
+    for (uint64_t row = 0; row < 2; ++row) {
+        request.query_ = input(row, 1);
+        const auto single = JsonType::Parse(index->AnalyzeIndexBySearch(request));
+        mean_distance += single["avg_distance_query"].GetFloat() / 2;
+        mean_recall += single["recall_query"].GetFloat() / 2;
+        auto distances = index->CalcDistancesById(request.query_, ids.data(), count, true);
+        REQUIRE(distances.has_value());
+        const auto* values = distances.value()->GetDistances();
+        std::vector<float> sorted(values, values + count);
+        std::sort(sorted.begin(), sorted.end());
+        const auto reference = std::accumulate(sorted.begin(), sorted.begin() + 5, 0.0F) / 5;
+        REQUIRE(single["avg_distance_query"].GetFloat() == Catch::Approx(reference));
+
+        auto neighbors = index->KnnSearch(request.query_, 5, request.params_str_);
+        REQUIRE(neighbors.has_value());
+        REQUIRE(neighbors.value()->GetDim() == 5);
+        auto base_distances =
+            index->CalcDistancesById(request.query_, neighbors.value()->GetIds(), 5, false);
+        auto precise_distances =
+            index->CalcDistancesById(request.query_, neighbors.value()->GetIds(), 5, true);
+        REQUIRE(base_distances.has_value());
+        REQUIRE(precise_distances.has_value());
+        float reference_error = 0;
+        for (uint64_t i = 0; i < 5; ++i) {
+            reference_error += std::abs(base_distances.value()->GetDistances()[i] -
+                                        precise_distances.value()->GetDistances()[i]) /
+                               5;
+        }
+        REQUIRE(single["quantization_error_query"].GetFloat() == Catch::Approx(reference_error));
+        mean_quantization_error += reference_error / 2;
+    }
+    REQUIRE(batch["avg_distance_query"].GetFloat() == Catch::Approx(mean_distance));
+    REQUIRE(batch["recall_query"].GetFloat() == Catch::Approx(mean_recall));
+    REQUIRE(mean_quantization_error > 0.0F);
+    REQUIRE(batch["quantization_error_query"].GetFloat() == Catch::Approx(mean_quantization_error));
 }
 
 }  // namespace vsag

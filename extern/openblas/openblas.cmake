@@ -193,6 +193,12 @@ if (NOT OPENBLAS_FOUND)
     string (STRIP "${_openblas_c_flags}" _openblas_c_flags)
     string (STRIP "${_openblas_cxx_flags}" _openblas_cxx_flags)
 
+    # The compiler is an absolute path, so the PATH-based ccache shims cannot intercept it.
+    set (_openblas_cc_launcher_envs)
+    if (ENABLE_CCACHE AND CCACHE_PROGRAM)
+        list (APPEND _openblas_cc_launcher_envs "CC=${CCACHE_PROGRAM} ${CMAKE_C_COMPILER}")
+    endif ()
+
     set (_openblas_target_arg)
     if (DEFINED ENV{VSAG_OPENBLAS_TARGET} AND NOT "$ENV{VSAG_OPENBLAS_TARGET}" STREQUAL "")
         string (STRIP "$ENV{VSAG_OPENBLAS_TARGET}" _openblas_target)
@@ -217,13 +223,14 @@ if (NOT OPENBLAS_FOUND)
         CONFIGURE_COMMAND ""
         BUILD_COMMAND
             ${common_configure_envs}
+            ${_openblas_cc_launcher_envs}
             "CFLAGS=${_openblas_c_flags} -D_DEFAULT_SOURCE -D_GNU_SOURCE"
             "CXXFLAGS=${_openblas_cxx_flags} -D_DEFAULT_SOURCE -D_GNU_SOURCE"
             OMP_NUM_THREADS=1
             PATH=/usr/lib/ccache:$ENV{PATH}
             LD_LIBRARY_PATH=/opt/alibaba-cloud-compiler/lib64/:$ENV{LD_LIBRARY_PATH}
             make USE_THREAD=0 USE_LOCKING=1 ${_openblas_target_arg} DYNAMIC_ARCH=1
-                 NOFORTRAN=1 -j1
+                 NOFORTRAN=1 -j${NUM_BUILDING_JOBS}
         INSTALL_COMMAND
             make ${_openblas_target_arg} DYNAMIC_ARCH=1 NOFORTRAN=1 PREFIX=${install_dir}
                  install

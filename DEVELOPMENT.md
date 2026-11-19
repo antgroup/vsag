@@ -24,12 +24,12 @@ docker pull vsaglib/vsag:ubuntu
 - Operating System:
   - Ubuntu 20.04 or later
   - or CentOS 7 or later
-  - or macOS 14 or later (arm64, C++ build path)
+  - or macOS 15 or later (arm64, C++ build path)
 - Compiler:
   - GCC version 9.4.0 or later
   - or Clang version 13.0.0 or later
 - Build Tools: 
-  - CMake version 3.18.0 or later
+  - CMake version 3.18.0 or later (3.20+ for native macOS Python wheels)
   - Ninja (preferred when available; Unix Makefiles remain the compatibility fallback)
   - clang-tidy version 20 EXACTLY (not higher, not lower - required for consistent lint diagnostics)
   - clang-format version 20 EXACTLY (not higher, not lower - required for consistent formatting)
@@ -97,7 +97,7 @@ Build target behavior:
 - `make release` is the reproducible release/package path. It uses the minimal configuration, Release optimization semantics, and disables ccache by default. Enable optional components explicitly when needed, for example `make release VSAG_ENABLE_TOOLS=ON`.
 - `make release-perf` uses the same Release optimization semantics and minimal configuration in `build-release-perf/`, but enables ccache by default for iterative development and benchmarking.
 - Override either cache default explicitly with `VSAG_ENABLE_CCACHE=ON` or `VSAG_ENABLE_CCACHE=OFF`.
-- Linux and macOS use the same dependency-script plus `make` entry points for the core C++ build. Use `./scripts/deps/install_deps.sh` first, then run the usual `make` target. The current macOS validation scope is `make debug`, `make release`, and `make test` on arm64; Python wheel packaging remains Linux-focused.
+- Linux and macOS use the same dependency-script plus `make` entry points for the core C++ build. Use `./scripts/deps/install_deps.sh` first, then run the usual `make` target. The current macOS validation scope is `make debug`, `make release`, and `make test` on arm64; Python wheels can also be built locally on macOS arm64 with `make pyvsag`; see the [pyvsag guide](docs/docs/en/src/guide/pyvsag.md). Published wheels remain Linux-only.
 
 ## CMake Build Options
 
@@ -232,3 +232,7 @@ make test DEBUG_BUILD_DIR=build_clang20 EXTRA_DEFINED="-DCMAKE_C_COMPILER=clang-
 The Ubuntu dependency installer requires Ubuntu 24.04+ and installs GCC 13 and LLVM 20 (using apt.llvm.org if needed). Other distributions need a matching toolchain prepared manually. Compiler requirements concern source builds, not the glibc baseline of prebuilt packages. Existing manylinux release baselines and both libstdc++ ABI choices are preserved. Installing a package does not require a C++20 client compiler.
 
 Maintained CI container images use Ubuntu 26.04 with GCC 13 and LLVM 20. Ubuntu 24.04 remains a development and runtime compatibility target. Published packages retain their existing manylinux/glibc baselines; validate their Ubuntu 24.04 runtime compatibility separately from the Ubuntu 26.04 CI build.
+
+Datacell compilation follows `COMPILE_JOBS` by default. On memory-limited Ninja builders,
+use `make asan COMPILE_JOBS=3 DATACELL_COMPILE_JOBS=1` to cap both datacell object libraries
+together. See the [compile parallelism guide](docs/docs/en/src/development/building.md#datacell-compile-parallelism).

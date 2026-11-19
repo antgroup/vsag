@@ -33,9 +33,10 @@ jobs:
       cmake: ${{ steps.changes.outputs.cmake }}
       coverage: ${{ steps.changes.outputs.coverage }}
       python: ${{ steps.changes.outputs.python }}
+      wheel: ${{ steps.changes.outputs.wheel }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
+      - uses: actions/checkout@v5
+      - uses: dorny/paths-filter@v4
         id: changes
         with:
           filters: |
@@ -77,10 +78,65 @@ jobs:
               - 'tests/scripts/simd_coverage_test.py'
             python:
               - 'python/**'
+              - 'include/vsag/vsag_c_api.h'
+              - 'src/vsag_c_api.cpp'
               - 'cmake/vsag_c.map'
+              - '.github/actions/python-*/**'
               - 'tests/python/**'
-              - '.github/workflows/**'
-              - 'scripts/**'
+              # Wheel build inputs and the callers of the shared Python actions.
+              - 'extern/**'
+              - 'src/**/CMakeLists.txt'
+              - 'src/**/*.cmake'
+              - 'scripts/python/**'
+              - 'scripts/deps/**'
+              - 'scripts/ci/python_ci.py'
+              - 'scripts/ci/collect_python_cache.sh'
+              # The installed-wheel test wrapper imports both planners even outside Nightly.
+              - 'scripts/testing/daily_measure.py'
+              - 'scripts/testing/daily_plan.py'
+              - 'scripts/testing/team_test_shards.py'
+              - 'tests/scripts/test_python*.py'
+              - 'tests/scripts/test_local_build_wheel.py'
+              - '.github/workflows/pr-ci.yml'
+              - '.github/workflows/pr-ci-community.yml'
+              - '.github/workflows/main-ci.yml'
+              - '.github/workflows/daily_test.yml'
+              - '.github/workflows/pyvsag-testpypi.yml'
+            # Main PR wheel inputs; python/cmake above retain formatting and legacy scope.
+            # Ordinary installed tests need a fresh, same-SHA artifact (no published fallback).
+            wheel:
+              - 'python/pyvsag/**'
+              - 'python/setup.py'
+              - 'python/setup.cfg'
+              - 'python/MANIFEST.in'
+              - 'python/requirements*.txt'
+              - 'python/pyproject.toml'
+              - 'python/LICENSE'
+              - 'python/NOTICE'
+              - 'python/licenses/**'
+              # setup.py reads this into the wheel metadata.
+              - 'README.md'
+              - 'include/vsag/*.h'
+              - 'include/vsag/*.hpp'
+              - 'src/vsag_c_api.cpp'
+              - 'src/version.h.in'
+              - 'CMakeLists.txt'
+              - 'Makefile'
+              - 'cmake/**'
+              - 'src/**/CMakeLists.txt'
+              - 'src/**/*.cmake'
+              - 'extern/**'
+              - 'scripts/deps/install_deps_centos.sh'
+              - 'scripts/python/prepare_python_build.sh'
+              - 'scripts/python/check_wheel_libs.py'
+              - 'scripts/python/local_build_wheel.sh'
+              # This caller owns the runner, checkout and build-action inputs.
+              - '.github/workflows/pr-ci-community.yml'
+              - '.github/actions/python-wheel-build/**'
+              - '.github/actions/python-wheel-test/**'
+              - 'scripts/ci/python_ci.py'
+              - 'scripts/ci/collect_python_cache.sh'
+              - 'tests/python/**'
 
   format:
     name: Format Check
@@ -89,18 +145,17 @@ jobs:
     # Python-only changes still need Community formatting.
     if: (needs.changes.outputs.cpp == 'true' || needs.changes.outputs.python == 'true') && !(github.event_name == 'pull_request' && github.base_ref == 'main' && inputs.team-linux && needs.changes.outputs.cpp == 'true')
     runs-on: ubuntu-24.04
+    # Docker Hub alternative: vsaglib/vsag:ci-main-base
+    container: ghcr.io/antgroup/vsag:ci-main-base
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Install Clang format
-        run: |
-          sudo apt-get update
-          sudo bash scripts/deps/install_toolchain_ubuntu.sh
-          sudo apt-get install -y clang-format-20
-          sudo ln -sf /usr/bin/clang-format-20 /usr/bin/clang-format
-          clang-format --version
-      - name: Run Clang format check
-        run: ./scripts/format/check_format.sh
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/check-format
 
   coverage-config:
     name: Coverage Configuration
@@ -108,7 +163,7 @@ jobs:
     if: needs.changes.outputs.coverage == 'true'
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Test coverage configuration
         run: |
           python3 -m unittest tests/scripts/coverage_diagnostics_test.py
@@ -129,7 +184,7 @@ jobs:
     steps:
       - name: Free Disk Space
         run: sudo rm -rf /opt/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Trust exact workspace for Git tooling
@@ -149,6 +204,8 @@ jobs:
           python3 -m unittest tests/scripts/test_dependency_workflows.py
           python3 -m unittest tests/scripts/test_asan_artifact_workflow.py
           python3 -m unittest tests/scripts/test_toolchain_compatibility.py
+          python3 -m unittest tests/scripts/test_python_license.py
+          python3 -m unittest tests/scripts/test_local_build_wheel.py tests/scripts/test_macos_wheel_audit.py tests/scripts/test_macos_openmp.py
       - name: Prepare Host
         run: |
           sudo env VSAG_INSTALL_INTEL_MKL=OFF bash ./scripts/deps/install_deps_ubuntu.sh
@@ -162,7 +219,7 @@ jobs:
           include-tests: "true"
           include-tools: "true"
       - name: Restore ExternalProject Archives
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: .ci-downloads
           key: external-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/**/*.cmake') }}
@@ -210,7 +267,7 @@ jobs:
           find ./build -type f -name "*.a" -exec rm -f {} +
           rm -rf ./build/hdf5
       - name: Save Build
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           path: ./build
           name: build-x86-${{ github.run_id }}
@@ -226,7 +283,7 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf "${RUNNER_TOOL_CACHE:-/Users/runner/hostedtoolcache}"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install Dependencies
         run: bash ./scripts/deps/install_deps.sh
         env:
@@ -237,49 +294,29 @@ jobs:
           clang++ --version
           cmake --version
       - name: Load Cache
-        uses: hendrikmuhs/ccache-action@v1.2
+        uses: hendrikmuhs/ccache-action@v1.2.25
         with:
           max-size: "2G"
           save: ${{ github.event_name != 'pull_request' }}
           key: build-macos-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Make Asan
-        run: export CMAKE_GENERATOR="Ninja" CMAKE_EXPORT_COMPILE_COMMANDS=ON; make asan VSAG_ENABLE_EXAMPLES=ON COMPILE_JOBS=3
+        run: export CMAKE_GENERATOR="Ninja" CMAKE_EXPORT_COMPILE_COMMANDS=ON; make asan VSAG_ENABLE_EXAMPLES=ON COMPILE_JOBS=3 DATACELL_COMPILE_JOBS=1
 
   build-python-x86:
     name: Python Build X86
-    # Temporarily disable Python validation on main PRs until the Python rework lands.
-    # Restore PR validation here and in test-python-x86 after that work.
     needs: [changes, format]
-    if: (github.event_name != 'pull_request' || github.base_ref != 'main') && (needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true')
+    # Team-routed cpp changes intentionally skip the Community format job, so a skipped format
+    # result must not skip the wheel build; failed or cancelled prerequisites still do.
+    if: ${{ !cancelled() && needs.changes.result == 'success' && (needs.format.result == 'success' || needs.format.result == 'skipped') && ((github.event_name == 'pull_request' && github.base_ref == 'main' && needs.changes.outputs.wheel == 'true') || ((github.event_name != 'pull_request' || github.base_ref != 'main') && (needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true'))) }}
     runs-on: ubuntu-24.04
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
-      - uses: actions/checkout@v4
-      - name: Prepare Env
-        run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
-      - name: Load Cache
-        uses: hendrikmuhs/ccache-action@v1.2
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/python-wheel-build
         with:
-          max-size: "2G"
-          save: ${{ github.event_name != 'pull_request' }}
-          key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
-      - name: Make Python Wheel
-        run: |
-          sudo apt update
-          sudo apt install -y python3-venv
-          export CMAKE_GENERATOR="Ninja"
-          export VSAG_USE_SYSTEM_DEPS=AUTO
-          export CIBW_ENVIRONMENT="${CIBW_ENVIRONMENT:+$CIBW_ENVIRONMENT }VSAG_USE_SYSTEM_DEPS=AUTO"
-          make pyvsag
-      - name: Save Wheel
-        uses: actions/upload-artifact@v5
-        with:
-          path: ./wheelhouse
-          name: wheelhouse-x86-${{ github.run_id }}
-          compression-level: 1
-          retention-days: 1
-          overwrite: 'true'
+          arch: x86_64
+          artifact: wheelhouse-x86-${{ github.run_id }}
 
   test-asan-x86-unittests:
     name: Test X86 Unittests
@@ -287,17 +324,18 @@ jobs:
     if: ${{ !inputs.team-linux && needs.changes.outputs.cpp == 'true' }}
     runs-on: ubuntu-24.04
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Clean Env
         run: rm -rf ./build
       - name: Download Build
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: build-x86-${{ github.run_id }}
           path: ./build
@@ -313,7 +351,7 @@ jobs:
           ./build/tools/eval/eval_dataset_test -d yes
           ./build/tools/autotune/autotune_test -d yes
       - name: Upload Log
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           path: ./log
           name: log-x86-unittests-${{ github.run_id }}
@@ -329,17 +367,18 @@ jobs:
     env:
       LD_LIBRARY_PATH: ${{ github.workspace }}/build/src
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Clean Env
         run: rm -rf ./build
       - name: Download Build
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: build-x86-${{ github.run_id }}
           path: ./build
@@ -353,7 +392,7 @@ jobs:
           chmod +x ./build/tests/eval_monitor_test
           ./build/tests/eval_monitor_test -d yes
       - name: Upload Log
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           path: ./log
           name: log-x86-functests-${{ github.run_id }}
@@ -367,17 +406,18 @@ jobs:
     if: ${{ !inputs.team-linux && needs.changes.outputs.cpp == 'true' }}
     runs-on: ubuntu-24.04
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Clean Env
         run: rm -rf ./build
       - name: Download Build
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: build-x86-${{ github.run_id }}
           path: ./build
@@ -404,7 +444,8 @@ jobs:
       COMPATIBILITY_INDEX_DIR: ${{ github.workspace }}/.ci-compatibility-inputs
       LD_LIBRARY_PATH: ${{ github.workspace }}/build/src
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -427,7 +468,7 @@ jobs:
           install -m 0755 /tmp/gh_${GH_VERSION}_linux_amd64/bin/gh /usr/local/bin/gh
           rm -rf /tmp/gh.tar.gz /tmp/gh_${GH_VERSION}_linux_amd64
           gh --version
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Download Compatibility Indexes from Release
@@ -437,7 +478,7 @@ jobs:
       - name: Clean Env
         run: rm -rf ./build
       - name: Download Build
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: build-x86-${{ github.run_id }}
           path: ./build
@@ -446,59 +487,43 @@ jobs:
       - name: Run Check Compatibility
         run: BUILD_DIR=./build bash ./scripts/check_compatibility.sh
 
-  # One py3-none wheel has to work on every supported CPython and on both numpy majors.
+  # One py3-none wheel has to work on every supported CPython and on both numpy majors. Main PRs
+  # run one primary environment; version branches and manual runs keep the full matrix.
   test-python-x86:
     name: Test Python X86 (py${{ matrix.python }}, numpy ${{ matrix.numpy }})
     needs: [changes, build-python-x86]
-    if: (github.event_name != 'pull_request' || github.base_ref != 'main') && (needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true')
+    # An explicit status function replaces the implicit success() check, which would otherwise
+    # skip this job when the intentionally skipped Community format job is an ancestor.
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.build-python-x86.result == 'success' && ((github.event_name == 'pull_request' && github.base_ref == 'main' && needs.changes.outputs.wheel == 'true') || ((github.event_name != 'pull_request' || github.base_ref != 'main') && (needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true'))) }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - {python: '3.10', numpy: '1.26.*'}
-          - {python: '3.11', numpy: '2.*'}
-          - {python: '3.12', numpy: '2.*', openmp: true}
-          - {python: '3.13', numpy: '2.*'}
-          - {python: '3.14', numpy: '2.*'}
+      matrix: ${{ fromJSON(github.event_name == 'pull_request' && github.base_ref == 'main' && '{"include":[{"python":"3.12","numpy":"2.*"}]}' || '{"include":[{"python":"3.10","numpy":"1.26.*"},{"python":"3.11","numpy":"2.*"},{"python":"3.12","numpy":"2.*","openmp":true},{"python":"3.13","numpy":"2.*"},{"python":"3.14","numpy":"2.*"}]}') }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
           allow-prereleases: true
-      - name: Download Wheel
-        uses: actions/download-artifact@v5
+      - uses: ./.github/actions/python-wheel-test
         with:
-          name: wheelhouse-x86-${{ github.run_id }}
-          path: ./wheelhouse
-      - name: Install Python Wheel
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install ./wheelhouse/*.whl "numpy==${{ matrix.numpy }}" pytest
-      - name: Install other OpenMP users
-        # torch and scikit-learn bring their own OpenMP runtimes; the coexistence test needs both.
+          arch: x86_64
+          artifact: wheelhouse-x86-${{ github.run_id }}
+          numpy-version: ${{ matrix.numpy }}
+          mode: ${{ matrix.openmp && 'openmp' || 'ordinary' }}
+
+      - name: Run ordinary tests in the integration environment
         if: ${{ matrix.openmp }}
-        run: |
-          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
-          python -m pip install scikit-learn
-      - name: Check installed wheel
-        run: python -c "import pyvsag, numpy; print(pyvsag.__version__, numpy.__version__)"
-      - name: Run Python Test
-        # Run from tests/python: the source tree's python/ directory is not on sys.path, so the
-        # installed wheel is what gets imported.
-        run: |
-          set -euo pipefail
-          cd ./tests/python/
-          python3 -m pytest . -v --tb=short 2>&1 | tee test-output.log
-      - name: Upload Test Logs
-        if: always()
-        uses: actions/upload-artifact@v5
+        run: python3 scripts/ci/python_ci.py test --output python-ordinary-report/results.json
+      - name: Upload ordinary integration-environment evidence
+        if: ${{ always() && matrix.openmp }}
+        uses: actions/upload-artifact@v6
         with:
-          name: pytest-logs-x86-py${{ matrix.python }}-${{ github.run_id }}
-          path: ./tests/python/test-output.log
+          name: python-ordinary-report-${{ github.job }}-${{ strategy.job-index }}-${{ github.run_id }}
+          path: python-ordinary-report
+          if-no-files-found: warn
           retention-days: 30
-          if-no-files-found: ignore
+          overwrite: true
 
   validate:
     if: inputs.run-docs
@@ -506,7 +531,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - uses: ./.github/actions/check-docs
 
   simd-coverage:
@@ -515,9 +540,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -562,7 +588,7 @@ jobs:
           else
             echo 'SIMD coverage unavailable: build, test, or collection did not finish. No passing result is claimed.' >> "$GITHUB_STEP_SUMMARY"
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: pr-simd-coverage
@@ -574,17 +600,48 @@ jobs:
     if: inputs.run-lite
     name: Lite ${{ matrix.mode }}
     runs-on: ubuntu-24.04
+    # Lite needs GCC/gcov, LLVM 20 format/tidy, CMake/Ninja, Python and Git; no BLAS/MKL.
+    # Docker Hub alternative: vsaglib/vsag:ci-main-base
+    container: ghcr.io/antgroup/vsag:ci-main-base
     strategy:
       fail-fast: false
       matrix:
         mode: [default-off, rabitq-on, sanitizer, coverage]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - uses: ./.github/actions/check-lite
         with:
           mode: ${{ matrix.mode }}
+
+  python-result:
+    name: Python Checks Result
+    needs: [changes, build-python-x86, test-python-x86]
+    if: always()
+    runs-on: ubuntu-24.04
+    env:
+      CORE: ${{ inputs.core }}
+      CHANGES_RESULT: ${{ needs.changes.result }}
+      RUN_PYTHON: ${{ ((github.event_name == 'pull_request' && github.base_ref == 'main' && needs.changes.outputs.wheel == 'true') || ((github.event_name != 'pull_request' || github.base_ref != 'main') && (needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true'))) }}
+      BUILD_RESULT: ${{ needs.build-python-x86.result }}
+      TEST_RESULT: ${{ needs.test-python-x86.result }}
+    steps:
+      - name: Require applicable Python jobs
+        shell: bash
+        run: |
+          if [ "$CORE" = true ] && [ "$CHANGES_RESULT" != success ]; then
+            echo '::error::Python applicability could not be determined.'
+            exit 1
+          fi
+          expected=skipped
+          if [ "$CORE" = true ] && [ "$RUN_PYTHON" = true ]; then expected=success; fi
+          for result in "$BUILD_RESULT" "$TEST_RESULT"; do
+            if [ "$result" != "$expected" ]; then
+              echo "::error::Python checks: expected $expected, got ${result:-unset}"
+              exit 1
+            fi
+          done
 
   shared-checks-result:
     name: Shared Checks Result
@@ -619,7 +676,7 @@ jobs:
     outputs:
       non_markdown: ${{ steps.execute.outputs.non_markdown }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/tsan-build-and-test-changes
         id: execute
     if: ${{ (inputs.core && github.event_name == 'pull_request' && startsWith(github.base_ref, '0.') && !contains(github.base_ref, '/')) && (true) }}
@@ -635,7 +692,8 @@ jobs:
       group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -664,7 +722,7 @@ jobs:
           done
           node24_diagnostics after
           exit "$cleanup_failed"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: '0'
       - uses: ./.github/actions/tsan-build-and-test-build-tsan
@@ -680,8 +738,9 @@ jobs:
       group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/tsan-build-and-test-test-tsan
         id: execute

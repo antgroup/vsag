@@ -12,12 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <algorithm>
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <cmath>
 #include <cstdint>
+#include <numeric>
 #include <random>
+#include <string>
 #include <vector>
 
+#include "json_types.h"
 #include "simd/bf16_simd.h"
 #include "simd/fp16_simd.h"
 #include "vsag/vsag.h"
@@ -221,6 +227,207 @@ TEST_CASE("HGraph typed native distance contract", "[ft][hgraph][distance_contra
             REQUIRE(batch.value()->GetDistances()[3] == -1);
         }
     }
+}
+
+TEST_CASE("HGraph analyzer preserves native half queries and batch strides",
+          "[ft][hgraph][fp16][bf16][analyzer]") {
+    const std::string dtype = GENERATE("float32", "float16", "bfloat16");
+    const std::string quant = GENERATE("sq8", "rabitq", "tq");
+    CAPTURE(dtype, quant);
+    constexpr int64_t dim = 33;
+    constexpr int64_t count = 256;
+    constexpr int64_t topk = 5;
+    std::vector<float> floats(count * dim);
+    std::vector<uint16_t> halves(count * dim);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 1000);
+    std::mt19937 random(20261112);
+    for (uint64_t i = 0; i < floats.size(); ++i) {
+        const auto value = (1 + random() % 128) / 129.0F;
+        const bool bf16 = dtype == "bfloat16";
+        halves[i] = bf16 ? generic::FloatToBF16(value) : generic::FloatToFP16(value);
+        floats[i] = bf16 ? generic::BF16ToFloat(halves[i]) : generic::FP16ToFloat(halves[i]);
+    }
+    const auto input = [&](uint64_t row, uint64_t size) {
+        auto data =
+            Dataset::Make()->NumElements(size)->Dim(dim)->Owner(false)->Ids(ids.data() + row);
+        if (dtype == "float32") {
+            data->Float32Vectors(floats.data() + row * dim);
+        } else {
+            data->Float16Vectors(halves.data() + row * dim);
+        }
+        return data;
+    };
+    const std::string transform = quant == "tq" ? R"(,"tq_chain":"mrle,rabitq","mrle_dim":24)" : "";
+    const auto parameters = std::string(R"({"dtype":")") + dtype +
+                            R"(","metric_type":"l2","dim":33,"index_param":{"max_degree":16,
+        "ef_construction":64,"build_thread_count":1,"base_quantization_type":")" +
+                            quant + R"(","rabitq_bits_per_dim_base":3)" + transform + R"(,
+        "precise_quantization_type":"sq8","use_reorder":true,"support_duplicate":true,
+        "graph_storage_type":"compressed"}})";
+    auto made = Factory::CreateIndex("hgraph", parameters);
+    REQUIRE(made.has_value());
+    auto index = made.value();
+    auto built = index->Build(input(0, count));
+    REQUIRE(built.has_value());
+    REQUIRE(built.value().empty());
+    const auto stats = JsonType::Parse(index->GetStats());
+    for (const auto* key : {"avg_distance_base", "recall_base", "quantization_bias_ratio"}) {
+        REQUIRE(std::isfinite(stats[key].GetFloat()));
+    }
+    REQUIRE(stats["recall_base"].GetFloat() > 0.5F);
+
+    SearchRequest request;
+    request.query_ = input(0, 2);
+    request.topk_ = topk;
+    request.params_str_ = R"({"hgraph":{"ef_search":100}})";
+    const auto batch = JsonType::Parse(index->AnalyzeIndexBySearch(request));
+    REQUIRE(std::isfinite(batch["quantization_bias_ratio_query"].GetFloat()));
+    float mean_distance = 0;
+    float mean_recall = 0;
+    for (uint64_t row = 0; row < 2; ++row) {
+        request.query_ = input(row, 1);
+        const auto single = JsonType::Parse(index->AnalyzeIndexBySearch(request));
+        mean_distance += single["avg_distance_query"].GetFloat() / 2;
+        mean_recall += single["recall_query"].GetFloat() / 2;
+        auto distances = index->CalcDistancesById(request.query_, ids.data(), count, true);
+        REQUIRE(distances.has_value());
+        const auto* values = distances.value()->GetDistances();
+        std::vector<float> sorted(values, values + count);
+        std::sort(sorted.begin(), sorted.end());
+        const auto reference = std::accumulate(sorted.begin(), sorted.begin() + topk, 0.0F) / topk;
+        REQUIRE(single["avg_distance_query"].GetFloat() == Catch::Approx(reference));
+    }
+    REQUIRE(batch["avg_distance_query"].GetFloat() == Catch::Approx(mean_distance));
+    REQUIRE(batch["recall_query"].GetFloat() == Catch::Approx(mean_recall));
+    if (dtype != "float32") {
+        request.query_ =
+            Dataset::Make()->Dim(dim)->NumElements(1)->Owner(false)->Float32Vectors(floats.data());
+        REQUIRE_THROWS(index->AnalyzeIndexBySearch(request));
+    }
+}
+
+TEST_CASE("HGraph analyzer preserves INT8 queries and batch strides",
+          "[ft][hgraph][int8][analyzer]") {
+    constexpr int64_t dim = 33;
+    constexpr int64_t count = 128;
+    constexpr int64_t topk = 5;
+    std::vector<int8_t> vectors(count * dim);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 1000);
+    std::mt19937 random(20261112);
+    for (auto& value : vectors) {
+        value = static_cast<int8_t>(static_cast<int>(random() % 23) - 11);
+    }
+    const auto input = [&](uint64_t row, uint64_t size) {
+        return Dataset::Make()
+            ->NumElements(size)
+            ->Dim(dim)
+            ->Owner(false)
+            ->Ids(ids.data() + row)
+            ->Int8Vectors(vectors.data() + row * dim);
+    };
+    auto made = Factory::CreateIndex("hgraph", R"({"dtype":"int8","metric_type":"l2","dim":33,
+        "index_param":{"max_degree":16,"ef_construction":64,"build_thread_count":1,
+        "base_quantization_type":"int8","use_reorder":false,"graph_storage_type":"compressed"}})");
+    REQUIRE(made.has_value());
+    auto index = made.value();
+    auto built = index->Build(input(0, count));
+    REQUIRE(built.has_value());
+    REQUIRE(built.value().empty());
+    const auto stats = JsonType::Parse(index->GetStats());
+    REQUIRE(std::isfinite(stats["avg_distance_base"].GetFloat()));
+    REQUIRE(stats["recall_base"].GetFloat() > 0.5F);
+
+    SearchRequest request;
+    request.query_ = input(0, 2);
+    request.topk_ = topk;
+    request.params_str_ = R"({"hgraph":{"ef_search":100}})";
+    const auto batch = JsonType::Parse(index->AnalyzeIndexBySearch(request));
+    REQUIRE(batch["recall_query"].GetFloat() > 0.5F);
+    float mean_distance = 0;
+    float mean_recall = 0;
+    for (uint64_t row = 0; row < 2; ++row) {
+        request.query_ = input(row, 1);
+        const auto single = JsonType::Parse(index->AnalyzeIndexBySearch(request));
+        auto distances = index->CalcDistancesById(request.query_, ids.data(), count, true);
+        REQUIRE(distances.has_value());
+        const auto* values = distances.value()->GetDistances();
+        std::vector<float> sorted(values, values + count);
+        std::sort(sorted.begin(), sorted.end());
+        const auto reference = std::accumulate(sorted.begin(), sorted.begin() + topk, 0.0F) / topk;
+        REQUIRE(single["avg_distance_query"].GetFloat() == Catch::Approx(reference));
+        mean_distance += reference / 2;
+        mean_recall += single["recall_query"].GetFloat() / 2;
+    }
+    REQUIRE(batch["avg_distance_query"].GetFloat() == Catch::Approx(mean_distance));
+    REQUIRE(batch["recall_query"].GetFloat() == Catch::Approx(mean_recall));
+    std::vector<float> wrong(dim, 0.0F);
+    request.query_ =
+        Dataset::Make()->Dim(dim)->NumElements(1)->Owner(false)->Float32Vectors(wrong.data());
+    REQUIRE_THROWS(index->AnalyzeIndexBySearch(request));
+}
+
+TEST_CASE("HGraph fused RaBitQ analysis preserves native half samples",
+          "[ft][hgraph][fp16][bf16][analyzer][fused]") {
+    const std::string dtype = GENERATE("float32", "float16", "bfloat16");
+    CAPTURE(dtype);
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 8;
+    std::vector<float> floats(count * dim);
+    std::vector<uint16_t> halves(count * dim);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 1000);
+    std::mt19937 random(20261112);
+    for (uint64_t i = 0; i < floats.size(); ++i) {
+        const auto value = static_cast<float>(1 + random() % 64) / 64.0F;
+        const bool bf16 = dtype == "bfloat16";
+        halves[i] = bf16 ? generic::FloatToBF16(value) : generic::FloatToFP16(value);
+        floats[i] = bf16 ? generic::BF16ToFloat(halves[i]) : generic::FP16ToFloat(halves[i]);
+    }
+    const auto input = [&](uint64_t row, uint64_t size) {
+        auto data =
+            Dataset::Make()->NumElements(size)->Dim(dim)->Owner(false)->Ids(ids.data() + row);
+        if (dtype == "float32") {
+            data->Float32Vectors(floats.data() + row * dim);
+        } else {
+            data->Float16Vectors(halves.data() + row * dim);
+        }
+        return data;
+    };
+    const auto parameters = std::string(R"({"dtype":")") + dtype +
+                            R"(","metric_type":"l2","dim":64,"index_param":{
+        "base_quantization_type":"rabitq","precise_quantization_type":"rabitq",
+        "base_io_type":"memory_io","base_supplement_io_type":"memory_io",
+        "rabitq_bits_per_dim_base":3,"rabitq_bits_per_dim_precise":5,"rabitq_use_fht":true,
+        "graph_io_type":"memory_io","graph_storage_type":"flat","graph_type":"nsw",
+        "max_degree":8,"ef_construction":32,"build_thread_count":1,
+        "use_reorder":true,"reorder_source":"base","store_raw_vector":false,
+        "rabitq_fused_datacell":true}})";
+    auto made = Factory::CreateIndex("hgraph", parameters);
+    REQUIRE(made.has_value());
+    auto index = made.value();
+    auto built = index->Build(input(0, count));
+    REQUIRE(built.has_value());
+    REQUIRE(built.value().empty());
+
+    // Each training point is a centroid, so decoded samples retain their input values.
+    // GetStats samples every row and includes every id in its top-k for this small index.
+    float reference_distance = 0.0F;
+    for (uint64_t row = 0; row < count; ++row) {
+        auto distances = index->CalcDistancesById(input(row, 1), ids.data(), count, true);
+        REQUIRE(distances.has_value());
+        reference_distance += std::accumulate(distances.value()->GetDistances(),
+                                              distances.value()->GetDistances() + count,
+                                              0.0F) /
+                              static_cast<float>(count * count);
+    }
+    REQUIRE(reference_distance > 0.0F);
+    const auto stats = JsonType::Parse(index->GetStats());
+    REQUIRE(stats["recall_base"].GetFloat() > 0.5F);
+    REQUIRE(stats["avg_distance_base"].GetFloat() ==
+            Catch::Approx(reference_distance).epsilon(1e-4).margin(1e-4));
+    REQUIRE(std::isfinite(stats["quantization_bias_ratio"].GetFloat()));
 }
 
 }  // namespace vsag

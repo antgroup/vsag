@@ -73,6 +73,24 @@ Save 将分配/容量异常转换为 `NO_ENOUGH_MEMORY`，流错误仍为 `READ_
 Remove 为 bool，false 无法区分 ID 缺失和图分配失败。失败回滚恢复逻辑状态，不恢复分配器容量。
 完整存储表示相同的 Update 不改变图；RaBitQ 编码相同不代表原始向量相同。
 
+## 可选 Add 自动持久化
+
+在本地 POSIX 文件系统上，构建时开启 `-DENABLE_LITE_PERSISTENT_ADD=ON`，
+并包含 `vsag/lite/persistent_index.h`。使用
+`PersistentIndex::Create(新目录, std::move(seed))`，种子可以是空 BruteForce、
+已建好的 FP32/FP16 图或已训练的 RaBitQ8 图。导入已有快照时先调用 `Index::Load`。
+
+目录内包含 `checkpoint.vsag` 和 `add.log`。每次 `Add` 在返回成功前同步一条
+包含外部 ID、FP32 输入与校验值的记录。`PersistentIndex::Open` 加载检查点并
+按序重放。末尾不完整的记录会被丢弃，完整记录校验失败会报错。若进程在返回前
+退出，完整记录也可能被恢复，重试前应核对外部 ID。追加或同步失败后，句柄失效并
+释放锁，重新打开并核对 ID 后再决定是否重试。
+
+每个目录由单个句柄持有，调用方负责串行访问。接口覆盖 Add、Search、Size 及 Save
+导出。需要包含此前的 Update/Remove 时，先将它们纳入种子检查点。每次 Add 的日志
+增加 `12 + 4 * 维数` 字节，压缩后端也记录 FP32 输入。恢复会重放全部日志。加载检查点时会为完整日志记录预留向量空间。
+Save 可导出普通快照，作为新目录的种子。本阶段验收范围是进程异常退出后的恢复。
+
 ## 项目产出要求对照
 
 | 要求 | 已有交付 | 剩余验收 |

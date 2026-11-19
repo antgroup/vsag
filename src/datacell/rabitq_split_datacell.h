@@ -643,6 +643,7 @@ public:
                        "optimized build filter codes are packaged during finalization");
         {
             std::lock_guard lock(this->mutex_);
+            this->restore_deferred_split_layouts();
             if (idx == std::numeric_limits<InnerIdType>::max()) {
                 idx = this->total_count_.load(std::memory_order_relaxed);
             }
@@ -669,6 +670,7 @@ public:
         CHECK_ARGUMENT(full_add != nullptr, "residual full factor output is required");
         {
             std::lock_guard lock(this->mutex_);
+            this->restore_deferred_split_layouts();
             if (idx == std::numeric_limits<InnerIdType>::max()) {
                 idx = this->total_count_.load(std::memory_order_relaxed);
             }
@@ -1531,6 +1533,13 @@ public:
     void
     Train(const void* data, uint64_t count) override {
         if (this->quantizer_) {
+            // Do not bypass TransformQuantizer chains, even dimension-preserving ones.
+            if constexpr (std::is_same_v<QuantizerT, typename Accessor::BottomQuantizerType>) {
+                if (this->dense_input_element_size() == sizeof(uint16_t)) {
+                    this->quantizer_->TrainHalf(data, count, this->common_param_.data_type_);
+                    return;
+                }
+            }
             Vector<float> input_scratch(this->allocator_);
             this->quantizer_->Train(this->prepare_dense_input(data, count, input_scratch), count);
         }
@@ -1582,6 +1591,7 @@ public:
         }
         this->supplement_layout_->Resize(final_capacity);
         this->max_capacity_ = final_capacity;
+        this->split_layouts_deferred_ = false;
 
         auto finalize_range = [this](InnerIdType begin, InnerIdType end) {
             ByteBuffer one_bit_code(this->one_bit_code_size_, allocator_);
@@ -1667,6 +1677,7 @@ public:
 
     void
     AbortOptimizedBuild() noexcept override {
+        // Keep exception unwinding allocation-free. Normal writes restore any deferred capacity.
         this->optimized_build_active_ = false;
         this->optimized_build_scalar_layout_.reset();
         this->optimized_build_code_sums_.reset();
@@ -1697,6 +1708,7 @@ public:
             return true;
         }
         std::lock_guard lock(this->mutex_);
+        this->restore_deferred_split_layouts();
         Vector<float> input_scratch(this->allocator_);
         this->write_encoded_vector(this->prepare_dense_input(vector, 1, input_scratch), idx);
         return true;
@@ -1888,7 +1900,10 @@ public:
     void
     Resize(InnerIdType new_capacity) override {
         if (new_capacity <= this->max_capacity_) {
-            return;
+            if (this->optimized_build_active_ or not this->split_layouts_deferred_) {
+                return;
+            }
+            new_capacity = this->max_capacity_;
         }
         if (this->fused_code_storage_ != nullptr) {
             if (this->optimized_build_active_) {
@@ -1898,13 +1913,17 @@ public:
             this->max_capacity_ = new_capacity;
             return;
         }
-        if (not this->external_filter_code_storage_) {
-            this->x_bit_layout_->Resize(new_capacity);
-        }
-        this->supplement_layout_->Resize(new_capacity);
         if (this->optimized_build_active_) {
+            // FinalizeOptimizedBuild materializes the split layouts after construction.
             this->optimized_build_scalar_layout_->Resize(new_capacity);
             this->optimized_build_code_sums_->resize(new_capacity, 0);
+            this->split_layouts_deferred_ = true;
+        } else {
+            if (not this->external_filter_code_storage_) {
+                this->x_bit_layout_->Resize(new_capacity);
+            }
+            this->supplement_layout_->Resize(new_capacity);
+            this->split_layouts_deferred_ = false;
         }
         this->max_capacity_ = new_capacity;
     }
@@ -2612,6 +2631,7 @@ public:
     Serialize(StreamWriter& writer) override {
         CHECK_ARGUMENT(not this->optimized_build_active_,
                        "cannot serialize RaBitQ split codes during optimized build");
+        this->restore_deferred_split_layouts();
         FlattenInterface::Serialize(writer);
         if (this->fused_code_storage_ != nullptr) {
             StreamWriter::WriteObj(writer, kFusedModelMagic);
@@ -2702,6 +2722,7 @@ public:
                                 "Merge rabitq split datacell failed: not match type");
         }
 
+        this->restore_deferred_split_layouts();
         for (InnerIdType i = 0; i < ptr->total_count_.load(std::memory_order_relaxed); ++i) {
             ByteBuffer one_bit(one_bit_code_size_, allocator_);
             ByteBuffer supplement(supplement_code_size_, allocator_);
@@ -2733,6 +2754,7 @@ public:
             (*this->optimized_build_code_sums_)[to] = (*this->optimized_build_code_sums_)[from];
             return;
         }
+        this->restore_deferred_split_layouts();
         ByteBuffer one_bit(one_bit_code_size_, allocator_);
         ByteBuffer supplement(supplement_code_size_, allocator_);
         this->x_bit_layout_->Read(from, one_bit.data);
@@ -2806,6 +2828,7 @@ public:
     // mismatched one-bit IO parameter type.
     std::string supplement_io_type_{};
     bool optimized_build_active_{false};
+    bool split_layouts_deferred_{false};
     uint64_t optimized_build_record_size_{0};
     bool external_filter_code_storage_{false};
     RabitQFusedInterface* fused_code_storage_{nullptr};
@@ -2814,10 +2837,19 @@ public:
     uint64_t optimized_build_prefetch_bytes_{0};
 
 private:
+    // Insert/update callers hold mutex_; other callers already require exclusive access.
+    void
+    restore_deferred_split_layouts() {
+        if (not this->optimized_build_active_ and this->split_layouts_deferred_) {
+            this->Resize(this->max_capacity_);
+        }
+    }
+
     void
     insert_vector_with_scratch(const void* vector, InnerIdType idx, Vector<float>& input_scratch) {
         {
             std::lock_guard lock(this->mutex_);
+            this->restore_deferred_split_layouts();
             if (idx == std::numeric_limits<InnerIdType>::max()) {
                 idx = this->total_count_.load(std::memory_order_relaxed);
             }

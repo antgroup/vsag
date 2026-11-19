@@ -372,6 +372,12 @@ parse(const int argc,
             return false;
         }
     }
+    const bool valid_dataset = dataset == "all" or dataset == "uniform" or dataset == "skewed" or
+                               dataset == "indivisible" or dataset == "duplicates";
+    if (not valid_dataset) {
+        std::printf("unknown dataset: %s\n", dataset.c_str());
+        return false;
+    }
     if (k >= vsag::KMeansCluster::THRESHOLD_FOR_HGRAPH) {
         // KMeansCluster switches to non-deterministic parallel HGraph assignment here.
         std::printf("--k must be less than %llu for reproducible HGraph-free assignment\n",

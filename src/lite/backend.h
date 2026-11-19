@@ -137,7 +137,7 @@ tl::expected<std::unique_ptr<Backend>, Error>
 make_rabitq_graph_backend(const Backend& source, uint64_t max_degree, uint64_t ef_search);
 
 tl::expected<std::unique_ptr<Backend>, Error>
-load_rabitq_graph_backend(std::istream& input);
+load_rabitq_graph_backend(std::istream& input, uint64_t extra_rows);
 #endif
 
 }  // namespace vsag::lite::detail

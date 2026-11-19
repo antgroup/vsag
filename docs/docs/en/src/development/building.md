@@ -26,7 +26,7 @@ the sum of simultaneously resident build processes.
 
 ## Prerequisites
 
-- **OS**: Ubuntu 20.04+, CentOS 7+, or macOS 14+ on Apple Silicon
+- **OS**: Ubuntu 20.04+, CentOS 7+, or macOS 15+ on Apple Silicon
 - **Compiler**: GCC 9.4.0+, Clang 13.0.0+, or Apple Clang from Xcode Command Line Tools
 - **CMake**: 3.18.0+
 - **Ninja**: preferred when available; Unix Makefiles are used as the fallback
@@ -93,9 +93,9 @@ or a measurement of generated build artifacts alone.
 
 > **Legacy no-op measurements are not trustworthy until [#2899](https://github.com/antgroup/vsag/pull/2899).** The standalone workflow deliberately fails its preflight on collectors without the supported schema 3 `true_noop` reporting. Separating PR builds does not itself fix the collector. While the prerequisite is unmerged, scheduled runs fail clearly instead of publishing misleading legacy baselines.
 
-PR CI's **ASan Build X86** runs one `make asan COMPILE_JOBS=3`, with Ninja, compile commands, system OpenBLAS, examples and tools enabled. The Makefile still enables tests, Sanitize and ASan/UBSan; changed-source lint, downstream tests, compatibility checks and build artifacts retain their existing contracts. `ccache --zero-stats` resets counters, **not cached objects**. The build step logs elapsed time, and an always-run step prints verbose/fallback cache diagnostics without hiding a build failure. ccache stays enabled in its default directory on the disposable GitHub-hosted VM; no compiler cache is restored or saved between jobs. PR X86 dependency archives intentionally change from restore-and-save to **restore-only** (`actions/cache/restore@v4`), preventing PR contexts from writing archives back to the shared cache; this policy is not limited to the standalone benchmark.
+PR CI's **ASan Build X86** runs one `make asan COMPILE_JOBS=3`, with Ninja, compile commands, system OpenBLAS, examples and tools enabled. The Makefile still enables tests, Sanitize and ASan/UBSan; changed-source lint, downstream tests, compatibility checks and build artifacts retain their existing contracts. `ccache --zero-stats` resets counters, **not cached objects**. The build step logs elapsed time, and an always-run step prints verbose/fallback cache diagnostics without hiding a build failure. ccache stays enabled in its default directory on the disposable GitHub-hosted VM; no compiler cache is restored or saved between jobs. PR X86 dependency archives intentionally change from restore-and-save to **restore-only** (`actions/cache/restore@v5`), preventing PR contexts from writing archives back to the shared cache; this policy is not limited to the standalone benchmark.
 
-The **Daily CI / Build Performance X86** profile (`.github/workflows/daily_test.yml`, `profile=build-performance`) runs weekly on Mondays at 03:23 UTC on upstream `main`, or manually from Actions. It is not a PR required check and uses separate concurrency, an Ubuntu 24.04 hosted runner, a 180-minute timeout and 14-day report retention. Once the workflow is on the default branch, for example:
+The **Nightly CI / Build Performance X86** profile (`.github/workflows/daily_test.yml`, `profile=build-performance`) runs weekly on Mondays at 03:23 UTC on upstream `main`, or manually from Actions. It is not a PR required check and uses separate concurrency, an Ubuntu 24.04 hosted runner, a 180-minute timeout and 14-day report retention. Once the workflow is on the default branch, for example:
 
 ```bash
 gh workflow run daily_test.yml --ref main -f profile=build-performance -f ref=main
@@ -176,7 +176,7 @@ pip install wheelhouse/pyvsag-*.whl
 The wheel is a `py3-none` package, so one build per architecture serves every supported CPython
 (3.10+). `make pyvsag` runs `scripts/python/local_build_wheel.sh` from the repository root and
 writes the wheel to `wheelhouse/`. With Docker it builds inside the `manylinux_2_28` image (via
-cibuildwheel) and runs part of `tests/python` there, leaving the host environment untouched. Without
+cibuildwheel) and runs part of `tests/python` there, leaving the host environment untouched. It then runs `scripts/python/check_wheel_libs.py`, which fails if the wheel bundles or links libgfortran, libquadmath, libaio, or liburing (skipped when `VSAG_USE_SYSTEM_DEPS` is not `OFF`, since system OpenBLAS pulls in libgfortran). Without
 Docker it falls back to a plain `python -m build`, installs the wheel into the active virtual
 environment and runs `tests/python` against it; that wheel carries a `linux_<arch>` tag instead of
 `manylinux_2_28`. Outside an active virtual environment the script creates `.venv/` in the
@@ -234,6 +234,23 @@ An unset path preserves existing behavior; an explicitly empty or unreadable pat
 
 You can increase `COMPILE_JOBS` if your machine has enough memory, but the default is conservative
 to avoid out-of-memory failures in CI runners.
+
+### Datacell compile parallelism
+
+`COMPILE_JOBS` controls the whole build. `DATACELL_COMPILE_JOBS=0` (the default)
+adds no separate cap: datacell and RaBitQ factory files use that same global job budget.
+On memory-limited Ninja builders, set a positive limit shared by both object libraries:
+
+```bash
+make asan COMPILE_JOBS=24                         # all sources share 24 jobs
+make asan COMPILE_JOBS=3 DATACELL_COMPILE_JOBS=1   # ARM CI: at most one datacell compile
+```
+
+Direct CMake callers use `-DVSAG_DATACELL_COMPILE_JOBS=N`. The cap applies to all build
+modes, does not change compiler flags or test scope, and cannot exceed the global job limit.
+Positive values require Ninja; other generators use `0` and their global parallelism.
+The ARM Linux/macOS ASan jobs set `1` explicitly; other jobs inherit the global limit.
+Higher parallelism needs more memory. This scheduling option does not fix cache misses.
 
 ## C++ standard and compiler validation
 

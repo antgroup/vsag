@@ -101,6 +101,7 @@ public:
     friend class HGraphFGIM;
     friend class HGraphFGIMTestAccessor;
     friend class HGraphCodeWriteTestAccess;
+    friend class HGraphCacheTestAccess;
     friend class HGraphFusedInputTestAccess;
     friend struct HGraphMCITestAccess;
     friend class HGraphOptimizedBuildSession;
@@ -535,6 +536,8 @@ public:
                      RaBitQSearchCandidateBuffers* rabitq_candidates = nullptr) const;
 
 private:
+    static constexpr uint64_t cache_refine_block_size_ = 128;
+
     float
     calc_native_distance_by_id(const void* native_query,
                                int64_t id,

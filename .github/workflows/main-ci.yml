@@ -27,7 +27,7 @@ jobs:
       lint: ${{ steps.policy.outputs.lint }}
       pattern: ${{ steps.policy.outputs.pattern }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -44,7 +44,7 @@ jobs:
     needs: [changes, platforms, python, tsan, lint]
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Verify selected checks
         env:
           MAIN_NEEDS: ${{ toJSON(needs) }}
@@ -61,7 +61,7 @@ jobs:
       simd: ${{ steps.select.outputs.simd }}
       lite: ${{ steps.select.outputs.lite }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -77,6 +77,11 @@ jobs:
       matrix:
         check: ${{ fromJSON((github.event.deleted != true && (needs.select-checks.result != 'success' || needs.select-checks.outputs.format == 'true')) && '["Format Check"]' || '["Format Check Not Required"]') }}
     runs-on: ubuntu-24.04
+    # Docker Hub alternative: vsaglib/vsag:ci-main-base
+    container: ${{ matrix.check == 'Format Check' && 'ghcr.io/antgroup/vsag:ci-main-base' || '' }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Require successful check selection
         if: matrix.check == 'Format Check'
@@ -89,7 +94,9 @@ jobs:
           fi
       - name: Checkout code
         if: matrix.check == 'Format Check'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/check-format
         if: matrix.check == 'Format Check'
 
@@ -113,7 +120,7 @@ jobs:
           fi
       - name: Checkout repository
         if: matrix.check == 'Branch Docs'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - uses: ./.github/actions/check-docs
         if: matrix.check == 'Branch Docs'
   entry-scope:
@@ -125,7 +132,7 @@ jobs:
       simd: ${{ steps.scope.outputs.simd }}
       profile: ${{ steps.scope.outputs.profile }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -138,7 +145,8 @@ jobs:
     name: Asan Build X86
     runs-on: ubuntu-24.04
     container:
-      image: vsaglib/vsag:ci-main-mkl
+      # Docker Hub alternative: vsaglib/vsag:ci-main-mkl
+      image: ghcr.io/antgroup/vsag:ci-main-mkl
       volumes:
         - /opt:/useless
     concurrency:
@@ -147,7 +155,7 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/asan-build-and-test-build-asan-x86
         id: execute
     needs:
@@ -157,7 +165,8 @@ jobs:
     name: Asan Build Aarch64
     runs-on: ubuntu-24.04-arm
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     concurrency:
@@ -166,7 +175,7 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/asan-build-and-test-build-asan-aarch64
         id: execute
     needs:
@@ -182,7 +191,7 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf "${RUNNER_TOOL_CACHE:-/Users/runner/hostedtoolcache}"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/asan-build-and-test-build-asan-macos-arm64
         id: execute
     needs:
@@ -206,13 +215,14 @@ jobs:
           - unittests
           - functests
     container:
-      image: vsaglib/vsag:ci-main-mkl
+      # Docker Hub alternative: vsaglib/vsag:ci-main-mkl
+      image: ghcr.io/antgroup/vsag:ci-main-mkl
       volumes:
         - /opt:/useless
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/asan-build-and-test-test-asan-x86
         id: execute
         with:
@@ -232,7 +242,8 @@ jobs:
           - unittests
           - functests
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     concurrency:
@@ -241,7 +252,7 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/asan-build-and-test-test-asan-aarch64
         id: execute
         with:
@@ -266,7 +277,7 @@ jobs:
       group: test_asan_macos-${{ matrix.test_type }}-${{ github.sha }}
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/asan-build-and-test-test-asan-macos-arm64
         id: execute
         with:
@@ -281,7 +292,8 @@ jobs:
       - platforms-build-asan-x86
     runs-on: ubuntu-24.04
     container:
-      image: vsaglib/vsag:ci-main-mkl
+      # Docker Hub alternative: vsaglib/vsag:ci-main-mkl
+      image: ghcr.io/antgroup/vsag:ci-main-mkl
       volumes:
         - /opt:/useless
     concurrency:
@@ -290,7 +302,7 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/asan-build-and-test-test-example-x86
         id: execute
   platforms-test-example-aarch64:
@@ -303,7 +315,8 @@ jobs:
       SMOKE: ${{ (needs.entry-scope.outputs.profile == 'full-branch' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch')) }}
     runs-on: ubuntu-24.04-arm
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     concurrency:
@@ -312,7 +325,7 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/asan-build-and-test-test-example-aarch64
         id: execute
         with:
@@ -329,7 +342,7 @@ jobs:
       - platforms-test-asan-macos-arm64
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - uses: ./.github/actions/asan-build-and-test-clean-up
@@ -351,7 +364,7 @@ jobs:
       - platforms-clean-up
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Require complete selected results
@@ -359,7 +372,7 @@ jobs:
           RESULTS: ${{ toJSON(needs) }}
           REQUIRED: ${{ (needs.entry-scope.outputs.profile == 'full-branch' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch')) && '["platforms-build-asan-aarch64", "platforms-build-asan-macos-arm64", "platforms-test-asan-aarch64", "platforms-test-asan-macos-arm64", "platforms-test-example-aarch64"]' || '["platforms-build-asan-x86", "platforms-build-asan-aarch64", "platforms-build-asan-macos-arm64", "platforms-test-asan-x86", "platforms-test-asan-aarch64", "platforms-test-asan-macos-arm64", "platforms-test-example-x86", "platforms-test-example-aarch64"]' }}
         run: python3 scripts/ci/check_job_results.py
-  # Main-push Python is paused until #3295 upgrades packaging; manual/version checks remain.
+  # Main validates the merged wheel on x86; broad environments belong to Nightly.
   python-build-python-wheel-x86:
     name: Python Wheel Build X86
     runs-on: ubuntu-24.04
@@ -369,7 +382,7 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/python-build-and-test-build-python-wheel-x86
         id: execute
     needs:
@@ -386,7 +399,7 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/python-build-and-test-build-python-wheel-aarch64
         id: execute
     needs:
@@ -405,10 +418,10 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
-          python-version: '3.10'
-      - uses: actions/checkout@v4
+          python-version: ${{ github.ref == 'refs/heads/main' && '3.12' || '3.10' }}
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/python-build-and-test-test-python-x86
         id: execute
     if: ${{ needs.changes.outputs.python != 'false' && ((!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'python' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (true)) && needs.python-build-python-wheel-x86.result == 'success' }}
@@ -426,10 +439,10 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.10'
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/python-build-and-test-test-python-aarch64
         id: execute
   python-clean-up:
@@ -441,7 +454,7 @@ jobs:
       - python-test-python-aarch64
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - uses: ./.github/actions/python-build-and-test-clean-up
@@ -460,7 +473,7 @@ jobs:
       - python-clean-up
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Require complete selected results
@@ -474,7 +487,7 @@ jobs:
     outputs:
       non_markdown: ${{ steps.execute.outputs.non_markdown }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/tsan-build-and-test-changes
         id: execute
     needs:
@@ -495,7 +508,8 @@ jobs:
       group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -524,7 +538,7 @@ jobs:
           done
           node24_diagnostics after
           exit "$cleanup_failed"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: '0'
       - uses: ./.github/actions/tsan-build-and-test-build-tsan
@@ -542,9 +556,10 @@ jobs:
       group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/tsan-build-and-test-test-tsan
         id: execute
   tsan:
@@ -558,7 +573,7 @@ jobs:
       - tsan-test-tsan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Require complete selected results
@@ -570,7 +585,8 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
     env:
       VSAG_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.ci-fetchcontent
       VSAG_THIRDPARTY_DOWNLOAD_DIR: ${{ github.workspace }}/.ci-downloads
@@ -579,7 +595,7 @@ jobs:
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           persist-credentials: false
       - uses: ./.github/actions/lint-clang-tidy-check
@@ -600,7 +616,7 @@ jobs:
       - lint-clang-tidy-check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Require complete selected results
@@ -614,7 +630,7 @@ jobs:
     outputs:
       non_markdown: ${{ steps.execute.outputs.non_markdown }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/coverage-changes
         id: execute
     needs:
@@ -633,13 +649,14 @@ jobs:
       group: coverage-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
     env:
       VSAG_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.ci-fetchcontent
       VSAG_THIRDPARTY_DOWNLOAD_DIR: ${{ github.workspace }}/.ci-downloads
       VSAG_TEST_SEED: 424242
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: '0'
           persist-credentials: false
@@ -657,7 +674,7 @@ jobs:
       - coverage-coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Require complete selected results
@@ -672,7 +689,8 @@ jobs:
       group: compatibility-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
     env:
       COMPATIBILITY_INDEX_DIR: ${{ github.workspace }}/.ci-compatibility-inputs
     steps:
@@ -689,7 +707,7 @@ jobs:
           install -m 0755 /tmp/gh_${GH_VERSION}_linux_amd64/bin/gh /usr/local/bin/gh
           rm -rf /tmp/gh.tar.gz /tmp/gh_${GH_VERSION}_linux_amd64
           gh --version
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - uses: ./.github/actions/check-compatibility-compatibility
@@ -707,7 +725,7 @@ jobs:
       - compatibility-compatibility
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Require complete selected results
@@ -719,7 +737,8 @@ jobs:
     name: Asan Build Simd
     runs-on: ubuntu-24.04
     container:
-      image: vsaglib/vsag:ci-main-mkl
+      # Docker Hub alternative: vsaglib/vsag:ci-main-mkl
+      image: ghcr.io/antgroup/vsag:ci-main-mkl
       volumes:
         - /opt:/useless
     strategy:
@@ -757,7 +776,7 @@ jobs:
           done
           node24_diagnostics after
           exit "$cleanup_failed"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/asan-with-simd-option-build-asan-simd
         id: execute
         with:
@@ -786,7 +805,8 @@ jobs:
       group: test-${{ matrix.simd_key }}-${{ matrix.test_type }}-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-main-mkl
+      # Docker Hub alternative: vsaglib/vsag:ci-main-mkl
+      image: ghcr.io/antgroup/vsag:ci-main-mkl
       volumes:
         - /opt:/useless
     steps:
@@ -815,7 +835,7 @@ jobs:
           done
           node24_diagnostics after
           exit "$cleanup_failed"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/asan-with-simd-option-test-asan-simd
         id: execute
         with:
@@ -836,7 +856,7 @@ jobs:
           - sse
           - generic
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - uses: ./.github/actions/asan-with-simd-option-clean-up
@@ -855,7 +875,7 @@ jobs:
       - simd-clean-up
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Require complete selected results

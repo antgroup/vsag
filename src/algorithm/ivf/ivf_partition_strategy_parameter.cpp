@@ -75,18 +75,21 @@ IVFPartitionStrategyParameters::FromJson(const JsonType& json) {
         this->partition_train_type = IVFNearestPartitionTrainerType::RandomTrainer;
     } else if (train_type == IVF_TRAIN_TYPE_BALANCED_KMEANS) {
         this->partition_train_type = IVFNearestPartitionTrainerType::BalancedKMeansTrainer;
+    } else if (train_type == IVF_TRAIN_TYPE_E_MEANS) {
+        this->partition_train_type = IVFNearestPartitionTrainerType::EMeansTrainer;
     } else {
         // Unknown trainer names used to be silently treated as the default. They
         // are refused now (issue #2870): a typo must not train an index the user
         // asked not to build. Serialized indexes only ever store the names above.
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             fmt::format("unknown {}: \"{}\", expected one of: "
-                                        "\"{}\", \"{}\", \"{}\"",
+                                        "\"{}\", \"{}\", \"{}\", \"{}\"",
                                         IVF_TRAIN_TYPE_KEY,
                                         train_type,
                                         IVF_TRAIN_TYPE_KMEANS,
                                         IVF_TRAIN_TYPE_RANDOM,
-                                        IVF_TRAIN_TYPE_BALANCED_KMEANS));
+                                        IVF_TRAIN_TYPE_BALANCED_KMEANS,
+                                        IVF_TRAIN_TYPE_E_MEANS));
     }
 
     if (json[IVF_PARTITION_STRATEGY_TYPE_KEY].GetString() == IVF_PARTITION_STRATEGY_TYPE_NEAREST) {
@@ -145,6 +148,18 @@ IVFPartitionStrategyParameters::FromJson(const JsonType& json) {
         CHECK_ARGUMENT(this->kmeans_iter_count > 0, "kmeans_iter_count must be positive");
     }
 
+    if (json.Contains(IVF_E_MEANS_EPOCHS_KEY)) {
+        const auto epochs = json[IVF_E_MEANS_EPOCHS_KEY].GetInt();
+        const bool valid_epochs = epochs > 0 && epochs <= std::numeric_limits<int32_t>::max();
+        CHECK_ARGUMENT(valid_epochs, "e_means_epochs must be in [1, INT32_MAX]");
+        this->e_means_epochs = static_cast<int32_t>(epochs);
+    }
+    const bool e_means_with_gno_imi =
+        this->partition_train_type == IVFNearestPartitionTrainerType::EMeansTrainer &&
+        this->partition_strategy_type == IVFPartitionStrategyType::GNO_IMI;
+    CHECK_ARGUMENT(not e_means_with_gno_imi,
+                   "ivf_train_type e_means is only supported with partition_strategy_type ivf");
+
     this->gnoimi_param = std::make_shared<GNOIMIParameter>();
     if (this->partition_strategy_type == IVFPartitionStrategyType::GNO_IMI) {
         CHECK_ARGUMENT(
@@ -166,6 +181,8 @@ IVFPartitionStrategyParameters::ToJson() const {
     } else if (this->partition_train_type ==
                IVFNearestPartitionTrainerType::BalancedKMeansTrainer) {
         json[IVF_TRAIN_TYPE_KEY].SetString(IVF_TRAIN_TYPE_BALANCED_KMEANS);
+    } else if (this->partition_train_type == IVFNearestPartitionTrainerType::EMeansTrainer) {
+        json[IVF_TRAIN_TYPE_KEY].SetString(IVF_TRAIN_TYPE_E_MEANS);
     }
 
     if (this->partition_strategy_type == IVFPartitionStrategyType::IVF) {
@@ -181,6 +198,7 @@ IVFPartitionStrategyParameters::ToJson() const {
     json[IVF_GPU_MEMORY_BUDGET_KEY].SetUint64(this->gpu_memory_budget);
     json[IVF_GPU_MIN_WORK_THRESHOLD_KEY].SetUint64(this->gpu_min_work_threshold);
     json[IVF_KMEANS_ITER_COUNT_KEY].SetInt(this->GetKMeansIterCount());
+    json[IVF_E_MEANS_EPOCHS_KEY].SetInt(this->e_means_epochs);
     if (this->partition_strategy_type == IVFPartitionStrategyType::GNO_IMI) {
         json[IVF_PARTITION_STRATEGY_TYPE_GNO_IMI].SetJson(this->gnoimi_param->ToJson());
     }
@@ -213,6 +231,7 @@ IVFPartitionStrategyParameters::CheckCompatibility(const ParamPtr& other) const 
         logger::error("kmeans_iter_count mismatch");
         return false;
     }
+    CHECK_FIELD_EQ(*this, *p, e_means_epochs);
     // use_route_graph selects the layout only when a new index is trained. Serialized partitions
     // are self-describing and must remain loadable by readers created with either setting.
     CHECK_SUB_PARAM(*this, *p, gnoimi_param);

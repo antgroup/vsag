@@ -1,8 +1,15 @@
+import collections
 import glob
 import os
+import platform
 import shutil
 import subprocess
 import sys
+# Set this before setuptools reads the platform configuration. All subprocesses,
+# including OpenBLAS and the private OpenMP build, inherit the same target.
+if sys.platform == "darwin":
+    os.environ.setdefault("MACOSX_DEPLOYMENT_TARGET", "15.0")
+
 from setuptools import setup, Extension
 from setuptools.command.build_ext import build_ext
 from setuptools.command.bdist_wheel import bdist_wheel
@@ -18,7 +25,31 @@ class CMakeBuild(build_ext):
     """Builds libvsag_c, which pyvsag loads through cffi; there is no Python extension module."""
 
     def get_ext_filename(self, ext_name):
-        return os.path.join("pyvsag", "libvsag_c.so")
+        suffix = "dylib" if sys.platform == "darwin" else "so"
+        return os.path.join("pyvsag", "libvsag_c." + suffix)
+
+    @staticmethod
+    def _report_ccache_stats():
+        """Prints ccache statistics so that a build log shows whether the cache is effective.
+
+        The per-result breakdown is opt-in: it only runs when CCACHE_LOGFILE is set, and it
+        is a temporary diagnostic for finding why ccache misses.
+        """
+        try:
+            subprocess.call(["ccache", "-s"])
+            log = os.environ.get("CCACHE_LOGFILE")
+            if log and os.path.exists(log):
+                results = collections.Counter()
+                with open(log, errors="replace") as f:
+                    for line in f:
+                        if "Result:" in line:
+                            results[line.split("Result:", 1)[1].strip()] += 1
+                if not results:
+                    print("ccache result: no 'Result:' lines found in CCACHE_LOGFILE")
+                for name, count in results.most_common():
+                    print(f"ccache result: {name}: {count}")
+        except OSError as e:
+            print(f"ccache statistics unavailable: {e}")
 
     def build_extension(self, ext):
         extdir = os.path.abspath(os.path.join(self.build_lib, "pyvsag"))
@@ -36,10 +67,27 @@ class CMakeBuild(build_ext):
             "-DENABLE_TESTS=OFF",
             f"-DENABLE_LIBAIO={libaio}",
             f"-DMKL_STATIC_LINK={mkl_static_link}",
-            "-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -s",
+            "-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG"
+            + ("" if sys.platform == "darwin" else " -s"),
         ]
+        if sys.platform == "darwin":
+            cmake_args.extend([
+                "-DVSAG_OPENMP_STATIC=ON",
+                "-DCMAKE_OSX_DEPLOYMENT_TARGET=" + os.environ["MACOSX_DEPLOYMENT_TARGET"],
+            ])
+            if os.environ.get("LIBOMP_PREFIX"):
+                cmake_args.append("-DLIBOMP_PREFIX=" + os.environ["LIBOMP_PREFIX"])
+        use_ccache = os.environ.get("VSAG_ENABLE_CCACHE", "OFF").strip().upper() == "ON"
+        if use_ccache:
+            cmake_args.append("-DENABLE_CCACHE=ON")
+            try:
+                subprocess.call(["ccache", "-z"])
+            except OSError as e:
+                print(f"ccache unavailable, skipping stats reset: {e}")
 
         jobs = os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL", str(os.cpu_count() or 4))
+        # Third-party builds (OpenBLAS, ...) use the same parallelism as the main build.
+        cmake_args.append(f"-DNUM_BUILDING_JOBS={jobs}")
         env = os.environ.copy()
         build_temp = self.build_temp
         os.makedirs(build_temp, exist_ok=True)
@@ -51,6 +99,9 @@ class CMakeBuild(build_ext):
             cwd=build_temp,
             env=env,
         )
+
+        if use_ccache:
+            self._report_ccache_stats()
 
         libs = glob.glob(os.path.join(build_temp, "**", "libvsag_c.*"), recursive=True)
         if len(libs) != 1:
@@ -72,6 +123,11 @@ class PlatformWheel(bdist_wheel):
 
     def get_tag(self):
         _, _, plat = bdist_wheel.get_tag(self)
+        if sys.platform == "darwin":
+            # CMake builds one native architecture, even when Python is universal2.
+            # Preserve the deployment target calculated from the built library.
+            os_name, major, minor, _ = plat.split("_", 3)
+            plat = f"{os_name}_{major}_{minor}_{platform.machine()}"
         return "py3", "none", plat
 
 
@@ -111,6 +167,10 @@ def _read_long_description():
 
 setup(
     version=_read_version(),
+    license_expression=("Apache-2.0 AND Apache-2.0 WITH LLVM-exception"
+                        if sys.platform == "darwin" else "Apache-2.0"),
+    license_files=(["LICENSE", "NOTICE", "licenses/LLVM-OpenMP.txt"]
+                   if sys.platform == "darwin" else ["LICENSE"]),
     long_description=_read_long_description(),
     long_description_content_type='text/markdown',
     distclass=BinaryDistribution,

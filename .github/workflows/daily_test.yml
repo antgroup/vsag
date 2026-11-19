@@ -1,4 +1,4 @@
-name: Daily CI
+name: Nightly CI
 
 on:
   workflow_dispatch:
@@ -18,8 +18,8 @@ on:
         type: string
         default: main
   schedule:
-    - cron: "01 08 * * 1-5" # UTC 08:01 every weekday
-    - cron: '23 3 * * 1'
+    - cron: '0 14 * * *' # 22:00 Asia/Shanghai: full regression
+    - cron: '23 3 * * 1' # Weekly build-performance benchmark (unchanged)
 
   workflow_call:
     inputs:
@@ -40,30 +40,32 @@ on:
         required: false
       PERF_DINGDING_SERCRET:
         required: false
-  # Tracking: https://github.com/antgroup/vsag/issues/3065
-  # Restore after validation:
-  # schedule:
-  #   - cron: '0 14 * * *'
+
+env:
+  VSAG_DAILY_AGGREGATE: ${{ ((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression'))) && '1' || '0' }}
 
 jobs:
   daily-plan:
-    name: Freeze Daily plan
-    if: ${{ github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression') }}
+    name: Freeze Nightly plan
+    if: ${{ ((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression'))) }}
     runs-on: ubuntu-24.04
     permissions:
       actions: read
       contents: read
     outputs:
+      python_matrix: ${{ steps.plan.outputs.python_matrix }}
       x86_shards: ${{ steps.plan.outputs.x86_shards }}
       x86_shard_count: ${{ steps.plan.outputs.x86_shard_count }}
       simd_options: ${{ steps.plan.outputs.simd_options }}
       simd_keys: ${{ steps.plan.outputs.simd_keys }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
+      - name: Preflight Nightly parameter inventory
+        run: python3 scripts/testing/daily_parameters.py
       - name: Read original run date
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           retries: 3
           script: |
@@ -83,23 +85,27 @@ jobs:
           import json, os, sys
           sys.path.insert(0, 'scripts/testing')
           import daily_plan as p
+          sys.path.insert(0, 'scripts/ci')
+          import python_ci
           created = json.load(open('daily-run.json'))['created_at']
           ctx = p.context(os.environ['SOURCE_SHA'], created, os.environ['LOGICAL_DATE'] or None)
           p.write('daily-context/context.json', ctx)
-          p.write('daily-context/expected-lanes.json', ['daily_test_asan_aarch64-unittests', 'daily_test_asan_aarch64-functests', 'daily_test_asan_simd-unittests_simd', 'daily_test_asan_simd-sentinels', 'daily_test_tsan-functests', 'full-platform-test-asan-x86-unittests', 'full-platform-test-asan-x86-functests', 'full-platform-test-asan-macos-arm64-unittests', 'full-platform-test-asan-macos-arm64-functests', 'full-platform-test-asan-macos-arm64-examples', 'full-platform-test-example-x86-examples', 'full-platform-test-example-aarch64-examples', 'full-python-test-python-x86-pytest', 'full-python-test-python-aarch64-pytest', 'full-coverage-coverage-unittests', 'full-coverage-coverage-functests', 'full-compatibility-compatibility-compatibility'])
-          expected = p.load('daily-context/expected-lanes.json')
+          p.write('daily-context/expected-lanes.json', ['daily_test_asan_aarch64-unittests', 'daily_test_asan_aarch64-functests', 'daily_test_asan_simd-unittests_simd', 'daily_test_asan_simd-sentinels', 'daily_test_tsan-functests', 'full-platform-test-asan-x86-unittests', 'full-platform-test-asan-x86-functests', 'full-platform-test-asan-macos-arm64-unittests', 'full-platform-test-asan-macos-arm64-functests', 'full-platform-test-asan-macos-arm64-examples', 'full-platform-test-example-x86-examples', 'full-platform-test-example-aarch64-examples', 'full-coverage-coverage-unittests', 'full-coverage-coverage-functests', 'full-compatibility-compatibility-compatibility'])
+          expected = p.load('daily-context/expected-lanes.json') + python_ci.lanes()
           shard_count = p.policy()['x86_shards']
           expected += [f'daily_test_asan_x86-{binary}-shard{i}' for binary in ('unittests', 'functests') for i in range(shard_count)]
+          expected += [f'daily-extra-x86-functests-shard{i}' for i in range(shard_count)]
           p.write('daily-context/expected-lanes.json', expected)
           mode = ctx['simd_mode']
           flags = {'generic': '-DDISABLE_SSE_FORCE=1', 'sse': '-DDISABLE_AVX_FORCE=1', 'avx': '-DDISABLE_AVX2_FORCE=1'}
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              print('python_matrix=' + json.dumps({'include': python_ci.environments()}), file=output)
               print('x86_shards=' + json.dumps(list(range(shard_count))), file=output)
               print('x86_shard_count=' + str(shard_count), file=output)
               print('simd_options=' + json.dumps([mode + ';' + flags[mode]]), file=output)
               print('simd_keys=' + json.dumps([mode]), file=output)
           PY
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: daily-context-${{ github.run_id }}
           overwrite: true
@@ -107,13 +113,21 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
   daily_build_asan_x86:
     timeout-minutes: 300
     name: ASan Build X86 OpenBLAS source
     needs: daily-plan
     runs-on: ubuntu-24.04
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     concurrency:
@@ -122,17 +136,18 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
       - name: Load Cache
-        uses: hendrikmuhs/ccache-action@v1.2
+        uses: hendrikmuhs/ccache-action@v1.2.25
         with:
+          job-summary: ${{ env.VSAG_DAILY_AGGREGATE != '1' && 'CCache Statistics' || '' }}
           max-size: "2G"
           save: false
           key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
-      - name: Download frozen Daily plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - name: Download frozen Nightly plan
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -151,7 +166,7 @@ jobs:
       - name: Clean
         run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           path: ./build
           name: daily_test_x86-${{ github.run_id }}
@@ -159,14 +174,22 @@ jobs:
           retention-days: 3
           overwrite: 'true'
 
-    if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
+    if: ${{ (((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) && (true) }}
   daily_build_asan_aarch64:
     timeout-minutes: 300
     name: Asan Build Aarch64
     needs: daily-plan
     runs-on: ubuntu-24.04-arm
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     concurrency:
@@ -175,17 +198,18 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
       - name: Load Cache
-        uses: hendrikmuhs/ccache-action@v1.2
+        uses: hendrikmuhs/ccache-action@v1.2.25
         with:
+          job-summary: ${{ env.VSAG_DAILY_AGGREGATE != '1' && 'CCache Statistics' || '' }}
           max-size: "2G"
           save: false
           key: build-aarch-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
-      - name: Download frozen Daily plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - name: Download frozen Nightly plan
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -194,11 +218,11 @@ jobs:
         uses: ./.github/actions/daily-execution-window
       - name: Make Asan
         timeout-minutes: ${{ fromJSON(steps.window.outputs.remaining_minutes) }}
-        run: export CMAKE_GENERATOR="Ninja"; make asan COMPILE_JOBS=3 VSAG_ENABLE_EXAMPLES=ON
+        run: export CMAKE_GENERATOR="Ninja"; make asan COMPILE_JOBS=3 DATACELL_COMPILE_JOBS=1 VSAG_ENABLE_EXAMPLES=ON
       - name: Clean
         run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           path: ./build/
           name: daily_test_aarch64-${{ github.run_id }}
@@ -206,7 +230,14 @@ jobs:
           retention-days: 3
           overwrite: 'true'
 
-    if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
+    if: ${{ (((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) && (true) }}
   daily_test_asan_x86:
     name: X86 ${{ matrix.test_type }} shard ${{ matrix.shard }}
     timeout-minutes: 300
@@ -224,7 +255,8 @@ jobs:
       # Matches daily_build_asan_x86: the test binaries were built against the
       # from-source OpenBLAS (statically linked), so any image with the rest
       # of the runtime would do. We pick ci-main-openblas for consistency.
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     env:
@@ -236,11 +268,11 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
-      - name: Download frozen Daily plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - name: Download frozen Nightly plan
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -249,7 +281,7 @@ jobs:
       - name: Clean Env
         run: rm -rf ./build
       - name: Download Test
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: daily_test_x86-${{ github.run_id }}
           path: ./build
@@ -260,7 +292,7 @@ jobs:
           chmod +x ./build/tests/${{ matrix.test_type }}
           ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }} ~[pr]
       - name: Upload Log
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           path: ./log
           name: daily-log-x86-${{ matrix.test_type }}-${{ matrix.shard }}-${{ github.run_id }}
@@ -268,9 +300,9 @@ jobs:
           retention-days: 3
           overwrite: 'true'
 
-      - name: Upload Daily evidence
+      - name: Upload Nightly evidence
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: daily-results-daily_test_asan_x86-${{ matrix.test_type }}-shard${{ matrix.shard }}-${{ github.run_id }}
           overwrite: true
@@ -278,7 +310,14 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-    if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
+    if: ${{ (((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) && (true) }}
   daily_test_asan_aarch64:
     timeout-minutes: 300
     name: ARM core and weekly extensions
@@ -289,7 +328,8 @@ jobs:
       matrix:
         test_type: [unittests, functests]
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     concurrency:
@@ -303,11 +343,11 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
-      - name: Download frozen Daily plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - name: Download frozen Nightly plan
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -316,7 +356,7 @@ jobs:
       - name: Clean Build
         run: rm -rf ./build
       - name: Download Test
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: daily_test_aarch64-${{ github.run_id }}
           path: ./build
@@ -327,7 +367,7 @@ jobs:
           chmod +x ./build/tests/${{ matrix.test_type }}
           ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }} ~[pr]
       - name: Upload Log
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           path: ./log
           name: daily-log-aarch64-${{ matrix.test_type }}-${{ github.run_id }}
@@ -335,9 +375,9 @@ jobs:
           retention-days: 3
           overwrite: 'true'
 
-      - name: Upload Daily evidence
+      - name: Upload Nightly evidence
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: daily-results-daily_test_asan_aarch64-${{ matrix.test_type }}-${{ github.run_id }}
           overwrite: true
@@ -345,14 +385,22 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-    if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
+    if: ${{ (((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) && (true) }}
   daily_build_simd:
     timeout-minutes: 300
     name: Asan Build Simd
     needs: daily-plan
     runs-on: ubuntu-24.04
     container:
-      image: vsaglib/vsag:ci-main-mkl
+      # Docker Hub alternative: vsaglib/vsag:ci-main-mkl
+      image: ghcr.io/antgroup/vsag:ci-main-mkl
       volumes:
         - /opt:/useless
     strategy:
@@ -365,11 +413,11 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
-      - name: Download frozen Daily plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - name: Download frozen Nightly plan
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -384,12 +432,24 @@ jobs:
           echo ${EXTRA_DEFINED}
           echo ${EXTRA_KEY}
           echo "SIMD_KEY=${EXTRA_KEY}" >> $GITHUB_ENV
-          export VSAG_ENABLE_INTEL_MKL=ON CMAKE_GENERATOR="Ninja"; make asan
-          cmake --build build --target unittests_simd --parallel 3
+          export VSAG_ENABLE_INTEL_MKL=ON CMAKE_GENERATOR="Ninja"
+          python3 scripts/ci/monitor_build.py --output-dir "$RUNNER_TEMP/simd-build-diagnostics/asan" -- \
+            make asan COMPILE_JOBS=3 DATACELL_COMPILE_JOBS=1
+          python3 scripts/ci/monitor_build.py --output-dir "$RUNNER_TEMP/simd-build-diagnostics/simd" -- \
+            cmake --build build --target unittests_simd --parallel 3
+      - name: Upload SIMD build diagnostics
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v5
+        with:
+          path: ${{ runner.temp }}/simd-build-diagnostics/
+          name: simd-build-diagnostics-${{ strategy.job-index }}-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 7
       - name: Clean
         run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           path: ./build
           name: daily_test_simd-${{ env.SIMD_KEY }}-${{ github.run_id }}
@@ -397,7 +457,14 @@ jobs:
           retention-days: 3
           overwrite: 'true'
 
-    if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
+    if: ${{ (((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) && (true) }}
   daily_test_asan_simd:
     timeout-minutes: 300
     name: Unit Test Simd
@@ -412,7 +479,8 @@ jobs:
       group: daily_test_simd-${{ matrix.simd_key }}-${{ matrix.test_type }}-${{ github.run_id }}
       cancel-in-progress: false
     container:
-      image: vsaglib/vsag:ci-main-mkl
+      # Docker Hub alternative: vsaglib/vsag:ci-main-mkl
+      image: ghcr.io/antgroup/vsag:ci-main-mkl
       volumes:
         - /opt:/useless
     env:
@@ -422,11 +490,11 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
-      - name: Download frozen Daily plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - name: Download frozen Nightly plan
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -435,7 +503,7 @@ jobs:
       - name: Clean Env
         run: rm -rf ./build
       - name: Download Test
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: daily_test_simd-${{ matrix.simd_key }}-${{ github.run_id }}
           path: ./build/
@@ -447,9 +515,9 @@ jobs:
           python3 scripts/testing/daily_entry.py unittests_simd simd
           python3 scripts/testing/daily_measure.py --name sentinels --owner simd -- python3 scripts/ci/platform_smoke.py functests
 
-      - name: Upload Daily evidence
+      - name: Upload Nightly evidence
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: daily-results-daily_test_asan_simd-${{ matrix.test_type }}-${{ github.run_id }}
           overwrite: true
@@ -457,7 +525,14 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-    if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
+    if: ${{ (((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) && (true) }}
   daily_clean_up_simd:
     timeout-minutes: 300
     name: Clean Up
@@ -471,7 +546,7 @@ jobs:
       - name: Create Empty File
         run: touch /tmp/clean_up
       - name: Overwrite Test Artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           path: /tmp/clean_up
           name: test-x86-${{ matrix.simd_key }}-${{ github.run_id }}
@@ -479,30 +554,32 @@ jobs:
           retention-days: 3
           overwrite: 'true'
 
-    if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
+    if: ${{ (((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) && (true) }}
   daily_build_tsan:
     timeout-minutes: 300
-    name: Daily Build with TSAN
+    name: Nightly Build with TSAN
     needs: daily-plan
     runs-on: ubuntu-24.04
     concurrency:
       group: daily_build_tsan_x86-${{ github.run_id }}
       cancel-in-progress: false
     container:
-      image: vsaglib/vsag:ci-main-mkl
+      # Docker Hub alternative: vsaglib/vsag:ci-main-mkl
+      image: ghcr.io/antgroup/vsag:ci-main-mkl
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: '0'
           ref: ${{ github.sha }}
       - name: Load Cache
-        uses: hendrikmuhs/ccache-action@v1.2
+        uses: hendrikmuhs/ccache-action@v1.2.25
         with:
+          job-summary: ${{ env.VSAG_DAILY_AGGREGATE != '1' && 'CCache Statistics' || '' }}
           max-size: "2G"
           save: false
           key: build-tsan-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
-      - name: Download frozen Daily plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - name: Download frozen Nightly plan
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -517,7 +594,7 @@ jobs:
       - name: Clean
         run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           path: ./build
           name: daily_test_x86-${{ github.run_id }}-tsan
@@ -525,25 +602,33 @@ jobs:
           retention-days: 3
           overwrite: 'true'
 
-    if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
+    if: ${{ (((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) && (true) }}
   daily_test_tsan:
     timeout-minutes: 300
-    name: Daily Run TSAN Tests
+    name: Nightly Run TSAN Tests
     needs: [daily-plan, daily_build_tsan]
     runs-on: ubuntu-24.04
     concurrency:
       group: daily_test_tsan_x86-${{ github.run_id }}
       cancel-in-progress: false
     container:
-      image: vsaglib/vsag:ci-main-mkl
+      # Docker Hub alternative: vsaglib/vsag:ci-main-mkl
+      image: ghcr.io/antgroup/vsag:ci-main-mkl
     env:
       VSAG_DAILY_CONTEXT: ${{ github.workspace }}/daily-context/context.json
       VSAG_DAILY_LANE: daily_test_tsan
       VSAG_DAILY_ENVIRONMENT: daily_test_tsan
     steps:
-      - uses: actions/checkout@v4
-      - name: Download frozen Daily plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - uses: actions/checkout@v5
+      - name: Download frozen Nightly plan
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -552,7 +637,7 @@ jobs:
       - name: Clean Env
         run: rm -rf ./build
       - name: Download Test
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: daily_test_x86-${{ github.run_id }}-tsan
           path: ./build/
@@ -568,9 +653,9 @@ jobs:
           chmod +x ./build/tests/functests
           python3 scripts/testing/daily_entry.py functests concurrent
 
-      - name: Upload Daily evidence
+      - name: Upload Nightly evidence
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: daily-results-daily_test_tsan-${{ github.run_id }}
           overwrite: true
@@ -578,15 +663,23 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-    if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
+    if: ${{ (((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) && (true) }}
   full-platform-build-asan-x86:
     timeout-minutes: 300
-    if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (!false) }}
+    if: ${{ (((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) && (!false) }}
     name: ASan Build X86 MKL
     needs: daily-plan
     runs-on: ubuntu-24.04
     container:
-      image: vsaglib/vsag:ci-main-mkl
+      # Docker Hub alternative: vsaglib/vsag:ci-main-mkl
+      image: ghcr.io/antgroup/vsag:ci-main-mkl
       volumes:
         - /opt:/useless
     concurrency:
@@ -595,9 +688,9 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
-      - uses: actions/checkout@v4
-      - name: Download frozen Daily plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - uses: actions/checkout@v5
+      - name: Download frozen Nightly plan
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -607,6 +700,13 @@ jobs:
       - uses: ./.github/actions/asan-build-and-test-build-asan-x86
         timeout-minutes: ${{ fromJSON(steps.window.outputs.remaining_minutes) }}
         id: execute
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
   full-platform-build-asan-macos-arm64:
     timeout-minutes: 300
     name: Asan Build macOS arm64
@@ -618,9 +718,9 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf "${RUNNER_TOOL_CACHE:-/Users/runner/hostedtoolcache}"
-      - uses: actions/checkout@v4
-      - name: Download frozen Daily plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - uses: actions/checkout@v5
+      - name: Download frozen Nightly plan
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -630,10 +730,17 @@ jobs:
       - uses: ./.github/actions/asan-build-and-test-build-asan-macos-arm64
         timeout-minutes: ${{ fromJSON(steps.window.outputs.remaining_minutes) }}
         id: execute
-    if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
+    if: ${{ (((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) && (true) }}
   full-platform-test-asan-x86:
     timeout-minutes: 300
-    if: ${{ ((github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (!false)) && needs.full-platform-build-asan-x86.result == 'success' }}
+    if: ${{ ((((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) && (!false)) && needs.full-platform-build-asan-x86.result == 'success' }}
     name: X86 MKL core
     needs:
       - daily-plan
@@ -649,7 +756,8 @@ jobs:
           - unittests
           - functests
     container:
-      image: vsaglib/vsag:ci-main-mkl
+      # Docker Hub alternative: vsaglib/vsag:ci-main-mkl
+      image: ghcr.io/antgroup/vsag:ci-main-mkl
       volumes:
         - /opt:/useless
     env:
@@ -660,9 +768,9 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
-      - uses: actions/checkout@v4
-      - name: Download frozen Daily plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - uses: actions/checkout@v5
+      - name: Download frozen Nightly plan
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -672,15 +780,22 @@ jobs:
         id: execute
         with:
           matrix-test-type: ${{ matrix.test_type }}
-      - name: Upload Daily evidence
+      - name: Upload Nightly evidence
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: daily-results-full-platform-test-asan-x86-${{ matrix.test_type }}-${{ github.run_id }}
           overwrite: true
           path: daily-results
           retention-days: 30
           if-no-files-found: error
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
   full-platform-test-asan-macos-arm64:
     timeout-minutes: 300
     name: Test macOS arm64
@@ -705,9 +820,9 @@ jobs:
       group: test_asan_macos-${{ matrix.test_type }}-${{ github.sha }}
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
-      - name: Download frozen Daily plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - uses: actions/checkout@v5
+      - name: Download frozen Nightly plan
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -717,9 +832,9 @@ jobs:
         id: execute
         with:
           matrix-test-type: ${{ matrix.test_type }}
-      - name: Upload Daily evidence
+      - name: Upload Nightly evidence
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: daily-results-full-platform-test-asan-macos-arm64-${{ matrix.test_type }}-${{ github.run_id }}
           overwrite: true
@@ -727,17 +842,25 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-    if: ${{ ((github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true)) && needs.full-platform-build-asan-macos-arm64.result == 'success' }}
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
+    if: ${{ ((((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) && (true)) && needs.full-platform-build-asan-macos-arm64.result == 'success' }}
   full-platform-test-example-x86:
     timeout-minutes: 300
-    if: ${{ ((github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (!false)) && needs.full-platform-build-asan-x86.result == 'success' }}
+    if: ${{ ((((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) && (!false)) && needs.full-platform-build-asan-x86.result == 'success' }}
     name: Test Example X86
     needs:
       - daily-plan
       - full-platform-build-asan-x86
     runs-on: ubuntu-24.04
     container:
-      image: vsaglib/vsag:ci-main-mkl
+      # Docker Hub alternative: vsaglib/vsag:ci-main-mkl
+      image: ghcr.io/antgroup/vsag:ci-main-mkl
       volumes:
         - /opt:/useless
     concurrency:
@@ -750,9 +873,9 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
-      - uses: actions/checkout@v4
-      - name: Download frozen Daily plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - uses: actions/checkout@v5
+      - name: Download frozen Nightly plan
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -760,15 +883,22 @@ jobs:
         uses: ./.github/actions/daily-execution-window
       - uses: ./.github/actions/asan-build-and-test-test-example-x86
         id: execute
-      - name: Upload Daily evidence
+      - name: Upload Nightly evidence
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: daily-results-full-platform-test-example-x86-${{ github.run_id }}
           overwrite: true
           path: daily-results
           retention-days: 30
           if-no-files-found: error
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
   full-platform-test-example-aarch64:
     timeout-minutes: 300
     name: Test Example Aarch64
@@ -782,7 +912,8 @@ jobs:
       SMOKE: ${{ false }}
     runs-on: ubuntu-24.04-arm
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     concurrency:
@@ -791,9 +922,9 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
-      - uses: actions/checkout@v4
-      - name: Download frozen Daily plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - uses: actions/checkout@v5
+      - name: Download frozen Nightly plan
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -804,9 +935,9 @@ jobs:
         with:
           inputs-smoke: ${{ false }}
           artifact-name: daily_test_aarch64-${{ github.run_id }}
-      - name: Upload Daily evidence
+      - name: Upload Nightly evidence
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: daily-results-full-platform-test-example-aarch64-${{ github.run_id }}
           overwrite: true
@@ -814,7 +945,14 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-    if: ${{ ((github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true)) && needs.daily_build_asan_aarch64.result == 'success' }}
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
+    if: ${{ ((((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) && (true)) && needs.daily_build_asan_aarch64.result == 'success' }}
   full-python-build-python-wheel-x86:
     timeout-minutes: 300
     name: Python Wheel Build X86
@@ -826,9 +964,9 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
-      - uses: actions/checkout@v4
-      - name: Download frozen Daily plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - uses: actions/checkout@v5
+      - name: Download frozen Nightly plan
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -838,10 +976,17 @@ jobs:
       - uses: ./.github/actions/python-build-and-test-build-python-wheel-x86
         timeout-minutes: ${{ fromJSON(steps.window.outputs.remaining_minutes) }}
         id: execute
-    if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
+    if: ${{ (((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) && (true) }}
   full-python-build-python-wheel-aarch64:
     timeout-minutes: 300
-    if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (!false) }}
+    if: ${{ (((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) && (!false) }}
     name: Python Wheel Build Aarch64
     needs: daily-plan
     runs-on: ubuntu-24.04-arm
@@ -851,9 +996,9 @@ jobs:
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
-      - uses: actions/checkout@v4
-      - name: Download frozen Daily plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - uses: actions/checkout@v5
+      - name: Download frozen Nightly plan
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -863,87 +1008,118 @@ jobs:
       - uses: ./.github/actions/python-build-and-test-build-python-wheel-aarch64
         timeout-minutes: ${{ fromJSON(steps.window.outputs.remaining_minutes) }}
         id: execute
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
   full-python-test-python-x86:
     timeout-minutes: 300
-    name: Test Python X86
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.daily-plan.outputs.python_matrix) }}
+    name: Python x86 ${{ matrix.key }}
     needs:
       - daily-plan
       - full-python-build-python-wheel-x86
     runs-on: ubuntu-24.04
-    concurrency:
-      group: test_python_x86-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     env:
       VSAG_DAILY_CONTEXT: ${{ github.workspace }}/daily-context/context.json
-      VSAG_DAILY_LANE: full-python-test-python-x86
-      VSAG_DAILY_ENVIRONMENT: full-python-test-python-x86
+      VSAG_DAILY_LANE: full-python-test-python-x86-${{ matrix.key }}
+      VSAG_DAILY_ENVIRONMENT: full-python-test-python-x86-${{ matrix.key }}
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
-          python-version: '3.10'
-      - uses: actions/checkout@v4
-      - name: Download frozen Daily plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+          python-version: ${{ matrix.python }}
+      - uses: actions/checkout@v5
+      - name: Download frozen Nightly plan
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
       - name: Refresh execution window for this attempt
+        id: window
         uses: ./.github/actions/daily-execution-window
       - uses: ./.github/actions/python-build-and-test-test-python-x86
         id: execute
-      - name: Upload Daily evidence
-        if: always()
-        uses: actions/upload-artifact@v5
+        timeout-minutes: ${{ fromJSON(steps.window.outputs.remaining_minutes) }}
         with:
-          name: daily-results-full-python-test-python-x86-${{ github.run_id }}
+          numpy-version: ${{ matrix.numpy }}
+          mode: ${{ matrix.mode }}
+      - name: Upload Nightly evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: daily-results-full-python-test-python-x86-${{ matrix.key }}-${{ github.run_id }}
           overwrite: true
           path: daily-results
           retention-days: 30
           if-no-files-found: error
 
-    if: ${{ ((github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true)) && needs.full-python-build-python-wheel-x86.result == 'success' }}
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
+    if: ${{ ((((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) && (true)) && needs.full-python-build-python-wheel-x86.result == 'success' }}
   full-python-test-python-aarch64:
     timeout-minutes: 300
-    if: ${{ ((github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (!false)) && needs.full-python-build-python-wheel-aarch64.result == 'success' }}
-    name: Test Python Aarch64
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.daily-plan.outputs.python_matrix) }}
+    if: ${{ ((((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) && (!false)) && needs.full-python-build-python-wheel-aarch64.result == 'success' }}
+    name: Python aarch64 ${{ matrix.key }}
     needs:
       - daily-plan
       - full-python-build-python-wheel-aarch64
     runs-on: ubuntu-24.04-arm
-    concurrency:
-      group: test_python_aarch64-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     env:
       VSAG_DAILY_CONTEXT: ${{ github.workspace }}/daily-context/context.json
-      VSAG_DAILY_LANE: full-python-test-python-aarch64
-      VSAG_DAILY_ENVIRONMENT: full-python-test-python-aarch64
+      VSAG_DAILY_LANE: full-python-test-python-aarch64-${{ matrix.key }}
+      VSAG_DAILY_ENVIRONMENT: full-python-test-python-aarch64-${{ matrix.key }}
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
-          python-version: '3.10'
-      - uses: actions/checkout@v4
-      - name: Download frozen Daily plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+          python-version: ${{ matrix.python }}
+      - uses: actions/checkout@v5
+      - name: Download frozen Nightly plan
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
       - name: Refresh execution window for this attempt
+        id: window
         uses: ./.github/actions/daily-execution-window
       - uses: ./.github/actions/python-build-and-test-test-python-aarch64
         id: execute
-      - name: Upload Daily evidence
-        if: always()
-        uses: actions/upload-artifact@v5
+        timeout-minutes: ${{ fromJSON(steps.window.outputs.remaining_minutes) }}
         with:
-          name: daily-results-full-python-test-python-aarch64-${{ github.run_id }}
+          numpy-version: ${{ matrix.numpy }}
+          mode: ${{ matrix.mode }}
+      - name: Upload Nightly evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: daily-results-full-python-test-python-aarch64-${{ matrix.key }}-${{ github.run_id }}
           overwrite: true
           path: daily-results
           retention-days: 30
           if-no-files-found: error
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
   full-python-clean-up:
     timeout-minutes: 300
     name: Clean Up
@@ -953,19 +1129,27 @@ jobs:
       - full-python-test-python-aarch64
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - uses: ./.github/actions/python-build-and-test-clean-up
         id: execute
-    if: ${{ ((github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true)) && needs.full-python-test-python-x86.result == 'success' && needs.full-python-test-python-aarch64.result == 'success' }}
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
+    if: ${{ ((((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) && (true)) && needs.full-python-test-python-x86.result == 'success' && needs.full-python-test-python-aarch64.result == 'success' }}
   full-lint-clang-tidy-check:
     timeout-minutes: 300
     name: Lint
     needs: daily-plan
     runs-on: ubuntu-latest
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
     env:
       VSAG_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.ci-fetchcontent
       VSAG_THIRDPARTY_DOWNLOAD_DIR: ${{ github.workspace }}/.ci-downloads
@@ -974,11 +1158,11 @@ jobs:
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - name: Download frozen Daily plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - name: Download frozen Nightly plan
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -991,7 +1175,14 @@ jobs:
         with:
           inputs-mode: ${{ 'full' }}
           inputs-pattern: ${{ '' }}
-    if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
+    if: ${{ (((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) && (true) }}
   full-coverage-changes:
     timeout-minutes: 300
     name: Detect Changes
@@ -1000,23 +1191,31 @@ jobs:
     outputs:
       non_markdown: ${{ steps.execute.outputs.non_markdown }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/coverage-changes
         id: execute
-    if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
+    if: ${{ (((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) && (true) }}
   full-coverage-coverage:
     timeout-minutes: 300
-    name: Test Coverage
+    name: Coverage — C++ lines and branches
     needs:
       - daily-plan
       - full-coverage-changes
-    if: ${{ ((github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (github.event_name != 'push' || needs.full-coverage-changes.outputs.non_markdown == 'true')) && needs.full-coverage-changes.result == 'success' }}
+    if: ${{ ((((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) && (github.event_name != 'push' || needs.full-coverage-changes.outputs.non_markdown == 'true')) && needs.full-coverage-changes.result == 'success' }}
     runs-on: ubuntu-latest
     concurrency:
       group: coverage-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
     env:
       VSAG_DAILY_CONTEXT: ${{ github.workspace }}/daily-context/context.json
       VSAG_DAILY_LANE: full-coverage-coverage
@@ -1026,12 +1225,12 @@ jobs:
       VSAG_THIRDPARTY_DOWNLOAD_DIR: ${{ github.workspace }}/.ci-downloads
       VSAG_TEST_SEED: 424242
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: '0'
           persist-credentials: false
-      - name: Download frozen Daily plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - name: Download frozen Nightly plan
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -1041,15 +1240,22 @@ jobs:
         id: execute
         with:
           secrets-CODECOV-TOKEN: ${{ secrets.CODECOV_TOKEN }}
-      - name: Upload Daily evidence
+      - name: Upload Nightly evidence
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: daily-results-full-coverage-coverage-${{ github.run_id }}
           overwrite: true
           path: daily-results
           retention-days: 30
           if-no-files-found: error
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
   full-compatibility-compatibility:
     timeout-minutes: 300
     name: Check Compatibility
@@ -1059,7 +1265,8 @@ jobs:
       group: compatibility-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
     env:
       VSAG_DAILY_CONTEXT: ${{ github.workspace }}/daily-context/context.json
       VSAG_DAILY_LANE: full-compatibility-compatibility
@@ -1079,11 +1286,11 @@ jobs:
           install -m 0755 /tmp/gh_${GH_VERSION}_linux_amd64/bin/gh /usr/local/bin/gh
           rm -rf /tmp/gh.tar.gz /tmp/gh_${GH_VERSION}_linux_amd64
           gh --version
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - name: Download frozen Daily plan
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - name: Download frozen Nightly plan
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
@@ -1091,9 +1298,9 @@ jobs:
         uses: ./.github/actions/daily-execution-window
       - uses: ./.github/actions/check-compatibility-compatibility
         id: execute
-      - name: Upload Daily evidence
+      - name: Upload Nightly evidence
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: daily-results-full-compatibility-compatibility-${{ github.run_id }}
           overwrite: true
@@ -1101,7 +1308,14 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-    if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
+    if: ${{ (((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) && (true) }}
   performance-performance:
     name: Performance
     runs-on: ubuntu-latest
@@ -1109,10 +1323,11 @@ jobs:
       group: runtime-performance-${{ github.run_id }}-${{ github.run_attempt }}
       cancel-in-progress: false
     container:
-      image: vsaglib/vsag:ci-main-openblas
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
     steps:
       - name: Checkout approved main history
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: antgroup/vsag
           ref: main
@@ -1177,7 +1392,7 @@ jobs:
           PERF_DINGDING_SERCRET: ${{ secrets.PERF_DINGDING_SERCRET }}
         run: |
           python3 scripts/perf_reports/dingding.py /tmp/github-perf.json || echo "send report to dingding failed"
-    if: ${{ ((github.event_name == 'schedule' && github.event.schedule == '01 08 * * 1-5') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'push') && inputs.profile == 'performance')) && (github.ref == 'refs/heads/main' && github.repository == 'antgroup/vsag') }}
+    if: ${{ ((github.event_name == 'workflow_dispatch' || github.event_name == 'push') && inputs.profile == 'performance') && (github.ref == 'refs/heads/main' && github.repository == 'antgroup/vsag') }}
   build-performance-benchmark-x86:
     name: Build Performance X86 (not a PR check)
     if: ${{ ((github.event_name == 'schedule' && github.event.schedule == '23 3 * * 1') || (github.event_name != 'schedule' && inputs.profile == 'build-performance')) && (github.ref == 'refs/heads/main' && (github.event_name != 'schedule' || github.repository == 'antgroup/vsag')) }}
@@ -1195,7 +1410,7 @@ jobs:
       VSAG_ENABLE_TOOLS: 'ON'
     steps:
       - name: Checkout approved main history
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: antgroup/vsag
           ref: main
@@ -1299,7 +1514,7 @@ jobs:
           PY
       - name: Restore ExternalProject Archives (never save)
         id: archives
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: .ci-downloads
           key: external-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/**/*.cmake') }}
@@ -1403,7 +1618,7 @@ jobs:
           PY
       - name: Upload build metrics
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           path: ./build-metrics
           name: build-performance-metrics-${{ github.run_id }}-${{ github.run_attempt }}
@@ -1414,29 +1629,147 @@ jobs:
       group: build-performance-${{ github.workflow }}-${{ github.event_name }}
       cancel-in-progress: false
 
+  daily-extra-plan:
+    if: ${{ ((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression'))) }}
+    name: Plan X86 Extra Coverage quota
+    timeout-minutes: 10
+    needs: [daily-plan, daily_test_asan_x86, daily_test_asan_aarch64, daily_test_asan_simd, daily_test_tsan, full-platform-test-asan-x86, full-platform-test-asan-macos-arm64, full-platform-test-example-x86, full-platform-test-example-aarch64, full-python-test-python-x86, full-python-test-python-aarch64, full-coverage-coverage, full-compatibility-compatibility, full-lint-clang-tidy-check]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: daily-results-daily_test_asan_x86-functests-shard*-${{ github.run_id }}
+          path: daily-base-results
+      - name: Read current attempt clock
+        uses: actions/github-script@v8
+        with:
+          retries: 3
+          script: |
+            const run = await github.rest.actions.getWorkflowRun({...context.repo, run_id: context.runId});
+            require('fs').writeFileSync('daily-extra-clock.json', JSON.stringify({started_at: run.data.run_started_at}));
+      - name: Freeze disjoint candidates and remaining quota
+        run: python3 scripts/testing/daily_extra.py plan --collect daily-base-results --clock daily-extra-clock.json --proposal daily-extra-proposal.json
+      - uses: actions/upload-artifact@v6
+        with:
+          name: daily-extra-proposal-${{ github.run_id }}
+          path: daily-extra-proposal.json
+          overwrite: true
+          retention-days: 30
+          if-no-files-found: error
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
+  daily-extra-x86:
+    if: ${{ ((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression'))) }}
+    name: X86 Extra Coverage shard ${{ matrix.shard }}
+    timeout-minutes: 270
+    needs: [daily-plan, daily-extra-plan]
+    runs-on: ubuntu-24.04
+    container:
+      # Docker Hub alternative: vsaglib/vsag:ci-main-openblas
+      image: ghcr.io/antgroup/vsag:ci-main-openblas
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.daily-plan.outputs.x86_shards) }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: daily-extra-proposal-${{ github.run_id }}
+          path: .
+      - name: Check remaining supplemental time
+        id: extra
+        run: |
+          python3 - <<'PYCODE'
+          import datetime as dt, os, sys
+          sys.path.insert(0, 'scripts/testing')
+          import daily_extra, daily_plan as dp
+          p = daily_extra.validate(dp.load('daily-extra-proposal.json'))
+          available = (daily_extra.timestamp(p['cutoff']) - dt.datetime.now(dt.timezone.utc)).total_seconds() > 900
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              print('available=' + str(available).lower(), file=output)
+          PYCODE
+      - name: Reuse verified X86 build
+        if: steps.extra.outputs.available == 'true'
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: daily_test_x86-${{ github.run_id }}
+          path: build
+      - name: Execute extras within remaining quota
+        env:
+          EXTRA_SHARD: ${{ matrix.shard }}
+          EXTRA_AVAILABLE: ${{ steps.extra.outputs.available }}
+        run: |
+          echo leak:libomp.so > omp.supp
+          export LSAN_OPTIONS="suppressions=$(pwd)/omp.supp"
+          python3 scripts/testing/daily_extra.py run --proposal daily-extra-proposal.json --shard "$EXTRA_SHARD" --output "daily-results/daily-extra-x86-functests-shard$EXTRA_SHARD"
+      - name: Upload Nightly evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: daily-results-extra-x86-shard${{ matrix.shard }}-${{ github.run_id }}
+          path: daily-results
+          overwrite: true
+          retention-days: 30
+          if-no-files-found: error
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
   daily-summary:
     timeout-minutes: 30
-    name: Daily budget and completeness
-    if: ${{ always() && (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) }}
-    needs: [daily-plan, daily_test_asan_x86, daily_test_asan_aarch64, daily_test_asan_simd, daily_test_tsan, full-platform-test-asan-x86, full-platform-test-asan-macos-arm64, full-platform-test-example-x86, full-platform-test-example-aarch64, full-python-test-python-x86, full-python-test-python-aarch64, full-coverage-coverage, full-compatibility-compatibility, full-lint-clang-tidy-check]
+    name: Nightly Summary
+    if: ${{ always() && (((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) }}
+    needs: [daily-plan, daily_test_asan_x86, daily_test_asan_aarch64, daily_test_asan_simd, daily_test_tsan, full-platform-test-asan-x86, full-platform-test-asan-macos-arm64, full-platform-test-example-x86, full-platform-test-example-aarch64, full-python-test-python-x86, full-python-test-python-aarch64, full-coverage-coverage, full-compatibility-compatibility, full-lint-clang-tidy-check, daily-extra-plan, daily-extra-x86]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: daily-context-${{ github.run_id }}
           path: daily-context
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           pattern: daily-results-*-${{ github.run_id }}
           path: daily-collected
+      - name: Download extra quota plan
+        if: ${{ always() && needs.daily-extra-plan.result != 'skipped' }}
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: daily-extra-proposal-${{ github.run_id }}
+          path: .
+      - name: Download per-job diagnostics
+        if: always()
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: daily-job-*-${{ github.run_id }}
+          path: daily-job-collected
+      - name: Download Python environment reports
+        if: always()
+        uses: actions/download-artifact@v7
+        with:
+          pattern: python-report-full-python-test-python-*
+          path: python-collected
       - name: Collect workflow elapsed and job timings
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           retries: 3
           script: |
@@ -1445,16 +1778,18 @@ jobs:
               {...context.repo, run_id: context.runId, filter: 'latest', per_page: 100});
             require('fs').writeFileSync('daily-job-metrics.json', JSON.stringify({
               started_at: run.data.run_started_at, observed_at: new Date().toISOString(),
-              jobs: jobs.map(({name, started_at, completed_at, conclusion}) =>
-                ({name, started_at, completed_at, conclusion}))
+              jobs: jobs.map(({name, started_at, completed_at, conclusion, steps}) =>
+                ({name, started_at, completed_at, conclusion,
+                  steps: (steps || []).map(({name, started_at, completed_at, conclusion}) =>
+                    ({name, started_at, completed_at, conclusion}))}))
             }));
       - name: Reconcile every expected lane
         if: always()
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: |
-          python3 scripts/testing/daily_report.py --collect daily-collected --metrics daily-job-metrics.json --expected-file daily-context/expected-lanes.json --summary "$GITHUB_STEP_SUMMARY" --json daily-summary.json
-      - uses: actions/upload-artifact@v5
+          python3 scripts/testing/daily_report.py --collect daily-collected --metrics daily-job-metrics.json --extra-proposal daily-extra-proposal.json --job-reports daily-job-collected --python-reports python-collected --expected-file daily-context/expected-lanes.json --summary "$GITHUB_STEP_SUMMARY" --json daily-summary.json
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: daily-summary-${{ github.run_id }}

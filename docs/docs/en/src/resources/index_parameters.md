@@ -157,12 +157,13 @@ The `hgraph` search-param object also accepts the following filter-related param
 ```json
 {
     "ivf": {
-        "nlist": 4096,
-        "base_quantization_type": "sq8",
-        "nprobe": 32
+        "buckets_count": 4096,
+        "base_quantization_type": "sq8"
     }
 }
 ```
+
+See the [IVF index page](../indexes/ivf.md) for the full build-parameter table.
 
 ## Brute Force
 
@@ -170,7 +171,9 @@ The `hgraph` search-param object also accepts the following filter-related param
 {"brute_force": {}}
 ```
 
-No extra parameters.
+Quantization, IO, and thread-pool parameters are available under
+`index_param`. See the [BruteForce index page](../indexes/brute_force.md)
+for the full parameter table.
 
 ## Pyramid
 

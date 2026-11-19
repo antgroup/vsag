@@ -14,8 +14,13 @@
 
 #include <fmt/format.h>
 
+#if defined(__linux__)
+#include <ctime>
+#endif
+
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <future>
 #include <limits>
@@ -47,6 +52,112 @@
 namespace vsag {
 
 static constexpr BucketIdType INVALID_BUCKET_ID = static_cast<BucketIdType>(-1);
+
+namespace {
+using ProfileClock = std::chrono::steady_clock;
+
+// A null destination performs no clock reads, including in the destructor.
+class ProfileTimer {
+public:
+    explicit ProfileTimer(uint64_t* destination) : destination_(destination) {
+        if (destination_ != nullptr) {
+            start_ = ProfileClock::now();
+        }
+    }
+
+    ~ProfileTimer() {
+        Stop();
+    }
+
+    [[nodiscard]] ProfileClock::time_point
+    Start() const noexcept {
+        return start_;
+    }
+
+    void
+    Stop() noexcept {
+        if (destination_ != nullptr) {
+            *destination_ += static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(ProfileClock::now() - start_)
+                    .count());
+            destination_ = nullptr;
+        }
+    }
+
+private:
+    uint64_t* destination_;
+    ProfileClock::time_point start_;
+};
+
+uint64_t
+profile_nanoseconds(ProfileClock::duration duration) noexcept {
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count());
+}
+
+bool
+read_thread_cpu(uint64_t& value) noexcept {
+#if defined(__linux__) && defined(CLOCK_THREAD_CPUTIME_ID)
+    timespec time{};
+    if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &time) == 0) {
+        value = static_cast<uint64_t>(time.tv_sec) * 1000000000ULL +
+                static_cast<uint64_t>(time.tv_nsec);
+        return true;
+    }
+#endif
+    return false;
+}
+
+// Lives inside one worker, including on callback/allocator exceptions.
+class ProfileWorkerGuard {
+public:
+    ProfileWorkerGuard(SearchProfile::Worker* worker, ProfileClock::time_point scan_start)
+        : worker_(worker), scan_start_(scan_start) {
+        if (worker_ != nullptr) {
+            cpu_started_ = read_thread_cpu(cpu_start_);
+            start_ = ProfileClock::now();
+            worker_->start_ns = profile_nanoseconds(start_ - scan_start_);
+        }
+    }
+
+    ~ProfileWorkerGuard() {
+        if (worker_ != nullptr) {
+            const auto end = ProfileClock::now();
+            uint64_t cpu_end = 0;
+            const bool cpu_ended = read_thread_cpu(cpu_end);
+            worker_->end_ns = profile_nanoseconds(end - scan_start_);
+            worker_->execution_ns = profile_nanoseconds(end - start_);
+            worker_->cpu_available = cpu_started_ and cpu_ended and cpu_end >= cpu_start_;
+            if (worker_->cpu_available) {
+                worker_->cpu_ns = cpu_end - cpu_start_;
+            }
+        }
+    }
+
+private:
+    SearchProfile::Worker* worker_;
+    ProfileClock::time_point scan_start_;
+    ProfileClock::time_point start_;
+    uint64_t cpu_start_{0};
+    bool cpu_started_{false};
+};
+
+struct ProfileRequestGuard {
+    SearchProfile* profile;
+    ProfileTimer total;
+
+    explicit ProfileRequestGuard(SearchProfile* profile)
+        : profile(profile), total(profile == nullptr ? nullptr : &profile->wall.total_ns) {
+    }
+
+    ~ProfileRequestGuard() {
+        total.Stop();
+        if (profile != nullptr) {
+            profile->Finish();
+        }
+    }
+};
+}  // namespace
 
 DatasetPtr
 IVF::KnnSearch(const DatasetPtr& query,
@@ -372,6 +483,7 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
                                  const InnerSearchParam& param,
                                  QueryContext& ctx,
                                  ReasoningContext* reasoning_ctx) const {
+    auto* profile = request.profile_.get();
     const auto* query_data = query->GetFloat32Vectors();
     Vector<BucketIdType> candidate_buckets(allocator_);
     if (not param.bucket_ids.empty()) {
@@ -411,7 +523,14 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
         this->thread_pool_ == nullptr ? 1 : param.parallel_search_thread_count;
     std::vector<DistHeapPtr> heaps(search_thread_count);
     std::atomic<uint64_t> cur_bucket_num{0};
+    if (profile != nullptr) {
+        profile->workers.resize(search_thread_count);
+    }
+    ProfileTimer scan_timer(profile == nullptr ? nullptr : &profile->wall.scan_ns);
+    const auto scan_start = scan_timer.Start();
     auto search_func = [&](int64_t thread_id) {
+        auto* worker = profile == nullptr ? nullptr : &profile->workers[thread_id];
+        ProfileWorkerGuard worker_guard(worker, scan_start);
         auto& search_result = heaps[thread_id];
         search_result = DistanceHeap::MakeInstanceBySize<true, false>(this->allocator_, topk);
         auto cur_heap_top = std::numeric_limits<float>::max();
@@ -429,8 +548,15 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
             if (is_timed_out()) {
                 return false;
             }
-            request.distance_batch_func_(
-                candidate_labels.data(), candidate_labels.size(), scores.data());
+            {
+                ProfileTimer timer(worker == nullptr ? nullptr : &worker->distance_callback_ns);
+                if (worker != nullptr) {
+                    ++worker->distance_batches;
+                    worker->distance_candidates += candidate_ids.size();
+                }
+                request.distance_batch_func_(
+                    candidate_labels.data(), candidate_labels.size(), scores.data());
+            }
             if (ctx.stats != nullptr) {
                 ctx.stats->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
                                        DistanceEvaluationBackend::UNKNOWN,
@@ -481,7 +607,11 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
             if (bucket_id == INVALID_BUCKET_ID) {
                 continue;
             }
+            if (worker != nullptr) {
+                ++worker->buckets;
+            }
             if (not param.executors.empty()) {
+                ProfileTimer timer(worker == nullptr ? nullptr : &worker->attribute_exec_ns);
                 param.executors[thread_id]->Clear();
                 attr_filter = param.executors[thread_id]->Run(bucket_id);
             }
@@ -544,6 +674,7 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
             std::rethrow_exception(error);
         }
     }
+    scan_timer.Stop();
     auto search_result = heaps[0];
     for (int64_t thread_id = 1; thread_id < search_thread_count; ++thread_id) {
         const auto& heap = heaps[thread_id];
@@ -586,15 +717,31 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
 
 DatasetPtr
 IVF::SearchWithRequest(const SearchRequest& request) const {
+    auto* profile = request.profile_.get();
+    if (profile != nullptr) {
+        CHECK_ARGUMENT(profile->Begin(),
+                       "a SearchProfile cannot be shared by simultaneous requests");
+    }
+    ProfileRequestGuard profile_guard(profile);
     SearchStatistics stats;
     auto result = this->search_with_request(request, stats);
     // Only the public boundary serializes statistics, including all early-return paths.
     result->Statistics(stats.Dump());
+    if (profile != nullptr) {
+        profile->complete = true;
+    }
     return result;
 }
 
 DatasetPtr
 IVF::search_with_request(const SearchRequest& request, SearchStatistics& stats) const {
+    auto* profile = request.profile_.get();
+    if (profile != nullptr) {
+        CHECK_ARGUMENT(request.distance_batch_func_ != nullptr,
+                       "IVF profiling only supports single-query custom-distance KNN search");
+        CHECK_ARGUMENT(not request.enable_iterator_search_,
+                       "IVF profiling does not support iterator search");
+    }
     ValidateSearchThreshold(request.threshold_);
     QueryContext ctx{.alloc = request.search_allocator_, .stats = &stats};
 

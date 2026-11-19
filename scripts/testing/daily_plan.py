@@ -161,11 +161,75 @@ def partition(units):
     return slots
 
 
-def build_plan(ctx, environment, core, extension, inventory=None, core_only=False, full_coverage=False):
+
+def quarantine_extensions(extension, rules):
+    """Explicit exact-configuration exceptions; never wildcard a case or mask core failures."""
+    keys = set()
+    for rule in rules:
+        if (set(rule) != {"key", "case", "reason", "tracking"}
+                or not isinstance(rule["key"], str) or not re.fullmatch(r"[0-9a-f]{64}", rule["key"])
+                or rule["key"] in keys or not isinstance(rule["case"], str)
+                or not rule["case"].startswith("(Daily) ")
+                or not isinstance(rule["reason"], str) or not rule["reason"].strip()
+                or not isinstance(rule["tracking"], str)
+                or not re.fullmatch(r"https://github.com/antgroup/vsag/issues/[0-9]+", rule["tracking"])):
+            raise PlanError("Invalid exact Daily quarantine")
+        keys.add(rule["key"])
+    retained, excluded = [], []
+    by_key = {rule["key"]: rule for rule in rules}
+    for unit in extension:
+        rule = by_key.get(unit["key"])
+        if rule is None:
+            retained.append(unit)
+            continue
+        if (unit.get("mode") != "rotation" or len(unit.get("tests", [])) != 1
+                or unit["tests"][0]["name"] != rule["case"]):
+            raise PlanError("Daily quarantine identity mismatch")
+        excluded.append({**rule, "configuration": unit.get("configuration"), "status": "not_validated"})
+    missing = keys - {item["key"] for item in excluded}
+    # Weekly seeds change effective configurations. An absent tuple is not a
+    # stale testcase, and must not prevent the rest of the inventory running.
+    rotation_names = {test["name"] for unit in extension if unit.get("mode") == "rotation"
+                      for test in unit.get("tests", [])}
+    stale = {key for key in missing if by_key[key]["case"] not in rotation_names}
+    if stale:
+        raise PlanError("Stale or mistargeted Daily quarantine: " + ", ".join(sorted(stale)))
+    excluded.extend({**by_key[key], "configuration": None, "status": "not_in_inventory"}
+                    for key in sorted(missing))
+    return retained, excluded
+
+
+def expand_execution_parts(unit, environment, history):
+    parts = unit["execution_parts"]
+    expanded = []
+    fallback = unit["order_seconds"] / len(parts)
+    for part in parts:
+        measured = estimate(part, environment, history)
+        exact = [s["seconds"] for s in history["samples"]
+                 if s["key"] == part["key"] and s["environment"] == environment
+                 and s["status"] in ("passed", "timeout")]
+        if any(type(value) not in (int, float) or not math.isfinite(value) or value <= 0 for value in exact):
+            raise PlanError("Invalid scheduling observation")
+        expanded.append({**part, "parent_key": unit["key"], "estimate_seconds": measured,
+                         "order_seconds": max([measured or 60.0] + (exact or [fallback]))})
+    return expanded
+
+
+def build_plan(ctx, environment, core, extension, inventory=None, core_only=False, full_coverage=False, profile=None):
     validate_context(ctx)
     if not environment or not core:
         raise PlanError("Environment and daily core cannot be empty")
     history = load(HERE / "daily_timing_history.json")
+    quarantines = []
+    if not full_coverage:
+        rules = load(HERE / "daily_matrix.json").get("quarantine", [])
+        # Full functional inventory must account for every configured exception,
+        # including renamed/removed cases. Other profiles only own their cases.
+        names = {test["name"] for unit in core + extension for test in unit.get("tests", [])}
+        applicable = rules if profile == "functional" else [r for r in rules if r["case"] in names]
+        if {r["key"] for r in applicable} & {unit["key"] for unit in core}:
+            raise PlanError("Stale or mistargeted Daily quarantine: core configuration")
+        extension, quarantines = quarantine_extensions(extension, applicable)
     units = core + extension
     if len({u["key"] for u in units}) != len(units):
         raise PlanError("Core/extension IDs overlap")
@@ -180,8 +244,15 @@ def build_plan(ctx, environment, core, extension, inventory=None, core_only=Fals
         if any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0
                for v in observations):
             raise PlanError("Invalid scheduling observation")
-        # Parent-group/timeout observations order work, never certify a new tuple's estimate.
-        u["order_seconds"] = max([u["estimate_seconds"] or 60.0] + observations)
+        exact = [s["seconds"] for s in history["samples"]
+                 if s["key"] == u["key"] and s["environment"] == environment
+                 and s["status"] in ("passed", "timeout")]
+        # A slow sibling/old unsplit parent must not flatten all measured tuple costs.
+        # Exact timeout observations remain lower bounds, not passing estimates.
+        costs = exact if exact else observations
+        if any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0 for v in costs):
+            raise PlanError("Invalid scheduling observation")
+        u["order_seconds"] = max([u["estimate_seconds"] or 60.0] + costs)
     architecture_scope = None
     if not full_coverage and environment.lower().endswith(("/linux/aarch64", "/linux/arm64")):
         # Keep one stable core smoke per source file/owner. Other existing core
@@ -215,12 +286,25 @@ def build_plan(ctx, environment, core, extension, inventory=None, core_only=Fals
                               "release_only_this_week": len(extension) - len(eligible)}
         extension = eligible
     week = partition([] if core_only else extension)
+    # Preserve the original group key for quarantine, ARM strata and day selection.
+    parts = {u["key"]: expand_execution_parts(u, environment, history)
+             for u in units if "execution_parts" in u}
+
+    def execution_units(group):
+        return [part for u in group for part in parts.get(u["key"], (u,))]
+
+    expanded = execution_units(units)
+    if len({part["key"] for part in expanded}) != len(expanded):
+        raise PlanError("Duplicate execution unit key")
+    week = [execution_units(day) for day in week]
+    core = execution_units(core)
     return sealed({"schema_version": 1, "kind": "daily-plan", "context": ctx,
                    "environment": environment, "architecture_scope": architecture_scope,
+                   "quarantines": quarantines,
                    "core": core, "rotation": week,
                    "inventory": inventory or {"exclusions": []},
                    "selected": core + week[ctx["slot"]],
-                   "unknown_timings": sum(u["estimate_seconds"] is None for u in units)})
+                   "unknown_timings": sum(u["estimate_seconds"] is None for u in expanded)})
 
 
 def main():

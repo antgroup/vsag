@@ -23,10 +23,7 @@ def main():
         summary.write("## Main CI\n\n| Check | Result |\n| --- | --- |\n")
         for name, value in needs.items():
             summary.write(f"| {name} | {value.get('result', 'missing')} |\n")
-        outputs = needs.get("changes", {}).get("outputs", {})
-        if outputs.get("heavy") == "true" and outputs.get("python") == "false":
-            summary.write("\nPython wheel build/tests are temporarily paused for main pushes pending #3295; skipped is not validation success.\n")
-        summary.write("\nDocs-only pushes intentionally skip heavy checks. Full regression belongs to the manually triggered Daily Build & Test workflow until scheduling is separately enabled.\n")
+        summary.write("\nDocs-only pushes intentionally skip heavy checks. Full regression belongs to Nightly CI.\n")
     if not validate(needs):
         raise SystemExit("A selected main check did not succeed, or classification was invalid")
 
