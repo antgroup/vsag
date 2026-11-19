@@ -476,7 +476,8 @@ TEST_CASE("SINDIV2 pruned partitions keep known high scores across repeated queu
                 REQUIRE(std::stoull(stats[4]) > 1);
             }
             for (uint32_t group = 0; group < groups; ++group) {
-                const auto prefix = "sindi_v2_partition_" + std::to_string(group);
+                auto prefix = std::string{"sindi_v2_partition_"};
+                prefix += std::to_string(group);
                 const auto local = result->GetStatistics({prefix + "_windows",
                                                           prefix + "_candidates",
                                                           prefix + "_quota",
