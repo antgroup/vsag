@@ -873,7 +873,7 @@ public:
     void
     ConfigureIncomingProtection(IncomingProtection mode,
                                 bool protect_add = false,
-                                bool protect_remove = false,
+                                bool protect_removed_sources = false,
                                 bool protect_add_displaced = false,
                                 bool protect_link = false) {
         codec_require(active_journal_ == nullptr and (mode == IncomingProtection::NONE or
@@ -884,7 +884,7 @@ public:
                       "safe link pruning requires cached incoming counts");
         incoming_protection_ = mode;
         protect_added_incoming_ = protect_add;
-        protect_removed_incoming_ = protect_remove;
+        protect_removed_sources_ = protect_removed_sources;
         protect_added_displaced_ = protect_add_displaced;
         protect_link_incoming_ = protect_link;
         incoming_counts_valid_ = false;
@@ -1215,10 +1215,10 @@ public:
             return false;
         }
         codec_require(active_journal_ == nullptr, "nested graph remove transaction");
-        // Only removal protection can initialize the cold cache during Remove.
-        // Without it, the local journal preserves rollback without a full-state copy.
+        // Only removed-source protection initializes the cold cache during Remove.
+        // Reselection uses reverse adjacency counts; the journal stays local.
         if (use_incoming_adjacency_ and incoming_protection_ == IncomingProtection::CACHED and
-            protect_removed_incoming_ and not incoming_counts_valid_) {
+            protect_removed_sources_ and not incoming_counts_valid_) {
             auto next = *this;
             const bool removed = next.Remove(id);
             *this = std::move(next);
@@ -1411,7 +1411,7 @@ public:
             for (const uint64_t old_candidate : removed_neighbors) {
                 repair_candidates.push_back(remap(old_candidate));
             }
-            if (incoming_protection_ != IncomingProtection::NONE and protect_removed_incoming_) {
+            if (incoming_protection_ != IncomingProtection::NONE and protect_removed_sources_) {
                 std::sort(affected_nodes.begin(), affected_nodes.end());
                 affected_nodes.erase(std::unique(affected_nodes.begin(), affected_nodes.end()),
                                      affected_nodes.end());
@@ -1889,22 +1889,28 @@ private:
     }
 
     // Experimental adaptation of floating GraphBackend::ensure_incoming.
-    // Recount reference or cached degrees; neither adds a reverse-edge index.
+    // Use existing reverse adjacency when requested; otherwise recount or cache degrees.
     void
-    protect_incoming(const std::vector<uint64_t>& targets) {
+    protect_incoming(const std::vector<uint64_t>& targets, bool use_reverse_counts = false) {
         if (Size() <= 1) {
             return;
         }
         std::vector<uint64_t> recounted;
-        if (incoming_protection_ == IncomingProtection::CACHED) {
-            prepare_incoming_counts();
-        } else {
-            count_incoming(recounted);
+        const bool reverse_counts = use_reverse_counts and use_incoming_adjacency_;
+        if (not reverse_counts) {
+            if (incoming_protection_ == IncomingProtection::CACHED) {
+                prepare_incoming_counts();
+            } else {
+                count_incoming(recounted);
+            }
         }
         auto& indegrees =
             incoming_protection_ == IncomingProtection::CACHED ? incoming_counts_ : recounted;
+        const auto incoming_count = [&](uint64_t target) -> uint64_t {
+            return reverse_counts ? incoming_[target].size() : indegrees[target];
+        };
         for (const uint64_t target : targets) {
-            if (target >= Size() or indegrees[target] != 0) {
+            if (target >= Size() or incoming_count(target) != 0) {
                 continue;
             }
             uint64_t selected_source = Size();
@@ -1916,7 +1922,7 @@ private:
                 const float sum = std::accumulate(query.begin(), query.end(), 0.0F);
                 for (uint64_t edge = 0; edge < adjacency_[source].size(); ++edge) {
                     const uint64_t displaced = adjacency_[source][edge];
-                    if (indegrees[displaced] <= 1) {
+                    if (incoming_count(displaced) <= 1) {
                         continue;
                     }
                     const auto code = codes_.At(displaced);
@@ -1937,7 +1943,7 @@ private:
             const auto old_neighbors = adjacency_[selected_source];
             const uint64_t displaced = adjacency_[selected_source][selected_edge];
             adjacency_[selected_source][selected_edge] = target;
-            if (incoming_protection_ != IncomingProtection::CACHED) {
+            if (not reverse_counts and incoming_protection_ != IncomingProtection::CACHED) {
                 --indegrees[displaced];
                 ++indegrees[target];
             }
@@ -2009,8 +2015,9 @@ private:
             }
             replace_neighbors(source, selected);
         }
-        // Protect only targets displaced by this new reselection. Existing Add/
-        // Remove guard flags retain their meanings; no new persistent state.
+        // Reselection protects the targets it displaces, independently of the
+        // legacy Add/removed-source guards. Reverse adjacency supplies exact
+        // counts without initializing a cold cache inside the local transaction.
         if (incoming_protection_ != IncomingProtection::NONE) {
             std::sort(displaced_targets.begin(), displaced_targets.end());
             displaced_targets.erase(std::unique(displaced_targets.begin(), displaced_targets.end()),
@@ -2023,7 +2030,7 @@ private:
                     displaced_targets.end());
             }
             if (not displaced_targets.empty()) {
-                protect_incoming(displaced_targets);
+                protect_incoming(displaced_targets, true);
             }
         }
     }
@@ -2074,7 +2081,7 @@ private:
 
     IncomingProtection incoming_protection_{IncomingProtection::NONE};
     bool protect_added_incoming_{};
-    bool protect_removed_incoming_{};
+    bool protect_removed_sources_{};
     bool protect_added_displaced_{};
     bool protect_link_incoming_{};
     std::vector<uint64_t> incoming_counts_;
