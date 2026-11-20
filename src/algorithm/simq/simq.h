@@ -208,6 +208,10 @@ private:
     int64_t max_cluster_size_{64};
     int64_t split_start_idx_{32};
     int64_t random_seed_{42};
+    std::string split_mode_{"online"};
+    int64_t kmeans_k_{2};
+    int64_t kmeans_iters_{8};
+    int64_t kmeans_seed_{42};
     int64_t default_coarse_k_{8};
     int64_t default_rerank_k_{100};
 

@@ -26,6 +26,10 @@ static constexpr const char* SIMQ_INIT_CLUSTER_RATIO = "init_cluster_ratio";
 static constexpr const char* SIMQ_MAX_CLUSTER_SIZE = "max_cluster_size";
 static constexpr const char* SIMQ_SPLIT_START_IDX = "split_start_idx";
 static constexpr const char* SIMQ_RANDOM_SEED = "random_seed";
+static constexpr const char* SIMQ_SPLIT_MODE = "split_mode";
+static constexpr const char* SIMQ_KMEANS_K = "kmeans_k";
+static constexpr const char* SIMQ_KMEANS_ITERS = "kmeans_iters";
+static constexpr const char* SIMQ_KMEANS_SEED = "kmeans_seed";
 static constexpr const char* SIMQ_COARSE_K = "coarse_k";
 static constexpr const char* SIMQ_RERANK_K = "rerank_k";
 static constexpr const char* SIMQ_SPLIT_DELAY_SECONDS = "split_delay_seconds";
@@ -48,6 +52,18 @@ SIMQParameter::FromJson(const JsonType& json) {
     }
     if (json.Contains(SIMQ_RANDOM_SEED)) {
         random_seed = json[SIMQ_RANDOM_SEED].GetInt();
+    }
+    if (json.Contains(SIMQ_SPLIT_MODE)) {
+        split_mode = json[SIMQ_SPLIT_MODE].GetString();
+    }
+    if (json.Contains(SIMQ_KMEANS_K)) {
+        kmeans_k = json[SIMQ_KMEANS_K].GetInt();
+    }
+    if (json.Contains(SIMQ_KMEANS_ITERS)) {
+        kmeans_iters = json[SIMQ_KMEANS_ITERS].GetInt();
+    }
+    if (json.Contains(SIMQ_KMEANS_SEED)) {
+        kmeans_seed = json[SIMQ_KMEANS_SEED].GetInt();
     }
     if (json.Contains(SIMQ_COARSE_K)) {
         coarse_k = json[SIMQ_COARSE_K].GetInt();
@@ -80,6 +96,11 @@ SIMQParameter::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(coarse_k > 0, "simq: coarse_k must be > 0");
     CHECK_ARGUMENT(rerank_k > 0, "simq: rerank_k must be > 0");
     CHECK_ARGUMENT(split_delay_seconds >= 0.0, "simq: split_delay_seconds must be >= 0");
+    CHECK_ARGUMENT(split_mode == "online" || split_mode == "post_kmeans",
+                   "simq: split_mode must be either online or post_kmeans");
+    CHECK_ARGUMENT(split_mode != "post_kmeans" || kmeans_k == 2,
+                   "simq: post_kmeans currently requires kmeans_k == 2");
+    CHECK_ARGUMENT(kmeans_iters > 0, "simq: kmeans_iters must be > 0");
 
     CHECK_ARGUMENT(json.Contains(BASE_CODES_KEY),
                    fmt::format("simq parameters must contain {}", BASE_CODES_KEY));
@@ -104,6 +125,10 @@ SIMQParameter::ToJson() const {
     json[SIMQ_MAX_CLUSTER_SIZE].SetInt(max_cluster_size);
     json[SIMQ_SPLIT_START_IDX].SetInt(split_start_idx);
     json[SIMQ_RANDOM_SEED].SetInt(random_seed);
+    json[SIMQ_SPLIT_MODE].SetString(split_mode);
+    json[SIMQ_KMEANS_K].SetInt(kmeans_k);
+    json[SIMQ_KMEANS_ITERS].SetInt(kmeans_iters);
+    json[SIMQ_KMEANS_SEED].SetInt(kmeans_seed);
     json[SIMQ_COARSE_K].SetInt(coarse_k);
     json[SIMQ_RERANK_K].SetInt(rerank_k);
     json[SIMQ_SPLIT_DELAY_SECONDS].SetDouble(split_delay_seconds);

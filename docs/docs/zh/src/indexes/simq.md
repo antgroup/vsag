@@ -119,6 +119,10 @@ SIMQ 专属构建参数放在 `index_param` 下；通用字段保留在顶层。
 | `max_cluster_size` | int | `64` | 必须 `> 1`；触发分区切分的 token 数阈值，不是文档数上限。 |
 | `split_start_idx` | int | `32` | 范围 `(1, max_cluster_size)`；溢出分区按距离排序后，新分区的起始位置。 |
 | `random_seed` | int | `42` | 初始 token 打乱及文档模型有界训练采样的随机种子；SIMQ 无额外范围检查。 |
+| `split_mode` | string | `"online"` | `"online"` 保持原有的在线切分；`"post_kmeans"` 先完成全部分配，再对超限簇递归执行局部 K=2 K-means 切分。 |
+| `kmeans_k` | int | `2` | `post_kmeans` 的局部 K-means 簇数，目前必须为 `2`。 |
+| `kmeans_iters` | int | `8` | 每次局部 K-means 切分的迭代次数。 |
+| `kmeans_seed` | int | `42` | 局部 K-means 初始化使用的确定性种子/偏移。 |
 | `coarse_k` | int | `8` | 必须 `> 0`；默认每个查询 token 搜索的最近代表簇数，检索时不超过可用簇数。 |
 | `rerank_k` | int | `100` | 必须 `> 0`；默认进入 MaxSim 精排的候选文档数上限，检索时不超过文档总数。 |
 | `split_delay_seconds` | float | `0.0` | 必须 `>= 0`；增量 `Add` 首次溢出后，等待该时长才允许切分；`0` 表示立即切分。待切分项在 `Add` 中检查，不存在后台定时器，也不推迟初次 Build 聚类切分。 |
@@ -137,6 +141,11 @@ FP32 工作流优先选择 `fp32`、`fp16`、`bf16`、`sq8_uniform`，并以实�
 > 簇的数量与大小。较小的 `init_cluster_ratio` 搭配较大的 `max_cluster_size`
 > 会产生更少的簇，粗排更快但召回降低。建议以 `init_cluster_ratio = 0.1`–`0.2`、
 > `max_cluster_size = 2 × split_start_idx` 为起点，再通过检索参数调优。
+
+在并行构建时可使用 `post_kmeans`：初始 HGraph 先完成全部 token
+分配，随后仅对超限簇递归执行局部 K=2 K-means，不再进行图搜索，
+最后使用切分后的分区构建代表点 HGraph。默认的 `online` 模式保持历史兼容的
+插入时切分行为；在该模式下 `kmeans_k`、`kmeans_iters` 和 `kmeans_seed` 不生效。
 
 ## 检索参数
 

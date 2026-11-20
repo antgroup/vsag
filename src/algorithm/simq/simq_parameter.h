@@ -40,6 +40,14 @@ public:
     int64_t split_start_idx{32};     // index within sorted cluster where new cluster begins
     int64_t random_seed{42};
 
+    // Cluster overflow handling.  "online" preserves the historical
+    // insertion-time split behavior.  "post_kmeans" assigns all tokens
+    // first, then recursively splits oversized clusters with local K-means.
+    std::string split_mode{"online"};
+    int64_t kmeans_k{2};
+    int64_t kmeans_iters{8};
+    int64_t kmeans_seed{42};
+
     // Search parameters (index-level defaults, overridable per-query)
     int64_t coarse_k{8};    // clusters searched per query token
     int64_t rerank_k{100};  // docs reranked with exact MaxSim

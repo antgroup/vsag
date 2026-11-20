@@ -16,7 +16,9 @@
 #include "simq.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <future>
@@ -183,6 +185,10 @@ public:
                             int64_t max_cluster_size,
                             int64_t split_start_idx,
                             int64_t random_seed,
+                            std::string split_mode,
+                            int64_t kmeans_k,
+                            int64_t kmeans_iters,
+                            int64_t kmeans_seed,
                             int64_t build_thread_count,
                             IndexCommonParam common_param,
                             std::shared_ptr<SafeThreadPool> thread_pool,
@@ -192,6 +198,10 @@ public:
           max_cluster_size_(static_cast<int>(max_cluster_size)),
           split_start_idx_(static_cast<int>(split_start_idx)),
           random_seed_(static_cast<int>(random_seed)),
+          split_mode_(std::move(split_mode)),
+          kmeans_k_(static_cast<int>(kmeans_k)),
+          kmeans_iters_(static_cast<int>(kmeans_iters)),
+          kmeans_seed_(static_cast<int>(kmeans_seed)),
           build_thread_count_(build_thread_count),
           common_param_(std::move(common_param)),
           thread_pool_(std::move(thread_pool)),
@@ -199,6 +209,11 @@ public:
           quantization_(std::move(quantization)) {
         token_codes_ = std::dynamic_pointer_cast<TokenCodeInterface>(storage_);
         CHECK_ARGUMENT(token_codes_ != nullptr, "simq token-code capability missing");
+        CHECK_ARGUMENT(split_mode_ == "online" || split_mode_ == "post_kmeans",
+                       "simq: split_mode must be either online or post_kmeans");
+        CHECK_ARGUMENT(split_mode_ != "post_kmeans" || kmeans_k_ == 2,
+                       "simq: post_kmeans currently requires kmeans_k == 2");
+        CHECK_ARGUMENT(kmeans_iters_ > 0, "simq: kmeans_iters must be > 0");
     }
 
     ~HGraphDynamicClustering() = default;
@@ -226,10 +241,25 @@ private:
     void
     split_cluster(int old_center_id, int64_t dim);
 
+    void
+    post_kmeans_split_oversized();
+
+    struct PostSplitResult {
+        std::vector<ClusterMemberEntry> first;
+        std::vector<ClusterMemberEntry> second;
+    };
+
+    PostSplitResult
+    split_members_kmeans(const std::vector<ClusterMemberEntry>& members) const;
+
     float init_cluster_ratio_;
     int max_cluster_size_;
     int split_start_idx_;
     int random_seed_;
+    std::string split_mode_;
+    int kmeans_k_{2};
+    int kmeans_iters_{8};
+    int kmeans_seed_{42};
     int64_t build_thread_count_;
     IndexCommonParam common_param_;
     std::shared_ptr<SafeThreadPool> thread_pool_;
@@ -384,6 +414,173 @@ HGraphDynamicClustering::split_cluster(int old_center_id, int64_t /*dim*/) {
     }
 }
 
+HGraphDynamicClustering::PostSplitResult
+HGraphDynamicClustering::split_members_kmeans(
+    const std::vector<ClusterMemberEntry>& members) const {
+    CHECK_ARGUMENT(members.size() >= 2, "simq post_kmeans: cannot split a singleton cluster");
+
+    const auto n = members.size();
+    std::vector<float> vectors(n * static_cast<size_t>(dim_));
+    for (size_t i = 0; i < n; ++i) {
+        storage_->Decode(codes_ + static_cast<uint64_t>(members[i].vec_id) * code_size_,
+                         vectors.data() + i * static_cast<size_t>(dim_));
+    }
+
+    // Deterministic far-apart initialization.  The second seed is chosen by
+    // a fixed, per-cluster offset so the result does not depend on task order.
+    size_t first = 0;
+    size_t second =
+        std::min(n - 1,
+                 static_cast<size_t>(
+                     1 + (static_cast<uint64_t>(kmeans_seed_) + members.front().vec_id) % (n - 1)));
+    if (second == first) {
+        second = n - 1;
+    }
+    std::vector<float> centers(static_cast<size_t>(kmeans_k_) * static_cast<size_t>(dim_));
+    std::memcpy(centers.data(),
+                vectors.data() + first * static_cast<size_t>(dim_),
+                static_cast<size_t>(dim_) * sizeof(float));
+    std::memcpy(centers.data() + static_cast<size_t>(dim_),
+                vectors.data() + second * static_cast<size_t>(dim_),
+                static_cast<size_t>(dim_) * sizeof(float));
+
+    std::vector<uint8_t> assignment(n, 0);
+    for (int iter = 0; iter < kmeans_iters_; ++iter) {
+        std::vector<double> sums(static_cast<size_t>(kmeans_k_) * static_cast<size_t>(dim_), 0.0);
+        std::array<size_t, 2> counts{0, 0};
+        for (size_t i = 0; i < n; ++i) {
+            float best = -std::numeric_limits<float>::infinity();
+            uint8_t best_cluster = 0;
+            for (int c = 0; c < kmeans_k_; ++c) {
+                float score = 0.0F;
+                for (int64_t d = 0; d < dim_; ++d) {
+                    score += vectors[i * static_cast<size_t>(dim_) + static_cast<size_t>(d)] *
+                             centers[static_cast<size_t>(c) * static_cast<size_t>(dim_) +
+                                     static_cast<size_t>(d)];
+                }
+                if (score > best) {
+                    best = score;
+                    best_cluster = static_cast<uint8_t>(c);
+                }
+            }
+            assignment[i] = best_cluster;
+            ++counts[best_cluster];
+            for (int64_t d = 0; d < dim_; ++d) {
+                sums[static_cast<size_t>(best_cluster) * static_cast<size_t>(dim_) +
+                     static_cast<size_t>(d)] +=
+                    vectors[i * static_cast<size_t>(dim_) + static_cast<size_t>(d)];
+            }
+        }
+
+        // Keep both sides non-empty.  This is important for duplicate or
+        // nearly-identical token vectors, where ordinary K-means may collapse.
+        if (counts[0] == 0 || counts[1] == 0) {
+            const size_t donor = counts[0] == 0 ? 1 : 0;
+            const size_t receiver = 1 - donor;
+            size_t move = 0;
+            while (move < n && assignment[move] != donor) {
+                ++move;
+            }
+            if (move == n) {
+                move = donor == 0 ? first : second;
+            }
+            assignment[move] = static_cast<uint8_t>(receiver);
+            counts[donor]--;
+            counts[receiver]++;
+            if (counts[donor] == 0) {
+                // The donor cannot be empty after moving one member when n>=2.
+                counts[donor] = 1;
+            }
+        }
+
+        for (int c = 0; c < kmeans_k_; ++c) {
+            if (counts[c] == 0) {
+                continue;
+            }
+            for (int64_t d = 0; d < dim_; ++d) {
+                centers[static_cast<size_t>(c) * static_cast<size_t>(dim_) +
+                        static_cast<size_t>(d)] =
+                    static_cast<float>(sums[static_cast<size_t>(c) * static_cast<size_t>(dim_) +
+                                            static_cast<size_t>(d)] /
+                                       static_cast<double>(counts[c]));
+            }
+        }
+    }
+
+    PostSplitResult result;
+    for (size_t i = 0; i < n; ++i) {
+        auto& target = assignment[i] == 0 ? result.first : result.second;
+        target.push_back({members[i].vec_id, 0.0F});
+    }
+    if (result.first.empty() || result.second.empty()) {
+        // Defensive fallback; the non-empty repair above should make this
+        // unreachable, but never return an invalid partition.
+        result.first.clear();
+        result.second.clear();
+        const size_t half = n / 2;
+        result.first.insert(result.first.end(), members.begin(), members.begin() + half);
+        result.second.insert(result.second.end(), members.begin() + half, members.end());
+    }
+    return result;
+}
+
+void
+HGraphDynamicClustering::post_kmeans_split_oversized() {
+    std::vector<std::vector<ClusterMemberEntry>> pending;
+    pending.reserve(clusters_.size());
+    for (const auto& center : cluster_centers_) {
+        pending.push_back(clusters_.at(center));
+    }
+
+    std::vector<std::vector<ClusterMemberEntry>> final_clusters;
+    while (!pending.empty()) {
+        std::vector<std::future<PostSplitResult>> futures;
+        std::vector<std::vector<ClusterMemberEntry>> next_pending;
+        final_clusters.reserve(final_clusters.size() + pending.size());
+
+        for (const auto& members : pending) {
+            if (members.size() <= static_cast<size_t>(max_cluster_size_)) {
+                final_clusters.push_back(members);
+                continue;
+            }
+            if (thread_pool_ && build_thread_count_ > 1) {
+                futures.push_back(thread_pool_->GeneralEnqueue(
+                    [this, members]() { return split_members_kmeans(members); }));
+            } else {
+                auto split = split_members_kmeans(members);
+                next_pending.push_back(std::move(split.first));
+                next_pending.push_back(std::move(split.second));
+            }
+        }
+
+        for (auto& future : futures) {
+            auto split = future.get();
+            next_pending.push_back(std::move(split.first));
+            next_pending.push_back(std::move(split.second));
+        }
+        pending = std::move(next_pending);
+    }
+
+    clusters_.clear();
+    cluster_centers_.clear();
+    vec_to_cluster_.assign(static_cast<size_t>(num_vecs_), -1);
+    for (auto& members : final_clusters) {
+        CHECK_ARGUMENT(not members.empty(), "simq post_kmeans: empty final cluster");
+        const int center = static_cast<int>(members.front().vec_id);
+        std::vector<ClusterMemberEntry> rebuilt;
+        rebuilt.reserve(members.size());
+        for (const auto& member : members) {
+            rebuilt.push_back({member.vec_id, ip_distance(member.vec_id, center)});
+            vec_to_cluster_[member.vec_id] = center;
+        }
+        std::sort(rebuilt.begin(), rebuilt.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.distance < rhs.distance;
+        });
+        clusters_[center] = std::move(rebuilt);
+        cluster_centers_.push_back(center);
+    }
+}
+
 void
 HGraphDynamicClustering::Fit(const uint8_t* codes, int64_t num_vecs, int64_t dim) {
     codes_ = codes;
@@ -477,12 +674,17 @@ HGraphDynamicClustering::Fit(const uint8_t* codes, int64_t num_vecs, int64_t dim
             sorted_insert(clusters_[nearest], static_cast<InnerIdType>(vid), dist);
             vec_to_cluster_[vid] = nearest;
 
-            if (static_cast<int>(clusters_[nearest].size()) > max_cluster_size_) {
+            if (split_mode_ == "online" &&
+                static_cast<int>(clusters_[nearest].size()) > max_cluster_size_) {
                 split_cluster(nearest, dim);
             }
         }
 
         remaining_it = batch_end;
+    }
+
+    if (split_mode_ == "post_kmeans") {
+        post_kmeans_split_oversized();
     }
 }
 
@@ -507,6 +709,10 @@ SIMQ::SIMQ(const SIMQParameterPtr& param, const IndexCommonParam& common_param)
     max_cluster_size_ = param->max_cluster_size;
     split_start_idx_ = param->split_start_idx;
     random_seed_ = param->random_seed;
+    split_mode_ = param->split_mode;
+    kmeans_k_ = param->kmeans_k;
+    kmeans_iters_ = param->kmeans_iters;
+    kmeans_seed_ = param->kmeans_seed;
     default_coarse_k_ = param->coarse_k;
     default_rerank_k_ = param->rerank_k;
     split_delay_seconds_ = param->split_delay_seconds;
@@ -613,6 +819,10 @@ SIMQ::run_clustering(const uint8_t* token_codes,
                                        max_cluster_size_,
                                        split_start_idx_,
                                        random_seed_,
+                                       split_mode_,
+                                       kmeans_k_,
+                                       kmeans_iters_,
+                                       kmeans_seed_,
                                        static_cast<int64_t>(build_thread_count_),
                                        common_param_,
                                        this->thread_pool_,
@@ -1818,6 +2028,10 @@ SIMQ::Deserialize(StreamReader& reader) {
         max_cluster_size_ = tmp_param.max_cluster_size;
         split_start_idx_ = tmp_param.split_start_idx;
         random_seed_ = tmp_param.random_seed;
+        split_mode_ = tmp_param.split_mode;
+        kmeans_k_ = tmp_param.kmeans_k;
+        kmeans_iters_ = tmp_param.kmeans_iters;
+        kmeans_seed_ = tmp_param.kmeans_seed;
         init_cluster_ratio_ = tmp_param.init_cluster_ratio;
         split_delay_seconds_ = tmp_param.split_delay_seconds;
         // NOLINTNEXTLINE(readability-simplify-boolean-expr)
@@ -2067,8 +2281,9 @@ SIMQ::CheckAndMappingExternalParam(const JsonType& external_param,
             inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][READ_CACHE_TOTAL_CACHE_SIZE_KEY].SetJson(
                 value);
         } else if (key == "init_cluster_ratio" || key == "max_cluster_size" ||
-                   key == "split_start_idx" || key == "random_seed" || key == "coarse_k" ||
-                   key == "rerank_k" || key == "quantization_type" ||
+                   key == "split_start_idx" || key == "random_seed" || key == "split_mode" ||
+                   key == "kmeans_k" || key == "kmeans_iters" || key == "kmeans_seed" ||
+                   key == "coarse_k" || key == "rerank_k" || key == "quantization_type" ||
                    key == BUILD_THREAD_COUNT_KEY || key == "split_delay_seconds" ||
                    key == "support_duplicate" || key == "deduplicate_storage") {
             inner_json[key].SetJson(value);
