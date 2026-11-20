@@ -158,6 +158,20 @@ build_default_hgraph_inner_param(const JsonType& external_json) {
 
 }  // namespace
 
+void
+ApplyBinaryQuantizationDefaults(const JsonType& user_json, JsonType& inner_json) {
+    if (not user_json.Contains(HGRAPH_BASE_QUANTIZATION_TYPE)) {
+        inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetString(
+            QUANTIZATION_TYPE_VALUE_BINARY);
+    }
+    if (not user_json.Contains(HGRAPH_PRECISE_QUANTIZATION_TYPE)) {
+        inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetString(
+            QUANTIZATION_TYPE_VALUE_BINARY);
+    }
+    inner_json[RAW_VECTOR_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetString(
+        QUANTIZATION_TYPE_VALUE_BINARY);
+}
+
 JsonType
 HGraph::map_hgraph_param(const JsonType& hgraph_json) {
     CHECK_ARGUMENT(not hgraph_json.Contains(HGRAPH_MCI_KEY),
@@ -384,6 +398,9 @@ ParamPtr
 HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                      const IndexCommonParam& common_param) {
     auto inner_json = map_hgraph_param(external_param);
+    if (common_param.data_type_ == DataTypes::DATA_TYPE_BINARY) {
+        ApplyBinaryQuantizationDefaults(external_param, inner_json);
+    }
     if (common_param.data_type_ == DataTypes::DATA_TYPE_SPARSE) {
         inner_json[BASE_CODES_KEY][CODES_TYPE_KEY].SetString(SPARSE_CODES);
         inner_json[PRECISE_CODES_KEY][CODES_TYPE_KEY].SetString(SPARSE_CODES);
@@ -398,6 +415,9 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     auto hgraph_parameter = std::make_shared<HGraphParameter>();
     hgraph_parameter->data_type = common_param.data_type_;
     hgraph_parameter->FromJson(inner_json);
+    CHECK_ARGUMENT(common_param.data_type_ != DataTypes::DATA_TYPE_BINARY or
+                       not hgraph_parameter->mci_parameters.enabled,
+                   "binary HGraph does not support MCI");
     if (hgraph_parameter->rabitq_fused_datacell) {
         CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
             common_param.metric_ == MetricType::METRIC_TYPE_L2SQR or

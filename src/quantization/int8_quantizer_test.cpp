@@ -264,6 +264,7 @@ TestSerializeAndDeserializeINT8(Quantizer<INT8Quantizer<metric>>& quant1,
     test_serializion(quant1, quant2);
 
     REQUIRE(quant1.GetCodeSize() == quant2.GetCodeSize());
+    REQUIRE(quant1.GetQueryCodeSize() == quant2.GetQueryCodeSize());
     REQUIRE(quant1.GetDim() == quant2.GetDim());
 
     TestQuantizerEncodeDecodeINT8(quant2, dim, count, error, false);
@@ -283,7 +284,7 @@ void
 TestSerializeAndDeserializeMetricINT8(uint64_t dim, int count, float error = 1e-5) {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     INT8Quantizer<metric> quantizer1(dim, allocator.get());
-    INT8Quantizer<metric> quantizer2(dim, allocator.get());
+    INT8Quantizer<metric> quantizer2(dim / 2, allocator.get());
     TestSerializeAndDeserializeINT8<metric>(quantizer1, quantizer2, dim, count, error);
 }
 

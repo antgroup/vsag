@@ -104,9 +104,10 @@ void
 TestSerializeAndDeserializeMetricFP32(uint64_t dim, int count, float error = 1e-5) {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     FP32Quantizer<metric> quantizer1(dim, allocator.get());
-    FP32Quantizer<metric> quantizer2(dim, allocator.get());
+    FP32Quantizer<metric> quantizer2(dim / 2, allocator.get());
     TestSerializeAndDeserialize<FP32Quantizer<metric>, metric>(
         quantizer1, quantizer2, dim, count, error);
+    REQUIRE(quantizer2.GetQueryCodeSize() == quantizer1.GetQueryCodeSize());
 }
 
 TEST_CASE("FP32 Serialize and Deserialize", "[ut][FP32Quantizer]") {

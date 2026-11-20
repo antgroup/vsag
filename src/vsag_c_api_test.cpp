@@ -200,6 +200,9 @@ TEST_CASE("vsag_c_api build, search and serialize", "[vsag_c_api][ut]") {
     int64_t count = 0;
     REQUIRE_OK(vsag_index_get_num_elements(index.get(), &count));
     REQUIRE(count == num_vectors);
+    int64_t actual_dim = 0;
+    REQUIRE_OK(vsag_index_get_dim(index.get(), &actual_dim));
+    REQUIRE(actual_dim == dim);
     int64_t memory = 0;
     REQUIRE_OK(vsag_index_get_memory_usage(index.get(), &memory));
     REQUIRE(memory > 0);
@@ -669,7 +672,9 @@ TEST_CASE("vsag_c_api invalid arguments", "[vsag_c_api][ut]") {
     REQUIRE(code_of(vsag_dataset_set_ids(nullptr, nullptr)) == VSAG_INVALID_ARGUMENT);
     REQUIRE(code_of(vsag_dataset_set_float32_vectors(nullptr, nullptr)) == VSAG_INVALID_ARGUMENT);
     REQUIRE(code_of(vsag_dataset_set_float16_vectors(nullptr, nullptr)) == VSAG_INVALID_ARGUMENT);
+    REQUIRE(code_of(vsag_dataset_set_binary_vectors(nullptr, nullptr)) == VSAG_INVALID_ARGUMENT);
     REQUIRE(code_of(vsag_dataset_set_int8_vectors(nullptr, nullptr)) == VSAG_INVALID_ARGUMENT);
+    REQUIRE(code_of(vsag_index_get_dim(nullptr, nullptr)) == VSAG_INVALID_ARGUMENT);
     REQUIRE(code_of(vsag_dataset_set_sparse_vectors(nullptr, nullptr, nullptr, nullptr)) ==
             VSAG_INVALID_ARGUMENT);
 }

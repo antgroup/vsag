@@ -627,6 +627,33 @@ public:
      */
     virtual const std::string*
     GetSourceID() const = 0;
+
+    /**
+     * @brief Sets the bit-packed binary vector array for the dataset.
+     *
+     * @details
+     * Each vector occupies ceil(Dim() / 8) bytes. Unused high bits in the final byte are ignored.
+     * The call is dispatched to Dataset implementations that opt in through the internal
+     * binary-vector extension interface; other implementations raise
+     * ErrorType::UNSUPPORTED_INDEX_OPERATION.
+     *
+     * @param vectors Pointer to the contiguous array of packed binary vectors.
+     * @return DatasetPtr A shared pointer to the dataset with updated binary vectors.
+     * @note This method is non-virtual so extending the API does not change Dataset's vtable,
+     * keeping applications built against older headers binary compatible.
+     */
+    DatasetPtr
+    BinaryVectors(const uint8_t* vectors);
+
+    /**
+     * @brief Retrieves the bit-packed binary vector array of the dataset.
+     *
+     * @return const uint8_t* Pointer to the array of packed binary vectors, or nullptr when the
+     * dataset holds none or does not support binary vectors.
+     * @note This method is non-virtual so extending the API does not change Dataset's vtable.
+     */
+    const uint8_t*
+    GetBinaryVectors() const;
 };
 
 }  // namespace vsag

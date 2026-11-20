@@ -23,6 +23,7 @@
 #include "common.h"
 #include "impl/reasoning/reasoning_context.h"
 #include "impl/thread_pool/safe_thread_pool.h"
+#include "index/index_dimension_provider.h"
 #include "index/search_session_provider.h"
 #include "index_common_param.h"
 #include "query_context.h"
@@ -48,7 +49,7 @@ struct HasTypedSearchWithRequest<
 };
 
 template <class T>
-class IndexImpl : public Index, public SearchSessionProvider {
+class IndexImpl : public Index, public SearchSessionProvider, public IndexDimensionProvider {
     static_assert(std::is_base_of<InnerIndexInterface, T>::value);
     static_assert(HasStaticCheckAndMappingExternalParam<T>::value);
 
@@ -352,6 +353,12 @@ public:
     GetNumElements() const override {
         const SearchLockScope public_search_scope(false);
         return this->inner_index_->GetNumElements();
+    }
+
+    [[nodiscard]] int64_t
+    GetDim() const override {
+        const SearchLockScope public_search_scope(false);
+        return this->inner_index_->dim_;
     }
 
     [[nodiscard]] int64_t

@@ -160,13 +160,8 @@ IVF::Train(const DatasetPtr& data) {
                             "IVF requires float32 vectors for non-empty datasets");
     }
     int64_t dim = data->GetDim();
-    DatasetPtr train_data = vsag::sample_train_data(data,
-                                                    total_elements,
-                                                    dim,
-                                                    train_sample_count_,
-                                                    allocator_,
-                                                    std::nullopt,
-                                                    common_param_.data_type_);
+    DatasetPtr train_data = vsag::sample_train_data(
+        data, total_elements, dim, train_sample_count_, DataTypes::DATA_TYPE_FLOAT, allocator_);
     int64_t sample_count = train_data->GetNumElements();
 
     partition_strategy_->Train(train_data);
