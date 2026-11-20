@@ -424,3 +424,15 @@ Serial requests need no preparation. VSAG does not read VecBase online policy JS
 
 
 Each independent SearchResource synchronously creates its own worker group during construction. Hosts with several index groups should set `max_background_workers` explicitly and reuse a shared SearchResource where appropriate; VSAG does not enforce a process-wide thread budget across independent groups.
+
+### Multiple-host KNN queries
+
+The existing string metadata `host` accepts one or more exact host values separated by `|`. Single and multiple hosts share the same OR filtering path, intersected with date conditions and the user Filter.
+
+```cpp
+std::string host = "a.com|b.com|c.com";
+query->StringMetadata("host", &host);
+// Keep host alive throughout the query and follow Dataset's existing ownership rules.
+```
+
+As with Pyramid's legacy multi-path query strings, `|` is reserved and has no escape syntax. Empty components in a nonempty selector are ignored, duplicates are removed, and unknown hosts are ignored. A selector such as `|` matches nothing. Whitespace is literal, not trimmed. An absent/null `host` does not restrict hosts, while a standalone empty string retains the existing missing-host meaning. `/` remains a literal character: host matching does not include descendant paths. Build metadata remains one literal host per document. Dataset APIs, ownership, copying and persisted formats are unchanged. Existing indexes need no rebuild.
