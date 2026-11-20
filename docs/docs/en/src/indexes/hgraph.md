@@ -628,6 +628,14 @@ rejected before destination data is changed. Queries on the destination normally
 wait for its structural lock during Merge. Between the lock scopes around capacity
 growth, readers can still access the unchanged, previously published index.
 
+### PiPNN reservoir cache
+
+`graph_type: "pipnn"` supports versioned reservoir export/import through the same cache APIs.
+Source IDs and FP32 content fingerprints identify reusable rows; incompatible/legacy snapshots
+and duplicate-group graphs cold-build. Pyramid isolates caches by hierarchy and node path.
+See [PiPNN reservoir cache](../advanced/build_cache.md#pipnn-reservoir-cache) for the lifecycle,
+compatibility, memory cost, approximate quality and diagnostics.
+
 ## See also
 
 - [Creating an Index](../guide/create_index.md)
