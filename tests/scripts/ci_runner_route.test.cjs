@@ -93,6 +93,35 @@ for (const [name, options] of Object.entries({
     assert.equal(outputs.team, 'false'); assert.equal(outputs.image, '');
   });
 }
+test('Team slot pilot is selected from canonical main only for a listed PR', async () => {
+  const team_slots = {app_id: 82, pilot_prs: [7]};
+  const config = {team_enabled: true, team_image: image, team_slots};
+  const base = {sha: 'base-a', ref: 'main', repo: {full_name: 'antgroup/vsag'}};
+  const pilot = await run({config, pr: {base}});
+  assert.equal(pilot.outputs.team, 'true');
+  assert.equal(pilot.outputs.slot_app_id, '82');
+  const legacy = await run({config: {...config, team_slots: {...team_slots, pilot_prs: [8]}}, pr: {base}});
+  assert.equal(legacy.outputs.team, 'true');
+  assert.equal(legacy.outputs.slot_app_id, '');
+  const earlierBranch = await run({config, pr: {base: {...base, ref: '0.9'}}});
+  assert.equal(earlierBranch.outputs.slot_app_id, '');
+});
+
+test('the locked trial fork branch selects the approved slot App', async () => {
+  const base = {sha: 'base-a', ref: 'main', repo: {full_name: 'antgroup/vsag'}};
+  const head = {sha: 'head-a', ref: 'codex/team-ci-slot-b-trial', repo: {full_name: 'wxyucs/vsag'}};
+  assert.equal((await run({pr: {head, base}})).outputs.slot_app_id, '5831739');
+  assert.equal((await run({pr: {head: {...head, ref: 'other-branch'}, base}})).outputs.slot_app_id, '');
+});
+
+test('malformed Team slot policy never selects an internal runner', async () => {
+  const {outputs} = await run({config: {team_enabled: true, team_image: image, team_slots: {
+    app_id: "82", pilot_prs: [7]
+  }}});
+  assert.equal(outputs.team, 'false');
+  assert.equal(outputs.slot_app_id, '');
+});
+
 test('GitHub usernames are case insensitive', async () => {
   assert.equal((await run({pr:{user:{login:'WXYUCS'}}})).outputs.team, 'true');
 });
@@ -261,7 +290,7 @@ test('compatibility uses verified inputs separate from example output', () => {
   const compatibility = team.split('      - name: Check index compatibility\n')[1].split('      - name: Record compatibility outcome\n')[0];
   assert.ok(!compatibility.includes('matrix.shard'));
   const compatibilityJob = team.split('  compatibility:\n')[1].split('  summary:\n')[0];
-  assert.match(compatibilityJob, /needs: build/);
+  assert.match(compatibilityJob, /needs: \[build, slot\]/);
   assert.match(compatibilityJob, /name: Team Index Compatibility/);
   assert.match(compatibilityJob, /run: \*team_consumer_bootstrap/);
   assert.match(compatibilityJob, /run: \*team_consumer_runtime/);
