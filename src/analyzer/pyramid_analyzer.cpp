@@ -19,6 +19,7 @@
 #include <cstring>
 #include <limits>
 #include <random>
+#include <vector>
 
 #include "dataset_impl.h"
 #include "impl/heap/standard_heap.h"
@@ -27,6 +28,7 @@
 #include "query_context.h"
 #include "typing.h"
 #include "vsag/dataset.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -777,24 +779,42 @@ PyramidAnalyzer::calculate_quantization_result(
             continue;
         }
 
+        const auto* base_valids = base_result->GetValids();
+        const auto* precise_valids = precise_result->GetValids();
+        if (base_valids == nullptr || precise_valids == nullptr) {
+            continue;
+        }
+        // Skip labels that were removed concurrently; their distances are NaN.
+        std::vector<uint32_t> kept;
+        kept.reserve(result_size);
+        for (uint32_t j = 0; j < result_size; ++j) {
+            if (base_valids[j] && precise_valids[j]) {
+                kept.push_back(j);
+            }
+        }
+        if (kept.empty()) {
+            continue;
+        }
+        const auto kept_count = static_cast<uint32_t>(kept.size());
+
         float sample_error = 0.0F;
         uint32_t inversion_count = 0;
-        for (uint32_t j = 0; j < result_size; ++j) {
-            sample_error += std::abs(base_distance[j] - precise_distance[j]);
-            for (uint32_t k = j + 1; k < result_size; ++k) {
-                if ((base_distance[j] - base_distance[k]) *
-                        (precise_distance[j] - precise_distance[k]) <
+        for (uint32_t j = 0; j < kept_count; ++j) {
+            sample_error += std::abs(base_distance[kept[j]] - precise_distance[kept[j]]);
+            for (uint32_t k = j + 1; k < kept_count; ++k) {
+                if ((base_distance[kept[j]] - base_distance[kept[k]]) *
+                        (precise_distance[kept[j]] - precise_distance[kept[k]]) <
                     0) {
                     inversion_count++;
                 }
             }
         }
 
-        total_quantization_error += sample_error / static_cast<float>(result_size);
-        if (result_size > 1) {
+        total_quantization_error += sample_error / static_cast<float>(kept_count);
+        if (kept_count > 1) {
             total_quantization_inversion_count_rate +=
                 static_cast<float>(inversion_count) /
-                (static_cast<float>(result_size) * static_cast<float>(result_size - 1) / 2.0F);
+                (static_cast<float>(kept_count) * static_cast<float>(kept_count - 1) / 2.0F);
             valid_inversion_sample_count++;
         }
         valid_sample_count++;
@@ -941,9 +961,14 @@ PyramidAnalyzer::get_search_recall(
             }
             bool is_hit = gt_set.find(label) != gt_set.end();
             if (not is_hit) {
-                const auto distance = pyramid_->CalcDistanceById(
-                    sample_datas.data() + static_cast<uint64_t>(i) * dim_, label, true);
-                is_hit = distance <= distance_threshold + tie_tolerance;
+                try {
+                    const auto distance = pyramid_->CalcDistanceById(
+                        sample_datas.data() + (static_cast<uint64_t>(i) * dim_), label, true);
+                    is_hit = distance <= distance_threshold + tie_tolerance;
+                } catch (const VsagException&) {
+                    // A label returned by search that is no longer present cannot be a hit.
+                    is_hit = false;
+                }
             }
             if (is_hit) {
                 hit_count++;

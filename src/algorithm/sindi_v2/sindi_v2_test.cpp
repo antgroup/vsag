@@ -1735,7 +1735,9 @@ TEST_CASE("SINDIV2 memory term layout mutable and immutable roundtrip", "[ut][SI
                              expected_distance) <= 1e-5F);
             int64_t candidates[] = {-1, labels[0], labels[1]};
             auto batch = disk_loaded.CalcDistancesById(query, candidates, 3, false);
-            REQUIRE(batch->GetDistances()[0] == -1.0F);
+            REQUIRE(std::isnan(batch->GetDistances()[0]));
+            REQUIRE_FALSE(batch->GetValids()[0]);
+            REQUIRE(batch->GetValids()[1]);
             REQUIRE(std::abs(batch->GetDistances()[1] - expected_distance) <= 1e-5F);
             auto top = disk_loaded.CalcDistancesById(query, candidates, 3, false, 2);
             REQUIRE(top->GetIds()[0] != -1);
@@ -2198,8 +2200,12 @@ TEST_CASE("SINDIV2 optimized DMQ and batch distance end-to-end", "[ut][SINDIV2]"
             auto all_distances = built.CalcDistancesById(batch_query, distance_ids, 3, true, -1);
             REQUIRE(all_distances->GetNumElements() == 2);
             REQUIRE(all_distances->GetDim() == 3);
-            REQUIRE(all_distances->GetDistances()[1] == -1.0F);
-            REQUIRE(all_distances->GetDistances()[4] == -1.0F);
+            REQUIRE(std::isnan(all_distances->GetDistances()[1]));
+            REQUIRE(std::isnan(all_distances->GetDistances()[4]));
+            REQUIRE(all_distances->GetValids() != nullptr);
+            REQUIRE_FALSE(all_distances->GetValids()[1]);
+            REQUIRE_FALSE(all_distances->GetValids()[4]);
+            REQUIRE(all_distances->GetValids()[0]);
 
             auto precise_topk = built.CalcDistancesById(batch_query, distance_ids, 3, true, 2);
             REQUIRE(precise_topk->GetNumElements() == 2);
