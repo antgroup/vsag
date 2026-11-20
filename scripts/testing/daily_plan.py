@@ -9,6 +9,7 @@ import json
 import math
 from pathlib import Path
 import re
+import signal
 from zoneinfo import ZoneInfo
 
 HERE = Path(__file__).resolve().parent
@@ -18,6 +19,19 @@ BUCKETS = {"hgraph", "pyramid", "sindi", "other", "concurrent", "simd",
 
 class PlanError(ValueError):
     pass
+
+
+def advisory_rotation_timeout(plan, lane, unit, record):
+    shard_index = plan.get("sharding", {}).get("index")
+    return (shard_index is not None
+            and lane == f"daily_test_asan_x86-functests-shard{shard_index}"
+            and plan["environment"] == "daily_test_asan_x86/Linux/x86_64"
+            and not plan.get("extra")
+            and unit.get("mode") == "rotation"
+            and record["status"] == "timeout"
+            and record.get("timeout_scope") == "case"
+            and record.get("exit_code") in (-signal.SIGTERM, -signal.SIGKILL)
+            and not record.get("error"))
 
 
 def canonical(value):
