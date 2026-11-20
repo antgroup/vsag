@@ -3582,6 +3582,34 @@ Pyramid::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
     }
 }
 
+void
+Pyramid::GetFloat32VectorByInnerId(InnerIdType inner_id, float* data) const {
+    if (data_type_ != DataTypes::DATA_TYPE_FP16 and data_type_ != DataTypes::DATA_TYPE_BF16) {
+        this->GetVectorByInnerId(inner_id, data);
+        return;
+    }
+    std::shared_lock<std::shared_mutex> lock(resize_mutex_);
+    auto codes = decodable_codes();
+    auto buffer = codes->AcquireCodesById(inner_id);
+    bool decoded = false;
+    if (buffer) {
+        // Split RaBitQ uses its own Float32 quantizer rather than the native adapter.
+        if (codes->SupportSplitCodeStorage()) {
+            decoded = codes->Decode(buffer.Data(), data);
+        } else {
+            Vector<float> native_row(dim_, allocator_);
+            decoded = codes->Decode(buffer.Data(), native_row.data());
+            if (decoded) {
+                this->expand_native_half_row(native_row.data(), data);
+            }
+        }
+    }
+    if (not decoded) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "Pyramid vector source does not support decode");
+    }
+}
+
 std::string
 Pyramid::GetStats() const {
     if (GetNumElements() == 0) {

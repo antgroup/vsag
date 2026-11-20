@@ -34,6 +34,7 @@
 #include "impl/cluster/e_means_cluster.h"
 #include "impl/cluster/kmeans_cluster.h"
 #include "inner_string_params.h"
+#include "ivf_input.h"
 #include "query_context.h"
 #include "simd/fp32_simd.h"
 #include "utils/util_functions.h"
@@ -98,6 +99,8 @@ IVFNearestPartition::IVFNearestPartition(BucketIdType bucket_count,
 void
 IVFNearestPartition::Train(const DatasetPtr dataset) {
     auto dim = this->dim_;
+    CHECK_ARGUMENT(dim > 0, "IVF partition dimension must be positive");
+    CHECK_ARGUMENT(dim <= INT32_MAX, "IVF partition dimension exceeds int32_t");
     auto centroids = Dataset::Make();
     Vector<float> data(bucket_count_ * dim, allocator_);
     Vector<LabelType> ids(this->bucket_count_, allocator_);
@@ -117,26 +120,51 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
         gpu_config.min_work_threshold = ivf_partition_strategy_param_->gpu_min_work_threshold;
         KMeansCluster cls(
             static_cast<int32_t>(dim), this->allocator_, this->thread_pool_, gpu_config);
-        cls.Run(this->bucket_count_,
-                dataset->GetFloat32Vectors(),
-                dataset->GetNumElements(),
-                ivf_partition_strategy_param_->GetKMeansIterCount());
+        if (common_param_.data_type_ == DataTypes::DATA_TYPE_FLOAT) {
+            cls.Run(this->bucket_count_,
+                    dataset->GetFloat32Vectors(),
+                    dataset->GetNumElements(),
+                    ivf_partition_strategy_param_->GetKMeansIterCount());
+        } else {
+            const IVFInput input(dataset, common_param_.data_type_);
+            const auto stride = static_cast<uint64_t>(dim) * sizeof(uint16_t);
+            cls.Run(this->bucket_count_,
+                    input.Data(),
+                    dataset->GetNumElements(),
+                    common_param_.data_type_,
+                    stride,
+                    stride * dataset->GetNumElements(),
+                    ivf_partition_strategy_param_->GetKMeansIterCount());
+        }
         std::memcpy(data.data(), cls.k_centroids_, dim * this->bucket_count_ * sizeof(float));
     } else if (ivf_partition_strategy_param_->partition_train_type ==
                IVFNearestPartitionTrainerType::EMeansTrainer) {
         EMeansCluster cls(static_cast<int32_t>(dim), this->allocator_, this->thread_pool_);
-        cls.Run(this->bucket_count_,
-                dataset->GetFloat32Vectors(),
-                dataset->GetNumElements(),
-                ivf_partition_strategy_param_->e_means_epochs);
+        if (common_param_.data_type_ == DataTypes::DATA_TYPE_FLOAT) {
+            cls.Run(this->bucket_count_,
+                    dataset->GetFloat32Vectors(),
+                    dataset->GetNumElements(),
+                    ivf_partition_strategy_param_->e_means_epochs);
+        } else {
+            const IVFInput input(dataset, common_param_.data_type_);
+            const auto stride = static_cast<uint64_t>(dim) * sizeof(uint16_t);
+            const TrainingRows rows(input.Data(),
+                                    dataset->GetNumElements(),
+                                    static_cast<int32_t>(dim),
+                                    common_param_.data_type_,
+                                    stride,
+                                    stride * dataset->GetNumElements());
+            cls.Run(this->bucket_count_, rows, ivf_partition_strategy_param_->e_means_epochs);
+        }
         std::memcpy(data.data(), cls.k_centroids_, dim * this->bucket_count_ * sizeof(float));
     } else if (ivf_partition_strategy_param_->partition_train_type ==
                IVFNearestPartitionTrainerType::RandomTrainer) {
         auto selected = select_k_numbers(dataset->GetNumElements(), this->bucket_count_);
+        const IVFInput input(dataset, common_param_.data_type_);
+        Vector<float> row(allocator_);
         for (int i = 0; i < bucket_count_; ++i) {
-            std::memcpy(data.data() + i * dim,
-                        dataset->GetFloat32Vectors() + selected[i] * dim,
-                        dim * sizeof(float));
+            std::memcpy(
+                data.data() + i * dim, input.Rows(selected[i], 1, row), dim * sizeof(float));
         }
     }
     if (metric_type_ == MetricType::METRIC_TYPE_COSINE) {
@@ -285,9 +313,9 @@ IVFNearestPartition::classify_datas_on_device(const void* datas,
         gpu::EffectiveChunkedCap(ivf_partition_strategy_param_->gpu_memory_budget));
     // float32 is the interface's precondition, not this function's: ClassifyDatas
     // takes `const void*` in ivf_partition_strategy.h, and classify_datas_on_host
-    // casts it the same way. Every caller in the tree passes float, IVF::add from
-    // base->GetFloat32Vectors() and both bucket data cells from a `const float*`
-    // of their own, so the device path assumes nothing the host path does not.
+    // casts it the same way. IVF::add decodes typed input in bounded row blocks,
+    // and bucket data cells pass their own `const float*`, so the device path
+    // assumes nothing the host path does not.
     // There is also nothing left to assert on, the type being gone by the time it
     // arrives here.
     if (not gpu::CudaAssignNearest(static_cast<const float*>(datas),
@@ -431,8 +459,10 @@ IVFNearestPartition::factory_router_index(const IndexCommonParam& common_param) 
     hgraph_json["max_degree"].SetInt(ivf_partition_strategy_param_->route_max_degree);
     hgraph_json["ef_construction"].SetInt(ivf_partition_strategy_param_->route_ef_construction);
 
-    param_ptr = HGraph::CheckAndMappingExternalParam(hgraph_json, common_param);
-    this->route_index_ptr_ = std::make_shared<HGraph>(param_ptr, common_param);
+    auto centroid_param = common_param;
+    centroid_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    param_ptr = HGraph::CheckAndMappingExternalParam(hgraph_json, centroid_param);
+    this->route_index_ptr_ = std::make_shared<HGraph>(param_ptr, centroid_param);
 }
 void
 IVFNearestPartition::GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) {
