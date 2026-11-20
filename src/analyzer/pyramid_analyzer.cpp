@@ -605,11 +605,27 @@ PyramidAnalyzer::calculate_quantization_result(
                                       true);
         const auto* precise_distance = precise_result->GetDistances();
 
-        uint32_t inversion_count = 0;
+        // Skip labels that are missing or removed: their distances are NaN.
+        const auto* base_valids = base_result->GetValids();
+        const auto* precise_valids = precise_result->GetValids();
+        std::vector<uint32_t> kept;
+        kept.reserve(result_size);
         for (uint32_t j = 0; j < result_size; ++j) {
-            for (uint32_t k = j + 1; k < result_size; ++k) {
-                if ((base_distance[j] - base_distance[k]) *
-                        (precise_distance[j] - precise_distance[k]) <
+            if ((base_valids == nullptr or base_valids[j]) and
+                (precise_valids == nullptr or precise_valids[j])) {
+                kept.push_back(j);
+            }
+        }
+        const auto kept_size = static_cast<uint32_t>(kept.size());
+        if (kept_size < 2) {
+            continue;
+        }
+
+        uint32_t inversion_count = 0;
+        for (uint32_t j = 0; j < kept_size; ++j) {
+            for (uint32_t k = j + 1; k < kept_size; ++k) {
+                if ((base_distance[kept[j]] - base_distance[kept[k]]) *
+                        (precise_distance[kept[j]] - precise_distance[kept[k]]) <
                     0) {
                     inversion_count++;
                 }
@@ -618,7 +634,7 @@ PyramidAnalyzer::calculate_quantization_result(
 
         total_quantization_inversion_count_rate +=
             static_cast<float>(inversion_count) /
-            (static_cast<float>(result_size) * static_cast<float>(result_size - 1) / 2.0F);
+            (static_cast<float>(kept_size) * static_cast<float>(kept_size - 1) / 2.0F);
     }
 
     return {total_quantization_error / static_cast<float>(sample_size),

@@ -61,7 +61,8 @@ CalDistanceById(const DatasetPtr& query,
 
 - 单 ID 重载返回 `float` 距离值。
 - 批量重载返回 `DatasetPtr`，其 `GetDistances()` 数组长度为 `count`，与输入 `ids` 一一
-  对应。值为 **`-1`** 表示对应的 ID **无效**（如该 ID 不在索引中）。
+  对应。不存在或已被删除的 ID 距离为 **`NaN`**，同时结果携带 `Valids` 掩码（`GetValids()`，长度与 `GetDistances()` 相同），对应位置为 `false`；`count == 0` 时 `GetValids()` 为 `nullptr`。
+- 单 ID 重载在 ID 不存在或已被删除时返回 `INVALID_ARGUMENT` 错误（`label <id> does not exist or is removed`）。
 - 距离的语义由建索引时设置的 `metric_type`（IP / L2 / cosine）决定，参见
   [度量语义](../resources/metric_semantics.md)。
 
@@ -85,8 +86,9 @@ std::vector<int64_t> ids = { 1, 2, 3, 4, 5 };
 auto result = index->CalDistanceById(query_vector.data(), ids.data(), ids.size());
 if (result.has_value()) {
     const float* dists = result.value()->GetDistances();
+    const bool* valids = result.value()->GetValids();
     for (size_t i = 0; i < ids.size(); ++i) {
-        if (dists[i] == -1.0f) {
+        if (!valids[i]) {
             std::cout << ids[i] << " -> 无效 ID" << std::endl;
         } else {
             std::cout << ids[i] << " -> " << dists[i] << std::endl;

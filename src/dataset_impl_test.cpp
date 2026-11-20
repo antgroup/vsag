@@ -15,10 +15,14 @@
 
 #include "dataset_impl.h"
 
+#include <cstring>
+#include <string>
+
 #include "impl/allocator/default_allocator.h"
 #include "unittest.h"
 #include "vsag/dataset.h"
 #include "vsag/engine.h"
+#include "vsag_exception.h"
 TEST_CASE("Dataset Implement Test", "[ut][dataset]") {
     vsag::DefaultAllocator allocator;
     SECTION("allocator") {
@@ -842,5 +846,137 @@ TEST_CASE("Dataset MultiVector DeepCopy Test", "[ut][dataset]") {
         REQUIRE(dst_mv[0].len_ == 0);
         REQUIRE(dst_mv[0].vectors_ == nullptr);
         REQUIRE(dst_mv[1].len_ == dataset->GetMultiVectors()[1].len_);
+    }
+}
+
+namespace {
+
+// Minimal allocator that tracks the number of live allocations.
+class LiveCountAllocator : public vsag::Allocator {
+public:
+    std::string
+    Name() override {
+        return "LiveCountAllocator";
+    }
+
+    void*
+    Allocate(uint64_t size) override {
+        ++live_count_;
+        return ::operator new(size);
+    }
+
+    void
+    Deallocate(void* p) override {
+        if (p != nullptr) {
+            --live_count_;
+            ::operator delete(p);
+        }
+    }
+
+    void*
+    Reallocate(void* p, uint64_t size) override {
+        throw vsag::VsagException(vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                  "Reallocate is not used by these tests");
+    }
+
+    int64_t live_count_{0};
+};
+
+}  // namespace
+
+TEST_CASE("Dataset Valids Test", "[ut][dataset]") {
+    SECTION("absent by default and null setter value") {
+        auto dataset = vsag::Dataset::Make()->NumElements(2)->Dim(1)->Owner(true);
+        REQUIRE(dataset->GetValids() == nullptr);
+        dataset->Valids(nullptr);
+        REQUIRE(dataset->GetValids() == nullptr);
+        auto copy = dataset->DeepCopy();
+        REQUIRE(copy->GetValids() == nullptr);
+    }
+
+    SECTION("owner true releases the buffer with the default path") {
+        auto* valids = new bool[3]{true, false, true};
+        auto dataset = vsag::Dataset::Make();
+        dataset->NumElements(1)->Dim(3)->Valids(valids)->Owner(true);
+        REQUIRE(dataset->GetValids() == valids);
+        REQUIRE_FALSE(dataset->GetValids()[1]);
+    }
+
+    SECTION("owner true releases the buffer with the allocator") {
+        LiveCountAllocator tracked_allocator;
+        {
+            auto* valids = static_cast<bool*>(tracked_allocator.Allocate(sizeof(bool) * 3));
+            valids[0] = true;
+            valids[1] = false;
+            valids[2] = true;
+            auto dataset = vsag::Dataset::Make();
+            dataset->NumElements(1)->Dim(3)->Valids(valids)->Owner(true, &tracked_allocator);
+            REQUIRE(tracked_allocator.live_count_ == 1);
+        }
+        REQUIRE(tracked_allocator.live_count_ == 0);
+    }
+
+    SECTION("owner false leaves the buffer untouched") {
+        bool valids[3] = {true, false, true};
+        {
+            auto dataset = vsag::Dataset::Make();
+            dataset->NumElements(1)->Dim(3)->Valids(valids)->Owner(false);
+            REQUIRE(dataset->GetValids() == valids);
+        }
+        REQUIRE(valids[0]);
+        REQUIRE_FALSE(valids[1]);
+        REQUIRE(valids[2]);
+    }
+
+    SECTION("DeepCopy duplicates the buffer") {
+        LiveCountAllocator tracked_allocator;
+        {
+            auto* valids = new bool[4]{true, false, false, true};
+            auto dataset = vsag::Dataset::Make();
+            dataset->NumElements(2)->Dim(2)->Valids(valids)->Owner(true);
+            auto copy = dataset->DeepCopy(&tracked_allocator);
+            REQUIRE(copy->GetValids() != nullptr);
+            REQUIRE(copy->GetValids() != dataset->GetValids());
+            for (int i = 0; i < 4; ++i) {
+                REQUIRE(copy->GetValids()[i] == valids[i]);
+            }
+            REQUIRE(tracked_allocator.live_count_ == 1);
+        }
+        REQUIRE(tracked_allocator.live_count_ == 0);
+    }
+
+    SECTION("Append concatenates valids when both sides have them") {
+        auto first = vsag::Dataset::Make();
+        first->NumElements(1)->Dim(2)->Valids(new bool[2]{true, false})->Owner(true);
+        auto second = vsag::Dataset::Make();
+        second->NumElements(2)->Dim(2)->Valids(new bool[4]{false, true, true, true})->Owner(true);
+        first->Append(second);
+        REQUIRE(first->GetNumElements() == 3);
+        const bool expected[6] = {true, false, false, true, true, true};
+        REQUIRE(first->GetValids() != nullptr);
+        for (int i = 0; i < 6; ++i) {
+            REQUIRE(first->GetValids()[i] == expected[i]);
+        }
+    }
+
+    SECTION("Append with valids on only one side throws before mutating") {
+        auto with_valids = vsag::Dataset::Make();
+        with_valids->NumElements(1)
+            ->Dim(2)
+            ->Ids(new int64_t[1]{1})
+            ->Valids(new bool[2]{true, false})
+            ->Owner(true);
+        auto without_valids = vsag::Dataset::Make();
+        without_valids->NumElements(1)->Dim(2)->Ids(new int64_t[1]{2})->Owner(true);
+
+        REQUIRE_THROWS_AS(with_valids->Append(without_valids), vsag::VsagException);
+        REQUIRE(with_valids->GetNumElements() == 1);
+        REQUIRE(with_valids->GetIds()[0] == 1);
+        REQUIRE(with_valids->GetValids()[0]);
+
+        REQUIRE_THROWS_AS(without_valids->Append(with_valids), vsag::VsagException);
+        REQUIRE(without_valids->GetNumElements() == 1);
+        REQUIRE(without_valids->GetIds()[0] == 2);
+        REQUIRE(without_valids->GetValids() == nullptr);
     }
 }

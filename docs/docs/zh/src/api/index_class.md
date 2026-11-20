@@ -214,7 +214,7 @@ RangeSearch(const DatasetPtr& query, float radius, const std::string& parameters
 |------|------|------|
 | `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const float* vector, int64_t id, bool calculate_precise_distance = true) const` | 稠密查询到已存向量 `id` 的距离。 |
 | `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const DatasetPtr& vector, int64_t id, bool calculate_precise_distance = true) const` | 同上，接收 `DatasetPtr`（适用于 SINDI 等稀疏索引）。 |
-| `CalDistanceById` | `tl::expected<DatasetPtr, Error> CalDistanceById(const float* query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true) const` | 批量版本；结果中的 `-1` 表示无效距离。 |
+| `CalDistanceById` | `tl::expected<DatasetPtr, Error> CalDistanceById(const float* query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true) const` | 批量版本；不存在或已删除的 ID 距离为 `NaN`，`GetValids()` 对应位置为 `false`；单 ID 版本对此类 ID 返回 `INVALID_ARGUMENT`。 |
 | `CalDistanceById` | `tl::expected<DatasetPtr, Error> CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true) const` | 接收 `DatasetPtr` 查询的批量版本。 |
 
 `calculate_precise_distance = true` 时可能会加载全精度向量（可能来自磁盘）而非量化编码。见

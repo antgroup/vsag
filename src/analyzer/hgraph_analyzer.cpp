@@ -297,22 +297,37 @@ HGraphAnalyzer::calculate_quantization_result(
         if (base_distance == nullptr or precise_distance == nullptr) {
             continue;
         }
-        uint32_t inversion_count = 0;
+        // Skip labels that are missing or removed: their distances are NaN.
+        const auto* base_valids = base_result->GetValids();
+        const auto* precise_valids = precise_result->GetValids();
+        std::vector<uint32_t> kept;
+        kept.reserve(actual_topk);
         for (uint32_t j = 0; j < actual_topk; ++j) {
-            sample_error += std::abs(base_distance[j] - precise_distance[j]);
-            for (uint32_t k = j + 1; k < actual_topk; ++k) {
-                if ((base_distance[j] - base_distance[k]) *
-                        (precise_distance[j] - precise_distance[k]) <
+            if ((base_valids == nullptr or base_valids[j]) and
+                (precise_valids == nullptr or precise_valids[j])) {
+                kept.push_back(j);
+            }
+        }
+        if (kept.empty()) {
+            continue;
+        }
+        const auto kept_topk = static_cast<uint32_t>(kept.size());
+        uint32_t inversion_count = 0;
+        for (uint32_t j = 0; j < kept_topk; ++j) {
+            sample_error += std::abs(base_distance[kept[j]] - precise_distance[kept[j]]);
+            for (uint32_t k = j + 1; k < kept_topk; ++k) {
+                if ((base_distance[kept[j]] - base_distance[kept[k]]) *
+                        (precise_distance[kept[j]] - precise_distance[kept[k]]) <
                     0) {
                     inversion_count++;
                 }
             }
         }
-        total_quantization_error += sample_error / static_cast<float>(actual_topk);
-        if (actual_topk > 1) {
+        total_quantization_error += sample_error / static_cast<float>(kept_topk);
+        if (kept_topk > 1) {
             total_quantization_inversion_count_rate +=
                 static_cast<float>(inversion_count) /
-                (static_cast<float>(actual_topk) * static_cast<float>(actual_topk - 1) / 2.0F);
+                (static_cast<float>(kept_topk) * static_cast<float>(kept_topk - 1) / 2.0F);
             valid_inversion_sample_count++;
         }
         valid_sample_count++;

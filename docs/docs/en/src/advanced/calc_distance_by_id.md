@@ -68,8 +68,11 @@ Declarations live in
 
 - The single-ID overload returns the distance as a `float`.
 - The batch overload returns a `DatasetPtr` whose `GetDistances()` array has `count` entries
-  aligned with the input `ids`. A value of **`-1`** in that array indicates an **invalid ID**
-  (e.g. the ID does not exist in the index).
+  aligned with the input `ids`. An ID that does not exist or has been removed gets a **`NaN`** distance, and the result
+  carries a `Valids` mask (`GetValids()`, same length as `GetDistances()`) that is `false` for
+  those entries. `GetValids()` is `nullptr` when `count == 0`.
+- The single-ID overload returns an `INVALID_ARGUMENT` error (`label <id> does not exist or is removed`)
+  when the ID does not exist or has been removed.
 - The distance metric (IP / L2 / cosine) follows the `metric_type` chosen at index
   construction; see [Metric Semantics](../resources/metric_semantics.md).
 
@@ -93,8 +96,9 @@ std::vector<int64_t> ids = { 1, 2, 3, 4, 5 };
 auto result = index->CalDistanceById(query_vector.data(), ids.data(), ids.size());
 if (result.has_value()) {
     const float* dists = result.value()->GetDistances();
+    const bool* valids = result.value()->GetValids();
     for (size_t i = 0; i < ids.size(); ++i) {
-        if (dists[i] == -1.0f) {
+        if (!valids[i]) {
             std::cout << ids[i] << " -> invalid ID" << std::endl;
         } else {
             std::cout << ids[i] << " -> " << dists[i] << std::endl;

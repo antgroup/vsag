@@ -83,6 +83,7 @@ For documents that hold several dense sub-vectors each:
 | `AttributeSets(const AttributeSet*)` | `GetAttributeSets()` | [`AttributeSet`](types.md#attributeset) | Per-element attributes for hybrid search. |
 | `ExtraInfos(const char*)` | `GetExtraInfos()` | `const char*` | Packed extra-info blobs. |
 | `ExtraInfoSize(int64_t)` | `GetExtraInfoSize()` | `int64_t` | Bytes per extra-info blob. |
+| `Valids(const bool*)` | `GetValids()` | `const bool*` | Per-entry validity mask (e.g. for `CalDistanceById` results); `false` marks an invalid entry. |
 | `Paths(const std::string*)` | `GetPaths()` | `const std::string*` | Hierarchy paths (Pyramid). Default hierarchy. |
 | `Paths(const std::string& hierarchy, const std::string*)` | `GetPaths(const std::string& hierarchy)` | `const std::string*` | Paths for a named hierarchy. |
 | `SourceID(const std::string*)` | `GetSourceID()` | `const std::string*` | Optional source identifier. |

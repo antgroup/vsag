@@ -88,6 +88,10 @@ main(int argc, char** argv) {
     /******************* Print Search Result *****************/
     std::cout << "results: " << std::endl;
     for (int64_t i = 0; i < ids_new.size(); ++i) {
+        if (result.value()->GetValids() != nullptr && not result.value()->GetValids()[i]) {
+            std::cout << ids_new[i] << " invalid id" << std::endl;
+            continue;
+        }
         std::cout << ids_new[i] << " " << result.value()->GetDistances()[i] << std::endl;
     }
 

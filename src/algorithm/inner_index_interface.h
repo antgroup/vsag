@@ -42,6 +42,16 @@
 
 namespace vsag {
 
+// Copies `validity` into an owned bool buffer allocated with `allocator` and attaches it to
+// `dataset` through Dataset::Valids(). Does nothing for an empty mask.
+void
+AttachValids(const DatasetPtr& dataset, const std::vector<bool>& validity, Allocator* allocator);
+
+// Throws VsagException(INVALID_ARGUMENT) reporting that `label` is missing or removed. Used by the
+// single-ID CalcDistanceById implementations.
+[[noreturn]] void
+ThrowLabelNotFound(int64_t label);
+
 DEFINE_POINTER2(InnerIndex, InnerIndexInterface);
 DEFINE_POINTER(LabelTable);
 DEFINE_POINTER(IndexFeatureList);
@@ -90,7 +100,8 @@ public:
      * @param id The unique identifier of the vector in the index.
      * @param calculate_precise_distance If true, use high-precision vectors for computation.
      * @return The distance between the query and the vector of the given ID.
-     * @throws VsagException If the index doesn't support calculate distance by id.
+     * @throws VsagException If the index doesn't support calculate distance by id, or with
+     *         ErrorType::INVALID_ARGUMENT if the label does not exist or is removed.
      */
     virtual float
     CalcDistanceById(const DatasetPtr& vector,
@@ -113,7 +124,8 @@ public:
      * @param id The unique identifier of the vector in the index.
      * @param calculate_precise_distance If true, use high-precision vectors for computation.
      * @return The distance between the query and the vector of the given ID.
-     * @throws VsagException If the index doesn't support calculate distance by id.
+     * @throws VsagException If the index doesn't support calculate distance by id, or with
+     *         ErrorType::INVALID_ARGUMENT if the label does not exist or is removed.
      */
     virtual float
     CalcDistanceById(const float* query, int64_t id, bool calculate_precise_distance = true) const {
@@ -135,7 +147,8 @@ public:
      * @param ids Array of unique identifiers of vectors to be calculated.
      * @param count Number of IDs in the array.
      * @param calculate_precise_distance If true, use high-precision vectors for computation.
-     * @return DatasetPtr containing distances. '-1' indicates an invalid ID.
+     * @return DatasetPtr containing distances. Missing or removed IDs have a quiet-NaN distance
+     *         and a false entry in GetValids() (label existence at lookup time).
      */
     virtual DatasetPtr
     CalDistanceById(const float* query,
@@ -159,7 +172,8 @@ public:
      * @param ids Array of unique identifiers of vectors to be calculated.
      * @param count Number of IDs in the array.
      * @param calculate_precise_distance If true, use high-precision vectors for computation.
-     * @return DatasetPtr containing distances. '-1' indicates an invalid ID.
+     * @return DatasetPtr containing distances. Missing or removed IDs have a quiet-NaN distance
+     *         and a false entry in GetValids() (label existence at lookup time).
      */
     virtual DatasetPtr
     CalDistanceById(const DatasetPtr& query,
@@ -530,6 +544,10 @@ protected:
     virtual DetailDataPtr
     get_detail_data_by_info(const IndexDetailInfo& info) const;
 
+    // Thread-safe check whether `label` currently exists (and is not removed).
+    bool
+    label_exists(int64_t label) const;
+
     float
     calc_distance_by_id(const float* query, int64_t id, const FlattenInterfacePtr& data) const;
 
@@ -537,7 +555,8 @@ protected:
     cal_distance_by_id(const float* query,
                        const int64_t* ids,
                        int64_t count,
-                       const FlattenInterfacePtr& data) const;
+                       const FlattenInterfacePtr& data,
+                       std::vector<bool>* validity = nullptr) const;
 
     // ========== Search Helper Methods ==========
     // Common filter composition: combines DeletedIdsFilter with user filter
