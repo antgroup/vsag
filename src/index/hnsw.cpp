@@ -1210,6 +1210,10 @@ HNSW::calc_distance_by_id(const float* vector, int64_t id) const {
         LOG_ERROR_AND_RETURNS(
             ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
     }
+    if (not alg_hnsw_->isValidLabel(id)) {
+        LOG_ERROR_AND_RETURNS(
+            ErrorType::INVALID_ARGUMENT, "label ", id, " does not exist or is removed");
+    }
     return alg_hnsw_->getDistanceByLabel(id, vector);
 }
 

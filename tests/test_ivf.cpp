@@ -765,11 +765,11 @@ TestIVFCalcDistanceByIdMissingId(const fixtures::IVFResourcePtr& resource) {
             const auto missing_id = fixtures::get_missing_id(dataset->base_);
             auto distance = index->CalcDistanceById(query->GetFloat32Vectors(), missing_id);
 
-            REQUIRE(distance.has_value());
-            REQUIRE(distance.value() == -1.0F);
+            REQUIRE_FALSE(distance.has_value());
+            REQUIRE(distance.error().type == vsag::ErrorType::INVALID_ARGUMENT);
         });
 }
-IVF_PR_DAILY_CASE("IVF CalcDistanceById missing id returns -1",
+IVF_PR_DAILY_CASE("IVF CalcDistanceById missing id returns INVALID_ARGUMENT",
                   "[ft][distance][ivf]",
                   TestIVFCalcDistanceByIdMissingId)
 

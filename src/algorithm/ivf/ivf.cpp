@@ -16,6 +16,7 @@
 #include "ivf.h"
 
 #include <atomic>
+#include <limits>
 #include <random>
 #include <set>
 
@@ -1378,6 +1379,7 @@ IVF::CalDistanceById(const float* query,
     result->Owner(true, allocator_);
     auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
     result->Distances(distances);
+    std::vector<bool> validity(count, false);
     auto computer = this->bucket_->FactoryComputer(query);
     for (int64_t i = 0; i < count; ++i) {
         bool success = false;
@@ -1387,12 +1389,14 @@ IVF::CalDistanceById(const float* query,
             std::tie(success, inner_id) = this->label_table_->TryGetIdByLabel(ids[i]);
         }
         if (not success) {
-            distances[i] = -1;
+            distances[i] = std::numeric_limits<float>::quiet_NaN();
             continue;
         }
+        validity[i] = true;
         auto [bucket_id, offset_id] = this->get_location(inner_id);
         distances[i] = this->bucket_->QueryOneById(computer, bucket_id, offset_id);
     }
+    AttachValids(result, validity, allocator_);
     return result;
 }
 
@@ -1401,7 +1405,7 @@ IVF::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_dis
     std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
     auto [success, inner_id] = this->label_table_->TryGetIdByLabel(id);
     if (not success) {
-        return -1.0F;
+        ThrowLabelNotFound(id);
     }
     if (this->use_reorder_ && calculate_precise_distance) {
         float dist = 0.0F;
