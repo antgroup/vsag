@@ -2067,7 +2067,10 @@ TEST_CASE("BruteForce dense native distance contract", "[distance_contract]") {
             REQUIRE(batch.value()->GetNumElements() == 2);
             REQUIRE(batch.value()->GetDim() == 3);
             REQUIRE(std::abs(batch.value()->GetDistances()[0] - raw.value()) < 1e-5F);
-            REQUIRE(batch.value()->GetDistances()[1] == -1.0F);
+            REQUIRE(std::isnan(batch.value()->GetDistances()[1]));
+            REQUIRE(batch.value()->GetValids() != nullptr);
+            REQUIRE_FALSE(batch.value()->GetValids()[1]);
+            REQUIRE(batch.value()->GetValids()[0]);
             auto top = index->CalcDistancesById(query, candidates, 3, precise, 2);
             REQUIRE(top.has_value());
             REQUIRE(top.value()->GetDim() == 2);
@@ -2102,6 +2105,8 @@ TEST_CASE("BruteForce valid minus-one distance sorts before missing IDs", "[dist
     REQUIRE(top.has_value());
     REQUIRE(top.value()->GetIds()[0] == label);
     REQUIRE(top.value()->GetDistances()[0] == -1.0F);
+    REQUIRE(top.value()->GetValids() != nullptr);
+    REQUIRE(top.value()->GetValids()[0]);
 }
 
 TEST_CASE("BruteForce distance stays consistent during force removal",
@@ -2132,8 +2137,12 @@ TEST_CASE("BruteForce distance stays consistent during force removal",
         for (int64_t pass = 0; pass < 8; ++pass) {
             for (int64_t i = 0; i < count; ++i) {
                 auto distance = index->CalcDistanceById(values.data() + i * 16, labels[i]);
-                if (!distance.has_value() ||
-                    (distance.value() != 0.0F && distance.value() != -1.0F)) {
+                // A label removed concurrently is reported as INVALID_ARGUMENT.
+                if (!distance.has_value()) {
+                    if (distance.error().type != vsag::ErrorType::INVALID_ARGUMENT) {
+                        failed.store(true);
+                    }
+                } else if (distance.value() != 0.0F) {
                     failed.store(true);
                 }
             }

@@ -2213,7 +2213,7 @@ SINDI::CalcDistanceById(const DatasetPtr& vector,
     if (use_reorder_ && calculate_precise_distance) {
         const auto [success, inner_id] = this->label_table_->TryGetIdByLabel(id);
         if (not success) {
-            return -1.0F;
+            ThrowLabelNotFound(id);
         }
         auto* rerank_datacell = rerank_flat_.get();
         auto computer = rerank_datacell->FactoryComputer(vector->GetSparseVectors());
@@ -2224,7 +2224,7 @@ SINDI::CalcDistanceById(const DatasetPtr& vector,
 
     const auto [success, inner_id] = this->label_table_->TryGetIdByLabel(id);
     if (not success) {
-        return -1.0F;
+        ThrowLabelNotFound(id);
     }
     auto sparse_query = vector->GetSparseVectors()[0];
     Vector<uint32_t> tmp_ids(allocator_);
@@ -2295,7 +2295,7 @@ SINDI::CalcDistancesById(const DatasetPtr& query,
                 const auto [success, inner_id] =
                     this->label_table_->TryGetIdByLabel(row_ids[index]);
                 if (not success) {
-                    row_distances[index] = -1.0F;
+                    row_distances[index] = std::numeric_limits<float>::quiet_NaN();
                     continue;
                 }
                 validity[validity_offset + static_cast<uint64_t>(index)] = true;
@@ -2320,7 +2320,7 @@ SINDI::CalcDistancesById(const DatasetPtr& query,
             const auto [success, inner_id] = this->label_table_->TryGetIdByLabel(row_ids[index]);
             if (not success) {
                 inner_ids[index] = -1;
-                row_distances[index] = -1.0F;
+                row_distances[index] = std::numeric_limits<float>::quiet_NaN();
                 continue;
             }
             inner_ids[index] = inner_id;
@@ -2355,6 +2355,7 @@ SINDI::CalcDistancesById(const DatasetPtr& query,
     }
 
     if (topk == -1) {
+        AttachValids(result, validity, allocator_);
         return result;
     }
     return ApplyTopkWithValidity(distances, ids, count, num_queries, topk, validity, allocator_);

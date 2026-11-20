@@ -50,13 +50,13 @@ def test_missing_ids_and_legacy_shape(index, distance_method):
     assert result.shape == (4,)
     assert result.dtype == np.float32
     assert result.strides == (np.dtype(np.float32).itemsize,)
-    np.testing.assert_allclose(result, [0, -1, 20, 0], atol=1e-5)
-    assert result[1] == -1.0  # Missing labels are exact sentinels, not numerical error.
+    np.testing.assert_allclose(result, [0, np.nan, 20, 0], atol=1e-5)
+    assert np.isnan(result[1])  # Missing labels are reported as NaN.
 
     # The returned array must own independent, contiguous entries. A zero-stride
     # allocation would overwrite every distance with the last value during copy.
     result[0] = 123.0
-    np.testing.assert_allclose(result[1:], [-1, 20, 0], atol=1e-5)
+    np.testing.assert_allclose(result[1:], [np.nan, 20, 0], atol=1e-5)
 
     empty = method(np.ones(4, dtype=np.float32), np.array([], dtype=np.int64))
     assert empty.shape == (0,)

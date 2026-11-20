@@ -1737,7 +1737,7 @@ SIMQ::CalcDistanceById(const DatasetPtr& query, int64_t id, bool calculate_preci
     auto compute = [&]() {
         const auto [valid, inner_id] = label_table_->TryGetIdByLabel(id);
         if (not valid) {
-            return -1.0F;
+            ThrowLabelNotFound(id);
         }
         auto computer = mv_codes_->FactoryComputer(vectors);
         float distance = 0.0F;

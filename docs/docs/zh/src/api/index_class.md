@@ -215,15 +215,21 @@ RangeSearch(const DatasetPtr& query, float radius, const std::string& parameters
 
 | 方法 | 签名 | 说明 |
 |------|------|------|
-| `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const float* vector, int64_t id, bool calculate_precise_distance = true) const` | 稠密查询到已存向量 `id` 的距离。 |
-| `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const DatasetPtr& vector, int64_t id, bool calculate_precise_distance = true) const` | 同上，接收 `DatasetPtr`（适用于 SINDI 等稀疏索引）。 |
-| `CalcDistancesById` | `tl::expected<DatasetPtr, Error> CalcDistancesById(const float* query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true, int64_t topk = -1) const` | 规范的批量版本；`topk > 0` 时返回按距离升序排列的最小距离及对应 ID，缺失 ID 排在最后（有效距离也可能是负数）。 |
-| `CalcDistancesById` | `tl::expected<DatasetPtr, Error> CalcDistancesById(const DatasetPtr& query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true, int64_t topk = -1) const` | 规范的 `DatasetPtr` 查询批量版本。`query->GetNumElements() > 1` 时索引需声明 `SUPPORT_BATCH_CALC_DISTANCE_BY_ID`；`ids` 包含 `NumElements * count` 个 row-major 条目。`topk > 0` 时每个 query 返回 `min(topk, count)` 个排序距离及对应 ID。 |
+| `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const float* vector, int64_t id, bool calculate_precise_distance = true) const` | 稠密查询到已存向量 `id` 的距离。`id` 不存在或已删除时返回 `INVALID_ARGUMENT` 错误（不再返回 `-1`）。 |
+| `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const DatasetPtr& vector, int64_t id, bool calculate_precise_distance = true) const` | 同上，接收 `DatasetPtr`（适用于 SINDI 等稀疏索引）。`id` 不存在或已删除时同样返回 `INVALID_ARGUMENT`。 |
+| `CalcDistancesById` | `tl::expected<DatasetPtr, Error> CalcDistancesById(const float* query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true, int64_t topk = -1) const` | 规范的批量版本；`topk > 0` 时返回按距离升序排列的最小距离及对应 ID，缺失 ID 排在最后。缺失 ID 的距离为 `NaN`，且 `GetValids()[i] == false`。 |
+| `CalcDistancesById` | `tl::expected<DatasetPtr, Error> CalcDistancesById(const DatasetPtr& query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true, int64_t topk = -1) const` | 规范的 `DatasetPtr` 查询批量版本。`query->GetNumElements() > 1` 时索引需声明 `SUPPORT_BATCH_CALC_DISTANCE_BY_ID`；`ids` 包含 `NumElements * count` 个 row-major 条目。`topk > 0` 时每个 query 返回 `min(topk, count)` 个排序距离及对应 ID。缺失 ID 的距离为 `NaN`，且 `GetValids()[i] == false`。 |
 | `CalDistanceById` | 与 `CalcDistancesById` 相同的签名 | 已弃用的公共转发别名，调用正式虚函数 `CalcDistancesById`；新实现应覆盖正式名称。参见[实现迁移说明](../advanced/calc_distance_by_id.md)。 |
 
 `calculate_precise_distance = true` 时可能会加载全精度向量（可能来自磁盘）而非量化编码。见
 [按 ID 计算距离](../advanced/calc_distance_by_id.md) 与
 `examples/cpp/306_feature_calculate_distance_by_id.cpp`。
+
+批量结果在返回的 `Dataset` 上带有逐项有效性标记：通过 `Dataset::Valids(const bool*)` 写入，
+通过 `const bool* Dataset::GetValids() const` 读取。标记为 `false` 表示该 ID 在查询时不存在或已删除，
+其距离为 `NaN`（`std::numeric_limits<float>::quiet_NaN()`）。`topk == -1` 时标记数量为
+`NumElements() * count`，与输入 ID 顺序对齐（多查询为 row-major）；`topk > 0` 时标记数量为
+`NumElements() * Dim()`，与输出顺序对齐。调用方必须使用该标记而不是距离值来判断 ID 是否缺失。
 
 ## 共轭图增强
 
