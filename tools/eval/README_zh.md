@@ -7,3 +7,4 @@
 - 网站：<https://vsag.io/docs/resources/eval.html>
 - 中文网站：<https://vsag.io/docs/zh/resources/eval.html>
 - 配置模板：[eval_template.yaml](eval_template.yaml)
+- 查询子集准备：[prepare_query_split.py](prepare_query_split.py)，用法见[校准与验证输入说明](../../docs/docs/zh/src/resources/eval.md#准备校准与验证输入)。
