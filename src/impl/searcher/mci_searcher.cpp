@@ -329,9 +329,8 @@ search_clique_view(const CliqueDataCellSearchView& view,
         batch_count = 0;
     };
     const bool resident_static = mci_param.use_resident_base and view.static_csr;
-    const bool batch_packed_members = resident_static and mci_param.batch_distance;
     bool consume_seen = false;
-    auto accept_node = [&](InnerIdType id, bool known_valid) {
+    auto try_visit = [&](InnerIdType id, uint32_t depth, bool known_valid = false) {
         if (id >= total) {
             return false;
         }
@@ -358,37 +357,12 @@ search_clique_view(const CliqueDataCellSearchView& view,
             not mci_param.deleted_ids_filter->CheckValid(id)) {
             return false;
         }
-        return true;
-    };
-    auto try_visit = [&](InnerIdType id, uint32_t depth, bool known_valid = false) {
-        if (not accept_node(id, known_valid)) {
-            return false;
-        }
         batch_depth = depth;
         batch_ids[batch_count++] = id;
         if (not mci_param.batch_distance or batch_count == batch_ids.size()) {
             flush();
         }
         return true;
-    };
-    auto scan_packed_members = [&](const MCIPackedFilter::Members& members, uint32_t depth) {
-        // SIMD packing preserves CSR order. Fill only the free batch slots, checking each
-        // selected ID once for deduplication, mutable predicates and pending deletions.
-        // Keep partial batches across this parent's cliques, exactly like scalar enqueueing.
-        batch_depth = depth;
-        uint64_t offset = 0;
-        while (offset < members.count) {
-            const auto end = std::min(members.count, offset + batch_ids.size() - batch_count);
-            for (; offset < end; ++offset) {
-                const auto id = members.data[offset];
-                if (accept_node(id, true)) {
-                    batch_ids[batch_count++] = id;
-                }
-            }
-            if (batch_count == batch_ids.size()) {
-                flush();
-            }
-        }
     };
     const auto seed_target = std::min<uint64_t>(mci_param.seed_count, total);
     const bool check_overtime = inner_search_param.time_cost != nullptr;
@@ -467,12 +441,8 @@ search_clique_view(const CliqueDataCellSearchView& view,
                 const auto begin = view.p_maxc[cid];
                 const auto count = view.p_maxc[cid + 1] - begin;
                 const auto& members = packed.Filter(view.maxcs + begin, count, total);
-                if (batch_packed_members) {
-                    scan_packed_members(members, depth + 1);
-                } else {
-                    for (auto member : members) {
-                        try_visit(member, depth + 1, true);
-                    }
+                for (auto member : members) {
+                    try_visit(member, depth + 1, true);
                 }
             } else {
                 view.ForEachMember(cid, [&](InnerIdType member) {
