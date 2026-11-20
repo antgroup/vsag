@@ -42,6 +42,20 @@ public:
            QueryContext* ctx = nullptr,
            DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
+    // KNN search with the distance early stop of ctx->distance_early_stop_alpha (at least 1).
+    // Defined in parallel_searcher_early_stop.cpp so that the traversals of Search are compiled
+    // without it.
+    DistHeapPtr
+    SearchWithDistanceEarlyStop(
+        const GraphInterfacePtr& graph,
+        const FlattenInterfacePtr& flatten,
+        const VisitedListPtr& vl,
+        const void* query,
+        const InnerSearchParam& inner_search_param,
+        const LabelTablePtr& label_table,
+        QueryContext* ctx,
+        DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+
     void
     SetMutexArray(MutexArrayPtr new_mutex_array);
 
@@ -59,7 +73,7 @@ private:
           uint64_t point_visited_num,
           Vector<InnerIdType>* deferred_ids = nullptr) const;
 
-    template <InnerSearchMode mode = KNN_SEARCH>
+    template <InnerSearchMode mode = KNN_SEARCH, bool early_stop = false>
     DistHeapPtr
     search_impl(const GraphInterfacePtr& graph,
                 const FlattenInterfacePtr& flatten,

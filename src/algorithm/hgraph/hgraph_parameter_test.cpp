@@ -827,6 +827,70 @@ TEST_CASE("HGraph maps label_remap_type to inner index parameter", "[ut][HGraphP
     REQUIRE(typed_param->label_remap_type == vsag::LabelRemapType::ROBIN);
 }
 
+TEST_CASE("HGraphSearchParameters parses distance early stop",
+          "[ut][HGraphSearchParameters][distance_early_stop]") {
+    auto defaults = vsag::HGraphSearchParameters::FromJson(R"({"hgraph":{"ef_search":64}})");
+    REQUIRE_FALSE(defaults.early_stop);
+    REQUIRE(defaults.early_stop_alpha == 0.0F);
+    auto enabled = vsag::HGraphSearchParameters::FromJson(
+        R"({"hgraph":{"ef_search":64,"early_stop":{"type":"distance","alpha":1.25}}})");
+    REQUIRE(enabled.early_stop);
+    REQUIRE(enabled.early_stop_alpha == 1.25F);
+    // Without alpha the search picks it from k.
+    auto defaulted = vsag::HGraphSearchParameters::FromJson(
+        R"({"hgraph":{"ef_search":64,"early_stop":{"type":"distance"}}})");
+    REQUIRE(defaulted.early_stop);
+    REQUIRE(defaulted.early_stop_alpha == 0.0F);
+    for (const auto& value : {"null",
+                              "[]",
+                              "true",
+                              "{}",
+                              R"({"type":"other","alpha":1.1})",
+                              R"({"type":"distance","alpha":0.9})",
+                              R"({"type":"distance","alpha":-1})",
+                              R"({"type":"distance","alpha":"1.1"})",
+                              R"({"type":"distance","alpha":1e100})",
+                              R"({"type":"distance","alfa":1.1})",
+                              R"({"type":"distance","alpha":1.1,"extra":true})"}) {
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+            std::string(R"({"hgraph":{"ef_search":64,"early_stop":)") + value + "}}"));
+    }
+}
+
+TEST_CASE("HGraphSearchParameters picks the default early-stop alpha from k",
+          "[ut][HGraphSearchParameters][distance_early_stop]") {
+    using vsag::HGraphSearchParameters;
+    const auto at_k10 = HGraphSearchParameters::DISTANCE_EARLY_STOP_ALPHA_AT_K10;
+    const auto at_k100 = HGraphSearchParameters::DISTANCE_EARLY_STOP_ALPHA_AT_K100;
+    REQUIRE(HGraphSearchParameters::DefaultDistanceEarlyStopAlpha(10) == at_k10);
+    REQUIRE(HGraphSearchParameters::DefaultDistanceEarlyStopAlpha(100) == at_k100);
+    REQUIRE(HGraphSearchParameters::DefaultDistanceEarlyStopAlpha(1000) == at_k100);
+    REQUIRE(HGraphSearchParameters::DefaultDistanceEarlyStopAlpha(1) ==
+            Catch::Approx(2 * at_k10 - at_k100));
+    REQUIRE(HGraphSearchParameters::DefaultDistanceEarlyStopAlpha(0) ==
+            HGraphSearchParameters::DefaultDistanceEarlyStopAlpha(1));
+    REQUIRE(HGraphSearchParameters::DefaultDistanceEarlyStopAlpha(30) ==
+            Catch::Approx(at_k10 - (at_k10 - at_k100) * std::log10(3.0)));
+    float previous = HGraphSearchParameters::DefaultDistanceEarlyStopAlpha(1);
+    for (int64_t k = 2; k <= 200; ++k) {
+        const float alpha = HGraphSearchParameters::DefaultDistanceEarlyStopAlpha(k);
+        REQUIRE(alpha <= previous);
+        REQUIRE(alpha >= at_k100);
+        previous = alpha;
+    }
+}
+
+TEST_CASE("HGraphSearchParameters skips the early stop when ef is close to k",
+          "[ut][HGraphSearchParameters][distance_early_stop]") {
+    using vsag::HGraphSearchParameters;
+    REQUIRE_FALSE(HGraphSearchParameters::DistanceEarlyStopApplies(125, 100));
+    REQUIRE(HGraphSearchParameters::DistanceEarlyStopApplies(126, 100));
+    REQUIRE_FALSE(HGraphSearchParameters::DistanceEarlyStopApplies(10, 8));
+    REQUIRE(HGraphSearchParameters::DistanceEarlyStopApplies(11, 8));
+    REQUIRE_FALSE(HGraphSearchParameters::DistanceEarlyStopApplies(1, 1));
+    REQUIRE(HGraphSearchParameters::DistanceEarlyStopApplies(2, 1));
+}
+
 TEST_CASE("HGraphSearchParameters parses brute_force_threshold",
           "[ut][HGraphSearchParameters][brute_force_threshold]") {
     SECTION("default is 0") {

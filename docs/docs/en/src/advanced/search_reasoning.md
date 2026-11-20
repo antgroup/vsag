@@ -78,7 +78,7 @@ The following metadata fields belong to full reports and are absent from
 | `topk` | int | Requested top k |
 | `use_reorder` | bool | Whether reorder was active |
 | `filter_active` | bool | Whether a filter was active |
-| `termination_reason` | string | none, lower_bound_reached, hops_limit_reached, timeout |
+| `termination_reason` | string | none, lower_bound_reached, hops_limit_reached, timeout, distance_early_stop |
 | `total_hops` | int | Total search hops |
 | `total_distance_computations` | int | Total distance evaluations |
 | `available_diagnoses` | [string] | All diagnoses the engine can emit |
@@ -103,6 +103,10 @@ quantization error, candidate eviction, reorder eviction, then unknown. In parti
 The quantization check is the legacy heuristic `approximate > 1.5 * true`, applied
 only when the true distance is positive. It is not a metric-independent error bound
 or proof that quantization caused the miss; signed IP distances need particular care.
+
+When `termination_reason` is `distance_early_stop`, the HGraph distance early stop ended the
+traversal, and expected targets it never reached are reported as `not_reachable`. Raise
+`alpha` or drop `early_stop` before suspecting the graph.
 
 When present in a full report, `supports_range` is a boolean describing registered
 range-reasoning support, not availability of the index's RangeSearch API. Unregistered

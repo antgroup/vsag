@@ -47,6 +47,9 @@ struct QueryContext {
     bool track_distance_evaluations = true;
     bool enable_rabitq_reorder = true;
     QueryComputerPool* computer_pool = nullptr;
+    // Alpha of the distance early stop, read by the searchers' SearchWithDistanceEarlyStop; the
+    // other search entry points ignore it.
+    float distance_early_stop_alpha = 0.0F;
 };
 
 class ScopedDistancePhase {
@@ -178,6 +181,9 @@ public:
         j["is_timeout"].SetBool(is_timeout.load(std::memory_order_relaxed));
         j["dist_cmp"].SetUint64(dist_cmp.load(std::memory_order_relaxed));
         j["hops"].SetUint64(hops.load(std::memory_order_relaxed));
+        if (early_stop_armed.load(std::memory_order_relaxed)) {
+            j["early_stop_count"].SetUint64(early_stop_count.load(std::memory_order_relaxed));
+        }
         j["io_cnt"].SetUint64(io_cnt.load(std::memory_order_relaxed));
         j["io_time_ms"].SetUint64(io_time_ms.load(std::memory_order_relaxed));
         j["reorder_distance_count"].SetUint64(
@@ -244,6 +250,10 @@ public:
     std::atomic<uint32_t> mv_candidate_count{0};
     std::atomic<uint64_t> mv_io_bytes{0};
     std::atomic<bool> complete{true};
+    // Set when a traversal ran with the distance early stop; only then is early_stop_count
+    // reported, so a count of zero means the rule ran and never fired.
+    std::atomic<bool> early_stop_armed{false};
+    std::atomic<uint32_t> early_stop_count{0};
 };
 
 class SearchMetrics {
@@ -252,12 +262,12 @@ public:
 
     /**
      * Add a query-specific field without replacing established values.
-     * Returns false for a baseline-schema collision or a duplicate extension key; on failure, the
+     * Returns false for a collector-owned field or a duplicate extension key; on failure, the
      * existing metric value is unchanged.
      */
     [[nodiscard]] bool
     AddExtension(std::string key, MetricValue value) {
-        if (MetricsSchema::Base().Contains(key)) {
+        if (MetricsSchema::Base().Contains(key) or key == "early_stop_count") {
             return false;
         }
         return extensions_.emplace(std::move(key), std::move(value)).second;
@@ -303,11 +313,16 @@ public:
         }
         result.complete = base.complete.load(std::memory_order_relaxed);
         result.extensions_ = std::move(extensions_);
+        if (base.early_stop_armed.load(std::memory_order_relaxed)) {
+            result.extensions_.emplace("early_stop_count",
+                                       base.early_stop_count.load(std::memory_order_relaxed));
+        }
         return result;
     }
 
-    // The typed Snapshot() and legacy ToJson() intentionally enumerate the same stable fields;
-    // adding a counter to SearchStatistics requires updating both (see ToJson below).
+    // The typed Snapshot() and legacy ToJson() enumerate the same stable fields. The early-stop
+    // count is a collector-owned extension, present when the distance early stop was armed;
+    // adding a counter to SearchStatistics requires updating both representations.
 
 private:
     std::map<std::string, MetricValue> extensions_;
