@@ -52,6 +52,21 @@ class HGraphFGIM {
     friend class HGraphFGIMTestAccessor;
 
 public:
+    // Algorithm 5. Input rows are not modified; output rows remain distance-sorted.
+    // Refinement and reconstruction each allocate N * dimension floats for vector work.
+    // Their vector buffers have separate lifetimes; graph storage adds to peak memory.
+    static FGIMKnnGraph
+    KnnGraphToPG(const Vector<const HGraph*>& source_graphs,
+                 const FGIMKnnGraph& graph,
+                 uint64_t k,
+                 uint64_t* distance_evaluations = nullptr);
+
+    // Destination storage must satisfy the same float32/L2/fp32 constraints as sources.
+    // The destination bottom graph must be writable; ReaderIO storage is rejected.
+    // Destination vectors and labels must already occupy the merged internal ID space.
+    // The bottom graph must have MaximumDegree() >= k and capacity for every merged node.
+    static void
+    WriteBottomGraph(HGraph& destination, const FGIMKnnGraph& graph, uint64_t k);
     // Paper Algorithm 3: bounded persistent lists, unbounded temporary reverse candidates.
     // Each stage validates its inputs so it can also be called independently.
     // max_iterations is a work budget, not a convergence guarantee.
@@ -71,6 +86,12 @@ private:
     // Shared checks also apply to an empty destination.
     static void
     ValidateStorage(const HGraph& index);
+
+    static void
+    ValidateWritableGraph(const HGraph& destination);
+
+    static void
+    ValidateKnnGraph(const FGIMKnnGraph& graph, uint64_t k, uint64_t expected_count);
 
     // Internal-only search, not a public index API. The caller must validate the target
     // as FGIM-compatible and provide at least target.dim_ floats in query.
