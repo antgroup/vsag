@@ -60,7 +60,7 @@ pip install wheelhouse/pyvsag-*.whl
 
 `make pyvsag` runs `scripts/python/local_build_wheel.sh` from the repository root and writes the
 wheel to `wheelhouse/`. On Linux, with Docker it builds inside the `manylinux_2_28` image and runs
-part of `tests/python` there. Without Docker it builds a native `linux_<arch>` wheel using
+all of `tests/python` there. Without Docker it builds a native `linux_<arch>` wheel using
 `python -m build`, installs it into the active virtual environment and runs `tests/python`.
 Outside an active virtual environment the script creates `.venv/` in the repository.
 
@@ -180,8 +180,8 @@ match is rejected with `ValueError`:
 
 | Method | Returns |
 | --- | --- |
-| `knn_search(vector, k, parameters)` | `(ids, distances)`: arrays of shape `(k,)` (`int64`, `float32`). Slots the search could not fill hold `-1`. |
-| `knn_search(index_pointers, indices, values, k, parameters)` | The same for a batch of sparse queries, with shape `(num_queries, k)`. |
+| `knn_search(vector, k, parameters)` | `(ids, distances)`: arrays of shape `(actual_count,)` (`int64`, `float32`), without padding. |
+| `knn_search(index_pointers, indices, values, k, parameters)` | Rectangular arrays of shape `(num_queries, k)`, padded with ID `-1` and distance `+inf`. |
 | `range_search(point, threshold, parameters)` | `(ids, distances)` of all results within `threshold`; empty arrays if none. |
 | `knn_search_with_statistics(...)` / `range_search_with_statistics(...)` | The arrays above plus the search statistics as a JSON string (a list of strings for sparse batches). See [Search Statistics](search_statistics.md). |
 
@@ -220,20 +220,19 @@ new_index = pyvsag.Index("hgraph", index_params)
 new_index.load("index.bin")
 ```
 
-`save` and `load` raise `RuntimeError` when the underlying serialization or deserialization fails,
-including when the file cannot be opened.
+`save` and `load` raise `OSError` for file open/final stream I/O failures, and `VsagError` for native serialization/deserialization failures. A failed save is not transactional: it may leave a partial file. These methods use the native stream format; they do not add a new Python-only persistence format.
 
 ## Index Operations
 
 | Method | Result | Notes |
 | --- | --- | --- |
-| `build(...)` | `None` | Dense `build(vectors, ids, num_elements, dim)` or sparse `build(index_pointers, indices, values, ids)`. |
-| `add(...)` | `None` | The same two forms as `build`. |
-| `remove(ids)` | `int` | Removes a one-dimensional integer ID array and returns the number actually removed. Returns `0` both when no ID is removed and when the operation fails. |
+| `build(...)` | `list[int]` of failed IDs | Dense `build(vectors, ids, num_elements, dim)` or sparse `build(index_pointers, indices, values, ids)`. |
+| `add(...)` | `list[int]` of failed IDs | The same two forms as `build`. |
+| `remove(ids)` | `int` | Removes a one-dimensional integer ID array and returns the number actually removed. A successful removal of no IDs returns `0`; errors raise. |
 | `get_num_elements()` | `int` | Current number of elements. |
 | `get_memory_usage()` | `int` | Index memory usage in bytes. |
 | `check_id_exist(id)` | `bool` | Whether an ID currently exists. |
-| `get_min_max_id()` | `(min_id, max_id)` | Returns `(-1, -1)` if the operation fails. |
+| `get_min_max_id()` | `(min_id, max_id)` | Native min/max IDs; errors raise rather than becoming a sentinel. |
 | `calc_distances_by_id(query, ids)` (legacy alias `cal_distance_by_id`) | `numpy.ndarray` | One float32 distance per ID. Missing IDs produce `-1`. |
 
 ```python
@@ -267,15 +266,20 @@ multi-vector or multi-query input.
 
 | Failure | What happens |
 | --- | --- |
-| `pyvsag.Index(...)` cannot create the index | `RuntimeError` (`error type: UNSUPPORTED_INDEX`, `error type: invalid_parameter` or `error type: unexpectedError`) |
-| `build`, `add`, `save`, `load`, `get_num_elements`, `get_memory_usage`, `check_id_exist`, `calc_distances_by_id`, `*_with_statistics` | `RuntimeError` whose message starts with the operation name and carries the C++ error |
-| `knn_search` | No exception: ids and distances are filled with `-1` |
-| `range_search` | No exception: empty arrays |
-| `remove` | No exception: returns `0` |
-| `get_min_max_id` | No exception: returns `(-1, -1)` |
-| Wrong dtype, shape, layout, byte order or integer range | `ValueError`; a call with the wrong arguments raises `TypeError` |
+| Native operation failure, including ordinary and statistics searches | `pyvsag.VsagError`, a `RuntimeError` subclass, with integer `.code`, public `.operation` and native message |
+| File open or final stream I/O failure in `save` / `load` | `OSError` |
+| Wrong dtype, shape, layout, byte order or representable range | `ValueError`; invalid call arguments raise `TypeError` |
 
-Use the `*_with_statistics` variants when a failed search must raise.
+`.code` uses the positive native C++ error value (the negative C ABI code is converted at the Python boundary). Ordinary searches no longer silently substitute empty or padded results for errors. Successful dense KNN returns only actual hits; sparse batches keep their rectangular shape and use `(-1, +inf)` padding. Build/add return failed IDs even when some vectors were inserted successfully; an empty list means none failed. Existing code that ignores their return values still works.
+
+```python
+try:
+    result_ids, distances = index.knn_search(query, 10, search_params)
+except pyvsag.VsagError as error:
+    print(error.operation, error.code, str(error))
+```
+
+CSR integer inputs are range-checked before conversion to `uint32`; negative and overflowing indices are rejected. Sparse values that overflow during conversion to float32 are rejected rather than passed as infinities. Non-contiguous supported ID/CSR inputs are copied in logical order; dense vector dtype/layout rules remain unchanged.
 
 ## Logging
 

@@ -80,7 +80,7 @@ class TestDataset:
             else:
                 raise ValueError(f"Unsupported metric: {metric}")
             sorted_indices = np.argsort(dists)
-            result_ids.append(sorted_indices[:k])
+            result_ids.append(self.ids[sorted_indices[:k]])
             result_dists.append(dists[sorted_indices[:k]])
         return np.array(result_ids), np.array(result_dists)
 
@@ -140,10 +140,24 @@ def load_index(index: pyvsag.Index, file_path: str):
     index.load(file_path)
 
 
-def calculate_recall(results: np.ndarray, gt_ids: np.ndarray, topk: int = 10) -> float:
-    """Calculate recall for testing"""
-    recall = np.isin(results[:topk], gt_ids[:topk]).sum(axis=0)
-    return recall / topk
+def calculate_recall(results: np.ndarray, gt_ids: np.ndarray, topk: int = 10,
+                     padding_id=None) -> float:
+    """Count each matching ID once; exclude padding only when explicitly configured."""
+    results = np.asarray(results)
+    gt_ids = np.asarray(gt_ids)
+    if results.ndim != 1 or gt_ids.ndim != 1:
+        raise ValueError("results and gt_ids must be one-dimensional for one query")
+    if not isinstance(topk, (int, np.integer)) or topk <= 0:
+        raise ValueError("topk must be a positive integer")
+    results = results[:topk]
+    gt_ids = gt_ids[:topk]
+    # Dense singlequery returns actual counts; -1 is a legitimate external ID.
+    # Rectangular callers may explicitly reserve a padding ID for their dataset.
+    if padding_id is not None:
+        results = results[results != padding_id]
+        gt_ids = gt_ids[gt_ids != padding_id]
+    matches = np.intersect1d(results, gt_ids)
+    return float(matches.size) / topk
 
 
 def verify_knn_search(
@@ -160,7 +174,7 @@ def verify_knn_search(
     for i in range(query_count):
         query = query_vectors[i]
         ids, _ = index.knn_search(vector=query, k=topk, parameters=search_param)
-        assert len(ids) == topk
-        recall += calculate_recall(ids, dataset.gt_ids, topk)
+        assert ids.ndim == 1 and len(ids) <= topk
+        recall += calculate_recall(ids, dataset.gt_ids[i], topk)
     print(f"recall: {recall / query_count}")
     assert recall >= expect_recall * query_count
