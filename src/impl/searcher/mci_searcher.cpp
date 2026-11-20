@@ -515,6 +515,15 @@ search_clique_view(const CliqueDataCellSearchView& view,
                     break;
                 }
             }
+        } else if (mci_param.use_resident_base and view.static_csr and id < view.base_node_count) {
+            // Compact CSR has no inactive nodes, retired cliques or delta rows.
+            const auto end = view.p_node_to_cid[id + 1];
+            for (auto pos = view.p_node_to_cid[id]; pos < end; ++pos) {
+                const auto cid = view.node_to_cids[pos];
+                if (cid < view.total_clique_count and not visit_clique(cid)) {
+                    break;
+                }
+            }
         } else {
             view.ForEachNodeClique(id, visit_clique);
         }

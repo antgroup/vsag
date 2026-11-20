@@ -660,6 +660,7 @@ HGraph::try_mci_search(const SearchRequest& request,
     mci_param.revalidate_predicate =
         not params.search_no_lock and not this->immutable_.load(std::memory_order_acquire);
     mci_param.batch_distance = params.mci_batch_distance;
+    mci_param.use_resident_base = params.mci_use_memory_quantization;
     mci_param.optimize_clique_expansion =
         params.mci_use_memory_quantization and params.mci_optimize_clique_expansion;
     mci_param.activation_cap = params.mci_activation_cap;

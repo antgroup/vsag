@@ -160,6 +160,7 @@ TEST_CASE("MCI resident base batches packed overlapping cliques without precise 
     REQUIRE(labels.MarkRemove(1) == 1);
     Vector<InnerIdType> seeds({0, 0, 1}, allocator.get());
     MCISearcherParam params;
+    params.use_resident_base = true;
     params.use_one_bit_distance = one_bit;
     params.packed_filter = packed;
     params.optimize_clique_expansion = optimize;
@@ -368,6 +369,7 @@ TEST_CASE("MCISearcher traverses base extras delta and tombstones before and aft
     params.batch_distance = GENERATE(false, true);
     params.seed_count = 1;
     params.seed_inner_ids = &seeds;
+    params.use_resident_base = not use_raw;
     params.precise_vectors = use_raw ? vectors.data() : nullptr;
     params.dim = 1;
     params.precise_vector_stride = 1;

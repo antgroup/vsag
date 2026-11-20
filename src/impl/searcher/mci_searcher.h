@@ -38,6 +38,7 @@ struct MCISearcherParam {
     bool optimize_clique_expansion{false};
     // Enabled only by the opt-in resident-base route, independently of legacy search flags.
     bool use_one_bit_distance{false};
+    bool use_resident_base{false};
     // Bounds may be reused only when reorder scores the same RaBitQ base, never a separate SQ8.
     DistanceRecordVector* one_bit_lower_bound_candidates{nullptr};
     uint32_t activation_cap{0};
