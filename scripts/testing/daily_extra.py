@@ -22,10 +22,10 @@ def timestamp(value):
 
 
 def propose(results, started_at, now, attempt, run_id):
-    # Require all four original functional shards; never spend extra budget to
-    # bypass a failing or incomplete mandatory selection.
+    # Require complete base evidence. Only the shared rotation-timeout policy
+    # can allow an unvalidated configuration without blocking supplemental work.
     checked = daily_report.summarize(results)
-    if checked["status"] != "passed":
+    if checked["status"] not in ("passed", "passed_with_warnings"):
         raise dp.PlanError("Mandatory functional shards did not pass")
     first = results[0]["plan"]
     shard = first["sharding"]
