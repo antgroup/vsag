@@ -202,6 +202,7 @@ const char* const HGRAPH_MCI_SEED_COVERAGE = "mci_seed_coverage";
 const char* const HGRAPH_MCI_SEED_MAX_COUNT = "mci_seed_max_count";
 const char* const HGRAPH_MCI_MCS = "mci_mcs";
 const char* const HGRAPH_MCI_CLIQUE_MAX = "mci_clique_max";
+const char* const HGRAPH_MCI_CLIQUE_ACTIVATION_ORDER = "mci_clique_activation_order";
 const char* const HGRAPH_MCI_ALPHA = "mci_alpha";
 const char* const HGRAPH_MCI_KNNG_SOURCE = "mci_knng_source";
 const char* const HGRAPH_MCI_KNNG_SOURCE_HGRAPH = "hgraph";
