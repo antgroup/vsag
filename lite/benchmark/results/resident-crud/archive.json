@@ -1,0 +1,7 @@
+{
+  "bytes": 7383654,
+  "sha256": "982d46aee54495eaf6c28519c9f0fe7991bfc705530085d333e7895b7a1622ab",
+  "members": 20,
+  "unpacked_dataset_audits": "PASS for SIFT/GIST/Cohere",
+  "originals_preserved": true
+}
