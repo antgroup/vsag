@@ -46,7 +46,26 @@ public:
     void*
     Allocate(uint64_t size) override {
         check_size(size);
-        return DefaultAllocator::Allocate(size);
+        auto* pointer = DefaultAllocator::Allocate(size);
+        if (size == capture_size) {
+            // Classification arrays can have the same size as the training buffer, which is
+            // allocated last. Ignore earlier matches instead of depending on destruction order.
+            captured_pointers.clear();
+            captured_pointers.emplace_back(pointer);
+        }
+        return pointer;
+    }
+
+    void
+    Deallocate(void* pointer) override {
+        auto captured = std::find(captured_pointers.begin(), captured_pointers.end(), pointer);
+        if (captured != captured_pointers.end()) {
+            REQUIRE(captured_pointers.size() == 1);
+            const auto* values = static_cast<const float*>(pointer);
+            captured_values.assign(values, values + capture_size / sizeof(float));
+            captured_pointers.erase(captured);
+        }
+        DefaultAllocator::Deallocate(pointer);
     }
 
     void*
@@ -56,12 +75,17 @@ public:
     }
 
     uint64_t limit{std::numeric_limits<uint64_t>::max()};
+    uint64_t rejected_size{0};
     uint64_t rejected{0};
+    uint64_t capture_size{0};
+    std::vector<float> captured_values;
 
 private:
+    std::vector<void*> captured_pointers;
+
     void
     check_size(uint64_t size) {
-        if (size > limit) {
+        if (size > limit or (rejected_size != 0 and size == rejected_size)) {
             ++rejected;
             throw std::bad_alloc();
         }
@@ -83,6 +107,7 @@ public:
 
     Vector<BucketIdType>
     ClassifyDatas(const void*, int64_t count, BucketIdType, QueryContext*) const override {
+        classify_requests_.fetch_add(1, std::memory_order_relaxed);
         return Vector<BucketIdType>(count, 0, allocator_);
     }
 
@@ -99,9 +124,171 @@ public:
         return centroid_requests_.load(std::memory_order_relaxed);
     }
 
+    [[nodiscard]] uint64_t
+    GetClassifyRequestCount() const {
+        return classify_requests_.load(std::memory_order_relaxed);
+    }
+
 private:
     std::atomic<uint64_t> centroid_requests_{0};
+    mutable std::atomic<uint64_t> classify_requests_{0};
     float centroid_scale_{1.0F};
+};
+
+class DualRouteFixedCentroidPartitionStrategy : public FixedCentroidPartitionStrategy {
+public:
+    using FixedCentroidPartitionStrategy::FixedCentroidPartitionStrategy;
+
+    [[nodiscard]] bool
+    HasDistinctBuildAssignment() const override {
+        return true;
+    }
+};
+
+class BuildAssignedPartitionStrategy : public FixedCentroidPartitionStrategy {
+public:
+    using FixedCentroidPartitionStrategy::FixedCentroidPartitionStrategy;
+
+    Vector<BucketIdType>
+    ClassifyDatasForBuild(const void*, int64_t count, BucketIdType, QueryContext*) const override {
+        return Vector<BucketIdType>(count, 1, allocator_);
+    }
+
+    [[nodiscard]] bool
+    HasDistinctBuildAssignment() const override {
+        return true;
+    }
+};
+
+class OrderedBalancedResidualPartitionStrategy : public IVFPartitionStrategy {
+public:
+    OrderedBalancedResidualPartitionStrategy(const IndexCommonParam& common_param,
+                                             BucketIdType bucket_count)
+        : IVFPartitionStrategy(common_param, bucket_count) {
+        is_trained_ = true;
+    }
+
+    void
+    Train(const DatasetPtr) override {
+    }
+
+    Vector<BucketIdType>
+    ClassifyDatas(const void* datas, int64_t count, BucketIdType, QueryContext*) const override {
+        const auto* values = static_cast<const float*>(datas);
+        Vector<BucketIdType> result(count, 0, allocator_);
+        for (int64_t i = 0; i < count; ++i) {
+            result[i] = values[i] > 1.0F ? 1 : 0;
+        }
+        return result;
+    }
+
+    Vector<BucketIdType>
+    ClassifyDatasForBuild(const void*, int64_t count, BucketIdType, QueryContext*) const override {
+        Vector<BucketIdType> result(count, 0, allocator_);
+        for (int64_t i = 0; i < count; ++i) {
+            result[i] = i < count / 2 ? 0 : 1;
+        }
+        return result;
+    }
+
+    [[nodiscard]] bool
+    HasDistinctBuildAssignment() const override {
+        return true;
+    }
+
+    void
+    GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) override {
+        centroid[0] = bucket_id == 0 ? 0.0F : 185530.0F / 65536.0F;
+    }
+};
+
+class MixedResidualPartitionStrategy : public IVFPartitionStrategy {
+public:
+    MixedResidualPartitionStrategy(const IndexCommonParam& common_param, BucketIdType bucket_count)
+        : IVFPartitionStrategy(common_param, bucket_count) {
+        is_trained_ = true;
+    }
+
+    void
+    Train(const DatasetPtr) override {
+    }
+
+    Vector<BucketIdType>
+    ClassifyDatas(const void* datas, int64_t count, BucketIdType, QueryContext*) const override {
+        const auto* values = static_cast<const float*>(datas);
+        Vector<BucketIdType> result(count, 0, allocator_);
+        for (int64_t i = 0; i < count; ++i) {
+            result[i] = values[i] == 100.0F ? 1 : 0;
+        }
+        return result;
+    }
+
+    Vector<BucketIdType>
+    ClassifyDatasForBuild(const void* datas,
+                          int64_t count,
+                          BucketIdType,
+                          QueryContext*) const override {
+        const auto* values = static_cast<const float*>(datas);
+        Vector<BucketIdType> result(count, 0, allocator_);
+        for (int64_t i = 0; i < count; ++i) {
+            result[i] = values[i] == 0.0F ? 0 : 1;
+        }
+        return result;
+    }
+
+    [[nodiscard]] bool
+    HasDistinctBuildAssignment() const override {
+        return true;
+    }
+
+    void
+    GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) override {
+        centroid[0] = bucket_id == 0 ? 0.0F : 28.0F;
+    }
+};
+
+class PeriodicResidualPartitionStrategy : public IVFPartitionStrategy {
+public:
+    PeriodicResidualPartitionStrategy(const IndexCommonParam& common_param,
+                                      BucketIdType bucket_count)
+        : IVFPartitionStrategy(common_param, bucket_count) {
+        is_trained_ = true;
+    }
+
+    void
+    Train(const DatasetPtr) override {
+    }
+
+    Vector<BucketIdType>
+    ClassifyDatas(const void*, int64_t count, BucketIdType, QueryContext*) const override {
+        Vector<BucketIdType> result(count, 0, allocator_);
+        for (int64_t i = 0; i < count; ++i) {
+            // Half the rows mismatch Build, exceeding the nearest-only sampling budget.
+            result[i] = (i % 4 == 0 or i % 4 == 3) ? 1 : 0;
+        }
+        return result;
+    }
+
+    Vector<BucketIdType>
+    ClassifyDatasForBuild(const void*, int64_t count, BucketIdType, QueryContext*) const override {
+        Vector<BucketIdType> result(count, 0, allocator_);
+        for (int64_t i = 0; i < count; ++i) {
+            // Each [0, 100, 100, 100] period forces its first 100 into centroid 50.
+            result[i] = i % 4 < 2 ? 0 : 1;
+        }
+        return result;
+    }
+
+    [[nodiscard]] bool
+    HasDistinctBuildAssignment() const override {
+        return true;
+    }
+
+    void
+    GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) override {
+        std::fill(centroid.begin(), centroid.end(), 0.0F);
+        centroid[0] = bucket_id == 0 ? 50.0F : 100.0F;
+    }
 };
 
 class TrackingReader : public Reader {
@@ -795,6 +982,315 @@ TEST_CASE("BucketDataCell batch query", "[ut][BucketDataCell]") {
     }
 }
 
+TEST_CASE("BucketDataCell ordinary residual training keeps one route and buffer",
+          "[ut][BucketDataCell]") {
+    auto allocator = std::make_shared<BoundedBucketAllocator>();
+    constexpr int64_t dim = 64;
+    constexpr uint64_t count = 1024;
+    constexpr uint64_t bucket_count = 1;
+    const std::vector<float> vectors(count * dim, 1.0F);
+    auto param = std::make_shared<BucketDataCellParameter>();
+    param->FromJson(JsonType::Parse(R"({
+        "io_params": { "type": "memory_io" },
+        "quantization_params": { "type": "fp32" },
+        "buckets_count": 1,
+        "use_residual": true
+    })"));
+
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto bucket = BucketInterface::MakeInstance(param, common_param);
+    auto strategy = std::make_shared<FixedCentroidPartitionStrategy>(common_param, bucket_count);
+    bucket->SetStrategy(strategy);
+    // One FP32 corpus is 256 KiB and the old dual residual buffer is 512 KiB.
+    allocator->limit = 300 * 1024;
+    REQUIRE_NOTHROW(bucket->Train(vectors.data(), count));
+    REQUIRE(allocator->rejected == 0);
+    REQUIRE(strategy->GetClassifyRequestCount() == 1);
+}
+
+TEST_CASE("BucketDataCell residual training uses build and nearest assignments",
+          "[ut][BucketDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr int64_t dim = 1;
+    constexpr uint64_t bucket_count = 2;
+    const std::vector<float> vectors = {50.0F, 100.0F};
+    auto param_json = JsonType::Parse(R"({
+        "io_params": { "type": "memory_io" },
+        "quantization_params": { "type": "sq8" },
+        "buckets_count": 2,
+        "use_residual": true
+    })");
+    auto param = std::make_shared<BucketDataCellParameter>();
+    param->FromJson(param_json);
+
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto bucket = BucketInterface::MakeInstance(param, common_param);
+    // Centroids are 50 and 100. Build assigns both rows to bucket 1, producing
+    // residuals [-50, 0], while nearest routing assigns both to bucket 0,
+    // producing [0, 50]. Each one-sided training set clips the other path.
+    auto strategy = std::make_shared<BuildAssignedPartitionStrategy>(
+        common_param, bucket_count, /*centroid_scale=*/5000.0F);
+    bucket->SetStrategy(strategy);
+    bucket->Train(vectors.data(), vectors.size());
+    bucket->InsertVector(vectors.data(), 1, 0);
+    bucket->InsertVector(vectors.data() + dim, 0, 1);
+
+    auto build_computer = bucket->FactoryComputer(vectors.data());
+    REQUIRE(std::abs(bucket->QueryOneById(build_computer, 1, 0)) < 1e-4F);
+    auto nearest_computer = bucket->FactoryComputer(vectors.data() + dim);
+    REQUIRE(std::abs(bucket->QueryOneById(nearest_computer, 0, 0)) < 1e-4F);
+}
+
+TEST_CASE("BucketDataCell samples scalar build and nearest residual populations",
+          "[ut][BucketDataCell]") {
+    auto allocator = std::make_shared<BoundedBucketAllocator>();
+    constexpr int64_t dim = 1;
+    constexpr uint64_t count = 131072;
+    constexpr uint64_t zero_count = 65536;
+    constexpr uint64_t outlier_count = 6;
+    constexpr uint64_t nearest_population = count - zero_count - outlier_count;
+    constexpr uint64_t train_count = count + nearest_population;
+    constexpr uint64_t max_scalar_samples = 100000;
+    constexpr uint64_t bucket_count = 2;
+    static_assert(nearest_population == 65530);
+    static_assert(2147483647UL % train_count == 1);
+    const std::string quantizer_type = GENERATE("sq8", "sq4", "sq8_uniform", "sq4_uniform");
+    CAPTURE(quantizer_type);
+
+    std::vector<float> vectors(count, 1.0F);
+    std::fill_n(vectors.begin(), zero_count, 0.0F);
+    std::fill(vectors.end() - outlier_count, vectors.end(), 20000.0F);
+
+    JsonType param_json;
+    JsonType io_json;
+    io_json["type"].SetString("memory_io");
+    param_json["io_params"].SetJson(io_json);
+    JsonType quantizer_json;
+    quantizer_json["type"].SetString(quantizer_type);
+    param_json["quantization_params"].SetJson(quantizer_json);
+    param_json["buckets_count"].SetInt(bucket_count);
+    param_json["use_residual"].SetBool(true);
+    auto param = std::make_shared<BucketDataCellParameter>();
+    param->FromJson(param_json);
+
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto bucket = BucketInterface::MakeInstance(param, common_param);
+    bucket->SetStrategy(
+        std::make_shared<OrderedBalancedResidualPartitionStrategy>(common_param, bucket_count));
+    allocator->capture_size = max_scalar_samples * dim * sizeof(float);
+    allocator->rejected_size = train_count * dim * sizeof(float);
+    bucket->Train(vectors.data(), count);
+    REQUIRE(allocator->rejected == 0);
+    REQUIRE(allocator->captured_values.size() == max_scalar_samples);
+
+    // Half the scalar budget represents the 65,530 nearest-only residuals. The old
+    // stride of one sampled only the Build prefix, making the upper bound zero.
+    for (uint64_t i = max_scalar_samples / 2; i < max_scalar_samples; ++i) {
+        REQUIRE(allocator->captured_values[i] == 1.0F);
+    }
+
+    const float added = 1.0F;
+    bucket->InsertVector(&added, 0, 0);
+    auto computer = bucket->FactoryComputer(&added);
+    // Training only the Build prefix clips this +1 residual against a zero upper bound.
+    REQUIRE(std::abs(bucket->QueryOneById(computer, 0, 0)) < 1e-3F);
+}
+
+TEST_CASE("BucketDataCell residual training preserves the PQ sample prefix",
+          "[ut][BucketDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr int64_t dim = 1;
+    constexpr uint64_t count = 131072;
+    constexpr uint64_t bucket_count = 1;
+    const std::string quantizer_type = GENERATE("pq", "pqfs");
+    CAPTURE(quantizer_type);
+    std::vector<float> vectors(count);
+    for (uint64_t i = 0; i < count; ++i) {
+        vectors[i] = i % 2 == 0 ? 0.0F : 100.0F;
+    }
+
+    JsonType param_json;
+    JsonType io_json;
+    io_json["type"].SetString("memory_io");
+    param_json["io_params"].SetJson(io_json);
+    param_json["quantization_params"].SetJson(
+        JsonType::Parse(quantizer_type == "pq" ? R"({"type": "pq", "pq_dim": 1, "pq_bits": 8})"
+                                               : R"({"type": "pqfs", "pq_dim": 1})"));
+    param_json["buckets_count"].SetInt(bucket_count);
+    param_json["use_residual"].SetBool(true);
+    auto param = std::make_shared<BucketDataCellParameter>();
+    param->FromJson(param_json);
+
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto bucket = BucketInterface::MakeInstance(param, common_param);
+    // The sole centroid is 50, so alternating rows have residuals -50 and +50.
+    // Both Build and nearest routing agree, leaving nearest_samples at zero.
+    // Fixed-stride sampling used to select only even rows, filling PQ's
+    // 65,536-row prefix with just the -50 residual.
+    auto strategy = std::make_shared<DualRouteFixedCentroidPartitionStrategy>(
+        common_param, bucket_count, /*centroid_scale=*/5000.0F);
+    bucket->SetStrategy(strategy);
+    bucket->Train(vectors.data(), count);
+    REQUIRE(strategy->GetClassifyRequestCount() == 2);
+    bucket->InsertVector(vectors.data() + count - 1, 0, count - 1);
+    bucket->Package();
+
+    auto computer = bucket->FactoryComputer(vectors.data() + count - 1);
+    REQUIRE(std::abs(bucket->QueryOneById(computer, 0, 0)) < 1e-3F);
+}
+
+TEST_CASE("BucketDataCell residual sampling avoids periodic population aliases",
+          "[ut][BucketDataCell]") {
+    auto allocator = std::make_shared<BoundedBucketAllocator>();
+    constexpr int64_t dim = 2;
+    constexpr uint64_t count = 131072;
+    constexpr uint64_t build_samples = 32768;
+    constexpr uint64_t nearest_samples = 32768;
+    constexpr uint64_t nearest_population = count / 2;
+    static_assert(nearest_samples < nearest_population);
+    constexpr uint64_t bucket_count = 2;
+    const std::string quantizer_type = GENERATE("pq", "pqfs");
+    CAPTURE(quantizer_type);
+    std::vector<float> vectors(count * dim, 0.0F);
+    for (uint64_t i = 0; i < count; ++i) {
+        vectors[i * dim] = i % 4 == 0 ? 0.0F : 100.0F;
+        // The second dimension only identifies source rows for uniqueness checks.
+        vectors[i * dim + 1] = static_cast<float>(i);
+    }
+
+    JsonType param_json;
+    JsonType io_json;
+    io_json["type"].SetString("memory_io");
+    param_json["io_params"].SetJson(io_json);
+    param_json["quantization_params"].SetJson(
+        JsonType::Parse(quantizer_type == "pq" ? R"({"type": "pq", "pq_dim": 1, "pq_bits": 8})"
+                                               : R"({"type": "pqfs", "pq_dim": 1})"));
+    param_json["buckets_count"].SetInt(bucket_count);
+    param_json["use_residual"].SetBool(true);
+    auto param = std::make_shared<BucketDataCellParameter>();
+    param->FromJson(param_json);
+
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto bucket = BucketInterface::MakeInstance(param, common_param);
+    bucket->SetStrategy(
+        std::make_shared<PeriodicResidualPartitionStrategy>(common_param, bucket_count));
+    allocator->capture_size = (build_samples + nearest_samples) * dim * sizeof(float);
+    allocator->rejected_size = 2 * count * dim * sizeof(float);
+    bucket->Train(vectors.data(), count);
+    REQUIRE(allocator->rejected == 0);
+    REQUIRE(allocator->captured_values.size() == (build_samples + nearest_samples) * dim);
+
+    std::vector<bool> build_seen(count, false);
+    std::vector<bool> nearest_seen(count, false);
+    uint64_t negative_build_residuals = 0;
+    uint64_t positive_build_residuals = 0;
+    uint64_t negative_nearest_residuals = 0;
+    uint64_t positive_nearest_residuals = 0;
+    for (uint64_t i = 0; i < build_samples; ++i) {
+        const float residual = allocator->captured_values[i * dim];
+        const float source_value = allocator->captured_values[i * dim + 1];
+        REQUIRE(source_value >= 0.0F);
+        REQUIRE(source_value < static_cast<float>(count));
+        REQUIRE(source_value == std::floor(source_value));
+        const auto source = static_cast<uint64_t>(source_value);
+        REQUIRE_FALSE(build_seen[source]);
+        build_seen[source] = true;
+
+        const float value = source % 4 == 0 ? 0.0F : 100.0F;
+        const float centroid = source % 4 < 2 ? 50.0F : 100.0F;
+        REQUIRE(residual == value - centroid);
+        negative_build_residuals += residual == -50.0F ? 1 : 0;
+        positive_build_residuals += residual == 50.0F ? 1 : 0;
+    }
+    // Fixed stride 4*i selected only the -50 Build residuals from this corpus.
+    REQUIRE(negative_build_residuals > 0);
+    REQUIRE(positive_build_residuals > 0);
+
+    for (uint64_t i = 0; i < nearest_samples; ++i) {
+        const uint64_t offset = (build_samples + i) * dim;
+        const float residual = allocator->captured_values[offset];
+        const float source_value = allocator->captured_values[offset + 1];
+        REQUIRE(source_value >= 0.0F);
+        REQUIRE(source_value < static_cast<float>(count));
+        REQUIRE(source_value == std::floor(source_value));
+        const auto source = static_cast<uint64_t>(source_value);
+        REQUIRE_FALSE(nearest_seen[source]);
+        nearest_seen[source] = true;
+        REQUIRE(source % 2 == 0);
+
+        const float value = source % 4 == 0 ? 0.0F : 100.0F;
+        const float centroid = source % 4 < 2 ? 100.0F : 50.0F;
+        REQUIRE(residual == value - centroid);
+        negative_nearest_residuals += residual < 0.0F ? 1 : 0;
+        positive_nearest_residuals += residual > 0.0F ? 1 : 0;
+    }
+    // Fixed stride over the 65,536 mismatches selected only -100 nearest residuals.
+    REQUIRE(negative_nearest_residuals > 0);
+    REQUIRE(positive_nearest_residuals > 0);
+}
+
+TEST_CASE("BucketDataCell samples nearest residuals within the PQ prefix", "[ut][BucketDataCell]") {
+    auto allocator = std::make_shared<BoundedBucketAllocator>();
+    constexpr int64_t dim = 1;
+    constexpr uint64_t count = 65536;
+    constexpr uint64_t bucket_count = 2;
+    const std::string quantizer_type = GENERATE("pq", "pqfs");
+    CAPTURE(quantizer_type);
+    std::vector<float> vectors(count, 0.0F);
+    for (uint64_t i = 0; i < count; ++i) {
+        const uint64_t kind = i % 10;
+        vectors[i] = kind < 5 ? 0.0F : (kind < 9 ? 10.0F : 100.0F);
+    }
+
+    JsonType param_json;
+    JsonType io_json;
+    io_json["type"].SetString("memory_io");
+    param_json["io_params"].SetJson(io_json);
+    param_json["quantization_params"].SetJson(
+        JsonType::Parse(quantizer_type == "pq" ? R"({"type": "pq", "pq_dim": 1, "pq_bits": 8})"
+                                               : R"({"type": "pqfs", "pq_dim": 1})"));
+    param_json["buckets_count"].SetInt(bucket_count);
+    param_json["use_residual"].SetBool(true);
+    auto param = std::make_shared<BucketDataCellParameter>();
+    param->FromJson(param_json);
+
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto bucket = BucketInterface::MakeInstance(param, common_param);
+    bucket->SetStrategy(
+        std::make_shared<MixedResidualPartitionStrategy>(common_param, bucket_count));
+    // The old temporary held 2 * count rows although PQ/PQFS consume at most
+    // count rows here. Reject that exact allocation without bounding trainer workspaces.
+    allocator->rejected_size = 2 * count * dim * sizeof(float);
+    bucket->Train(vectors.data(), count);
+    REQUIRE(allocator->rejected == 0);
+
+    // Build assigns 10 to centroid 28 (residual -18), but Add routes it to
+    // centroid 0 (residual +10). The latter used to start after the PQ prefix.
+    const float added = 10.0F;
+    bucket->InsertVector(&added, 0, 0);
+    bucket->Package();
+    auto computer = bucket->FactoryComputer(&added);
+    REQUIRE(std::abs(bucket->QueryOneById(computer, 0, 0)) < 1e-3F);
+}
+
 TEST_CASE("BucketDataCell batch query preserves residual correction", "[ut][BucketDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     constexpr int64_t dim = 8;
@@ -1380,6 +1876,59 @@ TEST_CASE("RaBitQ split bucket supports optimized build",
     REQUIRE(optimized->BeginOptimizedBuild(context, count));
     optimized->AbortOptimizedBuild();
     REQUIRE_FALSE(optimized->IsOptimizedBuildActive());
+}
+
+TEST_CASE("RaBitQ split residual training uses build and nearest assignments",
+          "[ut][BucketDataCell][rabitq_split][residual]") {
+    auto allocator = std::make_shared<BoundedBucketAllocator>();
+    constexpr uint64_t dim = 16;
+    constexpr uint64_t training_count = 64;
+    constexpr uint64_t bucket_count = 2;
+    auto vectors = fixtures::generate_vectors(training_count, dim);
+    auto param = std::make_shared<BucketDataCellParameter>();
+    param->FromJson(JsonType::Parse(R"({
+        "io_params": { "type": "memory_io" },
+        "quantization_params": {
+            "type": "rabitq",
+            "rabitq_version": "split",
+            "rabitq_bits_per_dim_query": 32,
+            "rabitq_bits_per_dim_base": 8,
+            "rabitq_bits_per_dim_filter": 1
+        },
+        "buckets_count": 2,
+        "use_residual": true
+    })"));
+
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto bucket = BucketInterface::MakeInstance(param, common_param);
+    auto strategy = std::make_shared<BuildAssignedPartitionStrategy>(
+        common_param, bucket_count, /*centroid_scale=*/5000.0F);
+    bucket->SetStrategy(strategy);
+    allocator->capture_size = 2 * training_count * dim * sizeof(float);
+    bucket->Train(vectors.data(), training_count);
+
+    // Every row has a different Build and nearest route, so training must fetch
+    // both centroids per row. Rebuilding residual query transforms may add more.
+    REQUIRE(strategy->GetClassifyRequestCount() == 1);
+    REQUIRE(strategy->GetCentroidRequestCount() >= 2 * training_count);
+
+    // Check the actual quantizer input, not just the classification counters: Build residuals
+    // occupy the prefix and each nearest residual is appended at count + i against centroid 0.
+    Vector<float> nearest_centroid(dim, allocator.get());
+    Vector<float> build_centroid(dim, allocator.get());
+    strategy->GetCentroid(0, nearest_centroid);
+    strategy->GetCentroid(1, build_centroid);
+    std::vector<float> expected(2 * training_count * dim);
+    for (uint64_t i = 0; i < training_count; ++i) {
+        for (uint64_t d = 0; d < dim; ++d) {
+            expected[i * dim + d] = vectors[i * dim + d] - build_centroid[d];
+            expected[(training_count + i) * dim + d] = vectors[i * dim + d] - nearest_centroid[d];
+        }
+    }
+    REQUIRE(allocator->captured_values == expected);
 }
 
 TEST_CASE("RaBitQ split bucket scan spills computed masks above 256 blocks",

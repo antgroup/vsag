@@ -206,8 +206,15 @@ IVF::add(const DatasetPtr& base, bool try_optimized_build) {
     const auto* attr_sets = base->GetAttributeSets();
     const auto* extra_info = base->GetExtraInfos();
     const auto extra_info_size = base->GetExtraInfoSize();
+    // The first Add of a fresh Build is the initial bucket assignment the
+    // partition strategies can refine (issue #2870); every other Add routes to
+    // the nearest buckets.
+    const bool initial_bucket_assignment = try_optimized_build and this->total_elements_ == 0;
     auto buckets =
-        partition_strategy_->ClassifyDatas(vectors, num_element, buckets_per_data_, nullptr);
+        initial_bucket_assignment
+            ? partition_strategy_->ClassifyDatasForBuild(
+                  vectors, num_element, buckets_per_data_, nullptr)
+            : partition_strategy_->ClassifyDatas(vectors, num_element, buckets_per_data_, nullptr);
 
     int64_t current_num;
     bool need_cal_memory_usage = false;

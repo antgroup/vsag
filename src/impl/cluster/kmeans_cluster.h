@@ -50,6 +50,8 @@ struct KMeansGpuConfig {
 
 class KMeansCluster {
 public:
+    static constexpr uint64_t THRESHOLD_FOR_HGRAPH = 10000ULL;
+
     explicit KMeansCluster(int32_t dim,
                            Allocator* allocator,
                            SafeThreadPoolPtr thread_pool = nullptr,
@@ -99,8 +101,6 @@ private:
     const int32_t dim_{0};
 
     const KMeansGpuConfig gpu_config_{};
-
-    static constexpr uint64_t THRESHOLD_FOR_HGRAPH = 10000ULL;
 };
 
 }  // namespace vsag

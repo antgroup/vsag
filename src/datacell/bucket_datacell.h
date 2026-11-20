@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cstring>
 #include <limits>
+#include <random>
 #include <shared_mutex>
 #include <type_traits>
 
@@ -629,24 +630,178 @@ void
 BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
     Vector<float> train_data_buffer(allocator_);
     if (use_residual_) {
-        auto data_ptr = static_cast<const float*>(data);
-        auto dim = this->quantizer_->GetDim();
-        train_data_buffer.resize(count * dim);
+        const auto* original_data_ptr = static_cast<const float*>(data);
+        auto data_ptr = original_data_ptr;
+        const uint64_t dim = static_cast<uint64_t>(this->quantizer_->GetDim());
+        const bool train_nearest = strategy_->HasDistinctBuildAssignment();
+        bool prefix_limited = false;
+        bool scalar_limited = false;
+        if (train_nearest) {
+            const auto quantizer_name = this->GetQuantizerName();
+            prefix_limited = quantizer_name == QUANTIZATION_TYPE_VALUE_PQ or
+                             quantizer_name == QUANTIZATION_TYPE_VALUE_PQFS;
+            scalar_limited = quantizer_name == QUANTIZATION_TYPE_VALUE_SQ8 or
+                             quantizer_name == QUANTIZATION_TYPE_VALUE_SQ4 or
+                             quantizer_name == QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM or
+                             quantizer_name == QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM;
+        }
+        const uint64_t buffer_factor = train_nearest ? 2 : 1;
+        if (dim == 0 or count > std::numeric_limits<uint64_t>::max() / dim / buffer_factor) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "residual training size overflow");
+        }
+        if (metric_ == MetricType::METRIC_TYPE_COSINE or not train_nearest) {
+            // Cosine classification needs a normalized corpus. Other single-route training can
+            // write its residuals immediately; dual-route L2/IP allocates after classification.
+            train_data_buffer.resize(count * dim);
+        }
         if (metric_ == MetricType::METRIC_TYPE_COSINE) {
-            for (int i = 0; i < count; ++i) {
+            for (uint64_t i = 0; i < count; ++i) {
                 Normalize(data_ptr + i * dim, train_data_buffer.data() + i * dim, dim);
             }
             data_ptr = train_data_buffer.data();
         }
         Vector<float> centroid(this->quantizer_->GetDim(), allocator_);
-        auto buckets = strategy_->ClassifyDatas(data_ptr, count, 1, nullptr);
-        for (int i = 0; i < count; ++i) {
-            strategy_->GetCentroid(buckets[i], centroid);
-            for (int j = 0; j < dim; ++j) {
-                train_data_buffer[i * dim + j] = data_ptr[i * dim + j] - centroid[j];
+        auto build_buckets = strategy_->ClassifyDatasForBuild(data_ptr, count, 1, nullptr);
+        uint64_t train_count = count;
+        if (train_nearest) {
+            // Balanced Build uses capacity-constrained assignments, while later Add
+            // calls use nearest-centroid routing. Only this path needs both residual
+            // populations and the corresponding second classification pass.
+            auto nearest_buckets = strategy_->ClassifyDatas(data_ptr, count, 1, nullptr);
+            Vector<uint64_t> nearest_rows(allocator_);
+            if (prefix_limited or scalar_limited) {
+                for (uint64_t i = 0; i < count; ++i) {
+                    if (build_buckets[i] != nearest_buckets[i]) {
+                        nearest_rows.emplace_back(i);
+                    }
+                }
+                const uint64_t max_train_count = prefix_limited ? 65536 : 100000;
+                const bool sample_populations = count + nearest_rows.size() > max_train_count;
+                uint64_t build_samples = count;
+                uint64_t nearest_samples = static_cast<uint64_t>(nearest_rows.size());
+                if (sample_populations) {
+                    // PQ/PQFS retain only their first 65,536 rows, while scalar quantizers
+                    // sample 100,000 rows. Budget both populations before either limit can
+                    // discard appended nearest residuals.
+                    build_samples = std::min(count, max_train_count / 2);
+                    nearest_samples = std::min(static_cast<uint64_t>(nearest_rows.size()),
+                                               max_train_count - build_samples);
+                    build_samples = std::min(count, max_train_count - nearest_samples);
+                }
+                train_count = build_samples + nearest_samples;
+                // The sampled rows are re-derived from the original input. Release
+                // any normalized classification copy before allocating only the rows
+                // that the sample-limited quantizer will actually consume.
+                Vector<float>(allocator_).swap(train_data_buffer);
+                train_data_buffer.resize(train_count * dim);
+                Vector<float> normalized_row(dim, allocator_);
+                auto write_residual =
+                    [&](uint64_t destination, uint64_t source, BucketIdType bucket) {
+                        const float* src = original_data_ptr + source * dim;
+                        if (metric_ == MetricType::METRIC_TYPE_COSINE) {
+                            Normalize(src, normalized_row.data(), dim);
+                            src = normalized_row.data();
+                        }
+                        strategy_->GetCentroid(bucket, centroid);
+                        for (uint64_t j = 0; j < dim; ++j) {
+                            train_data_buffer[destination * dim + j] = src[j] - centroid[j];
+                        }
+                    };
+                std::mt19937_64 random(0x524553494455414cULL);
+                auto for_each_sample = [&](bool should_sample,
+                                           uint64_t sample_count,
+                                           uint64_t population_count,
+                                           auto write_sample) {
+                    for (uint64_t i = 0; i < sample_count; ++i) {
+                        write_sample(i, i);
+                    }
+                    if (not should_sample) {
+                        return;
+                    }
+                    // Use the residual buffer itself as a reservoir. Every subset has the
+                    // same probability, without fixed-stride phase aliases, duplicate rows,
+                    // or any sampling allocation beyond the existing training budget.
+                    for (uint64_t i = sample_count; i < population_count; ++i) {
+                        std::uniform_int_distribution<uint64_t> select(0, i);
+                        const uint64_t selected = select(random);
+                        if (selected < sample_count) {
+                            write_sample(selected, i);
+                        }
+                    }
+                };
+                // Without nearest-only rows, retain the original PQ prefix. Scalar training
+                // already sampled a lone population, so reservoir-sample it here instead of
+                // silently reducing it to a prefix.
+                const bool sample_build =
+                    sample_populations && (nearest_samples != 0 or scalar_limited);
+                for_each_sample(
+                    sample_build, build_samples, count, [&](uint64_t destination, uint64_t source) {
+                        write_residual(destination, source, build_buckets[source]);
+                    });
+                for_each_sample(sample_populations,
+                                nearest_samples,
+                                nearest_rows.size(),
+                                [&](uint64_t destination, uint64_t nearest) {
+                                    const uint64_t source = nearest_rows[nearest];
+                                    write_residual(build_samples + destination,
+                                                   source,
+                                                   nearest_buckets[source]);
+                                });
+            } else {
+                // Keep complete populations when they fit. Allocate only rows whose routes
+                // disagree in addition to the Build corpus; cosine retains its normalized prefix.
+                for (uint64_t i = 0; i < count; ++i) {
+                    if (build_buckets[i] != nearest_buckets[i]) {
+                        ++train_count;
+                    }
+                }
+                const bool regrow_normalized =
+                    metric_ == MetricType::METRIC_TYPE_COSINE and train_count > count;
+                if (regrow_normalized) {
+                    // Do not let vector growth hold the old and new corpus allocations at once.
+                    Vector<float>(allocator_).swap(train_data_buffer);
+                }
+                train_data_buffer.resize(train_count * dim);
+                if (metric_ == MetricType::METRIC_TYPE_COSINE) {
+                    if (regrow_normalized) {
+                        for (uint64_t i = 0; i < count; ++i) {
+                            Normalize(original_data_ptr + i * dim,
+                                      train_data_buffer.data() + i * dim,
+                                      dim);
+                        }
+                    }
+                    data_ptr = train_data_buffer.data();
+                }
+                // Each nearest extra is written before its normalized source row is overwritten
+                // by the Build residual.
+                uint64_t nearest_offset = count;
+                for (uint64_t i = 0; i < count; ++i) {
+                    if (build_buckets[i] != nearest_buckets[i]) {
+                        strategy_->GetCentroid(nearest_buckets[i], centroid);
+                        for (uint64_t j = 0; j < dim; ++j) {
+                            train_data_buffer[nearest_offset * dim + j] =
+                                data_ptr[i * dim + j] - centroid[j];
+                        }
+                        ++nearest_offset;
+                    }
+                    strategy_->GetCentroid(build_buckets[i], centroid);
+                    for (uint64_t j = 0; j < dim; ++j) {
+                        train_data_buffer[i * dim + j] = data_ptr[i * dim + j] - centroid[j];
+                    }
+                }
+            }
+        } else {
+            // Ordinary kmeans/random strategies have identical Build and Add routes:
+            // retain the previous single-classification, single-buffer behavior.
+            for (uint64_t i = 0; i < count; ++i) {
+                strategy_->GetCentroid(build_buckets[i], centroid);
+                for (uint64_t j = 0; j < dim; ++j) {
+                    train_data_buffer[i * dim + j] = data_ptr[i * dim + j] - centroid[j];
+                }
             }
         }
         data = train_data_buffer.data();
+        count = train_count;
     }
     this->quantizer_->Train(reinterpret_cast<const float*>(data), count);
 }

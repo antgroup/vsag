@@ -201,3 +201,72 @@ TEST_CASE("IVF Partition Strategy GPU Settings Do Not Affect Compatibility",
     REQUIRE(host->CheckCompatibility(device));
     REQUIRE(device->CheckCompatibility(host));
 }
+
+TEST_CASE("IVF Partition Strategy Balanced KMeans Train Type",
+          "[ut][IVFPartitionStrategyParameters]") {
+    // Issue #2870: "balanced_kmeans" is a first-class ivf_train_type value that
+    // parses, serializes back to its own name, and keeps the defaults of the
+    // existing trainers untouched.
+    auto param = std::make_shared<vsag::IVFPartitionStrategyParameters>();
+    param->FromString(R"({"partition_strategy_type": "ivf", "ivf_train_type": "balanced_kmeans"})");
+    REQUIRE(param->partition_train_type ==
+            vsag::IVFNearestPartitionTrainerType::BalancedKMeansTrainer);
+
+    const auto dumped = param->ToJson();
+    REQUIRE(dumped[vsag::IVF_TRAIN_TYPE_KEY].GetString() == "balanced_kmeans");
+
+    // The dump round-trips: a reader sees the same trainer.
+    auto reloaded = std::make_shared<vsag::IVFPartitionStrategyParameters>();
+    reloaded->FromJson(dumped);
+    REQUIRE(reloaded->partition_train_type ==
+            vsag::IVFNearestPartitionTrainerType::BalancedKMeansTrainer);
+    vsag::ParameterTest::TestToJson(param);
+
+    // The trainer is a training choice, not a stored-layout difference, so it
+    // does not split compatibility - as for kmeans vs random.
+    auto plain = std::make_shared<vsag::IVFPartitionStrategyParameters>();
+    plain->FromString(R"({"partition_strategy_type": "ivf", "ivf_train_type": "kmeans"})");
+    auto balanced = std::make_shared<vsag::IVFPartitionStrategyParameters>();
+    balanced->FromString(
+        R"({"partition_strategy_type": "ivf", "ivf_train_type": "balanced_kmeans"})");
+    REQUIRE(plain->CheckCompatibility(balanced));
+    REQUIRE(balanced->CheckCompatibility(plain));
+
+    // The resolved iteration count applies to the balanced trainer as well:
+    // it shares the kmeans_iter_count knob with the plain kmeans trainer.
+    auto iter_param = std::make_shared<vsag::IVFPartitionStrategyParameters>();
+    iter_param->FromString(
+        R"({"partition_strategy_type": "ivf", "ivf_train_type": "balanced_kmeans",
+            "kmeans_iter_count": 9})");
+    REQUIRE(iter_param->partition_train_type ==
+            vsag::IVFNearestPartitionTrainerType::BalancedKMeansTrainer);
+    REQUIRE(iter_param->GetKMeansIterCount() == 9);
+    REQUIRE(iter_param->ToJson()[vsag::IVF_KMEANS_ITER_COUNT_KEY].GetInt() == 9);
+}
+
+TEST_CASE("IVF Partition Strategy Rejects Unknown and Incompatible Train Types",
+          "[ut][IVFPartitionStrategyParameters]") {
+    // An unknown trainer name must be refused with a clear invalid-argument
+    // error instead of silently training with the default (issue #2870).
+    auto param = std::make_shared<vsag::IVFPartitionStrategyParameters>();
+    REQUIRE_THROWS(
+        param->FromString(R"({"partition_strategy_type": "ivf", "ivf_train_type": "kmeanz"})"));
+
+    // GNO-IMI always trains plain k-means at both levels; the balanced
+    // constraint belongs to the single-level IVF strategy.
+    REQUIRE_THROWS(param->FromString(R"(
+    {
+        "partition_strategy_type": "gno_imi",
+        "ivf_train_type": "balanced_kmeans",
+        "gno_imi": {
+            "first_order_buckets_count": 20,
+            "second_order_buckets_count": 10
+        }
+    })"));
+
+    // The existing names keep parsing with both strategies exactly as before.
+    REQUIRE_NOTHROW(param->FromString(R"({"partition_strategy_type": "ivf",
+                                           "ivf_train_type": "kmeans"})"));
+    REQUIRE_NOTHROW(param->FromString(R"({"partition_strategy_type": "ivf",
+                                          "ivf_train_type": "random"})"));
+}
