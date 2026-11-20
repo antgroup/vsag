@@ -477,8 +477,8 @@ search_clique_view(const CliqueDataCellSearchView& view,
             const uint64_t end = view.p_node_to_cid[id + 1];
             for (uint64_t pos = view.p_node_to_cid[id]; pos < end; ++pos) {
                 constexpr uint64_t lookahead = 4;
-                // Fetch row metadata and epoch first, then issue just one member-line hint
-                // for a nonempty, as-yet-unvisited row closer to the traversal cursor.
+                // Fetch offsets and visit marks first, then the leading cache lines
+                // of an unvisited member list four cliques ahead.
                 if (pos + 2 * lookahead < end) {
                     const auto cid = view.node_to_cids[pos + 2 * lookahead];
                     if (cid < view.total_clique_count) {
@@ -489,9 +489,14 @@ search_clique_view(const CliqueDataCellSearchView& view,
                 if (pos + lookahead < end) {
                     const auto cid = view.node_to_cids[pos + lookahead];
                     if (cid < view.total_clique_count and not visited_cliques.Get(cid)) {
-                        const auto begin = view.p_maxc[cid];
-                        if (begin < view.p_maxc[cid + 1]) {
-                            __builtin_prefetch(view.maxcs + begin, 0, 1);
+                        constexpr uint64_t members_per_line = 64 / sizeof(InnerIdType);
+                        constexpr uint64_t max_lines = 5;
+                        const uint64_t begin = view.p_maxc[cid];
+                        const uint64_t member_end = view.p_maxc[cid + 1];
+                        for (uint64_t offset = 0;
+                             offset < max_lines * members_per_line and begin + offset < member_end;
+                             offset += members_per_line) {
+                            __builtin_prefetch(view.maxcs + begin + offset, 0, 1);
                         }
                     }
                 }

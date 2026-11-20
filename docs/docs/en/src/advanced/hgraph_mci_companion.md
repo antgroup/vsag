@@ -572,8 +572,11 @@ selecting the next parent. This route passes base codes to the distance backend;
 precise codes are accessed only by final reorder.
 
 Set `mci_optimize_clique_expansion: true` to optimize static CSR traversal on this
-path. It prefetches member data four cliques ahead and, when packed filtering
-is active, uses the query’s private bitmap to discard already visited members earlier. The option defaults to `false` and is ignored outside the MCI
+path. Four cliques ahead, it prefetches up to five cache lines of member IDs at
+64-byte intervals from the start of the row. Short rows receive only the hints
+whose addresses fall inside the row. When packed filtering is active, the query’s
+private bitmap discards already visited members earlier. The option defaults to
+`false` and is ignored outside the MCI
 memory-quantization path. It does not change seed selection, the scoring backend,
 or final reorder, and does not require rebuilding the index.
 

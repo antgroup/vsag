@@ -100,7 +100,7 @@ TEST_CASE("MCI resident base batches packed overlapping cliques without precise 
     base->Train(vectors.data(), count);
     base->BatchInsertVector(vectors.data(), count, nullptr);
     auto cliques = std::make_shared<CliqueDataCell>(allocator.get());
-    Vector<InnerIdType> offsets({0, 193, 324, 326, 328, 330, 332}, allocator.get());
+    Vector<InnerIdType> offsets({0, 193, 324, 326, 328, 330, 332, 397}, allocator.get());
     Vector<InnerIdType> members(allocator.get());
     Vector<InnerIdType> inverse_offsets(allocator.get());
     inverse_offsets.push_back(0);
@@ -111,10 +111,14 @@ TEST_CASE("MCI resident base batches packed overlapping cliques without precise 
     for (InnerIdType id = 128; id < count; ++id) {
         members.push_back(id);
     }
-    // The seed has five incident rows; the fifth is the first four-clique prefetch target.
+    // From seed 0, the four-clique lookahead reaches a two-member row and then a
+    // 65-member row: only the latter contains all five member prefetch targets.
     for (int row = 0; row < 4; ++row) {
         members.push_back(0);
         members.push_back(130);
+    }
+    for (InnerIdType id = 0; id < 65; ++id) {
+        members.push_back(id);
     }
     for (InnerIdType id = 0; id < count; ++id) {
         if (id < 193) {
@@ -127,6 +131,9 @@ TEST_CASE("MCI resident base batches packed overlapping cliques without precise 
             for (InnerIdType cid = 2; cid < 6; ++cid) {
                 inverse.push_back(cid);
             }
+        }
+        if (id < 65) {
+            inverse.push_back(6);
         }
         inverse_offsets.push_back(inverse.size());
     }
@@ -173,7 +180,7 @@ TEST_CASE("MCI resident base batches packed overlapping cliques without precise 
     QueryContext ctx{.alloc = allocator.get(), .stats = &stats};
     const float query = 260.125F;
     auto result = MCISearcher(common).Search(cliques, base, &query, search, params, &ctx);
-    REQUIRE(stats.hops.load() == 6);
+    REQUIRE(stats.hops.load() == 7);
     REQUIRE(stats.dist_cmp.load() == expected.size());
     REQUIRE(stats.io_cnt.load() == 0);
     REQUIRE(result->Size() == expected.size());
