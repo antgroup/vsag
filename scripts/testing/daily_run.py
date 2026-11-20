@@ -189,6 +189,37 @@ def phase_diagnostics(path):
     return result
 
 
+def timeout_has_test_failure(report, log):
+    # A terminated Catch2 process may leave a partial XML report. Keep failures
+    # written before termination and ignore Catch2's synthetic SIGTERM assertion.
+    xml = report.read_text(errors="replace") if report.is_file() else ""
+    sanitizer = r"(?:ERROR: (?:Address|Leak|Thread|Memory)Sanitizer|AddressSanitizer:DEADLYSIGNAL|:\d+:\d+: runtime error:)"
+    if re.search(sanitizer, log.read_text(errors="replace")) or re.search(sanitizer, xml):
+        return True
+    termination = "SIGTERM - Termination request signal"
+    parser = ET.XMLPullParser(events=("start", "end"))
+    parser.feed(xml)
+    incomplete_failure = False
+    try:
+        for event, element in parser.read_events():
+            if element.tag in ("Failure", "Exception"):
+                return True
+            if element.tag == "Expression" and element.get("success") == "false":
+                if event == "start":
+                    incomplete_failure = True
+                else:
+                    fatal = element.find("FatalErrorCondition")
+                    if fatal is None or (fatal.text or "").strip() != termination:
+                        return True
+                    incomplete_failure = False
+            if (event == "end" and element.tag == "FatalErrorCondition"
+                    and (element.text or "").strip() != termination):
+                return True
+    except ET.ParseError:
+        pass  # The last element can be incomplete after a process-group kill.
+    return incomplete_failure
+
+
 def run_unit(unit, number, output, timeout, cancelled, deadline=None):
     directory = output / ("case-%05d" % number)
     directory.mkdir()
@@ -199,6 +230,7 @@ def run_unit(unit, number, output, timeout, cancelled, deadline=None):
     record = {"key": unit["key"], "status": "failed", "seconds": 0, "directory": directory.name}
     try:
         listing_timeout = 120
+        timeout_scope = "case"
         if deadline is not None:
             remaining = (deadline - dt.datetime.now(dt.timezone.utc)).total_seconds()
             if remaining <= 0:
@@ -206,7 +238,6 @@ def run_unit(unit, number, output, timeout, cancelled, deadline=None):
                 dp.write(directory / "result.json", record)
                 return record
             listing_timeout = min(120, max(1, math.floor(remaining)))
-            timeout = min(timeout, max(1, math.floor(remaining)))
         selected = shards.listing(binary, shards.exact_filter([t["name"] for t in unit["tests"]]),
                                   unit["seed"], directory / "selection", listing_timeout, cancelled)
         if Counter(map(shards.case_identity, selected)) != Counter(map(shards.case_identity, unit["tests"])):
@@ -215,7 +246,9 @@ def run_unit(unit, number, output, timeout, cancelled, deadline=None):
             remaining = (deadline - dt.datetime.now(dt.timezone.utc)).total_seconds()
             if remaining <= 0:
                 raise dp.PlanError("Execution window exhausted during test listing")
-            timeout = min(timeout, max(1, math.floor(remaining)))
+            if remaining <= timeout:
+                timeout_scope = "window"
+                timeout = max(1, math.floor(remaining))
         report = directory / "report.xml"
         command = ["env", "VSAG_DAILY_EVENTS=1", "VSAG_TEST_SEED=" + str(unit["seed"]),
                    "VSAG_DAILY_PHASE_FILE=" + str(directory / "phases.jsonl")]
@@ -223,7 +256,12 @@ def run_unit(unit, number, output, timeout, cancelled, deadline=None):
         command += [str(binary), shards.exact_filter([t["name"] for t in unit["tests"]]),
                     "--reporter", "xml", "--out", str(report), "--durations", "yes",
                     "--order", "lex", "--rng-seed", str(unit["seed"])]
-        record.update(shards.execute(command, cwd, temporary, directory / "output.log", timeout, cancelled))
+        log = directory / "output.log"
+        record.update(shards.execute(command, cwd, temporary, log, timeout, cancelled))
+        if record["status"] == "timeout":
+            record["timeout_scope"] = timeout_scope
+            if unit.get("mode") == "rotation" and timeout_scope == "case" and timeout_has_test_failure(report, log):
+                record["error"] = "Test failure recorded before timeout"
         if record["status"] not in ("timeout", "cancelled", "launch_error"):
             executed, passed, _ = shards.parse_execution_xml(report, unit["tests"])
             record["tests"] = executed
@@ -319,7 +357,14 @@ def main():
     result = dp.sealed({"schema_version": 1, "kind": "daily-result", "plan": plan,
                         "lane": args.lane, "records": records})
     dp.write(output / "daily-result.json", result)
-    return 0 if all(r["status"] == "passed" for r in records) else 1
+    units = {u["key"]: u for u in plan["selected"]}
+    blocking = False
+    for record in records:
+        if dp.advisory_rotation_timeout(plan, args.lane, units[record["key"]], record):
+            print(f"::warning::Nightly rotation timed out in {args.lane}: {record['key']}")
+        elif record["status"] != "passed":
+            blocking = True
+    return int(blocking)
 
 
 if __name__ == "__main__":
