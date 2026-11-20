@@ -216,7 +216,7 @@ pyvsag.set_logger_debug()   # 输出详细调试信息
 
 | 辅助函数 | 返回值 | 说明 |
 | --- | --- | --- |
-| `build_term_vocabulary(documents)` | `dict[str, int]` | 对所有唯一词条按字典序排序并从 `0` 开始编号，因此词表不受字典插入顺序或文档顺序影响，ID 始终落在 `uint32` 范围内。空映射会引发 `ValueError`（SINDI 无法存储空行）。 |
+| `build_term_vocabulary(documents)` | `dict[str, int]` | 对所有唯一词条按字典序排序并从 `0` 开始编号，因此词表不受字典插入顺序或文档顺序影响。ID 在辅助函数层面始终落在 `uint32` 范围内；SINDI 另行要求 `term_id_limit` 位于 `(0, 50_000_000]`，因此超过 50,000,000 个词条的词表无法直接用于 SINDI。空映射会引发 `ValueError`（SINDI 无法存储空行）。 |
 | `TermVocabulary(vocabulary)` | 可复用的映射 | 包装 `build_term_vocabulary` 的结果并只校验一次 ID。同一份词表需要转换大量查询时传入它而不是原始字典，查询转换的耗时便只与查询词条数相关，而不再随词表大小增长。 |
 | `term_weights_to_csr(documents, vocabulary)` | `(index_pointers, indices, values)` | 返回 `uint32` / `uint32` / `float32` 数组，可直接传给 `index.build(...)` 和 `index.knn_search(...)`。每行按词条 ID 排序。**空映射被拒绝**（引发 `ValueError`），因为 SINDI::add 在添加时会静默丢弃空文档，而 SINDI::KnnSearch 排斥空查询。**词表中的 ID 必须唯一**——重复 ID 会引发 `ValueError`。 |
 
@@ -241,7 +241,6 @@ index_pointers, indices, values = term_weights_to_csr(documents, vocabulary)
 
 index_params = json.dumps({
     "dtype": "sparse",
-    "dim": max(len(document) for document in documents),
     "metric_type": "ip",
     "index_param": {"term_id_limit": len(vocabulary), "window_size": 10000},
 })
@@ -270,7 +269,7 @@ result_ids, result_distances = index.knn_search(
 )
 ```
 
-注意 `dim` 表示单个向量中非零词条数的最大值，而不是词表大小；`term_id_limit` 必须覆盖最大词条 ID 加一。完整可运行示例见
+对于稀疏 SINDI 索引，`dim` 可省略，默认值为 `4096`。显式传入时只需是正整数；它既不限制单个向量中的非零词条数，也不表示词表大小。`term_id_limit` 必须覆盖最大词条 ID 加一，且取值范围为 `(0, 50_000_000]`。完整可运行示例见
 [`examples/python/109_index_sindi.py`](https://github.com/antgroup/vsag/blob/main/examples/python/109_index_sindi.py)。
 
 ## 与 C++ 库的关系

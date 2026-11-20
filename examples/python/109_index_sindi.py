@@ -108,13 +108,13 @@ def sindi_term_weight_example():
     # each row; the vocabulary printed above maps each term to its ID.
     print("  values:        ", [float(v) for v in values.tolist()])
 
-    # `dim` is the maximum number of non-zero terms per vector, not the
-    # vocabulary size. `term_id_limit` must cover the largest term ID + 1.
-    max_terms_per_document = max(len(weights) for weights in term_weights)
+    # Omit `dim` to use the sparse-index default of 4096. If supplied, it must
+    # be a positive integer; it does not limit non-zero terms per vector.
+    # `term_id_limit` covers the largest term ID + 1 and must be in
+    # (0, 50_000_000].
     index_params = json.dumps(
         {
             "dtype": "sparse",
-            "dim": max_terms_per_document,
             "metric_type": "ip",
             "index_param": {
                 "term_id_limit": max(1, len(vocabulary)),

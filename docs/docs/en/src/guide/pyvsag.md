@@ -153,7 +153,7 @@ are pure Python and only require NumPy, which `pyvsag` already uses.
 
 | Helper | Result | Notes |
 | --- | --- | --- |
-| `build_term_vocabulary(documents)` | `dict[str, int]` | Sorts the unique terms lexicographically and assigns IDs from `0`, so the vocabulary is deterministic regardless of dict insertion order or document order. IDs fit in `uint32`. Empty mappings are rejected with `ValueError` (SINDI cannot store empty rows). |
+| `build_term_vocabulary(documents)` | `dict[str, int]` | Sorts the unique terms lexicographically and assigns IDs from `0`, so the vocabulary is deterministic regardless of dict insertion order or document order. IDs fit in `uint32` at the helper layer; SINDI separately requires `term_id_limit` in `(0, 50_000_000]`, so vocabularies with more than 50,000,000 terms cannot be indexed directly. Empty mappings are rejected with `ValueError` (SINDI cannot store empty rows). |
 | `TermVocabulary(vocabulary)` | reusable mapping | Wraps a vocabulary produced by `build_term_vocabulary` and validates its IDs once. Pass it instead of the raw dict when the same vocabulary converts many queries, so query-time conversion scans the query terms rather than the whole vocabulary. |
 | `term_weights_to_csr(documents, vocabulary)` | `(index_pointers, indices, values)` | Returns `uint32` / `uint32` / `float32` arrays for `index.build(...)` and `index.knn_search(...)`. Rows are ordered by term ID. **Empty mappings are rejected** (raise `ValueError`) because SINDI::add silently drops empty documents and SINDI::KnnSearch rejects empty queries. **Vocabulary IDs must be unique** — duplicate IDs raise `ValueError`. |
 
@@ -187,7 +187,6 @@ index_pointers, indices, values = term_weights_to_csr(documents, vocabulary)
 
 index_params = json.dumps({
     "dtype": "sparse",
-    "dim": max(len(document) for document in documents),
     "metric_type": "ip",
     "index_param": {"term_id_limit": len(vocabulary), "window_size": 10000},
 })
@@ -216,9 +215,10 @@ result_ids, result_distances = index.knn_search(
 )
 ```
 
-Remember that `dim` is the maximum number of non-zero terms per vector, not
-the vocabulary size, while `term_id_limit` must cover the largest term ID plus
-one. A complete runnable version is in
+For sparse SINDI indexes, `dim` is optional and defaults to `4096`. If supplied,
+it must be a positive integer; it is not a limit on the number of non-zero terms
+per vector or the vocabulary size. `term_id_limit` must cover the largest term
+ID plus one and be in `(0, 50_000_000]`. A complete runnable version is in
 [`examples/python/109_index_sindi.py`](https://github.com/antgroup/vsag/blob/main/examples/python/109_index_sindi.py).
 
 ## Saving & Loading
