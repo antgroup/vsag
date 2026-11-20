@@ -235,7 +235,10 @@ SparseIndex::CalDistanceByIdUnsafe(Vector<uint32_t>& sorted_ids,
 float
 SparseIndex::CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
     const auto* sparse_vectors = vector->GetSparseVectors();
-    uint32_t inner_id = this->label_table_->GetIdByLabel(id);
+    auto [success, inner_id] = this->label_table_->TryGetIdByLabel(id);
+    if (not success) {
+        ThrowLabelNotFound(id);
+    }
     auto [sorted_ids, sorted_vals] = sort_sparse_vector(sparse_vectors[0]);
     return CalDistanceByIdUnsafe(sorted_ids, sorted_vals, inner_id);
 }
@@ -260,7 +263,11 @@ SparseIndex::CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
     auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
+    if (distances == nullptr and count > 0) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate distance buffer");
+    }
     result->Distances(distances);
+    std::vector<bool> validity(count, false);
 
     // key optimization: only sort once for one query
     const auto* sparse_vectors = query->GetSparseVectors();
@@ -271,10 +278,12 @@ SparseIndex::CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_
         auto [success, inner_id] = this->label_table_->TryGetIdByLabel(ids[i]);
         if (success) {
             distances[i] = CalDistanceByIdUnsafe(sorted_ids, sorted_vals, inner_id);
+            validity[i] = true;
         } else {
-            distances[i] = -1;
+            distances[i] = std::numeric_limits<float>::quiet_NaN();
         }
     }
+    AttachValids(result, validity, allocator_);
     return result;
 }
 

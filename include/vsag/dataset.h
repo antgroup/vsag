@@ -277,6 +277,31 @@ public:
     virtual int64_t
     GetExtraInfoSize() const = 0;
 
+    /**
+     * @brief Sets the per-entry validity flags of the dataset.
+     *
+     * The array has one flag per entry of the Distances() array (NumElements() * Dim() entries).
+     * It follows the same ownership rules as the other pointer-backed Dataset fields. It is used
+     * by CalDistanceById to mark which requested IDs existed at lookup time.
+     *
+     * @param valids Pointer to the validity flags.
+     * @return DatasetPtr A shared pointer to the dataset with updated valids.
+     * @note This method is non-virtual so extending the API does not change Dataset's vtable.
+     * @throws VsagException UNSUPPORTED_INDEX_OPERATION if this Dataset implementation does not
+     * support valids.
+     */
+    DatasetPtr
+    Valids(const bool* valids);
+
+    /**
+     * @brief Retrieves the per-entry validity flags of the dataset.
+     *
+     * @return const bool* Pointer to the validity flags, or nullptr when absent.
+     * @note This method is non-virtual so extending the API does not change Dataset's vtable.
+     */
+    const bool*
+    GetValids() const;
+
     /*
      * @brief Sets the Statistics for the dataset.
      *

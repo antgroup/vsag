@@ -277,11 +277,13 @@ public:
         result->Owner(true, allocator_);
         auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
         result->Distances(distances);
+        std::vector<bool> validity(count, false);
         for (int i = 0; i < count; i++) {
             auto search = label_lookup_.find(ids[i]);
             if (search == label_lookup_.end()) {
-                distances[i] = -1;
+                distances[i] = std::numeric_limits<float>::quiet_NaN();
             } else {
+                validity[i] = true;
                 InnerIdType internal_id = search->second;
                 float dist =
                     fstdistfunc_(data_point, getDataByInternalId(internal_id), dist_func_param_);
@@ -290,6 +292,16 @@ public:
             }
         }
         result->NumElements(valid_cnt);
+        if (count > 0) {
+            auto* valids = static_cast<bool*>(allocator_->Allocate(sizeof(bool) * count));
+            if (valids == nullptr) {
+                throw std::runtime_error("failed to allocate valids buffer");
+            }
+            for (int i = 0; i < count; i++) {
+                valids[i] = validity[i];
+            }
+            result->Valids(valids);
+        }
         return std::move(result);
     }
 

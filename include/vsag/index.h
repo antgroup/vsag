@@ -420,7 +420,8 @@ public:
      *
      * @param vector is the embedding of query
      * @param id is the unique identifier of the vector to be calculated in the index.
-     * @return result is the distance between the query and the vector of the given ID.
+     * @return result is the distance between the query and the vector of the given ID. Returns an
+     * error with ErrorType::INVALID_ARGUMENT if the ID does not exist or is removed.
      */
     virtual tl::expected<float, Error>
     CalcDistanceById(const float* vector, int64_t id) const {
@@ -432,7 +433,8 @@ public:
      *
      * @param vector is the embedding of query
      * @param id is the unique identifier of the vector to be calculated in the index.
-     * @return result is the distance between the query and the vector of the given ID.
+     * @return result is the distance between the query and the vector of the given ID. Returns an
+     * error with ErrorType::INVALID_ARGUMENT if the ID does not exist or is removed.
      */
     virtual tl::expected<float, Error>
     CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
@@ -445,7 +447,8 @@ public:
      * @param query is the embedding of query
      * @param ids is the unique identifier of the vector to be calculated in the index.
      * @param count is the count of ids
-     * @return result is valid distance of input ids. '-1' indicates an invalid distance.
+     * @return result is the distances of input ids. Missing or removed IDs have a NaN distance and
+     * a false entry in result->GetValids().
      */
     virtual tl::expected<DatasetPtr, Error>
     CalDistanceById(const float* query, const int64_t* ids, int64_t count) const {
@@ -458,7 +461,8 @@ public:
      * @param query is the embedding of query
      * @param ids is the unique identifier of the vector to be calculated in the index.
      * @param count is the count of ids
-     * @return result is valid distance of input ids. '-1' indicates an invalid distance.
+     * @return result is the distances of input ids. Missing or removed IDs have a NaN distance and
+     * a false entry in result->GetValids().
      */
     virtual tl::expected<DatasetPtr, Error>
     CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count) const {
