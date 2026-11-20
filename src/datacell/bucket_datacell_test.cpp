@@ -1166,6 +1166,300 @@ TEST_CASE("BucketDataCell batch insert preserves RaBitQ PCA input stride", "[ut]
     }
 }
 
+TEST_CASE("BucketDataCell append matches one-at-a-time insert", "[ut][BucketDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 37;
+    constexpr uint64_t train_count = 300;
+    constexpr BucketIdType bucket_count = 3;
+    // 900 vectors give runs of up to 300, longer than one encode block of
+    // BucketDataCell::ENCODE_BATCH_ROWS (256).
+    const uint64_t insert_count = GENERATE(40, 900);
+    auto vectors = fixtures::generate_vectors(std::max(train_count, insert_count), dim);
+    auto queries = fixtures::generate_vectors(2, dim, 89);
+
+    const std::vector<std::pair<std::string, std::string>> quantizers = {
+        {"fp32", R"({"type": "fp32"})"},
+        {"sq8", R"({"type": "sq8"})"},
+        {"sq8_uniform", R"({"type": "sq8_uniform"})"},
+        {"sq4", R"({"type": "sq4"})"},
+        {"sq4_uniform", R"({"type": "sq4_uniform"})"},
+        {"fp16", R"({"type": "fp16"})"},
+        {"bf16", R"({"type": "bf16"})"},
+        {"pq", R"({"type": "pq", "pq_dim": 37, "pq_bits": 8})"},
+        {"pqfs", R"({"type": "pqfs", "pq_dim": 37})"},
+        {"rabitq_1bit",
+         R"({"type": "rabitq", "rabitq_bits_per_dim_query": 32, "rabitq_bits_per_dim_base": 1})"},
+        {"rabitq_4bit",
+         R"({"type": "rabitq", "rabitq_bits_per_dim_query": 32, "rabitq_bits_per_dim_base": 4})"},
+    };
+    const MetricType metrics[] = {
+        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP, MetricType::METRIC_TYPE_COSINE};
+
+    for (const auto& [quantizer_name, quantizer_json] : quantizers) {
+        for (auto metric : metrics) {
+            for (bool use_residual : {false, true}) {
+                CAPTURE(insert_count, quantizer_name, static_cast<int>(metric), use_residual);
+                JsonType param_json;
+                param_json["io_params"].SetJson(JsonType::Parse(R"({"type": "memory_io"})"));
+                param_json["quantization_params"].SetJson(JsonType::Parse(quantizer_json));
+                param_json["buckets_count"].SetInt(bucket_count);
+                param_json["use_residual"].SetBool(use_residual);
+                auto param = std::make_shared<BucketDataCellParameter>();
+                param->FromJson(param_json);
+
+                IndexCommonParam common_param;
+                common_param.allocator_ = allocator;
+                common_param.dim_ = dim;
+                common_param.metric_ = metric;
+                auto make_bucket = [&]() {
+                    auto bucket = BucketInterface::MakeInstance(param, common_param);
+                    bucket->SetStrategy(std::make_shared<FixedCentroidPartitionStrategy>(
+                        common_param, bucket_count));
+                    return bucket;
+                };
+                auto incremental = make_bucket();
+                auto appended = make_bucket();
+                incremental->Train(vectors.data(), train_count);
+                incremental->ExportModel(appended);
+
+                // Vector i goes to bucket i % 3; bucket 1 receives two runs so the second run
+                // has to continue after the first.
+                std::vector<InnerIdType> expected_offsets(insert_count);
+                for (uint64_t i = 0; i < insert_count; ++i) {
+                    expected_offsets[i] =
+                        incremental->InsertVector(vectors.data() + i * dim,
+                                                  static_cast<BucketIdType>(i % bucket_count),
+                                                  static_cast<InnerIdType>(1000 + i));
+                }
+                std::vector<InnerIdType> actual_offsets(insert_count);
+                for (BucketIdType bucket_id = 0; bucket_id < bucket_count; ++bucket_id) {
+                    std::vector<uint64_t> members;
+                    for (uint64_t i = bucket_id; i < insert_count; i += bucket_count) {
+                        members.push_back(i);
+                    }
+                    const auto member_count = static_cast<uint64_t>(members.size());
+                    const uint64_t split = bucket_id == 1 ? member_count / 2 : member_count;
+                    for (auto [begin, end] :
+                         {std::pair{uint64_t{0}, split}, std::pair{split, member_count}}) {
+                        if (begin == end) {
+                            continue;
+                        }
+                        std::vector<const void*> run_vectors;
+                        std::vector<InnerIdType> run_ids;
+                        for (auto k = begin; k < end; ++k) {
+                            run_vectors.push_back(vectors.data() + members[k] * dim);
+                            run_ids.push_back(static_cast<InnerIdType>(1000 + members[k]));
+                        }
+                        std::vector<InnerIdType> run_offsets(end - begin);
+                        appended->AppendVectorsToBucket(bucket_id,
+                                                        run_vectors.data(),
+                                                        run_ids.data(),
+                                                        static_cast<InnerIdType>(end - begin),
+                                                        run_offsets.data());
+                        for (auto k = begin; k < end; ++k) {
+                            actual_offsets[members[k]] = run_offsets[k - begin];
+                        }
+                    }
+                }
+                REQUIRE(actual_offsets == expected_offsets);
+
+                const auto code_size = incremental->code_size_;
+                std::vector<uint8_t> expected_code(code_size);
+                std::vector<uint8_t> actual_code(code_size);
+                for (BucketIdType bucket_id = 0; bucket_id < bucket_count; ++bucket_id) {
+                    REQUIRE(appended->GetBucketSize(bucket_id) ==
+                            incremental->GetBucketSize(bucket_id));
+                    for (InnerIdType offset = 0; offset < incremental->GetBucketSize(bucket_id);
+                         ++offset) {
+                        REQUIRE(appended->GetInnerIds(bucket_id)[offset] ==
+                                incremental->GetInnerIds(bucket_id)[offset]);
+                        incremental->GetCodesById(bucket_id, offset, expected_code.data());
+                        appended->GetCodesById(bucket_id, offset, actual_code.data());
+                        REQUIRE(expected_code == actual_code);
+                    }
+                }
+                // PQFS queries read its packed layout; Package is a no-op for the others.
+                incremental->Package();
+                appended->Package();
+                for (uint64_t query_id = 0; query_id < 2; ++query_id) {
+                    auto expected_computer =
+                        incremental->FactoryComputer(queries.data() + query_id * dim);
+                    auto actual_computer =
+                        appended->FactoryComputer(queries.data() + query_id * dim);
+                    for (uint64_t i = 0; i < insert_count; ++i) {
+                        const auto bucket_id = static_cast<BucketIdType>(i % bucket_count);
+                        REQUIRE(
+                            appended->QueryOneById(actual_computer, bucket_id, actual_offsets[i]) ==
+                            incremental->QueryOneById(
+                                expected_computer, bucket_id, expected_offsets[i]));
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("BucketDataCell append stores each run with one write", "[ut][BucketDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 8;
+    constexpr BucketIdType bucket_count = 3;
+    constexpr uint64_t base_count = 5;
+    constexpr uint64_t code_size = dim * sizeof(float);
+    auto vectors = fixtures::generate_vectors(base_count, dim);
+    auto state = std::make_shared<TrackingWriteIOState>();
+    auto io_param = std::make_shared<TrackingWriteIOParameter>(state);
+    auto quantizer_param = std::make_shared<FP32QuantizerParameter>();
+
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto bucket = std::make_shared<
+        BucketDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, TrackingWriteIO>>(
+        quantizer_param, io_param, common_param, bucket_count);
+    bucket->Train(vectors.data(), base_count);
+
+    std::vector<const void*> first_vectors{vectors.data(), vectors.data() + dim, vectors.data()};
+    std::vector<InnerIdType> first_ids{10, 11, 12};
+    std::vector<InnerIdType> first_offsets(first_ids.size());
+    bucket->AppendVectorsToBucket(
+        2, first_vectors.data(), first_ids.data(), first_ids.size(), first_offsets.data());
+    std::vector<const void*> second_vectors{vectors.data() + 4 * dim, vectors.data() + 3 * dim};
+    std::vector<InnerIdType> second_ids{13, 14};
+    std::vector<InnerIdType> second_offsets(second_ids.size());
+    bucket->AppendVectorsToBucket(
+        2, second_vectors.data(), second_ids.data(), second_ids.size(), second_offsets.data());
+
+    REQUIRE(first_offsets == std::vector<InnerIdType>{0, 1, 2});
+    REQUIRE(second_offsets == std::vector<InnerIdType>{3, 4});
+    REQUIRE(state->writes_by_bucket[0].empty());
+    REQUIRE(state->writes_by_bucket[1].empty());
+    REQUIRE(state->writes_by_bucket[2].size() == 2);
+    REQUIRE(state->writes_by_bucket[2][0].size == 3 * code_size);
+    REQUIRE(state->writes_by_bucket[2][0].offset == 0);
+    REQUIRE(state->writes_by_bucket[2][1].size == 2 * code_size);
+    REQUIRE(state->writes_by_bucket[2][1].offset == 3 * code_size);
+
+    const std::vector<const void*> stored{vectors.data(),
+                                          vectors.data() + dim,
+                                          vectors.data(),
+                                          vectors.data() + 4 * dim,
+                                          vectors.data() + 3 * dim};
+    std::vector<uint8_t> actual(code_size);
+    REQUIRE(bucket->GetBucketSize(2) == stored.size());
+    for (InnerIdType offset = 0; offset < stored.size(); ++offset) {
+        REQUIRE(bucket->GetInnerIds(2)[offset] == 10 + offset);
+        bucket->GetCodesById(2, offset, actual.data());
+        REQUIRE(std::memcmp(actual.data(), stored[offset], code_size) == 0);
+    }
+}
+
+TEST_CASE("BucketDataCell append validates before writing", "[ut][BucketDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 4;
+    constexpr BucketIdType bucket_count = 2;
+    auto vectors = fixtures::generate_vectors(2, dim);
+    auto state = std::make_shared<TrackingWriteIOState>();
+    auto io_param = std::make_shared<TrackingWriteIOParameter>(state);
+    auto quantizer_param = std::make_shared<FP32QuantizerParameter>();
+
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto bucket = std::make_shared<
+        BucketDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, TrackingWriteIO>>(
+        quantizer_param, io_param, common_param, bucket_count);
+    bucket->Train(vectors.data(), 2);
+
+    std::vector<const void*> run_vectors{vectors.data(), vectors.data() + dim};
+    std::vector<InnerIdType> run_ids{1, 2};
+    std::vector<InnerIdType> offsets(2);
+    auto require_unchanged = [&]() {
+        for (BucketIdType bucket_id = 0; bucket_id < bucket_count; ++bucket_id) {
+            REQUIRE(state->writes_by_bucket[bucket_id].empty());
+            REQUIRE(bucket->GetBucketSize(bucket_id) == 0);
+        }
+    };
+
+    REQUIRE_NOTHROW(bucket->AppendVectorsToBucket(0, nullptr, nullptr, 0, nullptr));
+    require_unchanged();
+    REQUIRE_THROWS(bucket->AppendVectorsToBucket(0, nullptr, run_ids.data(), 2, offsets.data()));
+    REQUIRE_THROWS(
+        bucket->AppendVectorsToBucket(0, run_vectors.data(), nullptr, 2, offsets.data()));
+    REQUIRE_THROWS(
+        bucket->AppendVectorsToBucket(0, run_vectors.data(), run_ids.data(), 2, nullptr));
+    REQUIRE_THROWS(bucket->AppendVectorsToBucket(
+        bucket_count, run_vectors.data(), run_ids.data(), 2, offsets.data()));
+    REQUIRE_THROWS(
+        bucket->AppendVectorsToBucket(-1, run_vectors.data(), run_ids.data(), 2, offsets.data()));
+    require_unchanged();
+
+    auto null_vector = run_vectors;
+    null_vector[1] = nullptr;
+    REQUIRE_THROWS(
+        bucket->AppendVectorsToBucket(0, null_vector.data(), run_ids.data(), 2, offsets.data()));
+    auto empty_id = run_ids;
+    empty_id[1] = std::numeric_limits<InnerIdType>::max();
+    REQUIRE_THROWS(
+        bucket->AppendVectorsToBucket(0, run_vectors.data(), empty_id.data(), 2, offsets.data()));
+    require_unchanged();
+}
+
+TEST_CASE("BucketInterface default append inserts one vector at a time",
+          "[ut][BucketDataCell][rabitq_split]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 32;
+    constexpr uint64_t count = 9;
+    auto vectors = fixtures::generate_vectors(64, dim);
+    auto make_bucket = [&]() {
+        auto param = std::make_shared<BucketDataCellParameter>();
+        param->FromJson(JsonType::Parse(R"({
+            "io_params": { "type": "memory_io" },
+            "quantization_params": {
+                "type": "rabitq",
+                "rabitq_version": "split",
+                "rabitq_bits_per_dim_query": 32,
+                "rabitq_bits_per_dim_base": 4,
+                "rabitq_bits_per_dim_filter": 1
+            },
+            "buckets_count": 2
+        })"));
+        IndexCommonParam common_param;
+        common_param.allocator_ = allocator;
+        common_param.dim_ = dim;
+        common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+        return BucketInterface::MakeInstance(param, common_param);
+    };
+    auto incremental = make_bucket();
+    auto appended = make_bucket();
+    incremental->Train(vectors.data(), 64);
+    incremental->ExportModel(appended);
+
+    std::vector<const void*> run_vectors;
+    std::vector<InnerIdType> run_ids;
+    std::vector<InnerIdType> expected_offsets;
+    for (uint64_t i = 0; i < count; ++i) {
+        run_vectors.push_back(vectors.data() + i * dim);
+        run_ids.push_back(static_cast<InnerIdType>(i + 5));
+        expected_offsets.push_back(incremental->InsertVector(
+            vectors.data() + i * dim, 1, static_cast<InnerIdType>(i + 5)));
+    }
+    std::vector<InnerIdType> actual_offsets(count);
+    appended->AppendVectorsToBucket(
+        1, run_vectors.data(), run_ids.data(), count, actual_offsets.data());
+    REQUIRE(actual_offsets == expected_offsets);
+    REQUIRE(appended->GetBucketSize(1) == incremental->GetBucketSize(1));
+    std::vector<uint8_t> expected_code(incremental->code_size_);
+    std::vector<uint8_t> actual_code(incremental->code_size_);
+    for (InnerIdType offset = 0; offset < count; ++offset) {
+        REQUIRE(appended->GetInnerIds(1)[offset] == incremental->GetInnerIds(1)[offset]);
+        incremental->GetCodesById(1, offset, expected_code.data());
+        appended->GetCodesById(1, offset, actual_code.data());
+        REQUIRE(expected_code == actual_code);
+    }
+}
+
 TEST_CASE("BucketDataCell supports RabitQ", "[ut][BucketDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     constexpr uint64_t dim = 64;

@@ -171,6 +171,21 @@ public:
                       InnerIdType count,
                       InnerIdType* out_offsets) = 0;
 
+    // Appends count vectors that all belong to bucket_id and writes each one's offset to
+    // out_offsets. Calls may run concurrently, for the same bucket or different ones. The
+    // default inserts the vectors one at a time; implementations can encode the run together
+    // and store it with a single write.
+    virtual void
+    AppendVectorsToBucket(BucketIdType bucket_id,
+                          const void* const* vectors,
+                          const InnerIdType* inner_ids,
+                          InnerIdType count,
+                          InnerIdType* out_offsets) {
+        for (InnerIdType i = 0; i < count; ++i) {
+            out_offsets[i] = this->InsertVector(vectors[i], bucket_id, inner_ids[i]);
+        }
+    }
+
     // Fixed-offset inserts may create holes: GetBucketSize() includes reserved offsets and
     // GetInnerIds() reports holes as InnerIdType::max(). Therefore inner_id must not be max.
     virtual void
