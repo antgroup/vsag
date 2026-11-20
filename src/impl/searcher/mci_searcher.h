@@ -35,7 +35,6 @@ struct MCISearcherParam {
     // Mapped labels may change during a locked query on a mutable index.
     bool revalidate_predicate{false};
     bool batch_distance{true};
-    bool optimize_clique_expansion{false};
     // Enabled only by the opt-in resident-base route, independently of legacy search flags.
     bool use_one_bit_distance{false};
     bool use_resident_base{false};

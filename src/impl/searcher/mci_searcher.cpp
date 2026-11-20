@@ -328,7 +328,8 @@ search_clique_view(const CliqueDataCellSearchView& view,
         }
         batch_count = 0;
     };
-    const bool optimize_static = mci_param.optimize_clique_expansion and view.static_csr;
+    const bool resident_static = mci_param.use_resident_base and view.static_csr;
+    const bool batch_packed_members = resident_static and mci_param.batch_distance;
     bool consume_seen = false;
     auto accept_node = [&](InnerIdType id, bool known_valid) {
         if (id >= total) {
@@ -420,7 +421,7 @@ search_clique_view(const CliqueDataCellSearchView& view,
                             (mci_param.valid_inner_ids != nullptr or valid_bitmap != nullptr);
     if (use_packed) {
         packed.Build(total, valid_bitmap, mci_param.valid_inner_ids, mci_param.valid_inner_count);
-        consume_seen = optimize_static;
+        consume_seen = resident_static;
         if (consume_seen and mci_param.seed_inner_ids != nullptr) {
             // Seed visits predate Build. Clear only sampled seeds that reached the epoch mark;
             // keep that mark to catch duplicates within a single packed row as well.
@@ -466,7 +467,7 @@ search_clique_view(const CliqueDataCellSearchView& view,
                 const auto begin = view.p_maxc[cid];
                 const auto count = view.p_maxc[cid + 1] - begin;
                 const auto& members = packed.Filter(view.maxcs + begin, count, total);
-                if (mci_param.batch_distance) {
+                if (batch_packed_members) {
                     scan_packed_members(members, depth + 1);
                 } else {
                     for (auto member : members) {
@@ -483,7 +484,7 @@ search_clique_view(const CliqueDataCellSearchView& view,
             }
             return hops < mci_param.hops_limit;
         };
-        if (optimize_static and id < view.base_node_count) {
+        if (resident_static and id < view.base_node_count) {
             const uint64_t end = view.p_node_to_cid[id + 1];
             for (uint64_t pos = view.p_node_to_cid[id]; pos < end; ++pos) {
                 constexpr uint64_t lookahead = 4;
@@ -510,15 +511,6 @@ search_clique_view(const CliqueDataCellSearchView& view,
                         }
                     }
                 }
-                const auto cid = view.node_to_cids[pos];
-                if (cid < view.total_clique_count and not visit_clique(cid)) {
-                    break;
-                }
-            }
-        } else if (mci_param.use_resident_base and view.static_csr and id < view.base_node_count) {
-            // Compact CSR has no inactive nodes, retired cliques or delta rows.
-            const auto end = view.p_node_to_cid[id + 1];
-            for (auto pos = view.p_node_to_cid[id]; pos < end; ++pos) {
                 const auto cid = view.node_to_cids[pos];
                 if (cid < view.total_clique_count and not visit_clique(cid)) {
                     break;

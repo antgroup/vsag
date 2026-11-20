@@ -77,15 +77,15 @@ public:
 };
 }  // namespace
 
-TEST_CASE("MCI resident base batches packed overlapping cliques without precise scoring",
+TEST_CASE("MCI scores overlapping clique members in order with packed and batch search",
           "[ut][MCISearcher][mci][mci_memory][MCIOptimization]") {
     constexpr InnerIdType count = 259;
     const bool packed = GENERATE(false, true);
     const bool batch = GENERATE(false, true);
-    const bool one_bit = GENERATE(false, true);
+    const bool resident = GENERATE(false, true);
+    const bool one_bit = resident and GENERATE(false, true);
     const bool from_ids = GENERATE(false, true);
-    const bool optimize = GENERATE(false, true);
-    CAPTURE(packed, batch, one_bit, from_ids, optimize);
+    CAPTURE(packed, batch, resident, one_bit, from_ids);
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common;
     common.dim_ = 1;
@@ -160,10 +160,9 @@ TEST_CASE("MCI resident base batches packed overlapping cliques without precise 
     REQUIRE(labels.MarkRemove(1) == 1);
     Vector<InnerIdType> seeds({0, 0, 1}, allocator.get());
     MCISearcherParam params;
-    params.use_resident_base = true;
+    params.use_resident_base = resident;
     params.use_one_bit_distance = one_bit;
     params.packed_filter = packed;
-    params.optimize_clique_expansion = optimize;
     params.batch_distance = batch;
     params.seed_count = seeds.size();
     params.seed_inner_ids = &seeds;
@@ -196,7 +195,6 @@ TEST_CASE("MCI resident base batches packed overlapping cliques without precise 
                 base->batch_sizes.end());
         REQUIRE(base->batch_sizes.back() < 64);
     }
-    std::sort(base->scored_ids.begin(), base->scored_ids.end());
     REQUIRE(base->scored_ids == expected);
     while (not result->Empty()) {
         const auto [distance, id] = result->Top();
@@ -250,6 +248,7 @@ TEST_CASE("MCISearcher uses the HGraph one-bit backend for seeds and clique expa
     MCISearcherParam params;
     params.seed_count = seeds.size();
     params.seed_inner_ids = &seeds;
+    params.use_resident_base = true;
     params.enumerated_valid_count = complete_scan ? count : 0;
     params.valid_bitmap = bitmap.data();
     params.valid_bitmap_size = bitmap.size();

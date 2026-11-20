@@ -748,7 +748,6 @@ TEST_CASE("HGraph MCI resident RaBitQ defers disk SQ8 reads until reorder",
     auto legacy = index->KnnSearch(query, topk, search.Dump(), filter);
     REQUIRE(legacy.has_value());
     search["hgraph"]["mci_use_memory_quantization"].SetBool(false);
-    search["hgraph"]["mci_optimize_clique_expansion"].SetBool(true);
     auto disabled = index->KnnSearch(query, topk, search.Dump(), filter);
     REQUIRE(disabled.has_value());
     REQUIRE(legacy.value()->GetDim() == disabled.value()->GetDim());
@@ -762,18 +761,20 @@ TEST_CASE("HGraph MCI resident RaBitQ defers disk SQ8 reads until reorder",
     }
 
     search["hgraph"]["mci_use_memory_quantization"].SetBool(true);
-    search["hgraph"]["mci_optimize_clique_expansion"].SetBool(false);
-    auto baseline = index->KnnSearch(query, ef, search.Dump(), filter);
-    REQUIRE(baseline.has_value());
-    search["hgraph"]["mci_optimize_clique_expansion"].SetBool(true);
     auto approximate = index->KnnSearch(query, ef, search.Dump(), filter);
     REQUIRE(approximate.has_value());
-    REQUIRE(approximate.value()->GetDim() == baseline.value()->GetDim());
-    REQUIRE(approximate.value()->GetStatistics(legacy_counters) ==
-            baseline.value()->GetStatistics(legacy_counters));
-    for (int64_t i = 0; i < approximate.value()->GetDim(); ++i) {
-        REQUIRE(approximate.value()->GetIds()[i] == baseline.value()->GetIds()[i]);
-        REQUIRE(approximate.value()->GetDistances()[i] == baseline.value()->GetDistances()[i]);
+    if (packed_filter and not complete_seeds) {
+        auto scalar_params = vsag::JsonType::Parse(search.Dump());
+        scalar_params["hgraph"]["mci_packed_filter"].SetBool(false);
+        auto scalar = index->KnnSearch(query, ef, scalar_params.Dump(), filter);
+        REQUIRE(scalar.has_value());
+        REQUIRE(approximate.value()->GetDim() == scalar.value()->GetDim());
+        REQUIRE(approximate.value()->GetStatistics(legacy_counters) ==
+                scalar.value()->GetStatistics(legacy_counters));
+        for (int64_t i = 0; i < approximate.value()->GetDim(); ++i) {
+            REQUIRE(approximate.value()->GetIds()[i] == scalar.value()->GetIds()[i]);
+            REQUIRE(approximate.value()->GetDistances()[i] == scalar.value()->GetDistances()[i]);
+        }
     }
     REQUIRE(approximate.value()->GetDim() == ef);
     const auto approximate_stats = vsag::JsonType::Parse(approximate.value()->GetStatistics());

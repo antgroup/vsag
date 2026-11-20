@@ -978,14 +978,11 @@ TEST_CASE("HGraph mrle_dim validation rejects out-of-range values", "[ut][HGraph
 TEST_CASE("HGraph MCI memory quantization is opt-in", "[ut][HGraphParameter][mci_memory]") {
     const auto defaults = vsag::HGraphSearchParameters::FromJson(R"({"hgraph":{"ef_search":32}})");
     REQUIRE_FALSE(defaults.mci_use_memory_quantization);
-    REQUIRE_FALSE(defaults.mci_optimize_clique_expansion);
     for (const bool enabled : {false, true}) {
         auto json = vsag::JsonType::Parse(R"({"hgraph":{"ef_search":32}})");
         json["hgraph"]["mci_use_memory_quantization"].SetBool(enabled);
-        json["hgraph"]["mci_optimize_clique_expansion"].SetBool(enabled);
         const auto parsed = vsag::HGraphSearchParameters::FromJson(json.Dump());
         REQUIRE(parsed.mci_use_memory_quantization == enabled);
-        REQUIRE(parsed.mci_optimize_clique_expansion == enabled);
     }
     for (const auto* invalid : {"0", "1", "null", "\"true\"", "[]", "{}"}) {
         REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(

@@ -571,14 +571,11 @@ seeds are deduplicated before scoring, and any partial batch is submitted before
 selecting the next parent. This route passes base codes to the distance backend;
 precise codes are accessed only by final reorder.
 
-Set `mci_optimize_clique_expansion: true` to optimize static CSR traversal on this
-path. Four cliques ahead, it prefetches up to five cache lines of member IDs at
-64-byte intervals from the start of the row. Short rows receive only the hints
-whose addresses fall inside the row. When packed filtering is active, the query’s
-private bitmap discards already visited members earlier. The option defaults to
-`false` and is ignored outside the MCI
-memory-quantization path. It does not change seed selection, the scoring backend,
-or final reorder, and does not require rebuilding the index.
+When this path expands cliques in a compact static CSR, it automatically prefetches
+member IDs four cliques ahead. It prefetches up to five cache lines per row, at
+64-byte intervals from the start of the row, and stops at the row boundary.
+With packed filtering enabled, the search clears visited seeds and clique members
+from the query's private bitmap so later cliques can skip them during SIMD filtering.
 
 The selected MCI path rejects non-RaBitQ bases and bases that are not fully
 resident, including split RaBitQ with a disk-backed supplement. It never falls
