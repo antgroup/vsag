@@ -21,6 +21,7 @@ jobs:
     outputs:
       team: ${{ steps.route.outputs.team }}
       image: ${{ steps.route.outputs.image }}
+      slot_app_id: ${{ steps.route.outputs.slot_app_id }}
     steps:
       # No PR checkout or PR-provided executable code in this routing job.
       - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
@@ -30,6 +31,7 @@ jobs:
             // BEGIN ROUTE POLICY
             core.setOutput('team', 'false');
             core.setOutput('image', '');
+            core.setOutput('slot_app_id', '');
             const fallback = reason => core.info(`Community CI: ${reason}`);
             if (context.repo.owner !== 'antgroup' || context.repo.repo !== 'vsag') {
               return fallback('not the canonical repository');
@@ -67,7 +69,7 @@ jobs:
               const config = JSON.parse(Buffer.from(configFile.content, 'base64').toString('utf8'));
               if (!config || Array.isArray(config) || typeof config !== 'object' ||
                   typeof config.team_enabled !== 'boolean' || typeof config.team_image !== 'string' ||
-                  Object.keys(config).some(key => !['team_enabled', 'team_image'].includes(key))) {
+                  Object.keys(config).some(key => !['team_enabled', 'team_image', 'team_slots'].includes(key))) {
                 return fallback('invalid routing config schema');
               }
               if (!config.team_enabled) {
@@ -76,6 +78,21 @@ jobs:
               const image = config.team_image;
               if (!/^ghcr\.io\/antgroup\/vsag@sha256:[a-f0-9]{64}$/.test(image)) {
                 return fallback('a digest-pinned team image is required');
+              }
+              let slotAppId = '';
+              if (Object.hasOwn(config, 'team_slots')) {
+                const slots = config.team_slots;
+                if (!slots || typeof slots !== 'object' || Array.isArray(slots) ||
+                    Object.keys(slots).sort().join(',') !== 'app_id,pilot_prs' ||
+                    !Number.isSafeInteger(slots.app_id) || slots.app_id <= 0 ||
+                    !(slots.pilot_prs === null ||
+                      (Array.isArray(slots.pilot_prs) && slots.pilot_prs.every(
+                        prNumber => Number.isSafeInteger(prNumber) && prNumber > 0)))) {
+                  return fallback('invalid Team slot pilot policy');
+                }
+                if (pr.base.ref === 'main' && (slots.pilot_prs === null || slots.pilot_prs.includes(eventPR.number))) {
+                  slotAppId = String(slots.app_id);
+                }
               }
               stage = 'read allowlist';
               const {data: file} = await github.rest.repos.getContent({
@@ -97,6 +114,7 @@ jobs:
               }
               core.info(`Team Linux CI: policy from main at ${main.sha}`);
               core.setOutput('image', image);
+              core.setOutput('slot_app_id', slotAppId);
               core.setOutput('team', 'true');
             } catch (error) {
               // Avoid logging arbitrary API bodies, policy contents or credential-bearing URLs.
@@ -119,7 +137,7 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/check-selection-tests"
           "$RUNNER_TEMP/check-selection-tests/bin/pip" install --disable-pip-version-check -r scripts/ci/check-selection-requirements.txt
           "$RUNNER_TEMP/check-selection-tests/bin/python" -m unittest tests.scripts.test_simd_check_selection
-      - run: node --test tests/scripts/ci_runner_route.test.cjs
+      - run: node --test tests/scripts/ci_runner_route.test.cjs tests/scripts/ci_team_slot.test.cjs
       - name: Python packaging helper regressions (no native build)
         run: >-
           python3 -m unittest
@@ -149,18 +167,20 @@ jobs:
   team:
     name: Team
     permissions:
+      checks: read
       contents: read
       pull-requests: read
       actions: read
     needs: route
     if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action) && (github.base_ref == 'main' || (startsWith(github.base_ref, '0.') && !contains(github.base_ref, '/'))))) && needs.route.outputs.team == 'true'
     concurrency:
-      group: vsag-team-vm
+      group: ${{ needs.route.outputs.slot_app_id != '' && format('vsag-team-queued-{0}', github.run_id) || 'vsag-team-vm' }}
       queue: max
       cancel-in-progress: false
     uses: ./.github/workflows/pr-ci-team.yml
     with:
       image: ${{ needs.route.outputs.image }}
+      slot-app-id: ${{ needs.route.outputs.slot_app_id }}
 
   select-checks:
     name: Select checks
