@@ -1634,3 +1634,111 @@ TEST_CASE("RaBitQ contiguous incoming validation checks exact edge multisets", "
     std::reverse(reverse[0].begin(), reverse[0].end());
     REQUIRE_NOTHROW(codec::validate_incoming_adjacency(skewed, reverse));
 }
+
+TEST_CASE("RaBitQ repair reselects full affected rows after removal", "[lite-rabitq]") {
+    namespace codec = vsag::lite::detail::rabitq;
+    constexpr uint64_t dim = 128;
+    const std::vector<float> coordinates{0, 0, 1, 0, 2, 0, 10, 10, 0, 2};
+    std::vector<float> vectors(5 * dim);
+    for (uint64_t slot = 0; slot < 5; ++slot) {
+        for (uint64_t d = 0; d < dim; ++d) {
+            vectors[slot * dim + d] = coordinates[slot * 2 + d % 2];
+        }
+    }
+    auto model = codec::train(vectors, 5, dim, 47);
+    codec::EncodedRecords codes(dim);
+    for (uint64_t slot = 0; slot < 5; ++slot) {
+        codes.Append(codec::encode(model, vectors.data() + slot * dim));
+    }
+    const std::vector<int64_t> ids{100, 10, 55, 1000, 20};
+    codec::OwnedGraphAdjacency links{{{1, 2}, {0, 2}, {0, 1}, {0, 4}, {1, 2}}};
+    codec::MutableGraphState state(
+        std::move(links), std::move(model), std::move(codes), ids, 2, 128, false, true);
+    state.ConfigureIncomingProtection(codec::IncomingProtection::CACHED, false, false, false, true);
+    REQUIRE(state.RemoveTransactional(1000));
+    REQUIRE(state.Size() == 4);
+    REQUIRE_NOTHROW(state.Validate());
+    std::vector<int64_t> neighbors;
+    neighbors.reserve(state.GetAdjacency()[0].size());
+    for (const uint64_t slot : state.GetAdjacency()[0]) {
+        neighbors.push_back(state.GetIds()[slot]);
+    }
+    std::sort(neighbors.begin(), neighbors.end());
+    REQUIRE(neighbors == std::vector<int64_t>{10, 20});
+}
+
+TEST_CASE("RaBitQ reselection protects displaced targets without a cold recount", "[lite-rabitq]") {
+    namespace codec = vsag::lite::detail::rabitq;
+    constexpr uint64_t dim = 128;
+    const std::vector<float> coordinates{0, 0, 1, 0, 2, 0, 0, 2, 10, 10};
+    const std::vector<std::vector<uint64_t>> original{{4, 2}, {0, 3}, {1, 3}, {0, 1}, {1, 3}};
+    for (const bool compact : {false, true}) {
+        std::array<uint64_t, 5> slots{0, 1, 2, 3, 4};
+        if (compact) {
+            std::swap(slots[2], slots[4]);
+        }
+        std::vector<float> vectors(5 * dim);
+        std::vector<int64_t> ids(5);
+        codec::OwnedGraphAdjacency links;
+        links.rows.resize(5);
+        for (uint64_t slot = 0; slot < 5; ++slot) {
+            ids[slots[slot]] = static_cast<int64_t>(slot * 10);
+            for (uint64_t d = 0; d < dim; ++d) {
+                vectors[slots[slot] * dim + d] = coordinates[slot * 2 + d % 2];
+            }
+            for (const uint64_t target : original[slot]) {
+                links.rows[slots[slot]].push_back(slots[target]);
+            }
+        }
+        const auto model = codec::train(vectors, 5, dim, 47);
+        codec::EncodedRecords codes(dim);
+        for (uint64_t slot = 0; slot < 5; ++slot) {
+            codes.Append(codec::encode(model, vectors.data() + slot * dim));
+        }
+        for (const bool reverse : {false, true}) {
+            for (const bool transactional : {false, true}) {
+                for (const bool protect : {false, true}) {
+                    for (const auto mode : {codec::IncomingProtection::NONE,
+                                            codec::IncomingProtection::RECOUNT,
+                                            codec::IncomingProtection::CACHED}) {
+                        codec::MutableGraphState state(
+                            links, model, codes, ids, 2, 128, false, reverse);
+                        // The legacy removal guard protects affected sources. Protection
+                        // of reselected targets is separate and uses reverse counts.
+                        state.ConfigureIncomingProtection(
+                            mode, false, protect, false, mode == codec::IncomingProtection::CACHED);
+                        const auto incoming = [&state](int64_t target) {
+                            const auto& current_ids = state.GetIds();
+                            const auto found =
+                                std::find(current_ids.begin(), current_ids.end(), target);
+                            REQUIRE(found != current_ids.end());
+                            const auto slot =
+                                static_cast<uint64_t>(std::distance(current_ids.begin(), found));
+                            const auto graph = state.GetGraph();
+                            return std::count(graph.neighbors.begin(), graph.neighbors.end(), slot);
+                        };
+                        REQUIRE(incoming(20) == 1);
+                        REQUIRE((transactional ? state.RemoveTransactional(40) : state.Remove(40)));
+                        REQUIRE_NOTHROW(state.Validate());
+                        REQUIRE(state.Size() == 4);
+                        REQUIRE_FALSE(state.Contains(40));
+                        REQUIRE(incoming(20) == (mode == codec::IncomingProtection::NONE ? 0 : 1));
+                        if (mode == codec::IncomingProtection::CACHED) {
+                            REQUIRE(state.IncomingCountRebuilds() ==
+                                    (protect or not reverse ? 1 : 0));
+                            if (not protect and reverse) {
+                                REQUIRE(state.IncomingCountBytes() == 0);
+                            }
+                        }
+                        std::stringstream snapshot;
+                        codec::save_mutable_snapshot(snapshot, state);
+                        auto restored = codec::load_mutable_snapshot(snapshot);
+                        REQUIRE_NOTHROW(restored.Validate());
+                        REQUIRE(restored.GetIds() == state.GetIds());
+                        REQUIRE(restored.GetGraph().neighbors == state.GetGraph().neighbors);
+                    }
+                }
+            }
+        }
+    }
+}

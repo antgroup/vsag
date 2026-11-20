@@ -59,11 +59,27 @@ RaBitQ stores a fixed trained centroid/rotation model, 3-bit filter and 5-bit
 supplement codes plus per-record metadata, IDs and graph adjacency. It does not
 retain an exact FP32 vector matrix. Current public construction/loading enables
 32-bit incoming adjacency and `CACHED` protection with safe link pruning;
-the additional Add/Remove/displaced-target guard flags remain false.
+the legacy Add, removed-source and Add-displaced-target guards remain false.
 Update protection is enabled by CACHED. This preserves an existing target's last
 incoming edge when another edge can be safely removed; the farthest fallback
 remains if none can. It is not a global connectivity or recall guarantee.
 See [RaBitQ design](lite_rabitq_design.md) for the actual configuration and model limits.
+
+### Graph repair after mutations
+
+After a physical deletion or a changed-vector update, affected adjacency rows
+are reselected from their current neighbors and the previous neighbors of the
+changed record. Reselection includes rows that are already at their degree cap.
+It uses a diversity pass, then fills any remaining capacity by distance.
+RaBitQ uses its existing encoded distance estimates for reselection. Targets
+displaced by reselection receive incoming-edge protection independently of the
+legacy guards for Add and removed sources. With reverse adjacency enabled, this
+protection reads exact row sizes without initializing full-graph incoming counts
+on a cold-cache Remove. It preserves a last incoming edge when a safe substitute
+is available; it does not guarantee global connectivity.
+
+This helps preserve navigability under repeated mutations. It adds work to
+Delete and Update, and recall still depends on the workload and search budget.
 
 ## Compatibility, persistence and failure boundaries
 
