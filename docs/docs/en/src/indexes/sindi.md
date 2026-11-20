@@ -9,6 +9,7 @@ pairs and is one of the VSAG indexes that accepts `dtype: "sparse"`.
 
 - Source: `src/algorithm/sindi/`
 - Example: [`examples/cpp/109_index_sindi.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/109_index_sindi.cpp)
+- Python example: [`examples/python/109_index_sindi.py`](https://github.com/antgroup/vsag/blob/main/examples/python/109_index_sindi.py)
 
 ## How it works
 
