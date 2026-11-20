@@ -293,10 +293,10 @@ WriteDenseQueryFile(const std::string& query_path, int64_t rows, int64_t cols) {
 }
 
 void
-WriteSparseQueryFile(const std::string& query_path, int64_t rows) {
+WriteSparseQueryFile(const std::string& query_path, int64_t rows, int64_t cols = 128) {
     std::ofstream stream(query_path, std::ios::binary | std::ios::out);
     REQUIRE(stream.is_open());
-    const std::vector<int64_t> header{rows, 128, rows};
+    const std::vector<int64_t> header{rows, cols, rows};
     std::vector<int64_t> indptr(static_cast<uint64_t>(rows) + 1);
     std::vector<int32_t> indices(static_cast<uint64_t>(rows));
     const std::vector<float> values(static_cast<uint64_t>(rows), 1.0F);
@@ -671,6 +671,25 @@ TEST_CASE("AnalyzeIndex accepts multi-row sparse query files", "[analyze_index]"
     REQUIRE(report["dynamic_analysis"]["results"]["_analysis"]["skipped"]["search"].GetString() ==
             "index is empty");
     REQUIRE(report["dynamic_analysis"]["results"]["_analysis"]["sample_count"].GetInt() == 2);
+}
+
+TEST_CASE("AnalyzeIndex rejects sparse query dimension mismatches", "[analyze_index]") {
+    fixtures::TempDir temp_dir("analyze_index_sparse_query_dim_mismatch");
+    const std::string index_path =
+        SaveEmptyIndex(temp_dir.path + "index.vsag", "sindi", kSindiIndexParam);
+    const std::string query_path = temp_dir.path + "queries.bin";
+    WriteSparseQueryFile(query_path, 1, 256);
+
+    vsag::IndexAnalysisOptions options;
+    options.index_path = index_path;
+    options.build_parameter = kSindiIndexParam;
+    options.query_path = query_path;
+    options.query_data_type = "sparse";
+    options.topk = 2;
+
+    REQUIRE_THROWS_WITH(vsag::AnalyzeIndex(options),
+                        Catch::Matchers::ContainsSubstring(
+                            "query dimension (256) does not match index dimension (128)"));
 }
 
 TEST_CASE("AnalyzeIndex aligns SINDI ground truth with every query row", "[analyze_index]") {

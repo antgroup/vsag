@@ -714,9 +714,6 @@ private:
         }
 
         build_param[INDEX_PARAM].SetJson(index_param_);
-        if (index_name_ == INDEX_BRUTE_FORCE or index_name_ == INDEX_WARP) {
-            IsolateExternalBruteForceParam(build_param, index_name_ == INDEX_WARP);
-        }
         auto create_result = Factory::CreateIndex(index_name_, build_param.Dump());
         if (not create_result.has_value()) {
             throw std::runtime_error(
@@ -862,6 +859,13 @@ private:
                               data_type_,
                               options_.query_data_type,
                               effective_query_data_type);
+            if (effective_query_data_type == QUERY_DATA_TYPE_SPARSE and dim_ > 0 and
+                query->GetDim() != dim_) {
+                throw std::runtime_error(
+                    fmt::format("query dimension ({}) does not match index dimension ({})",
+                                query->GetDim(),
+                                dim_));
+            }
         } catch (const std::exception& error) {
             throw std::runtime_error(fmt::format(
                 "failed to load query dataset '{}': {}", options_.query_path, error.what()));

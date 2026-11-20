@@ -22,15 +22,7 @@ def _is_analyze_index_cli_invocation():
     if executable.startswith("pyvsag-analyze-index"):
         return True
 
-    command = list(getattr(sys, "orig_argv", ()))
-    if not command and sys.argv[:1] == ["-m"] and sys.platform.startswith("linux"):
-        # sys.orig_argv is unavailable before Python 3.10. This fallback keeps `python -m`
-        # working on the older Python versions supported by the manylinux wheels.
-        try:
-            with open("/proc/self/cmdline", "rb") as stream:
-                command = stream.read().decode("utf-8", "replace").split("\0")
-        except OSError:
-            command = []
+    command = list(sys.orig_argv)
     return any(
         command[index] == "-m" and command[index + 1] == "pyvsag.analyze_index_cli"
         for index in range(len(command) - 1)

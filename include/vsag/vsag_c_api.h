@@ -454,7 +454,8 @@ vsag_index_get_min_max_id(const vsag_index_t* index, int64_t* out_min_id, int64_
 /**
  * Analyzes a serialized index and returns its JSON report. All string arguments are required;
  * use an empty string for an unused optional path. "default" reuses embedded index/search
- * parameters, and query_data_type accepts "auto", "dense" or "sparse".
+ * parameters, and query_data_type accepts "auto", "dense" or "sparse". `topk` must be positive,
+ * including for static-only analysis; it is ignored when `query_path` is empty.
  *
  * On success, `*out_json` is an owned NUL-terminated string that the caller must release with
  * vsag_string_destroy(). On failure, `*out_json` is NULL.
