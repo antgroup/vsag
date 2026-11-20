@@ -16,8 +16,8 @@ using IndexPtr = std::shared_ptr<Index>;
 
 - 当具体索引未实现某方法时，大多数方法返回
   `tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, ...))`。
-- 少数统计访问器则会**抛出 `std::runtime_error`**（下文会明确标注）。若在可能不支持它们的索引上调用，
-  请用 `try/catch` 包裹。
+- 少数统计访问器则会**抛出 `std::runtime_error` 或派生自 `std::exception` 的类型化错误**
+  （下文会明确标注）。若在可能不支持它们的索引上调用，请用 `try/catch` 包裹。
 
 由于“不支持”是正常且预期的结果，请用 [`CheckFeature`](#checkfeature) 提前探测能力，而不要假设某个方法一定
 可用。标注为 *（纯虚函数）* 的方法必须由每种索引实现，调用它们总是安全的。
@@ -288,8 +288,8 @@ HGraph 通过 `Dataset::SourceID` 匹配缓存条目。应在 `Build()` 前导�
 
 ## 统计与自省
 
-除非另有说明，这些方法直接返回值。**标注为“抛出”的方法在索引不支持时会抛出 `std::runtime_error`**
-（而非 `tl::expected`）。
+除非另有说明，这些方法直接返回值。**标注为“抛出”的方法在索引不支持时会抛出 `std::runtime_error`
+或派生自 `std::exception` 的类型化错误**（而非 `tl::expected`）。
 
 | 方法 | 签名 | 说明 |
 |------|------|------|
@@ -299,7 +299,7 @@ HGraph 通过 `Dataset::SourceID` 匹配缓存条目。应在 `Build()` 前导�
 | `GetMemoryUsage` | `int64_t GetMemoryUsage() const` | *（纯虚函数）* 索引占用的字节数。 |
 | `GetMemoryUsageDetail` | `std::string GetMemoryUsageDetail() const` | 不支持时**抛出**。各组件内存的 JSON。 |
 | `EstimateMemory` | `uint64_t EstimateMemory(uint64_t num_elements) const` | 不支持时**抛出**。`num_elements` 的预估字节数。 |
-| `GetEstimateBuildMemory` | `int64_t GetEstimateBuildMemory(int64_t num_elements) const` | 不支持时**抛出**。预估构建峰值内存。 |
+| `EstimateBuildMemory` | `uint64_t EstimateBuildMemory(uint64_t num_elements) const` | 不支持时**抛出**派生自 `std::exception` 的类型化错误；先用 `SUPPORT_ESTIMATE_BUILD_MEMORY` 探测。预估构建峰值内存 —— 约束见[内存管理](../advanced/memory.md)。 |
 | `GetStats` | `std::string GetStats() const` | 不支持时**抛出**。运行期统计的 JSON。 |
 | `AnalyzeIndexBySearch` | `std::string AnalyzeIndexBySearch(const SearchRequest& request)` | 不支持时**抛出**。一次探测搜索的分析 JSON。 |
 | `CheckIdExist` | `bool CheckIdExist(int64_t id) const` | 不支持时**抛出**。`id` 是否存在。 |

@@ -17,7 +17,8 @@ almost every method:
 
 - Most methods return `tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, ...))` when the
   concrete index does not implement them.
-- A handful of statistics accessors instead **throw `std::runtime_error`** (called out explicitly
+- A handful of statistics accessors instead **throw `std::runtime_error` or an
+  `std::exception`-derived typed error** (called out explicitly
   below). Wrap those in `try/catch` if you call them on an index that may not support them.
 
 Because "unsupported" is a normal, expected outcome, probe capabilities up front with
@@ -296,7 +297,8 @@ HGraph matches cache entries by `Dataset::SourceID`. Import into an empty compat
 ## Statistics & introspection
 
 Unless noted, these return values directly. **The methods marked "throws" raise
-`std::runtime_error`** (not `tl::expected`) when the index does not support them.
+`std::runtime_error` or an `std::exception`-derived typed error** (not `tl::expected`) when the
+index does not support them.
 
 | Method | Signature | Notes |
 |--------|-----------|-------|
@@ -306,7 +308,7 @@ Unless noted, these return values directly. **The methods marked "throws" raise
 | `GetMemoryUsage` | `int64_t GetMemoryUsage() const` | *(pure virtual)* Bytes occupied by the index. |
 | `GetMemoryUsageDetail` | `std::string GetMemoryUsageDetail() const` | **Throws** if unsupported. Per-component memory as JSON. |
 | `EstimateMemory` | `uint64_t EstimateMemory(uint64_t num_elements) const` | **Throws** if unsupported. Estimated bytes for `num_elements`. |
-| `GetEstimateBuildMemory` | `int64_t GetEstimateBuildMemory(int64_t num_elements) const` | **Throws** if unsupported. Estimated peak build memory. |
+| `EstimateBuildMemory` | `uint64_t EstimateBuildMemory(uint64_t num_elements) const` | **Throws** an `std::exception`-derived typed error if unsupported; probe with `SUPPORT_ESTIMATE_BUILD_MEMORY` first. Estimated peak build memory — constraints in [Memory Management](../advanced/memory.md). |
 | `GetStats` | `std::string GetStats() const` | **Throws** if unsupported. Runtime statistics as JSON. |
 | `AnalyzeIndexBySearch` | `std::string AnalyzeIndexBySearch(const SearchRequest& request)` | **Throws** if unsupported. Analysis JSON for a probe search. |
 | `CheckIdExist` | `bool CheckIdExist(int64_t id) const` | **Throws** if unsupported. Whether `id` is present. |
