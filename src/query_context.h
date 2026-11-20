@@ -270,38 +270,47 @@ public:
      */
     [[nodiscard]] SearchResultMetrics
     Snapshot() && {
+        return std::move(*this).Snapshot(base);
+    }
+
+    /** Snapshot an existing query collector while retaining this object's extensions. */
+    [[nodiscard]] SearchResultMetrics
+    Snapshot(const SearchStatistics& statistics) && {
         SearchResultMetrics result;
-        result.is_timeout = base.is_timeout.load(std::memory_order_relaxed);
-        result.dist_cmp = base.dist_cmp.load(std::memory_order_relaxed);
-        result.hops = base.hops.load(std::memory_order_relaxed);
-        result.io_cnt = base.io_cnt.load(std::memory_order_relaxed);
-        result.io_time_ms = base.io_time_ms.load(std::memory_order_relaxed);
-        result.reorder_distance_count = base.reorder_distance_count.load(std::memory_order_relaxed);
+        result.is_timeout = statistics.is_timeout.load(std::memory_order_relaxed);
+        result.dist_cmp = statistics.dist_cmp.load(std::memory_order_relaxed);
+        result.hops = statistics.hops.load(std::memory_order_relaxed);
+        result.io_cnt = statistics.io_cnt.load(std::memory_order_relaxed);
+        result.io_time_ms = statistics.io_time_ms.load(std::memory_order_relaxed);
+        result.reorder_distance_count =
+            statistics.reorder_distance_count.load(std::memory_order_relaxed);
         result.reorder_candidate_count =
-            base.reorder_candidate_count.load(std::memory_order_relaxed);
+            statistics.reorder_candidate_count.load(std::memory_order_relaxed);
         result.reorder_lower_bound_probe_count =
-            base.reorder_lower_bound_probe_count.load(std::memory_order_relaxed);
-        result.rabitq_filter_count = base.rabitq_filter_count.load(std::memory_order_relaxed);
-        result.rabitq_full_count = base.rabitq_full_count.load(std::memory_order_relaxed);
+            statistics.reorder_lower_bound_probe_count.load(std::memory_order_relaxed);
+        result.rabitq_filter_count = statistics.rabitq_filter_count.load(std::memory_order_relaxed);
+        result.rabitq_full_count = statistics.rabitq_full_count.load(std::memory_order_relaxed);
         result.rabitq_filter_fallback_full_count =
-            base.rabitq_filter_fallback_full_count.load(std::memory_order_relaxed);
+            statistics.rabitq_filter_fallback_full_count.load(std::memory_order_relaxed);
         result.rabitq_reorder_hint_full_count =
-            base.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed);
+            statistics.rabitq_reorder_hint_full_count.load(std::memory_order_relaxed);
         result.rabitq_reorder_fallback_full_count =
-            base.rabitq_reorder_fallback_full_count.load(std::memory_order_relaxed);
-        result.query_computer_count = base.query_computer_count.load(std::memory_order_relaxed);
+            statistics.rabitq_reorder_fallback_full_count.load(std::memory_order_relaxed);
+        result.query_computer_count =
+            statistics.query_computer_count.load(std::memory_order_relaxed);
         result.parallel_search_fallback_count =
-            base.parallel_search_fallback_count.load(std::memory_order_relaxed);
-        result.distance_evaluations = base.distance_evaluations.load(std::memory_order_relaxed);
+            statistics.parallel_search_fallback_count.load(std::memory_order_relaxed);
+        result.distance_evaluations =
+            statistics.distance_evaluations.load(std::memory_order_relaxed);
         for (uint64_t i = 0; i < result.distance_evaluations_by_phase.size(); ++i) {
             result.distance_evaluations_by_phase[i] =
-                base.distance_evaluations_by_phase[i].load(std::memory_order_relaxed);
+                statistics.distance_evaluations_by_phase[i].load(std::memory_order_relaxed);
         }
         for (uint64_t i = 0; i < result.distance_evaluations_by_backend.size(); ++i) {
             result.distance_evaluations_by_backend[i] =
-                base.distance_evaluations_by_backend[i].load(std::memory_order_relaxed);
+                statistics.distance_evaluations_by_backend[i].load(std::memory_order_relaxed);
         }
-        result.complete = base.complete.load(std::memory_order_relaxed);
+        result.complete = statistics.complete.load(std::memory_order_relaxed);
         result.extensions_ = std::move(extensions_);
         return result;
     }
