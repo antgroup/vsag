@@ -368,9 +368,17 @@ TEST_CASE("Pyramid half input native distance by ID", "[ft][pyramid][half_input]
         REQUIRE(distances.value()->GetNumElements() == 2);
         REQUIRE(distances.value()->GetDim() == (topk == -1 ? 3 : 2));
         for (int64_t i = 0; i < 2 * distances.value()->GetDim(); ++i) {
-            REQUIRE(
-                distances.value()->GetDistances()[i] ==
-                Catch::Approx(expected.value()->GetDistances()[i]).epsilon(2e-5F).margin(1e-4F));
+            REQUIRE(distances.value()->GetValids() != nullptr);
+            REQUIRE(expected.value()->GetValids() != nullptr);
+            REQUIRE(distances.value()->GetValids()[i] == expected.value()->GetValids()[i]);
+            if (distances.value()->GetValids()[i]) {
+                REQUIRE(distances.value()->GetDistances()[i] ==
+                        Catch::Approx(expected.value()->GetDistances()[i])
+                            .epsilon(2e-5F)
+                            .margin(1e-4F));
+            } else {
+                REQUIRE(std::isnan(distances.value()->GetDistances()[i]));
+            }
             if (topk != -1) {
                 REQUIRE(distances.value()->GetIds()[i] == expected.value()->GetIds()[i]);
             }

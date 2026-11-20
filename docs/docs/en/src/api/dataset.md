@@ -53,6 +53,7 @@ DatasetPtr DeepCopy(Allocator* allocator = nullptr) const;  // independent copy
 | `Dim(int64_t)` | `GetDim()` | `int64_t` | Dense vector dimensionality. |
 | `Ids(const int64_t*)` | `GetIds()` | `const int64_t*` | Per-element ids (length `NumElements`). |
 | `Distances(const float*)` | `GetDistances()` | `const float*` | Distances (search output; length depends on `k`/matches). |
+| `Valids(const bool*)` | `GetValids()` | `const bool*` | Per-distance validity flags (same length as `Distances`). Set by `CalcDistancesById`; `false` means the requested ID does not exist or was removed, and its distance is NaN. `nullptr` when absent. |
 
 ## Vector payloads
 

@@ -777,8 +777,8 @@ TEST_CASE("SIMQ distance-by-ID native query contract", "[simq][distance_contract
     REQUIRE(index->CheckFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID));
     REQUIRE(index->CheckFeature(IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID));
     auto empty_distance = index->CalcDistanceById(base, label);
-    REQUIRE(empty_distance.has_value());
-    REQUIRE(empty_distance.value() == -1.0F);
+    REQUIRE_FALSE(empty_distance.has_value());
+    REQUIRE(empty_distance.error().type == ErrorType::INVALID_ARGUMENT);
     REQUIRE(index->Build(base).has_value());
     auto search = index->KnnSearch(base, 1, make_search_param(1, 1), FilterPtr{});
     REQUIRE(search.has_value());
@@ -801,10 +801,15 @@ TEST_CASE("SIMQ distance-by-ID native query contract", "[simq][distance_contract
         REQUIRE(batch.has_value());
         REQUIRE(batch.value()->GetNumElements() == 2);
         REQUIRE(batch.value()->GetDim() == 2);
-        REQUIRE(batch.value()->GetDistances()[0] == -1.0F);
+        REQUIRE(std::isnan(batch.value()->GetDistances()[0]));
         REQUIRE(batch.value()->GetDistances()[1] == expected);
         REQUIRE(batch.value()->GetDistances()[2] == expected);
-        REQUIRE(batch.value()->GetDistances()[3] == -1.0F);
+        REQUIRE(std::isnan(batch.value()->GetDistances()[3]));
+        REQUIRE(batch.value()->GetValids() != nullptr);
+        REQUIRE_FALSE(batch.value()->GetValids()[0]);
+        REQUIRE(batch.value()->GetValids()[1]);
+        REQUIRE(batch.value()->GetValids()[2]);
+        REQUIRE_FALSE(batch.value()->GetValids()[3]);
         auto top = index->CalcDistancesById(query, ids, 2, precise, 1);
         REQUIRE(top.has_value());
         REQUIRE(top.value()->GetDim() == 1);
@@ -812,6 +817,9 @@ TEST_CASE("SIMQ distance-by-ID native query contract", "[simq][distance_contract
         REQUIRE(top.value()->GetIds()[1] == label);
         REQUIRE(top.value()->GetDistances()[0] == expected);
         REQUIRE(top.value()->GetDistances()[1] == expected);
+        REQUIRE(top.value()->GetValids() != nullptr);
+        REQUIRE(top.value()->GetValids()[0]);
+        REQUIRE(top.value()->GetValids()[1]);
     }
     REQUIRE_FALSE(index->CalcDistanceById(DatasetPtr{}, label).has_value());
 }

@@ -322,15 +322,21 @@ TEST_CASE("Pyramid immutable preserves reverse label lookup", "[ut][pyramid][imm
         int64_t candidates[] = {999, 42};
         const auto result = index->CalcDistancesById(vectors.data(), candidates, 2);
         CHECK(result->GetDistances()[0] == 0.0F);
-        CHECK(result->GetDistances()[1] == -1.0F);
+        CHECK(std::isnan(result->GetDistances()[1]));
+        CHECK(result->GetValids()[0]);
+        CHECK_FALSE(result->GetValids()[1]);
+        CHECK_THROWS_AS(index->CalcDistanceById(vectors.data(), 42), vsag::VsagException);
     };
     source.index->SetImmutable();
     source.index->SetImmutable();
     check(source.index);
     CHECK_FALSE(source.index->CheckIdExist(118));
     int64_t removed_id = 118;
-    CHECK(source.index->CalcDistancesById(vectors.data(), &removed_id, 1)->GetDistances()[0] ==
-          -1.0F);
+    auto removed_result = source.index->CalcDistancesById(vectors.data(), &removed_id, 1);
+    CHECK(std::isnan(removed_result->GetDistances()[0]));
+    CHECK_FALSE(removed_result->GetValids()[0]);
+    CHECK_THROWS_AS(source.index->CalcDistanceById(vectors.data(), removed_id),
+                    vsag::VsagException);
     std::stringstream stream;
     if (streaming) {
         source.index->SerializeStreaming(stream);
