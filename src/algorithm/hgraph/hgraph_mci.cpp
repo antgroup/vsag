@@ -660,6 +660,7 @@ HGraph::try_mci_search(const SearchRequest& request,
     mci_param.revalidate_predicate =
         not params.search_no_lock and not this->immutable_.load(std::memory_order_acquire);
     mci_param.batch_distance = params.mci_batch_distance;
+    mci_param.use_resident_base = params.mci_use_memory_quantization;
     mci_param.activation_cap = params.mci_activation_cap;
     mci_param.depth_limit = params.mci_hops_limit;
     mci_param.expansion_idle_window = params.mci_expansion_idle_window;
@@ -706,11 +707,18 @@ HGraph::try_mci_search(const SearchRequest& request,
     }
 
     auto codes_lock = make_search_read_lock(this->persistent_codes_mutex_);
-    auto precise_flatten = this->get_precise_codes();
-    if (precise_flatten != nullptr) {
+    auto scoring_flatten =
+        params.mci_use_memory_quantization ? this->basic_flatten_codes_ : this->get_precise_codes();
+    if (params.mci_use_memory_quantization) {
+        // Query() on split codes can read a disk supplement. Require the entire base cell
+        // to be resident, rather than silently falling back to precise or supplement IO.
+        CHECK_ARGUMENT(scoring_flatten != nullptr and scoring_flatten->InMemory() and
+                           scoring_flatten->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_RABITQ,
+                       "mci_use_memory_quantization requires fully in-memory RaBitQ base codes");
+    } else if (scoring_flatten != nullptr) {
         uint64_t precise_vector_stride = 0;
         mci_param.precise_vectors =
-            precise_flatten->TryGetContiguousRawFloatData(&precise_vector_stride);
+            scoring_flatten->TryGetContiguousRawFloatData(&precise_vector_stride);
         mci_param.dim = this->dim_;
         mci_param.precise_vector_stride = precise_vector_stride;
         mci_param.metric = this->metric_;
@@ -730,11 +738,40 @@ HGraph::try_mci_search(const SearchRequest& request,
     query_filter->AppendFilter(mci_param.deleted_ids_filter);
     auto mci_search_param = search_param;
     mci_search_param.is_inner_id_allowed = query_filter;
+    mci_param.use_one_bit_distance =
+        params.mci_use_memory_quantization and search_param.enable_rabitq_one_bit_search;
+    std::unique_ptr<DistanceRecordVector> one_bit_candidates;
+    if (mci_param.use_one_bit_distance and this->use_reorder_ and search_param.enable_reorder and
+        this->reorder_by_base_) {
+        one_bit_candidates = std::make_unique<DistanceRecordVector>(ctx->alloc);
+        mci_param.one_bit_lower_bound_candidates = one_bit_candidates.get();
+    }
     result.result = this->mci_searcher_->Search(
-        this->mci_cliques_, precise_flatten, query, mci_search_param, mci_param, ctx);
+        this->mci_cliques_, scoring_flatten, query, mci_search_param, mci_param, ctx);
     if (result.result == nullptr or result.result->Empty()) {
         // A concurrent mutation may have unpublished the companion before the view was pinned.
         return result;
+    }
+    if (params.mci_use_memory_quantization and this->use_reorder_ and search_param.enable_reorder) {
+        // The searcher retains max(topk, ef) candidates, including complete-seed scans.
+        // Only finalists may access precise storage. Finalize here so the legacy MCI
+        // route and the outer reorder exclusion remain unchanged.
+        this->reorder(query,
+                      this->get_reorder_codes(),
+                      result.result,
+                      static_cast<int64_t>(search_param.min_results),
+                      nullptr,
+                      *ctx,
+                      one_bit_candidates.get());
+    } else if (mci_param.use_one_bit_distance and search_param.enable_reorder) {
+        // Like HGraph, an enabled one-bit query can refine against the base itself even
+        // when the index has no separately configured reorder store.
+        this->reorder(query,
+                      this->basic_flatten_codes_,
+                      result.result,
+                      static_cast<int64_t>(search_param.min_results),
+                      nullptr,
+                      *ctx);
     }
     result.route = "mci";
     return result;

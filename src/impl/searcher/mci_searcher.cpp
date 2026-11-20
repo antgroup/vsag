@@ -157,6 +157,48 @@ mci_precise_float_distance(const float* query,
     return 1.0F - similarity;
 }
 
+// Match HGraph's one-bit dispatch and same-base reorder recovery. The caller has checked
+// residency, so even a backend's full-score fallback cannot read disk precise/supplement codes.
+void
+query_mci_codes(const FlattenInterfacePtr& flatten,
+                const ComputerInterfacePtr& computer,
+                const InnerIdType* ids,
+                uint64_t count,
+                float* distances,
+                const MCISearcherParam& mci_param,
+                const DistHeapPtr& result_heap,
+                int64_t candidate_limit,
+                QueryContext* ctx) {
+    if (not mci_param.use_one_bit_distance) {
+        flatten->Query(distances, computer, ids, count, ctx);
+        return;
+    }
+    std::array<float, 64> bounds;
+    auto* extra = mci_param.one_bit_lower_bound_candidates;
+    const bool collect_bounds =
+        extra != nullptr and result_heap->Size() >= static_cast<uint64_t>(candidate_limit);
+    flatten->QueryWithDistanceLowerBound(
+        distances, collect_bounds ? bounds.data() : nullptr, computer, ids, count, ctx);
+    if (collect_bounds) {
+        const auto threshold = result_heap->Top().first;
+        for (uint64_t i = 0; i < count; ++i) {
+            if (bounds[i] < threshold) {
+                extra->emplace_back(bounds[i], ids[i]);
+            }
+        }
+    }
+}
+
+// Keep the optional extra member hints out of the shared traversal loop.
+[[gnu::noinline]] void
+prefetch_mci_member_tail(const InnerIdType* members, uint64_t count) {
+    constexpr uint64_t members_per_line = 64 / sizeof(InnerIdType);
+    for (uint64_t offset = members_per_line; offset < 5 * members_per_line and offset < count;
+         offset += members_per_line) {
+        __builtin_prefetch(members + offset, 0, 1);
+    }
+}
+
 template <bool use_raw_float>
 DistHeapPtr
 search_clique_view(const CliqueDataCellSearchView& view,
@@ -207,7 +249,15 @@ search_clique_view(const CliqueDataCellSearchView& view,
             const auto batch_size = mci_param.batch_distance ? batch_capacity : 1;
             for (uint64_t i = 0; i < seeds->size(); i += batch_size) {
                 const auto count = std::min<uint64_t>(batch_size, seeds->size() - i);
-                flatten->Query(distances.data(), computer, seeds->data() + i, count, ctx);
+                query_mci_codes(flatten,
+                                computer,
+                                seeds->data() + i,
+                                count,
+                                distances.data(),
+                                mci_param,
+                                result_heap,
+                                candidate_limit,
+                                ctx);
                 for (uint64_t j = 0; j < count; ++j) {
                     if (is_result_distance_eligible(distances[j])) {
                         result_heap->Push(distances[j], (*seeds)[i + j]);
@@ -255,7 +305,15 @@ search_clique_view(const CliqueDataCellSearchView& view,
                     query, vector, dim, metric, cosine_query_inv_norm, cosine_hold_mold);
             }
         } else {
-            flatten->Query(batch_distances.data(), computer, batch_ids.data(), batch_count, ctx);
+            query_mci_codes(flatten,
+                            computer,
+                            batch_ids.data(),
+                            batch_count,
+                            batch_distances.data(),
+                            mci_param,
+                            result_heap,
+                            candidate_limit,
+                            ctx);
         }
         for (uint64_t i = 0; i < batch_count; ++i) {
             const auto distance = batch_distances[i];
@@ -270,6 +328,8 @@ search_clique_view(const CliqueDataCellSearchView& view,
         }
         batch_count = 0;
     };
+    const bool resident_static = mci_param.use_resident_base and view.static_csr;
+    bool consume_seen = false;
     auto try_visit = [&](InnerIdType id, uint32_t depth, bool known_valid = false) {
         if (id >= total) {
             return false;
@@ -285,6 +345,9 @@ search_clique_view(const CliqueDataCellSearchView& view,
         // Remember rejected fallback IDs too: overlapping cliques must not repeat user
         // callbacks or deletion lookups. Byte/packed rejection above remains a cheap probe.
         visited_nodes.Set(id);
+        if (consume_seen) {
+            packed.MarkSeen(id);
+        }
         if ((mci_param.revalidate_predicate or (not known_valid and valid_bitmap == nullptr)) and
             inner_search_param.is_inner_id_allowed != nullptr and
             not inner_search_param.is_inner_id_allowed->CheckValid(id)) {
@@ -332,6 +395,19 @@ search_clique_view(const CliqueDataCellSearchView& view,
                             (mci_param.valid_inner_ids != nullptr or valid_bitmap != nullptr);
     if (use_packed) {
         packed.Build(total, valid_bitmap, mci_param.valid_inner_ids, mci_param.valid_inner_count);
+        consume_seen = resident_static;
+        if (consume_seen and mci_param.seed_inner_ids != nullptr) {
+            // Seed visits predate Build. Clear only sampled seeds that reached the epoch mark;
+            // keep that mark to catch duplicates within a single packed row as well.
+            const auto& ids = *mci_param.seed_inner_ids;
+            const auto sampled = std::min<uint64_t>(seed_target, ids.size());
+            for (uint64_t i = 0; i < sampled; ++i) {
+                const auto id = ids[i * ids.size() / sampled];
+                if (visited_nodes.Get(id)) {
+                    packed.MarkSeen(id);
+                }
+            }
+        }
     }
     uint32_t hops = 0;
     uint64_t idle = 0;
@@ -352,7 +428,7 @@ search_clique_view(const CliqueDataCellSearchView& view,
         }
         const auto accepted_before = accepted;
         uint64_t considered = 0;
-        view.ForEachNodeClique(id, [&](InnerIdType cid) {
+        auto visit_clique = [&](InnerIdType cid) {
             if (mci_param.activation_cap != 0 and considered++ >= mci_param.activation_cap) {
                 return false;
             }
@@ -377,7 +453,42 @@ search_clique_view(const CliqueDataCellSearchView& view,
                 });
             }
             return hops < mci_param.hops_limit;
-        });
+        };
+        if (resident_static and id < view.base_node_count) {
+            const uint64_t end = view.p_node_to_cid[id + 1];
+            for (uint64_t pos = view.p_node_to_cid[id]; pos < end; ++pos) {
+                constexpr uint64_t lookahead = 4;
+                // Fetch offsets and visit marks first, then the leading cache lines
+                // of an unvisited member list four cliques ahead.
+                if (pos + 2 * lookahead < end) {
+                    const auto cid = view.node_to_cids[pos + 2 * lookahead];
+                    if (cid < view.total_clique_count) {
+                        __builtin_prefetch(visited_cliques.marks.data() + cid, 0, 1);
+                        __builtin_prefetch(view.p_maxc + cid, 0, 1);
+                    }
+                }
+                if (pos + lookahead < end) {
+                    const auto cid = view.node_to_cids[pos + lookahead];
+                    if (cid < view.total_clique_count and not visited_cliques.Get(cid)) {
+                        const auto begin = view.p_maxc[cid];
+                        const auto member_end = view.p_maxc[cid + 1];
+                        if (begin < member_end) {
+                            const auto* members = view.maxcs + begin;
+                            __builtin_prefetch(members, 0, 1);
+                            if (member_end - begin > 64 / sizeof(InnerIdType)) {
+                                prefetch_mci_member_tail(members, member_end - begin);
+                            }
+                        }
+                    }
+                }
+                const auto cid = view.node_to_cids[pos];
+                if (cid < view.total_clique_count and not visit_clique(cid)) {
+                    break;
+                }
+            }
+        } else {
+            view.ForEachNodeClique(id, visit_clique);
+        }
         // All distances of this parent must be visible before choosing the next parent.
         flush();
         idle = accepted == accepted_before ? idle + 1 : 0;
@@ -412,6 +523,10 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
     auto heap = DistanceHeap::MakeInstanceBySize<true, true>(alloc, candidate_limit);
     if (cliques == nullptr or flatten == nullptr or query == nullptr) {
         return heap;
+    }
+    if (mci_param.use_one_bit_distance) {
+        CHECK_ARGUMENT(flatten->InMemory(),
+                       "MCI one-bit scoring requires fully in-memory base codes");
     }
 
     const auto total = static_cast<InnerIdType>(flatten->TotalCount());
