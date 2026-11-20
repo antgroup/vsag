@@ -302,6 +302,19 @@ public:
     virtual DetailDataPtr
     GetDetailDataByName(const std::string& name, IndexDetailInfo& info) const;
 
+    /**
+     * @brief Return the estimated memory required while building the index.
+     *
+     * The estimate covers the peak memory the index itself owns during Build(): the retained
+     * footprint of the built index plus the build-only temporaries. Memory held by the caller
+     * for the input vectors is excluded. Indexes that cannot produce a meaningful estimate
+     * keep the default implementation, which throws.
+     *
+     * @param num_elements denotes the amount of data used to build the index.
+     * @return estimated memory required during building, in bytes.
+     * @throws VsagException with ErrorType::UNSUPPORTED_INDEX_OPERATION when the
+     *         implementation does not support the estimate.
+     */
     [[nodiscard]] virtual uint64_t
     EstimateBuildMemory(uint64_t num_elements) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
