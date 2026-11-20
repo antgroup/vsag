@@ -512,6 +512,8 @@ jobs:
           numpy-version: ${{ matrix.numpy }}
           mode: ${{ matrix.openmp && 'openmp' || 'ordinary' }}
 
+      - name: Run Wheel Smoke Test
+        run: python3 ./scripts/python/smoke_test_wheel.py
       - name: Run ordinary tests in the integration environment
         if: ${{ matrix.openmp }}
         run: python3 scripts/ci/python_ci.py test --output python-ordinary-report/results.json
