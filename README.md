@@ -736,6 +736,15 @@ VSAG draws on the following works for graph construction, vector quantization, f
                 </a>
             </td>
         </tr>
+        <tr>
+            <td align="center">
+                <a href="https://github.com/XiaoZhijiayou">
+                    <img src="https://avatars.githubusercontent.com/u/132753484?v=4" width="100" alt="XiaoZhijiayou"/>
+                    <br />
+                    <sub><b>MK</b></sub>
+                </a>
+            </td>
+        </tr>
     </tbody>
 </table>
 <!-- readme: contributors -end -->
