@@ -34,6 +34,24 @@ DatasetImpl::MakeEmptyDataset() {
     return result;
 }
 
+DatasetPtr
+Dataset::Valids(const bool* valids) {
+    auto* dataset = dynamic_cast<DatasetImpl*>(this);
+    if (dataset == nullptr) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "This Dataset implementation does not support valids");
+    }
+    return dataset->Valids(valids);
+}
+
+const bool*
+Dataset::GetValids() const {
+    if (const auto* dataset = dynamic_cast<const DatasetImpl*>(this)) {
+        return dataset->GetValids();
+    }
+    return nullptr;
+}
+
 template <typename T>
 static inline T*
 new_element(T*& old_dest, size_t old_count, size_t new_total) {
@@ -143,6 +161,7 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
     if (allocator_ != nullptr) {
         allocator_->Deallocate(void_ptr(DatasetImpl::GetIds()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetDistances()));
+        allocator_->Deallocate(void_ptr(DatasetImpl::GetValids()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetInt8Vectors()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetFloat32Vectors()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetExtraInfos()));
@@ -162,6 +181,7 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
     } else {
         delete[] DatasetImpl::GetIds();
         delete[] DatasetImpl::GetDistances();
+        delete[] DatasetImpl::GetValids();
         delete[] DatasetImpl::GetInt8Vectors();
         delete[] DatasetImpl::GetFloat32Vectors();
         delete[] DatasetImpl::GetExtraInfos();
@@ -203,6 +223,10 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
     if (this->GetDistances() != nullptr) {
         copy_dataset->Distances(
             allocate_and_copy(this->GetDistances(), num_elements * dim, allocator_ref));
+    }
+    if (this->GetValids() != nullptr) {
+        copy_dataset->Valids(
+            allocate_and_copy(this->GetValids(), num_elements * dim, allocator_ref));
     }
     if (this->GetInt8Vectors() != nullptr) {
         copy_dataset->Int8Vectors(
@@ -278,10 +302,24 @@ DatasetImpl::Append(const DatasetPtr& other) {
     auto new_num_elements = other->GetNumElements();
     auto dim = this->GetDim();
 
+    // valids must be present on both sides or neither side; checked before any mutation
+    if ((this->GetValids() != nullptr) != (other->GetValids() != nullptr)) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Cannot append datasets when only one of them has valids");
+    }
+
     this->NumElements(old_num_elements + new_num_elements);
 
     APPEND_DATA(IDS, int64_t*, Ids, 1);
     APPEND_DATA(DISTS, float*, Distances, dim);
+    if (this->GetValids() != nullptr) {
+        auto* valids = const_cast<bool*>(this->GetValids());
+        this->Valids(allocate_and_copy(other->GetValids(),
+                                       new_num_elements * dim,
+                                       this->allocator_,
+                                       valids,
+                                       old_num_elements * dim));
+    }
     APPEND_DATA(INT8_VECTORS, int8_t*, Int8Vectors, dim);
     APPEND_DATA(FLOAT32_VECTORS, float*, Float32Vectors, dim);
     if (this->GetExtraInfoSize() != 0) {

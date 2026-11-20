@@ -1009,35 +1009,67 @@ IVF::CalDistanceById(const float* query, const int64_t* ids, int64_t count) cons
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
     auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
+    if (distances == nullptr and count > 0) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate distance buffer");
+    }
     result->Distances(distances);
-    if (this->use_reorder_) {
-        auto computer = this->reorder_codes_->FactoryComputer(query);
-        Vector<InnerIdType> inner_ids(count, allocator_);
+    std::vector<bool> validity(count, false);
+    Vector<InnerIdType> inner_ids(allocator_);
+    Vector<int64_t> positions(allocator_);
+    {
+        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
         for (int64_t i = 0; i < count; ++i) {
-            inner_ids[i] = this->label_table_->GetIdByLabel(ids[i]);
+            auto [success, inner_id] = this->label_table_->TryGetIdByLabel(ids[i]);
+            if (success) {
+                inner_ids.push_back(inner_id);
+                positions.push_back(i);
+                validity[i] = true;
+            } else {
+                distances[i] = std::numeric_limits<float>::quiet_NaN();
+            }
         }
-        this->reorder_codes_->Query(distances, computer, inner_ids.data(), count);
-        return result;
     }
-    auto computer = this->bucket_->FactoryComputer(query);
-    for (int64_t i = 0; i < count; ++i) {
-        auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
-        auto location = this->get_location(inner_id);
-        distances[i] = this->bucket_->QueryOneById(computer, location.first, location.second);
+    if (not inner_ids.empty()) {
+        const auto valid_count = static_cast<int64_t>(inner_ids.size());
+        if (this->use_reorder_) {
+            auto computer = this->reorder_codes_->FactoryComputer(query);
+            Vector<float> valid_distances(valid_count, 0.0F, allocator_);
+            this->reorder_codes_->Query(
+                valid_distances.data(), computer, inner_ids.data(), valid_count);
+            for (int64_t i = 0; i < valid_count; ++i) {
+                distances[positions[i]] = valid_distances[i];
+            }
+        } else {
+            auto computer = this->bucket_->FactoryComputer(query);
+            for (int64_t i = 0; i < valid_count; ++i) {
+                auto location = this->get_location(inner_ids[i]);
+                distances[positions[i]] =
+                    this->bucket_->QueryOneById(computer, location.first, location.second);
+            }
+        }
     }
+    AttachValids(result, validity, allocator_);
     return result;
 }
+
 float
 IVF::CalcDistanceById(const float* query, int64_t id) const {
+    InnerIdType inner_id = 0;
+    {
+        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+        auto [success, found_id] = this->label_table_->TryGetIdByLabel(id);
+        if (not success) {
+            ThrowLabelNotFound(id);
+        }
+        inner_id = found_id;
+    }
     if (this->use_reorder_) {
         float dist = 0.0F;
         auto computer = this->reorder_codes_->FactoryComputer(query);
-        auto inner_id = this->label_table_->GetIdByLabel(id);
         this->reorder_codes_->Query(&dist, computer, &inner_id, 1);
         return dist;
     }
     auto computer = this->bucket_->FactoryComputer(query);
-    auto inner_id = this->label_table_->GetIdByLabel(id);
     auto location = this->get_location(inner_id);
     return this->bucket_->QueryOneById(computer, location.first, location.second);
 }

@@ -87,8 +87,11 @@ main(int argc, char** argv) {
 
     /******************* Print Search Result *****************/
     std::cout << "results: " << std::endl;
+    // Missing or removed IDs have a NaN distance and a false entry in GetValids().
+    const auto* valids = result.value()->GetValids();
     for (int64_t i = 0; i < ids_new.size(); ++i) {
-        std::cout << ids_new[i] << " " << result.value()->GetDistances()[i] << std::endl;
+        std::cout << ids_new[i] << " " << result.value()->GetDistances()[i]
+                  << (valids != nullptr and not valids[i] ? " (invalid id)" : "") << std::endl;
     }
 
     engine.Shutdown();

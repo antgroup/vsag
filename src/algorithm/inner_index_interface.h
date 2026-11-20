@@ -16,6 +16,7 @@
 #pragma once
 
 #include <atomic>
+#include <limits>
 #include <shared_mutex>
 #include <vector>
 
@@ -42,6 +43,16 @@ DEFINE_POINTER(LabelTable);
 DEFINE_POINTER(IndexFeatureList);
 
 class IndexCommonParam;
+
+// Copies `validity` into an owned bool buffer allocated with `allocator` and attaches it to
+// `dataset` through Dataset::Valids(). Does nothing for an empty mask.
+void
+AttachValids(const DatasetPtr& dataset, const std::vector<bool>& validity, Allocator* allocator);
+
+// Throws VsagException(INVALID_ARGUMENT) reporting that `label` is missing or removed. Used by the
+// single-ID CalcDistanceById implementations.
+[[noreturn]] void
+ThrowLabelNotFound(int64_t label);
 
 class InnerIndexInterface {
 public:
@@ -422,7 +433,8 @@ protected:
     cal_distance_by_id(const float* query,
                        const int64_t* ids,
                        int64_t count,
-                       const FlattenInterfacePtr& data) const;
+                       const FlattenInterfacePtr& data,
+                       std::vector<bool>* validity = nullptr) const;
 
 public:
     LabelTablePtr label_table_{nullptr};

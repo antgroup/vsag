@@ -247,13 +247,15 @@ HierarchicalNSW::getBatchDistanceByLabel(const int64_t* ids,
     result->Owner(true, allocator_);
     auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
     result->Distances(distances);
+    std::vector<bool> validity(count, false);
     std::shared_ptr<float[]> normalize_query;
     normalizeVector(data_point, normalize_query);
     for (int i = 0; i < count; i++) {
         auto search = label_lookup_.find(ids[i]);
         if (search == label_lookup_.end()) {
-            distances[i] = -1;
+            distances[i] = std::numeric_limits<float>::quiet_NaN();
         } else {
+            validity[i] = true;
             InnerIdType internal_id = search->second;
             float dist =
                 fstdistfunc_(data_point, getDataByInternalId(internal_id), dist_func_param_);
@@ -262,6 +264,17 @@ HierarchicalNSW::getBatchDistanceByLabel(const int64_t* ids,
         }
     }
     result->NumElements(count);
+    if (count > 0) {
+        auto* valids = static_cast<bool*>(allocator_->Allocate(sizeof(bool) * count));
+        if (valids == nullptr) {
+            throw vsag::VsagException(vsag::ErrorType::NO_ENOUGH_MEMORY,
+                                      "failed to allocate valids buffer");
+        }
+        for (int i = 0; i < count; i++) {
+            valids[i] = validity[i];
+        }
+        result->Valids(valids);
+    }
     return std::move(result);
 }
 
