@@ -233,7 +233,7 @@ def test_from_hdf5(hdf5_path):
     assert loaded.ground_truth.shape == (20, 10)
 
 
-def test_from_hdf5_accepts_one_dimensional_neighbors(tmp_path):
+def test_from_hdf5_rejects_one_dimensional_neighbors(tmp_path):
     h5py = pytest.importorskip("h5py")
     rng = np.random.default_rng(4)
     path = tmp_path / "one_nn.hdf5"
@@ -241,7 +241,8 @@ def test_from_hdf5_accepts_one_dimensional_neighbors(tmp_path):
         file.create_dataset("train", data=rng.random((50, DIM), dtype=np.float32))
         file.create_dataset("test", data=rng.random((5, DIM), dtype=np.float32))
         file.create_dataset("neighbors", data=np.arange(5))
-    assert EvalDataset.from_hdf5(str(path)).ground_truth.shape == (5, 1)
+    with pytest.raises(ValueError, match="num_queries, k"):
+        EvalDataset.from_hdf5(str(path))
 
 
 def _case(hdf5_path, action, **extra):
