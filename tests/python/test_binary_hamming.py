@@ -98,7 +98,7 @@ def test_binary_bruteforce_range_and_distance_by_id(dim):
     probe = np.array([0, 17, num - 1, 10**9], dtype=np.int64)
     distances = index.calc_distances_by_id(_pack(query_bits), probe)
     np.testing.assert_array_equal(distances[:3], expected[probe[:3]].astype(np.float32))
-    assert distances[3] < 0
+    assert np.isnan(distances[3])  # an unknown id is reported as NaN
 
 
 def test_binary_inputs_accept_flat_buffers_and_ignore_padding():
