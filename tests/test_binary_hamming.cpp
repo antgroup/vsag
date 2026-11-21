@@ -236,6 +236,73 @@ serialize_round_trip(const vsag::IndexPtr& index,
     return restored;
 }
 
+// A removed id follows the CalcDistanceById contract: the single-ID form fails with
+// INVALID_ARGUMENT, and the batch form reports NaN with a false validity flag next to a live id.
+void
+check_removed_distance(const vsag::IndexPtr& index,
+                       const BinaryData& data,
+                       const uint8_t* query,
+                       const std::set<int64_t>& removed) {
+    const int64_t dim = data.dim;
+    const int64_t gone = *removed.begin();
+    int64_t kept_row = -1;
+    for (int64_t i = 0; i < data.count() and kept_row < 0; ++i) {
+        if (removed.count(data.ids[i]) == 0) {
+            kept_row = i;
+        }
+    }
+    REQUIRE(kept_row >= 0);
+    const int64_t kept = data.ids[kept_row];
+    const float kept_distance = exact_distances(data, query, removed).at(kept);
+    auto single = index->CalcDistanceById(query_dataset(query, dim), gone);
+    REQUIRE_FALSE(single.has_value());
+    REQUIRE(single.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    const std::vector<int64_t> probe = {kept, gone};
+    auto batch = index->CalcDistancesById(query_dataset(query, dim), probe.data(), 2);
+    REQUIRE(batch.has_value());
+    const auto* valids = batch.value()->GetValids();
+    REQUIRE(valids != nullptr);
+    REQUIRE(valids[0]);
+    REQUIRE(batch.value()->GetDistances()[0] == kept_distance);
+    REQUIRE_FALSE(valids[1]);
+    REQUIRE(std::isnan(batch.value()->GetDistances()[1]));
+
+    // Two binary queries in one dataset read their ids row by row and get one validity flag per
+    // output entry; with a top-k an invalid entry ranks last, so the live id is the one kept.
+    const auto bytes = row_bytes(dim);
+    std::vector<uint8_t> queries(2 * bytes);
+    std::copy_n(query, bytes, queries.data());
+    std::copy_n(data.row(kept_row), bytes, queries.data() + bytes);
+    auto two = vsag::Dataset::Make();
+    two->NumElements(2)->Dim(dim)->BinaryVectors(queries.data())->Owner(false);
+    const std::vector<int64_t> rows = {kept, gone, gone, kept};
+    auto all = index->CalcDistancesById(two, rows.data(), 2);
+    REQUIRE(all.has_value());
+    REQUIRE(all.value()->GetNumElements() == 2);
+    REQUIRE(all.value()->GetDim() == 2);
+    const auto* all_valids = all.value()->GetValids();
+    const auto* all_dists = all.value()->GetDistances();
+    REQUIRE(all_valids != nullptr);
+    REQUIRE(all_valids[0]);
+    REQUIRE(all_dists[0] == kept_distance);
+    REQUIRE_FALSE(all_valids[1]);
+    REQUIRE(std::isnan(all_dists[1]));
+    REQUIRE_FALSE(all_valids[2]);
+    REQUIRE(std::isnan(all_dists[2]));
+    REQUIRE(all_valids[3]);
+    REQUIRE(all_dists[3] == 0.0F);  // the second query is the stored row of `kept`
+    auto top1 = index->CalcDistancesById(two, rows.data(), 2, true, 1);
+    REQUIRE(top1.has_value());
+    REQUIRE(top1.value()->GetDim() == 1);
+    REQUIRE(top1.value()->GetValids() != nullptr);
+    for (int64_t q = 0; q < 2; ++q) {
+        REQUIRE(top1.value()->GetIds()[q] == kept);
+        REQUIRE(top1.value()->GetValids()[q]);
+    }
+    REQUIRE(top1.value()->GetDistances()[0] == kept_distance);
+    REQUIRE(top1.value()->GetDistances()[1] == 0.0F);
+}
+
 }  // namespace
 
 TEST_CASE("Binary BruteForce returns exact Hamming results", "[ft][binary][brute_force]") {
@@ -291,10 +358,15 @@ TEST_CASE("Binary BruteForce returns exact Hamming results", "[ft][binary][brute
         auto distances = index->CalcDistancesById(
             query_dataset(query.data(), dim), ids.data(), static_cast<int64_t>(ids.size()));
         REQUIRE(distances.has_value());
+        const auto* valids = distances.value()->GetValids();
+        REQUIRE(valids != nullptr);
         for (int64_t i = 0; i < 3; ++i) {
+            REQUIRE(valids[i]);
             REQUIRE(distances.value()->GetDistances()[i] == exact.at(ids[i]));
         }
-        REQUIRE(distances.value()->GetDistances()[3] < 0.0F);
+        // An unknown id is reported as NaN with a false validity flag.
+        REQUIRE_FALSE(valids[3]);
+        REQUIRE(std::isnan(distances.value()->GetDistances()[3]));
         auto single = index->CalcDistanceById(query_dataset(query.data(), dim), data.ids[1]);
         REQUIRE(single.has_value());
         REQUIRE(single.value() == exact.at(data.ids[1]));
@@ -488,6 +560,9 @@ TEST_CASE("Binary BruteForce add, remove and serialization", "[ft][binary][brute
             check_exact_range(range.value(), exact, radius);
         }
     }
+    for (const auto& candidate : {index, restored}) {
+        check_removed_distance(candidate, data, query.data(), removed);
+    }
 }
 
 TEST_CASE("Binary HGraph build, add, remove, search and serialization", "[ft][binary][hgraph]") {
@@ -575,6 +650,9 @@ TEST_CASE("Binary HGraph build, add, remove, search and serialization", "[ft][bi
         const double recall = hits / total;
         INFO("recall@" << k << " = " << recall);
         REQUIRE(recall >= 0.95);
+    }
+    for (const auto& candidate : {index, restored}) {
+        check_removed_distance(candidate, data, query.data(), removed);
     }
 
     const auto& probe_id = data.ids[1];
