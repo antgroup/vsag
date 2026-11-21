@@ -14,6 +14,7 @@
 
 #include <atomic>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -23,6 +24,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "data_type.h"
@@ -37,6 +39,7 @@
 #include "query_context.h"
 #include "storage/serialization.h"
 #include "unittest.h"
+#include "utils/lock_strategy.h"
 #include "vsag/factory.h"
 #include "vsag/options.h"
 #include "vsag_exception.h"
@@ -191,6 +194,50 @@ TEST_CASE("Binary FlattenDataCell stores codes through user-defined IO",
     // datacell that an index would dereference.
     REQUIRE_THROWS_AS(FlattenInterface::MakeInstance(param, binary_common_param(dim, allocator)),
                       VsagException);
+}
+
+TEST_CASE("Binary FlattenDataCell range scans take external node locks",
+          "[ut][FlattenDataCell][binary]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    fixtures::TempDir dir("binary_flatten_locked_range");
+    constexpr int64_t dim = 100;
+    auto flatten = FlattenInterface::MakeInstance(
+        binary_flatten_param(IO_TYPE_VALUE_BLOCK_MEMORY_IO, QUANTIZATION_TYPE_VALUE_BINARY, dir),
+        binary_common_param(dim, allocator));
+    const uint64_t row_bytes = BinaryVectorBytes(dim);
+    constexpr InnerIdType count = 64;
+    std::mt19937_64 rng(47);
+    std::vector<uint8_t> vectors(count * row_bytes);
+    for (auto& value : vectors) {
+        value = static_cast<uint8_t>(rng());
+    }
+    flatten->Train(vectors.data(), count);
+    flatten->BatchInsertVector(vectors.data(), count);
+    std::vector<uint8_t> query(row_bytes);
+    for (auto& value : query) {
+        value = static_cast<uint8_t>(rng());
+    }
+    auto computer = flatten->FactoryComputer(query.data());
+
+    // An owner that hands the cell per-node read locks (HGraph with cluster vector node locks)
+    // relies on every read taking them, range scans included.
+    auto mutexes = std::make_shared<PointsMutex>(count, allocator.get());
+    flatten->SetExternalReadMutexArray(mutexes);
+    std::vector<float> dists(count, -1.0F);
+    std::atomic<bool> done{false};
+    mutexes->Lock(5);
+    std::thread scan([&]() {
+        flatten->QueryRange(dists.data(), computer, 0, count);
+        done.store(true);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    const bool finished_while_locked = done.load();
+    mutexes->Unlock(5);
+    scan.join();
+    REQUIRE_FALSE(finished_while_locked);
+    for (InnerIdType i = 0; i < count; ++i) {
+        REQUIRE(dists[i] == reference_hamming(query.data(), vectors.data() + i * row_bytes, dim));
+    }
 }
 
 TEST_CASE("Binary FlattenDataCell scattered inserts and id ranges",
