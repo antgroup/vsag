@@ -16,7 +16,9 @@ EXCLUDED_PREFIXES = ("extern/", "vendor/", "third_party/", "build/", "build-")
 EXCLUDED_PARTS = {"generated", "hnsw", "diskann"}
 EXCLUDED_FILES = {"include/vsag/expected.hpp"}
 # These opaque tags are part of the public C API, not C++ implementation names.
-C_ABI_FILES = {"include/vsag/vsag_c_api.h", "src/vsag_c_api.cpp"}
+C_ABI_FILES = {
+    "include/vsag/vsag_c_api.h", "src/vsag_c_api.cpp", "src/vsag_c_api_internal.h",
+}
 C_ABI_TAGS = {
     "vsag_error", "vsag_dataset", "vsag_engine", "vsag_engine_options",
     "vsag_filter", "vsag_index", "vsag_search_result",

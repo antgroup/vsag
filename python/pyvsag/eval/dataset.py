@@ -164,6 +164,8 @@ class EvalDataset:
             base = file["train"][...]
             queries = file["test"][...]
             neighbors = file["neighbors"][...] if "neighbors" in file else None
+        if neighbors is not None and neighbors.ndim == 1:
+            neighbors = neighbors.reshape(-1, 1)
         return cls.from_arrays(base, queries, neighbors, metric=metric)
 
     @property
