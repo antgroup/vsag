@@ -19,6 +19,7 @@
 
 #include <atomic>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <optional>
 #include <type_traits>
@@ -30,6 +31,7 @@
 #include "gpu/gpu_plan.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/blas/blas_function.h"
+#include "impl/cluster/e_means_cluster.h"
 #include "impl/cluster/kmeans_cluster.h"
 #include "inner_string_params.h"
 #include "query_context.h"
@@ -119,14 +121,22 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
                 dataset->GetFloat32Vectors(),
                 dataset->GetNumElements(),
                 ivf_partition_strategy_param_->GetKMeansIterCount());
-        memcpy(data.data(), cls.k_centroids_, dim * this->bucket_count_ * sizeof(float));
+        std::memcpy(data.data(), cls.k_centroids_, dim * this->bucket_count_ * sizeof(float));
+    } else if (ivf_partition_strategy_param_->partition_train_type ==
+               IVFNearestPartitionTrainerType::EMeansTrainer) {
+        EMeansCluster cls(static_cast<int32_t>(dim), this->allocator_, this->thread_pool_);
+        cls.Run(this->bucket_count_,
+                dataset->GetFloat32Vectors(),
+                dataset->GetNumElements(),
+                ivf_partition_strategy_param_->e_means_epochs);
+        std::memcpy(data.data(), cls.k_centroids_, dim * this->bucket_count_ * sizeof(float));
     } else if (ivf_partition_strategy_param_->partition_train_type ==
                IVFNearestPartitionTrainerType::RandomTrainer) {
         auto selected = select_k_numbers(dataset->GetNumElements(), this->bucket_count_);
         for (int i = 0; i < bucket_count_; ++i) {
-            memcpy(data.data() + i * dim,
-                   dataset->GetFloat32Vectors() + selected[i] * dim,
-                   dim * sizeof(float));
+            std::memcpy(data.data() + i * dim,
+                        dataset->GetFloat32Vectors() + selected[i] * dim,
+                        dim * sizeof(float));
         }
     }
     if (metric_type_ == MetricType::METRIC_TYPE_COSINE) {
@@ -145,7 +155,7 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
         // Persist the trained centroids (normalized for cosine) so the scan routing path can
         // assign buckets without creating a routing HGraph.
         this->centroids_.resize(this->bucket_count_ * this->dim_);
-        memcpy(
+        std::memcpy(
             this->centroids_.data(), data.data(), this->bucket_count_ * this->dim_ * sizeof(float));
         this->norms_.resize(this->bucket_count_);
         if (metric_type_ == MetricType::METRIC_TYPE_L2SQR) {
@@ -435,9 +445,9 @@ IVFNearestPartition::GetCentroid(BucketIdType bucket_id, Vector<float>& centroid
     if (this->use_route_graph_) {
         this->route_index_ptr_->GetCodeByInnerId(bucket_id, (uint8_t*)centroid.data());
     } else {
-        memcpy(centroid.data(),
-               this->centroids_.data() + bucket_id * this->dim_,
-               this->dim_ * sizeof(float));
+        std::memcpy(centroid.data(),
+                    this->centroids_.data() + bucket_id * this->dim_,
+                    this->dim_ * sizeof(float));
     }
 }
 

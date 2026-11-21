@@ -24,17 +24,17 @@ docker pull vsaglib/vsag:ubuntu
 - Operating System:
   - Ubuntu 20.04 or later
   - or CentOS 7 or later
-  - or macOS 14 or later (arm64, C++ build path)
+  - or macOS 15 or later (arm64, C++ build path)
 - Compiler:
   - GCC version 9.4.0 or later
   - or Clang version 13.0.0 or later
 - Build Tools: 
-  - CMake version 3.18.0 or later
+  - CMake version 3.18.0 or later (3.20+ for native macOS Python wheels)
   - Ninja (preferred when available; Unix Makefiles remain the compatibility fallback)
   - clang-tidy version 20 EXACTLY (not higher, not lower - required for consistent lint diagnostics)
   - clang-format version 20 EXACTLY (not higher, not lower - required for consistent formatting)
 - Additional Dependencies:
-  - Linux: gfortran, python 3.6+, OpenMP, libaio, curl
+  - Linux: gfortran, python 3.10+, OpenMP, libaio, curl
   - macOS: Xcode Command Line Tools, Homebrew
 
 ```bash
@@ -82,8 +82,7 @@ run-dist-tests:          ## Run distribution tests.
 dist-pre-cxx11-abi:      ## Build vsag with distribution options (pre C++11 ABI).
 dist-cxx11-abi:          ## Build vsag with distribution options (C++11 ABI).
 dist-libcxx:             ## Build vsag using libc++.
-pyvsag:                  ## Build a specific Python version wheel. Usage: make pyvsag PY_VERSION=3.10
-pyvsag-all:              ## Build wheels for all supported versions.
+pyvsag:                  ## Build the pyvsag wheel (one py3-none wheel per architecture) into wheelhouse/.
 clean-release:           ## Clear build-release/ directory.
 clean-release-perf:      ## Clear build-release-perf/ directory.
 install:                 ## Build and install the release version of vsag.
@@ -91,14 +90,14 @@ install:                 ## Build and install the release version of vsag.
 
 Build target behavior:
 
-- `make debug` builds the default minimal configuration. It does not enable tests, examples, tools, or Python bindings unless they are explicitly turned on.
-- `make dev` builds the full developer configuration with tests, examples, tools, and Python bindings enabled.
+- `make debug` builds the default minimal configuration. It does not enable tests, examples, tools, or the pyvsag library (`libvsag_c`) unless they are explicitly turned on.
+- `make dev` builds the full developer configuration with tests, examples, tools, and the pyvsag library (`libvsag_c`) enabled.
 - `make test`, `make asan`, `make tsan`, and the related parallel test targets automatically enable tests.
 - `make test-module MODULE=<name>` builds and runs one unit-test subsystem without building the other unit-test modules. `CASE=<filter>` applies the usual Catch2 runtime filter; run `make test` for full validation.
 - `make release` is the reproducible release/package path. It uses the minimal configuration, Release optimization semantics, and disables ccache by default. Enable optional components explicitly when needed, for example `make release VSAG_ENABLE_TOOLS=ON`.
 - `make release-perf` uses the same Release optimization semantics and minimal configuration in `build-release-perf/`, but enables ccache by default for iterative development and benchmarking.
 - Override either cache default explicitly with `VSAG_ENABLE_CCACHE=ON` or `VSAG_ENABLE_CCACHE=OFF`.
-- Linux and macOS use the same dependency-script plus `make` entry points for the core C++ build. Use `./scripts/deps/install_deps.sh` first, then run the usual `make` target. The current macOS validation scope is `make debug`, `make release`, and `make test` on arm64; Python wheel packaging remains Linux-focused.
+- Linux and macOS use the same dependency-script plus `make` entry points for the core C++ build. Use `./scripts/deps/install_deps.sh` first, then run the usual `make` target. The current macOS validation scope is `make debug`, `make release`, and `make test` on arm64; Python wheels can also be built locally on macOS arm64 with `make pyvsag`; see the [pyvsag guide](docs/docs/en/src/guide/pyvsag.md). Published wheels remain Linux-only.
 
 ## CMake Build Options
 
@@ -192,7 +191,7 @@ source of truth for the exact upstream URL and expected checksum.
   - Build tools under `tools/`
 
 - **`ENABLE_PYBINDS`** (default: `OFF`)
-  - Build the `_pyvsag` Python extension module
+  - Build `libvsag_c`, the C ABI library that `pyvsag` loads through cffi
 
 - **`ENABLE_CUDA`** (default: `OFF`)
   - Build the optional CUDA backend. Requires CUDA 11.8 or later, with `nvcc` on
@@ -215,8 +214,7 @@ For a complete list of build options, see the `option()` directives in `cmake/VS
 - `examples/`: cpp and python example codes
 - `extern/`: third-party libraries
 - `include/`: export header files
-- `python/`: the pyvsag package and setup tools
-- `python_bindings/`: the python bindings
+- `python/`: the pyvsag package (pure-Python cffi layer) and wheel packaging
 - `scripts/`: useful scripts
 - `src/`: the source codes and unit tests
 - `tests/`: the functional tests
@@ -234,3 +232,7 @@ make test DEBUG_BUILD_DIR=build_clang20 EXTRA_DEFINED="-DCMAKE_C_COMPILER=clang-
 The Ubuntu dependency installer requires Ubuntu 24.04+ and installs GCC 13 and LLVM 20 (using apt.llvm.org if needed). Other distributions need a matching toolchain prepared manually. Compiler requirements concern source builds, not the glibc baseline of prebuilt packages. Existing manylinux release baselines and both libstdc++ ABI choices are preserved. Installing a package does not require a C++20 client compiler.
 
 Maintained CI container images use Ubuntu 26.04 with GCC 13 and LLVM 20. Ubuntu 24.04 remains a development and runtime compatibility target. Published packages retain their existing manylinux/glibc baselines; validate their Ubuntu 24.04 runtime compatibility separately from the Ubuntu 26.04 CI build.
+
+Datacell compilation follows `COMPILE_JOBS` by default. On memory-limited Ninja builders,
+use `make asan COMPILE_JOBS=3 DATACELL_COMPILE_JOBS=1` to cap both datacell object libraries
+together. See the [compile parallelism guide](docs/docs/en/src/development/building.md#datacell-compile-parallelism).

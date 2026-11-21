@@ -38,6 +38,10 @@ make release
 pip install pyvsag==X.Y.Z
 ```
 
+基于 C API 构建的版本，每个架构只发布一个 `py3-none-manylinux_2_28` wheel（Linux、glibc 2.28 及以上、
+CPython 3.10 及以上）。更早的版本为每个 CPython 版本（最低到 3.6）各发布一个 `manylinux2014` wheel；
+如果需要更老的解释器或 glibc，请固定到那些版本。
+
 绑定版本不一定与每个 C++ core tag 对应。
 仓库还包含 C 和 Node.js/TypeScript 绑定。
 各绑定的具体支持范围与打包状态，

@@ -27,9 +27,13 @@ guarded(Function function, ErrorType fallback = ErrorType::INTERNAL_ERROR) -> de
 
 class RaBitQBackend final : public Backend {
 public:
-    explicit RaBitQBackend(rabitq::MutableGraphState state) : state_(std::move(state)) {
+    explicit RaBitQBackend(rabitq::MutableGraphState state, bool will_replay_adds = false)
+        : state_(std::move(state)) {
         state_.ConfigureIncomingProtection(
             rabitq::IncomingProtection::CACHED, false, false, false, true);
+        if (will_replay_adds) {
+            state_.InitializeIncomingCountsForReplay();
+        }
     }
 
     tl::expected<void, Error>
@@ -227,11 +231,11 @@ make_rabitq_graph_backend(const Backend& source, uint64_t max_degree, uint64_t e
 }
 
 tl::expected<std::unique_ptr<Backend>, Error>
-load_rabitq_graph_backend(std::istream& input) {
+load_rabitq_graph_backend(std::istream& input, uint64_t extra_rows) {
     return guarded(
         [&]() -> tl::expected<std::unique_ptr<Backend>, Error> {
-            return std::unique_ptr<Backend>(
-                new RaBitQBackend(rabitq::load_mutable_snapshot(input, true)));
+            return std::unique_ptr<Backend>(new RaBitQBackend(
+                rabitq::load_mutable_snapshot(input, true, extra_rows), extra_rows != 0));
         },
         ErrorType::INVALID_BINARY);
 }

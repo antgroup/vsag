@@ -10,6 +10,8 @@ ifeq ($(origin CMAKE_GENERATOR), undefined)
 endif
 CMAKE_INSTALL_PREFIX ?= "/usr/local/"
 COMPILE_JOBS ?= 6
+# 0: use the global job limit; positive values cap datacell compilation (Ninja).
+DATACELL_COMPILE_JOBS ?= 0
 CMAKE_BUILD_ARGS ?=
 DEBUG_BUILD_DIR ?= ./build/
 RELEASE_BUILD_DIR ?= "./build-release/"
@@ -24,6 +26,7 @@ VSAG_USE_SYSTEM_DEPS ?= AUTO
 LINT_BUILD_DIR ?= build-release/
 
 VSAG_CMAKE_ARGS := -DCMAKE_EXPORT_COMPILE_COMMANDS=1 -DCMAKE_COLOR_DIAGNOSTICS=ON -DENABLE_INTEL_MKL=${VSAG_ENABLE_INTEL_MKL}
+VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} -DVSAG_DATACELL_COMPILE_JOBS=${DATACELL_COMPILE_JOBS}
 VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} -DENABLE_LIBAIO=${VSAG_ENABLE_LIBAIO}
 VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} -DVSAG_USE_SYSTEM_DEPS=${VSAG_USE_SYSTEM_DEPS}
 VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX} -DNUM_BUILDING_JOBS=${COMPILE_JOBS}
@@ -239,16 +242,9 @@ dist-libcxx:             ## Build vsag using libc++.
 	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_CCACHE=${VSAG_ENABLE_CCACHE} -DENABLE_LIBCXX=on
 	cmake --build ${RELEASE_BUILD_DIR} --parallel ${COMPILE_JOBS}
 
-PY_VERSION ?= 3.10
+.PHONY: pyvsag
 
-.PHONY: pyvsag pyvsag-all
-
-pyvsag:                  ## Build a specific Python version wheel. Usage: make pyvsag PY_VERSION=3.10
-	@echo "Building wheel for Python $(PY_VERSION)..."
-	bash ./scripts/python/local_build_wheel.sh $(PY_VERSION)
-
-pyvsag-all:              ## Build wheels for all supported versions. Usage: make pyvsag-all
-	@echo "Building wheels for all supported versions..."
+pyvsag:                  ## Build the pyvsag wheel (one py3-none wheel per architecture) into wheelhouse/.
 	bash ./scripts/python/local_build_wheel.sh
 
 .PHONY: clean-release

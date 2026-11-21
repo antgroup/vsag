@@ -59,10 +59,15 @@
 
 #include "algorithm/simq/simq.h"
 #include "algorithm/simq/simq_utils.h"
+#include "allocator/memory_record_allocator.h"
 #include "framework/test_dataset.h"
 #include "framework/test_dataset_pool.h"
+#include "impl/thread_pool/default_thread_pool.h"
+#include "index/index_impl.h"
+#include "io/common/io_parameter.h"
 #include "test_index.h"
 #include "vsag/dataset.h"
+#include "vsag/engine.h"
 #include "vsag/index.h"
 #include "vsag/vsag.h"
 
@@ -777,8 +782,8 @@ TEST_CASE("SIMQ distance-by-ID native query contract", "[simq][distance_contract
     REQUIRE(index->CheckFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID));
     REQUIRE(index->CheckFeature(IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID));
     auto empty_distance = index->CalcDistanceById(base, label);
-    REQUIRE(empty_distance.has_value());
-    REQUIRE(empty_distance.value() == -1.0F);
+    REQUIRE_FALSE(empty_distance.has_value());
+    REQUIRE(empty_distance.error().type == ErrorType::INVALID_ARGUMENT);
     REQUIRE(index->Build(base).has_value());
     auto search = index->KnnSearch(base, 1, make_search_param(1, 1), FilterPtr{});
     REQUIRE(search.has_value());
@@ -801,10 +806,15 @@ TEST_CASE("SIMQ distance-by-ID native query contract", "[simq][distance_contract
         REQUIRE(batch.has_value());
         REQUIRE(batch.value()->GetNumElements() == 2);
         REQUIRE(batch.value()->GetDim() == 2);
-        REQUIRE(batch.value()->GetDistances()[0] == -1.0F);
+        REQUIRE(std::isnan(batch.value()->GetDistances()[0]));
         REQUIRE(batch.value()->GetDistances()[1] == expected);
         REQUIRE(batch.value()->GetDistances()[2] == expected);
-        REQUIRE(batch.value()->GetDistances()[3] == -1.0F);
+        REQUIRE(std::isnan(batch.value()->GetDistances()[3]));
+        REQUIRE(batch.value()->GetValids() != nullptr);
+        REQUIRE_FALSE(batch.value()->GetValids()[0]);
+        REQUIRE(batch.value()->GetValids()[1]);
+        REQUIRE(batch.value()->GetValids()[2]);
+        REQUIRE_FALSE(batch.value()->GetValids()[3]);
         auto top = index->CalcDistancesById(query, ids, 2, precise, 1);
         REQUIRE(top.has_value());
         REQUIRE(top.value()->GetDim() == 1);
@@ -812,6 +822,9 @@ TEST_CASE("SIMQ distance-by-ID native query contract", "[simq][distance_contract
         REQUIRE(top.value()->GetIds()[1] == label);
         REQUIRE(top.value()->GetDistances()[0] == expected);
         REQUIRE(top.value()->GetDistances()[1] == expected);
+        REQUIRE(top.value()->GetValids() != nullptr);
+        REQUIRE(top.value()->GetValids()[0]);
+        REQUIRE(top.value()->GetValids()[1]);
     }
     REQUIRE_FALSE(index->CalcDistanceById(DatasetPtr{}, label).has_value());
 }
@@ -966,7 +979,9 @@ TEST_CASE("SIMQ GetStats reports doc vector count distribution", "[simq][stats][
     REQUIRE(dist["max"].GetInt() == static_cast<int64_t>(DOC_TOKENS));
 }
 TEST_CASE("SIMQ native quantized build lifecycle", "[simq][quantized_build]") {
-    const auto quantization = GENERATE("fp32", "fp16", "bf16", "sq8_uniform");
+    const char* quantization = GENERATE("fp32", "fp16", "bf16", "sq8_uniform");
+    const bool build_centroid_updates = GENERATE(false, true);
+    CAPTURE(quantization, build_centroid_updates);
     constexpr int64_t dim = 32;
     constexpr int64_t docs = 96;
     constexpr uint32_t tokens = 4;
@@ -990,13 +1005,20 @@ TEST_CASE("SIMQ native quantized build lifecycle", "[simq][quantized_build]") {
             ->Owner(false);
     };
     const auto parameters = fmt::format(
-        R"({{"dtype":"float32","metric_type":"ip","dim":{},"index_param":{{"base_io_type":"memory_io","quantization_type":"{}","init_cluster_ratio":0.05,"max_cluster_size":16,"split_start_idx":8,"build_thread_count":2}}}})",
+        R"({{"dtype":"float32","metric_type":"ip","dim":{},"index_param":{{)"
+        R"("base_io_type":"memory_io","quantization_type":"{}","init_cluster_ratio":0.05,)"
+        R"("max_cluster_size":16,"split_start_idx":8,"build_thread_count":2,)"
+        R"("enable_build_centroid_updates":{}}}}})",
         dim,
-        quantization);
+        quantization,
+        build_centroid_updates);
     auto created = Factory::CreateIndex("simq", parameters);
     REQUIRE(created.has_value());
     auto index = created.value();
     REQUIRE(index->Build(data(0, docs / 2)).has_value());
+    auto stats = JsonType::Parse(index->GetStats());
+    REQUIRE((stats["center_update_count"].GetInt() > 0) == build_centroid_updates);
+    REQUIRE(stats["assigned_token_count"].GetInt() == docs / 2 * tokens);
     REQUIRE(index->Add(data(docs / 2, docs / 2)).has_value());
     std::vector<float> zero_values(2 * dim, 0.0F);
     MultiVector zero_mv{2, zero_values.data()};
@@ -1010,15 +1032,24 @@ TEST_CASE("SIMQ native quantized build lifecycle", "[simq][quantized_build]") {
         index->KnnSearch(zero_query, 10, R"({"simq":{"coarse_k":10000,"rerank_k":10000}})");
     REQUIRE(zero_result.has_value());
     REQUIRE(zero_result.value()->GetDim() == 10);
+    const std::vector<int64_t> zero_result_ids(
+        zero_result.value()->GetIds(),
+        zero_result.value()->GetIds() + zero_result.value()->GetDim());
+    CAPTURE(labels, zero_result_ids);
+    CAPTURE(zero_result.value()->GetStatistics());
     std::unordered_set<int64_t> zero_ids;
     for (int64_t i = 0; i < zero_result.value()->GetDim(); ++i) {
         REQUIRE(zero_ids.insert(zero_result.value()->GetIds()[i]).second);
     }
-    const auto search = R"({"simq":{"coarse_k":10000,"rerank_k":10000}})";
+    const char* search = R"({"simq":{"coarse_k":10000,"rerank_k":10000}})";
     auto query = data(3, 1);
     auto result = index->KnnSearch(query, 10, search);
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetDim() == 10);
+    const std::vector<int64_t> result_ids(result.value()->GetIds(),
+                                          result.value()->GetIds() + result.value()->GetDim());
+    CAPTURE(labels, result_ids);
+    CAPTURE(result.value()->GetStatistics());
     std::unordered_set<int64_t> unique;
     for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
         REQUIRE(unique.insert(result.value()->GetIds()[i]).second);
@@ -1048,8 +1079,102 @@ TEST_CASE("SIMQ native quantized build lifecycle", "[simq][quantized_build]") {
     REQUIRE(found);
 }
 
+TEST_CASE("SIMQ collects each candidate once across zero coarse scores",
+          "[simq][quantized_build][zero_score]") {
+    const auto quantization = GENERATE("fp32", "fp16", "bf16", "sq8_uniform");
+    const auto threads = GENERATE(1, 2);
+    const auto query_case = GENERATE(0, 1, 2);
+    CAPTURE(quantization, threads, query_case);
+    constexpr int64_t dim = 32;
+    constexpr int64_t docs = 8;
+    constexpr uint32_t tokens = 4;
+    // Exact basis vectors make zero scores and cancellation independent of RNG,
+    // clustering order, and platform-specific normal_distribution implementations.
+    std::vector<float> values(docs * tokens * dim, 0.0F);
+    std::vector<MultiVector> mvs(docs);
+    std::vector<int64_t> labels(docs);
+    for (int64_t i = 0; i < docs; ++i) {
+        for (uint32_t t = 0; t < tokens; ++t) {
+            values[(i * tokens + t) * dim + i] = 1.0F;
+        }
+        mvs[i] = MultiVector{tokens, values.data() + i * tokens * dim};
+        labels[i] = 1000 + i;
+    }
+    auto data = [&](int64_t start, int64_t count) {
+        return Dataset::Make()
+            ->NumElements(count)
+            ->Dim(dim)
+            ->MultiVectorDim(dim)
+            ->MultiVectors(mvs.data() + start)
+            ->Ids(labels.data() + start)
+            ->Owner(false);
+    };
+    const auto parameters = fmt::format(
+        R"({{"dtype":"float32","metric_type":"ip","dim":{},
+            "index_param":{{"base_io_type":"memory_io","quantization_type":"{}",
+                "init_cluster_ratio":1.0,"max_cluster_size":16,"split_start_idx":8,
+                "build_thread_count":{}}}}})",
+        dim,
+        quantization,
+        threads);
+    auto index = Factory::CreateIndex("simq", parameters).value();
+    REQUIRE(index->Build(data(0, docs / 2)).has_value());
+    REQUIRE(index->Add(data(docs / 2, docs / 2)).has_value());
+    const auto search = R"({"simq":{"coarse_k":10000,"rerank_k":10000}})";
+    auto check = [&](const IndexPtr& current) {
+        // A single token is the negative control. Later query tokens must not
+        // register a document again when its running score is zero, including
+        // after cancellation.
+        const std::vector<float> queries[] = {{1.0F}, {0.0F, 1.0F}, {1.0F, -1.0F, 1.0F}};
+        const auto& weights = queries[query_case];
+        CAPTURE(weights);
+        std::vector<float> query_values(weights.size() * dim, 0.0F);
+        for (uint64_t t = 0; t < weights.size(); ++t) {
+            query_values[t * dim] = weights[t];
+        }
+        MultiVector mv{static_cast<uint32_t>(weights.size()), query_values.data()};
+        auto query = Dataset::Make()
+                         ->NumElements(1)
+                         ->Dim(dim)
+                         ->MultiVectorDim(dim)
+                         ->MultiVectors(&mv)
+                         ->Owner(false);
+        auto check_result = [&](const DatasetPtr& result) {
+            REQUIRE(result->GetDim() == docs);
+            std::vector<int64_t> ids(result->GetIds(), result->GetIds() + result->GetDim());
+            CAPTURE(labels, ids);
+            CAPTURE(result->GetStatistics());
+            std::unordered_set<int64_t> unique;
+            for (int64_t i = 0; i < docs; ++i) {
+                REQUIRE(unique.insert(ids[i]).second);
+                REQUIRE(std::find(labels.begin(), labels.end(), ids[i]) != labels.end());
+                auto distance = current->CalcDistanceById(query, ids[i]);
+                REQUIRE(distance.has_value());
+                REQUIRE(std::abs(distance.value() - result->GetDistances()[i]) < 1e-5F);
+            }
+            auto stats = JsonType::Parse(result->GetStatistics());
+            REQUIRE(stats["simq_coarse_candidate_count"].GetUint64() == docs);
+        };
+        auto knn = current->KnnSearch(query, docs, search);
+        REQUIRE(knn.has_value());
+        check_result(knn.value());
+        auto range = current->RangeSearch(query, 10.0F, search);
+        REQUIRE(range.has_value());
+        check_result(range.value());
+    };
+    check(index);
+    auto serialized = index->Serialize();
+    REQUIRE(serialized.has_value());
+    auto restored = Factory::CreateIndex("simq", parameters).value();
+    REQUIRE(restored->Deserialize(serialized.value()).has_value());
+    check(restored);
+    restored->SetImmutable();
+    check(restored);
+}
+
 TEST_CASE("SIMQ serialized version and representative bounds", "[simq][serialization]") {
-    const auto mode = GENERATE("future", "count", "legacy");
+    const auto mode =
+        GENERATE("future", "count", "empty_v1", "metadata_v2", "populated_v2", "legacy");
     const std::string parameters =
         R"({"dtype":"float32","metric_type":"ip","dim":4,"index_param":{"base_io_type":"memory_io","build_thread_count":2,"init_cluster_ratio":1.0}})";
     auto index = Factory::CreateIndex("simq", parameters).value();
@@ -1072,6 +1197,7 @@ TEST_CASE("SIMQ serialized version and representative bounds", "[simq][serializa
     REQUIRE(footer != nullptr);
     auto metadata = footer->GetMetadata();
     auto info = metadata->Get("basic_info");
+    REQUIRE(info["simq_format_version"].GetInt() == 1);
     // init ratio1 with two distinct tokens produces two representatives,16B each.
     const uint64_t payload_end = bytes.size() - footer->Length();
     const uint64_t cache_bytes = 2 * 4 * sizeof(float);
@@ -1086,11 +1212,26 @@ TEST_CASE("SIMQ serialized version and representative bounds", "[simq][serializa
         stored = std::numeric_limits<uint64_t>::max();
         std::memcpy(bytes.data() + cache_offset, &stored, sizeof(stored));
     }
+    if (std::string(mode) == "empty_v1" or std::string(mode) == "metadata_v2") {
+        stored = 0;
+        std::memcpy(bytes.data() + cache_offset, &stored, sizeof(stored));
+        bytes.erase(cache_offset + sizeof(stored), cache_bytes);
+    }
+    if (std::string(mode) == "populated_v2") {
+        info["simq_format_version"].SetInt(2);
+    }
+    if (std::string(mode) == "metadata_v2") {
+        info["simq_format_version"].SetInt(2);
+        info.Erase("representative_quantization_type");
+    }
     if (std::string(mode) == "legacy") {
         info["simq_format_version"].SetInt(0);
         bytes.resize(cache_offset);
     } else
-        bytes.resize(payload_end);
+        bytes.resize(payload_end -
+                     ((std::string(mode) == "empty_v1" or std::string(mode) == "metadata_v2")
+                          ? cache_bytes
+                          : 0));
     metadata->Set("basic_info", info);
     std::stringstream rebuilt;
     rebuilt.write(bytes.data(), bytes.size());
@@ -1102,6 +1243,19 @@ TEST_CASE("SIMQ serialized version and representative bounds", "[simq][serializa
     auto loaded = restored->Deserialize(rebuilt);
     if (std::string(mode) != "legacy") {
         REQUIRE_FALSE(loaded.has_value());
+        if (std::string(mode) == "empty_v1") {
+            REQUIRE(loaded.error().message.find("SIMQ representative code count mismatch") !=
+                    std::string::npos);
+        }
+        if (std::string(mode) == "metadata_v2") {
+            REQUIRE(loaded.error().message.find(
+                        "SIMQ version 1/2 requires representative quantization metadata") !=
+                    std::string::npos);
+        }
+        if (std::string(mode) == "populated_v2") {
+            REQUIRE(loaded.error().message.find("SIMQ v2 requires absent representative codes") !=
+                    std::string::npos);
+        }
     } else {
         REQUIRE(loaded.has_value());
         auto result = restored->KnnSearch(data, 1, "{}");
@@ -1115,6 +1269,25 @@ TEST_CASE("SIMQ serialized version and representative bounds", "[simq][serializa
 // ─────────────────────────────────────────────────────────────────────────────
 // support_duplicate / deduplicate_storage parameter tests
 // ─────────────────────────────────────────────────────────────────────────────
+
+TEST_CASE("SIMQParameter: build centroid updates are opt-in and survive JSON round-trip",
+          "[simq][parameter]") {
+    IndexCommonParam common;
+    common.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    common.metric_ = MetricType::METRIC_TYPE_IP;
+    common.dim_ = SIMQ_DIM;
+
+    const auto default_param = SIMQ::CheckAndMappingExternalParam(
+        JsonType::Parse(R"({"base_io_type":"memory_io"})"), common);
+    REQUIRE(not default_param->ToJson()["enable_build_centroid_updates"].GetBool());
+
+    const auto enabled = SIMQ::CheckAndMappingExternalParam(
+        JsonType::Parse(R"({"base_io_type":"memory_io","enable_build_centroid_updates":true})"),
+        common);
+    SIMQParameter restored;
+    restored.FromJson(enabled->ToJson());
+    REQUIRE(restored.enable_build_centroid_updates);
+}
 
 TEST_CASE("SIMQParameter: support_duplicate JSON round-trip", "[simq][parameter]") {
     IndexCommonParam common_param;
@@ -1339,4 +1512,268 @@ TEST_CASE("SIMQ multi-vector duplicate flags and aliases survive two serializati
         REQUIRE(std::abs(result.value()->GetDistances()[0]) < 1e-6F);
         index = restored.value();
     }
+}
+
+TEST_CASE("SIMQ immutable representative release and serving roundtrip", "[simq][immutable]") {
+    const auto quantization = GENERATE("fp32", "sq8_uniform");
+    const auto load_before_transition = GENERATE(false, true);
+    constexpr int64_t dim = 32;
+    constexpr int64_t docs = 32;
+    constexpr uint32_t tokens = 4;
+    std::mt19937 random(424242);
+    std::vector<float> values(docs * tokens * dim);
+    fill_normalized(values.data(), docs * tokens, dim, random);
+    std::vector<MultiVector> mvs(docs);
+    std::vector<int64_t> ids(docs);
+    for (int64_t i = 0; i < docs; ++i) {
+        mvs[i] = MultiVector{tokens, values.data() + i * tokens * dim};
+        ids[i] = 1000 + i;
+    }
+    auto data = Dataset::Make()
+                    ->NumElements(docs)
+                    ->Dim(dim)
+                    ->MultiVectorDim(dim)
+                    ->MultiVectors(mvs.data())
+                    ->Ids(ids.data())
+                    ->Owner(false);
+    auto query = Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(dim)
+                     ->MultiVectorDim(dim)
+                     ->MultiVectors(mvs.data())
+                     ->Owner(false);
+    auto parameters = fmt::format(
+        R"({{"dtype":"float32","metric_type":"ip","dim":{},"index_param":{{"base_io_type":"memory_io","quantization_type":"{}","init_cluster_ratio":0.25,"build_thread_count":2}}}})",
+        dim,
+        quantization);
+    fixtures::MemoryRecordAllocator allocator;
+    auto index = Factory::CreateIndex("simq", parameters, &allocator).value();
+    REQUIRE(index->Build(data).has_value());
+    if (load_before_transition) {
+        auto serial = index->Serialize();
+        REQUIRE(serial.has_value());
+        auto loaded = Factory::CreateIndex("simq", parameters, &allocator).value();
+        REQUIRE(loaded->Deserialize(serial.value()).has_value());
+        index = loaded;
+    }
+    const auto search = R"({"simq":{"coarse_k":10000,"rerank_k":10000}})";
+    auto before = index->KnnSearch(query, 10, search);
+    REQUIRE(before.has_value());
+    auto check_result = [&](const std::shared_ptr<Index>& serving) {
+        auto after = serving->KnnSearch(query, 10, search);
+        REQUIRE(after.has_value());
+        REQUIRE(after.value()->GetDim() == before.value()->GetDim());
+        for (int64_t i = 0; i < before.value()->GetDim(); ++i) {
+            REQUIRE(after.value()->GetIds()[i] == before.value()->GetIds()[i]);
+            REQUIRE(after.value()->GetDistances()[i] == before.value()->GetDistances()[i]);
+        }
+        auto added = serving->Add(data);
+        REQUIRE_FALSE(added.has_value());
+        REQUIRE(added.error().type == ErrorType::UNSUPPORTED_INDEX_OPERATION);
+    };
+    const auto memory_before = allocator.GetCurrentMemory();
+    REQUIRE(index->SetImmutable().has_value());
+    // The representative cache has 32 clusters; verify allocated bytes, not GetMemoryUsage.
+    const uint64_t representative_bytes = 32 * dim * (std::string(quantization) == "fp32" ? 4 : 1);
+    REQUIRE(allocator.GetCurrentMemory() + representative_bytes <= memory_before);
+    const auto memory_after = allocator.GetCurrentMemory();
+    REQUIRE(index->SetImmutable().has_value());
+    REQUIRE(allocator.GetCurrentMemory() == memory_after);
+    check_result(index);
+    // Model an Add that passed the outer immutable check before SetImmutable:
+    // resume directly at the backend entry point after the transition.
+    // This deterministically exercises the mutex-protected recheck rather than
+    // the wrapper fast rejection, without depending on thread scheduling.
+    auto impl = std::dynamic_pointer_cast<IndexImpl<SIMQ>>(index);
+    REQUIRE(impl != nullptr);
+    auto backend = impl->GetInnerIndex();
+    const auto count_before_add = backend->GetNumElements();
+    try {
+        backend->Add(data);
+        FAIL("backend Add must reject after the immutable transition");
+    } catch (const VsagException& error) {
+        REQUIRE(error.error_.type == ErrorType::UNSUPPORTED_INDEX_OPERATION);
+        REQUIRE(std::string(error.what()) == "simq: cannot add to an immutable index");
+    }
+    REQUIRE(backend->GetNumElements() == count_before_add);
+    check_result(index);
+    std::stringstream serialized;
+    REQUIRE(index->Serialize(serialized).has_value());
+    IOStreamReader reader(serialized);
+    auto footer = Footer::Parse(reader);
+    REQUIRE(footer != nullptr);
+    REQUIRE(footer->GetMetadata()->Get("basic_info")["simq_format_version"].GetInt() == 2);
+    serialized.seekg(0);
+    auto restored = Factory::CreateIndex("simq", parameters).value();
+    REQUIRE(restored->Deserialize(serialized).has_value());
+    check_result(restored);
+    REQUIRE(restored->SetImmutable().has_value());
+    check_result(restored);
+}
+
+TEST_CASE("SIMQ Add completes cluster splitting with a bounded shared pool",
+          "[simq][add][nested_pool]") {
+    const auto workers = GENERATE(1, 2);
+    CAPTURE(workers);
+    constexpr int64_t dim = 32;
+    constexpr uint32_t tokens = 8;
+    auto pool = std::make_shared<DefaultThreadPool>(workers);
+    Resource resource(Engine::CreateDefaultAllocator(), pool);
+    Engine engine(&resource);
+    const auto param = fmt::format(R"({{
+        "dtype":"float32", "metric_type":"ip", "dim":{},
+        "index_param":{{"base_io_type":"memory_io", "init_cluster_ratio":0.05,
+            "max_cluster_size":4, "split_start_idx":2, "build_thread_count":1}}
+    }})",
+                                   dim);
+    auto created = engine.CreateIndex("simq", param);
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    std::vector<float> vectors(tokens * dim, 0.0F);
+    for (uint32_t token = 0; token < tokens; ++token) {
+        vectors[token * dim] = 0.1F * static_cast<float>(token);
+    }
+    MultiVector mv;
+    mv.len_ = tokens;
+    mv.vectors_ = vectors.data();
+    auto make_doc = [&](int64_t& label) {
+        return Dataset::Make()
+            ->NumElements(1)
+            ->Dim(dim)
+            ->Ids(&label)
+            ->MultiVectors(&mv)
+            ->MultiVectorDim(dim)
+            ->Owner(false);
+    };
+    int64_t first = 0;
+    REQUIRE(index->Build(make_doc(first)).has_value());
+    for (int64_t label = 1; label <= 5; ++label) {
+        CAPTURE(label);
+        auto added = index->Add(make_doc(label));
+        REQUIRE(added.has_value());
+        REQUIRE(added.value().empty());
+    }
+    REQUIRE(index->GetNumElements() == 6);
+    auto query =
+        Dataset::Make()->NumElements(1)->Dim(dim)->MultiVectors(&mv)->MultiVectorDim(dim)->Owner(
+            false);
+    auto result = index->KnnSearch(query, 6, R"({"simq":{"coarse_k":10000,"rerank_k":10000}})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 6);
+    std::unordered_set<int64_t> labels;
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        REQUIRE(labels.insert(result.value()->GetIds()[i]).second);
+    }
+}
+TEST_CASE("SIMQ ReadCache with async_io survives serialize round-trip",
+          "[simq][cacheio][serialization]") {
+    auto ds = generate_dataset();
+    TempFile tmp_build;
+    TempFile tmp_deser;
+
+    // Build with async_io + read cache enabled
+    auto build_param = fmt::format(
+        R"({{
+            "dtype": "float32",
+            "metric_type": "ip",
+            "dim": {},
+            "index_param": {{
+                "base_io_type": "async_io",
+                "base_file_path": "{}",
+                "base_enable_read_cache": true,
+                "base_cache_total_size": 1048576,
+                "init_cluster_ratio": 0.01,
+                "max_cluster_size": 200,
+                "split_start_idx": 100,
+                "coarse_k": 20,
+                "rerank_k": 1000
+            }}
+        }})",
+        SIMQ_DIM,
+        tmp_build.path);
+
+    auto search_param = make_search_param();
+    auto r1 = vsag::Factory::CreateIndex("simq", build_param);
+    REQUIRE(r1.has_value());
+    auto index = r1.value();
+    auto build_result = index->Build(ds.base_dataset);
+    REQUIRE(build_result.has_value());
+
+    // Verify cache config was actually parsed (not silently ignored)
+    IndexCommonParam common_param;
+    common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = SIMQ_DIM;
+    auto index_param_only = JsonType::Parse(build_param);
+    auto mapped = std::dynamic_pointer_cast<SIMQParameter>(
+        SIMQ::CheckAndMappingExternalParam(index_param_only["index_param"], common_param));
+    REQUIRE(mapped != nullptr);
+    REQUIRE(mapped->base_codes_param != nullptr);
+    REQUIRE(mapped->base_codes_param->io_parameter != nullptr);
+    REQUIRE(mapped->base_codes_param->io_parameter->enable_read_cache_);
+    REQUIRE(mapped->base_codes_param->io_parameter->read_cache_total_size_ == uint64_t{1048576});
+
+    // Search with original index
+    float recall_orig = 0.0f;
+    for (uint64_t q = 0; q < QUERY_DOCS; ++q) {
+        vsag::DatasetPtr one_query = vsag::Dataset::Make();
+        one_query->NumElements(1)
+            ->Dim(SIMQ_DIM)
+            ->MultiVectors(&ds.query_mvs[q])
+            ->MultiVectorDim(SIMQ_DIM)
+            ->Owner(false);
+        auto sr = index->KnnSearch(one_query, TOP_K, search_param, vsag::FilterPtr(nullptr));
+        REQUIRE(sr.has_value());
+        recall_orig += recall_at_k(sr.value()->GetIds(), TOP_K, ds.gt_ids[q].data(), TOP_K);
+    }
+    recall_orig /= static_cast<float>(QUERY_DOCS);
+    REQUIRE(recall_orig >= 0.5f);
+
+    // Serialize
+    auto serial = index->Serialize();
+    REQUIRE(serial.has_value());
+
+    // Deserialize into fresh index with same cache config
+    auto load_param = fmt::format(
+        R"({{
+            "dtype": "float32",
+            "metric_type": "ip",
+            "dim": {},
+            "index_param": {{
+                "base_io_type": "async_io",
+                "base_file_path": "{}",
+                "base_enable_read_cache": true,
+                "base_cache_total_size": 1048576
+            }}
+        }})",
+        SIMQ_DIM,
+        tmp_deser.path);
+
+    auto r2 = vsag::Factory::CreateIndex("simq", load_param);
+    REQUIRE(r2.has_value());
+    auto index2 = r2.value();
+    auto deser = index2->Deserialize(serial.value());
+    REQUIRE(deser.has_value());
+    REQUIRE(index2->GetNumElements() == static_cast<int64_t>(BASE_DOCS));
+
+    // Compare recall between original and deserialized index
+    float recall_deser = 0.0f;
+    for (uint64_t q = 0; q < QUERY_DOCS; ++q) {
+        vsag::DatasetPtr one_query = vsag::Dataset::Make();
+        one_query->NumElements(1)
+            ->Dim(SIMQ_DIM)
+            ->MultiVectors(&ds.query_mvs[q])
+            ->MultiVectorDim(SIMQ_DIM)
+            ->Owner(false);
+        auto sr = index2->KnnSearch(one_query, TOP_K, search_param, vsag::FilterPtr(nullptr));
+        REQUIRE(sr.has_value());
+        recall_deser += recall_at_k(sr.value()->GetIds(), TOP_K, ds.gt_ids[q].data(), TOP_K);
+    }
+    recall_deser /= static_cast<float>(QUERY_DOCS);
+
+    std::cout << "\n[SIMQ ReadCache] Original recall@" << TOP_K << " = " << recall_orig
+              << "  Deserialized recall@" << TOP_K << " = " << recall_deser << "\n";
+
+    REQUIRE(std::abs(recall_orig - recall_deser) < 0.01f);
+    SUCCEED("SIMQ read cache io config survives serialize/deserialize round-trip.");
 }

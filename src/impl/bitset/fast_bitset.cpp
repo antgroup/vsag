@@ -15,6 +15,7 @@
 
 #include "fast_bitset.h"
 
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <string>

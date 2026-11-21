@@ -19,8 +19,13 @@ model and returns quantized estimates, not exact original-vector distances.
 
 Public API: `include/vsag/lite/index.h`; implementation/tests: `src/lite`;
 installed shared/static examples: `lite/example`. Floating snapshots are
-VSAGLT01 v1/v2/v3; RaBitQ uses independent VSAGLQ01 v1. No checksum, fsync,
-atomic file replacement, SQ8, mmap or same-instance concurrent access is promised.
+VSAGLT01 v1/v2/v3; RaBitQ uses independent VSAGLQ01 v1. The ordinary Save stream
+leaves filesystem synchronization and replacement to the caller.
+
+Set `-DENABLE_LITE_PERSISTENT_ADD=ON` for a separate checkpoint and synchronous
+Add log. See [persistent Add](../docs/docs/en/src/development/lite_first.md#optional-persistent-add)
+for the API and process recovery contract. The [persistent Add benchmark](benchmark/persistent_add/README.md)
+records write volume, recovery time and memory.
 
 - [Current English function/source/test/requirement mapping](../docs/docs/en/src/development/lite_first.md)
 - [当前中文功能、源码、测试及产出要求对照](../docs/docs/zh/src/development/lite_first.md)
@@ -29,7 +34,7 @@ atomic file replacement, SQ8, mmap or same-instance concurrent access is promise
 `tools/check_tidy.py` checks configured Lite translation units and private/public
 headers using clang-tidy20. `tools/collect_coverage.py` unions production Lite
 source/header executable lines across instrumented tests and enforces 90%; it
-does not measure Full or branch coverage. See `.github/workflows/lite.yml` for
+does not measure Full or branch coverage. See `.github/workflows/manual-checks.yml` for
 default-OFF, ON, sanitizer and coverage CI matrices. Benchmark reports,
 replay scripts, configurations and raw results are delivered separately in
 benchmark PR #2926. Functional tests do not establish final quality,

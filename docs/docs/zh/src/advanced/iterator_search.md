@@ -89,10 +89,35 @@ delete iter_ctx;
 每次调用都会推进 `iter_ctx`；多次结果的并集就是按距离顺序、不重叠的延续序列。如果还想取出
 上下文中仍缓存的尾部候选，可以在最后再加一次 `is_last_search=true` 的调用。
 
-> **`SearchRequest` API。** `SearchRequest` 中定义了 `enable_iterator_search_` /
-> `p_iter_ctx_` / `is_last_search_` 三个字段，但仓库内当前的 `SearchWithRequest` 实现尚未
-> 读取这些字段，无法通过 `SearchWithRequest` 触发迭代式搜索。在这部分接入完成之前，请使用
-> 上面两种 `KnnSearch` 形式。
+> **`SearchRequest` API。** HGraph 通过 `SearchWithRequest` 同样支持这三个字段：把
+> `enable_iterator_search_` 置为 `true`，并让 `p_iter_ctx_` 指向一个初始为 `nullptr` 的
+> `IteratorContext*`（首次调用内部创建）。`topk_`、`params_str_`、`filter_`、`threshold_`、
+> `search_allocator_` 的含义与上面 `KnnSearch` 形式完全一致。
+
+```cpp
+vsag::IteratorContext* ctx = nullptr;
+
+vsag::SearchRequest request;
+request.query_ = query;
+request.topk_ = 10;
+request.params_str_ = param_str;
+request.enable_iterator_search_ = true;
+request.p_iter_ctx_ = &ctx;   // 首次调用内部填充
+
+auto page1 = index->SearchWithRequest(request);   // 创建 ctx
+auto page2 = index->SearchWithRequest(request);   // 续页，与 page1 不重叠
+
+request.is_last_search_ = true;                   // 可选：取出上下文仍缓存的候选
+auto tail = index->SearchWithRequest(request);
+
+delete ctx;                                       // 释放迭代器内部状态
+```
+
+通过 `SearchWithRequest` 使用迭代式搜索目前仅支持 HGraph，其他索引返回
+`UNSUPPORTED_INDEX_OPERATION`。迭代模式下不支持 range search、自定义打分
+（`distance_batch_func_`）、attribute filter 与推理（`expected_labels_`），需要的过滤请放进
+`filter_`。两种模式下距离上界都只取 `request.threshold_`：`params_str_` 里的 `"threshold"`
+键会被忽略。
 
 ## 与过滤器组合
 

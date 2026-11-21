@@ -21,6 +21,7 @@ TestIndex::TestUpdateId(const IndexPtr& index,
                         const TestDatasetPtr& dataset,
                         const std::string& search_param,
                         bool expected_success) {
+    fixtures::daily::Phase daily_phase("TestUpdateId");
     if (not index->CheckFeature(vsag::SUPPORT_UPDATE_ID_CONCURRENT)) {
         return;
     }

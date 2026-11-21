@@ -43,7 +43,10 @@ public:
           block_size_(ChooseBlockSize(record_size, block_size_limit)),
           records_per_block_((block_size_ - (K_ALIGNMENT - 1)) / record_size),
           io_(block_size_, allocator),
-          blocks_(allocator) {
+          blocks_(allocator),
+          reciprocal32_(records_per_block_ == 1
+                            ? 0
+                            : std::numeric_limits<uint64_t>::max() / records_per_block_ + 1) {
     }
 
     void
@@ -73,6 +76,26 @@ public:
     [[nodiscard]] const uint8_t*
     GetRecord(uint64_t id) const {
         return blocks_[id / records_per_block_] + (id % records_per_block_) * record_size_;
+    }
+
+    [[nodiscard]] uint64_t
+    BlockIndex32(uint32_t id) const {
+#if defined(__SIZEOF_INT128__)
+        // For a 32-bit numerator, ceil(2^64 / divisor) gives an exact quotient
+        // with one multiply-high. The rounding error is smaller than 1/divisor;
+        // divisors greater than UINT32_MAX always produce zero. Divisor 1 is separate.
+        return reciprocal32_ == 0
+                   ? id
+                   : static_cast<uint64_t>((static_cast<__uint128_t>(id) * reciprocal32_) >> 64);
+#else
+        return id / records_per_block_;
+#endif
+    }
+
+    [[nodiscard]] const uint8_t*
+    GetRecord32(uint32_t id) const {
+        const auto block = BlockIndex32(id);
+        return blocks_[block] + (id - block * records_per_block_) * record_size_;
     }
 
     [[nodiscard]] uint8_t*
@@ -131,6 +154,7 @@ private:
     const uint64_t records_per_block_;
     MemoryBlockIO io_;
     Vector<uint8_t*> blocks_;
+    const uint64_t reciprocal32_;
 };
 
 }  // namespace vsag

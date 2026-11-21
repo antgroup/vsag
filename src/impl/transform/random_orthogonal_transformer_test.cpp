@@ -15,10 +15,17 @@
 
 #include "random_orthogonal_transformer.h"
 
+#include <limits>
+#include <sstream>
+#include <vector>
+
 #include "impl/allocator/safe_allocator.h"
 #include "impl/blas/blas_function.h"
 #include "storage/serialization_template_test.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "unittest.h"
+#include "vsag_exception.h"
 using namespace vsag;
 
 void
@@ -160,4 +167,39 @@ TEST_CASE("Random Orthogonal Matrix Serialize / Deserialize Test", "[ut][RandomO
 
         TestSame(rom1, rom2, dim);
     }
+}
+
+TEST_CASE("Random Orthogonal Matrix rejects malformed serialized matrices",
+          "[ut][RandomOrthogonalMatrix]") {
+    constexpr uint64_t dim = 8;
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    RandomOrthogonalMatrix matrix(allocator.get(), dim, 1, 2026);
+    matrix.Train(nullptr, 0);
+    std::vector<float> original(dim * dim);
+    matrix.CopyOrthogonalMatrix(original.data());
+
+    SECTION("wrong element count") {
+        Vector<float> malformed(dim * dim - 1, allocator.get());
+        std::stringstream stream;
+        IOStreamWriter writer(stream);
+        StreamWriter::WriteVector(writer, malformed);
+        stream.seekg(0, std::ios::beg);
+        IOStreamReader reader(stream);
+        REQUIRE_THROWS_AS(matrix.Deserialize(reader), VsagException);
+    }
+
+    SECTION("non-finite element") {
+        Vector<float> malformed(dim * dim, 0.0F, allocator.get());
+        malformed.back() = std::numeric_limits<float>::quiet_NaN();
+        std::stringstream stream;
+        IOStreamWriter writer(stream);
+        StreamWriter::WriteVector(writer, malformed);
+        stream.seekg(0, std::ios::beg);
+        IOStreamReader reader(stream);
+        REQUIRE_THROWS_AS(matrix.Deserialize(reader), VsagException);
+    }
+
+    std::vector<float> after_failure(dim * dim);
+    matrix.CopyOrthogonalMatrix(after_failure.data());
+    REQUIRE(after_failure == original);
 }

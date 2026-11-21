@@ -3,6 +3,7 @@
 
 from pathlib import Path
 import os
+import json
 import re
 import shlex
 import shutil
@@ -22,7 +23,29 @@ def job_text(workflow: Path, job_name: str) -> str:
     )
     if match is None:
         raise AssertionError(f"job {job_name} not found in {workflow}")
-    return match.group("body")
+    body = match.group("body")
+    # Inspect the actual shared execution steps as well as the entry job envelope.
+    local = re.search(r"(?m)^      - uses: (\./\.github/actions/[^\n]+)\n(?P<call>(?:        .*\n|\n)*)", body)
+    if local:
+        action = (ROOT / local[1][2:] / 'action.yml').read_text()
+        steps = action.split('  steps:\n', 1)[1]
+        parameters = {}
+        for key, value in re.findall(r"(?m)^          ([\w-]+): (.*)$", local['call']):
+            value = value.strip()
+            if value.startswith('${{') and value.endswith('}}'):
+                parameters[key] = value[3:-2].strip()
+            else:
+                parameters[key] = value
+        for key, value in parameters.items():
+            steps = steps.replace('inputs.' + key, '(' + value + ')')
+        # Normalize trivial matrix substitutions for existing executable-shell tests.
+        steps = re.sub(r'\$\{\{ \((matrix\.[\w-]+)\) \}\}', r'${{ \1 }}', steps)
+        # Tests execute extracted commands under an explicit shell; omit redundant
+        # composite shell declarations from the normalized command view.
+        steps = re.sub(r'(?m)^      shell: (?:bash|sh|bash -e \{0\})\n', '', steps)
+        expanded = ''.join('  ' + line if line.strip() else line for line in steps.splitlines(True))
+        body = body[:local.start()] + expanded + body[local.end():]
+    return body
 
 
 class DependencyWorkflowTest(unittest.TestCase):
@@ -48,10 +71,10 @@ class DependencyWorkflowTest(unittest.TestCase):
     def test_pull_request_archive_cache_is_restore_only(self) -> None:
         pr_ci = (ROOT / ".github/workflows/pr-ci-community.yml").read_text(encoding="utf-8")
 
-        self.assertIn("uses: actions/cache/restore@v4", pr_ci)
-        self.assertNotIn("uses: actions/cache@v4", pr_ci)
-        self.assertNotIn("uses: actions/cache/save@v4", pr_ci)
-        benchmark = (ROOT / ".github/workflows/build_performance.yml").read_text(encoding="utf-8")
+        self.assertIn("uses: actions/cache/restore@v5", pr_ci)
+        self.assertNotIn("uses: actions/cache@v5", pr_ci)
+        self.assertNotIn("uses: actions/cache/save@v5", pr_ci)
+        benchmark = (ROOT / ".github/workflows/daily_test.yml").read_text(encoding="utf-8")
         self.assertIn("dependency-cache-write-policy restore-only", benchmark)
 
     def test_archive_directory_is_exported_for_the_entire_metrics_job(self) -> None:
@@ -86,8 +109,8 @@ class DependencyWorkflowTest(unittest.TestCase):
 
 
 class TsanCleanupTest(unittest.TestCase):
-    workflow_name = "tsan_build_and_test.yml"
-    job_name = "build_tsan"
+    workflow_name = "main-ci.yml"
+    job_name = "tsan-build-tsan"
 
     def cleanup_script(self, sandbox: Path) -> str:
         workflow = ROOT / ".github/workflows" / self.workflow_name
@@ -209,19 +232,19 @@ class TsanCleanupTest(unittest.TestCase):
 
 
 class SimdBuildCleanupTest(TsanCleanupTest):
-    workflow_name = "asan_with_simd_option.yml"
-    job_name = "build_asan_simd"
+    workflow_name = "main-ci.yml"
+    job_name = "simd-build-asan-simd"
 
 
 class SimdTestCleanupTest(TsanCleanupTest):
-    workflow_name = "asan_with_simd_option.yml"
-    job_name = "test_asan_simd"
+    workflow_name = "main-ci.yml"
+    job_name = "simd-test-asan-simd"
 
 
 class FailurePropagationTest(unittest.TestCase):
     def test_tsan_keeps_vsag_concurrency_and_propagates_sanitizer_failures(self):
         from tests.scripts.test_build_benchmark_workflow import step
-        body = job_text(ROOT / '.github/workflows/tsan_build_and_test.yml', 'test_tsan')
+        body = job_text(ROOT / '.github/workflows/main-ci.yml', 'tsan-test-tsan')
         run = step(body, 'Run TSAN tests')
         self.assertIn('OPENBLAS_NUM_THREADS: "1"', run)
         script = textwrap.dedent(run.split('run: |\n', 1)[1])
@@ -247,30 +270,26 @@ class FailurePropagationTest(unittest.TestCase):
         import os
         import subprocess
         import tempfile
-        import textwrap
         from tests.scripts.test_build_benchmark_workflow import step
-        jobs = [('pr-ci-community.yml', 'test-python-x86'),
-                ('python_build_and_test.yml', 'test_python_x86'),
-                ('python_build_and_test.yml', 'test_python_aarch64')]
-        for filename, name in jobs:
-            body = job_text(ROOT / '.github/workflows' / filename, name)
-            run = step(body, 'Run Python Test')
-            self.assertNotIn('continue-on-error', run)
-            self.assertIn('if: always()', step(body, 'Upload Test Logs'))
-            script = textwrap.dedent(run.split('run: |\n', 1)[1])
-            for code in (0, 1, 2, 5, 137):
-                with self.subTest(workflow=filename, job=name, code=code), tempfile.TemporaryDirectory() as tmp:
-                    root = Path(tmp); (root / 'tests/python').mkdir(parents=True)
-                    fake = root / 'python3'
-                    marker = f'pytest-result-exit-{code}'
-                    fake.write_text('#!/bin/sh\necho "1 passed"\necho ' + marker + '\nexit ' + str(code) + '\n')
-                    fake.chmod(0o755)
-                    result = subprocess.run(['bash', '-c', script], cwd=root,
-                        env=dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH']),
-                        capture_output=True, text=True)
-                    self.assertEqual(result.returncode, code)
-                    self.assertIn(marker, result.stdout)
-                    self.assertIn(marker, (root / 'tests/python/test-output.log').read_text())
+        body = (ROOT / '.github/actions/python-wheel-test/action.yml').read_text()
+        run = step(body, 'Run required Python tests')
+        self.assertNotIn('continue-on-error', body)
+        self.assertIn('if: always()', body)
+        script = run.split('run: ', 1)[1].strip()
+        # The shared action must preserve the helper exit status, not parse stdout.
+        # test_python_ci separately exercises actual pytest/JUnit reconciliation.
+        for code in (0, 1, 2, 5, 137):
+            with self.subTest(code=code), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                fake = root / 'python3'
+                marker = f'pytest-result-exit-{code}'
+                fake.write_text('#!/bin/sh\necho "1 passed"\necho ' + marker + '\nexit ' + str(code) + '\n')
+                fake.chmod(0o755)
+                result = subprocess.run(['bash', '-c', script], cwd=root,
+                    env=dict(os.environ, TEST_MODE='ordinary', PATH=str(root) + os.pathsep + os.environ['PATH']),
+                    capture_output=True, text=True)
+                self.assertEqual(result.returncode, code)
+                self.assertIn(marker, result.stdout)
 
     def test_lint_pattern_is_data_and_dispatch_has_a_base(self):
         import os
@@ -295,14 +314,14 @@ class FailurePropagationTest(unittest.TestCase):
 
     def test_compatibility_workflows_fail_closed_and_use_private_input_directory(self):
         from tests.scripts.test_build_benchmark_workflow import step
-        for filename in ['pr-ci-community.yml','check_compatibility.yml']:
-            body=job_text(ROOT/'.github/workflows'/filename,'compatibility')
+        for filename in ['pr-ci-community.yml','main-ci.yml']:
+            body=job_text(ROOT/'.github/workflows'/filename,'compatibility-compatibility' if filename == 'main-ci.yml' else 'compatibility')
             download=step(body,'Download Compatibility Indexes from Release')
             self.assertIn('download_compatibility_inputs.py',download)
             self.assertNotIn('||',download)
             self.assertIn('COMPATIBILITY_INDEX_DIR: ${{ github.workspace }}/.ci-compatibility-inputs',body)
             self.assertNotIn('runner.temp', body.split('    steps:', 1)[0])
-            self.assertLess(body.index('actions/checkout@v4'),body.index('download_compatibility_inputs.py'))
+            self.assertLess(body.index('actions/checkout@v5'),body.index('download_compatibility_inputs.py'))
 
 
 class CompatibilityDownloadTest(unittest.TestCase):
@@ -409,34 +428,73 @@ class CompatibilityDownloadTest(unittest.TestCase):
 
 class LeanPrChecksTest(unittest.TestCase):
     def test_main_ci_policy_suite(self):
-        subprocess.run(["python3", "-m", "unittest", "tests/scripts/test_main_ci.py"], cwd=ROOT, check=True)
+        subprocess.run(["python3", "-m", "unittest", "tests/scripts/test_main_ci.py", "tests/scripts/test_workflow_entries.py"], cwd=ROOT, check=True)
 
     def selected(self, name, *, base="main", event="pull_request", team=False,
-                 cpp=False, python=False, cmake=False):
+                 cpp=False, python=False, cmake=False, format_result=None,
+                 build_result=None):
         body = job_text(ROOT / ".github/workflows/pr-ci-community.yml", name)
         expression = re.search(r"^    if: (.*)$", body, re.M).group(1)
+        expression = expression.removeprefix("${{").removesuffix("}}")
+        if format_result is None and name != "format":
+            format_result = "success" if self.selected("format", base=base, event=event,
+                                                       team=team, cpp=cpp, python=python) else "skipped"
+        if build_result is None:
+            build_result = "success" if name == "test-python-x86" and self.selected(
+                "build-python-x86", base=base, event=event, team=team, cpp=cpp,
+                python=python, cmake=cmake, format_result=format_result) else "skipped"
         values = {"github.base_ref": base, "github.event_name": event,
                   "inputs.team-linux": team, "needs.changes.outputs.cpp": str(cpp).lower(),
                   "needs.changes.outputs.python": str(python).lower(),
-                  "needs.changes.outputs.cmake": str(cmake).lower()}
+                  "needs.changes.outputs.wheel": str(python or cmake).lower(),
+                  "needs.changes.outputs.cmake": str(cmake).lower(),
+                  "needs.changes.result": "success", "needs.format.result": format_result,
+                  "needs.build-python-x86.result": build_result}
         for key in sorted(values, key=len, reverse=True):
             expression = expression.replace(key, repr(values[key]))
         expression = expression.replace("&&", " and ").replace("||", " or ")
         expression = re.sub(r"!(?!=)", " not ", expression)
-        return eval(expression, {"__builtins__": {}}, {})
+        return eval(expression, {"__builtins__": {}}, {"cancelled": lambda: False})
 
     def test_main_pr_selection_matrix(self):
         for team in (False, True):
             self.assertFalse(self.selected("build-asan-macos-arm64", cpp=True, team=team))
-            self.assertFalse(self.selected("build-python-x86", cpp=True, python=True, team=team))
             for name in ("build-python-x86", "test-python-x86"):
                 for python, cmake in ((True, False), (False, True), (True, True)):
-                    self.assertFalse(self.selected(name, python=python, cmake=cmake, team=team))
-                self.assertFalse(self.selected(name, team=team))
+                    self.assertTrue(self.selected(name, python=python, cmake=cmake, team=team))
+                self.assertFalse(self.selected(name, cpp=True, team=team))
+            # Team-routed cpp changes skip Community format but must still build the wheel.
+            for flag in ("python", "cmake"):
+                self.assertTrue(self.selected("build-python-x86", cpp=True, team=team, **{flag: True}))
             self.assertEqual(self.selected("format", cpp=True, team=team), not team)
             self.assertTrue(self.selected("format", python=True, team=team))
         body = job_text(ROOT / ".github/workflows/pr-ci-community.yml", "build-python-x86")
         self.assertIn("needs: [changes, format]", body)
+        for result in ("failure", "cancelled"):
+            self.assertFalse(self.selected("build-python-x86", python=True, format_result=result))
+            self.assertFalse(self.selected("test-python-x86", python=True, format_result=result))
+
+    def test_python_chain_survives_intentional_format_skip(self):
+        # format skipped -> build succeeds -> pytest runs; a build that is not successful stops it.
+        for flag in ("python", "cmake"):
+            self.assertTrue(self.selected("test-python-x86", cpp=True, team=True, **{flag: True},
+                                          format_result="skipped", build_result="success"))
+            for build in ("failure", "cancelled", "skipped"):
+                self.assertFalse(self.selected("test-python-x86", cpp=True, team=True, **{flag: True},
+                                               format_result="skipped", build_result=build))
+        # GitHub applies an implicit success() to every ancestor unless the condition has an
+        # explicit status function, so a skipped format ancestor would otherwise skip both jobs.
+        for name in ("build-python-x86", "test-python-x86"):
+            body = job_text(ROOT / ".github/workflows/pr-ci-community.yml", name)
+            self.assertIn("!cancelled()", re.search(r"^    if: (.*)$", body, re.M).group(1))
+
+    def test_python_matrix_is_reduced_only_for_main_prs(self):
+        body = job_text(ROOT / ".github/workflows/pr-ci-community.yml", "test-python-x86")
+        primary, full = re.findall(r"'(\{\"include\".*?\]\})'", body)
+        self.assertEqual(json.loads(primary), {"include": [{"python": "3.12", "numpy": "2.*"}]})
+        self.assertEqual([item["python"] for item in json.loads(full)["include"]],
+                         ["3.10", "3.11", "3.12", "3.13", "3.14"])
+        self.assertIn("github.event_name == 'pull_request' && github.base_ref == 'main'", body)
 
     def test_version_and_dispatch_preserve_legacy_selection(self):
         for context in ({"base": "0.18"}, {"event": "workflow_dispatch", "base": ""}):
@@ -456,11 +514,14 @@ class LeanPrChecksTest(unittest.TestCase):
         self.assertIn("./scripts/format/check_format.sh", job_text(ROOT / ".github/workflows/pr-ci-team.yml", "checks"))
 
     def test_tsan_push_and_version_triggers_retained(self):
-        text = (ROOT / ".github/workflows/tsan_build_and_test.yml").read_text()
-        self.assertIn('push:\n    branches: [ "0.*" ]', text)
-        self.assertIn("./.github/workflows/tsan_build_and_test.yml", (ROOT / ".github/workflows/main-ci.yml").read_text())
-        self.assertIn('pull_request:\n    branches: [ "0.*" ]', text)
-        self.assertIn('workflow_dispatch:', text)
+        branch = (ROOT / ".github/workflows/main-ci.yml").read_text()
+        manual = (ROOT / ".github/workflows/manual-checks.yml").read_text()
+        community = (ROOT / ".github/workflows/pr-ci-community.yml").read_text()
+        self.assertIn("tsan-build-tsan:", branch)
+        self.assertIn("needs.entry-scope.outputs.version == 'true'", branch)
+        self.assertIn("startsWith(github.base_ref, '0.')", community)
+        self.assertIn("version-tsan-build-tsan:", community)
+        self.assertIn('tsan', manual)
 
     def test_circleci_only_skips_verified_current_main_prs(self):
         import importlib.util
@@ -518,6 +579,144 @@ class LeanPrChecksTest(unittest.TestCase):
             with patch.object(module, "fetch_pr", return_value=pr), patch.dict(os.environ, env, clear=True), patch.object(module.subprocess, "run", side_effect=error) as run:
                 module.main()
                 run.assert_called_once()
+
+class DatacellCompileJobsTest(unittest.TestCase):
+    """Generate and build the actual datacell CMake with dependency-free fixture sources."""
+
+    def setUp(self):
+        if not all(shutil.which(tool) for tool in ("cmake", "ninja", "c++")):
+            self.skipTest("CMake, Ninja and a C++ compiler are required")
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.source = self.root / "source"
+        self.build = self.root / "build"
+        datacell = self.source / "datacell"
+        datacell.mkdir(parents=True)
+        shutil.copyfile(ROOT / "src/datacell/CMakeLists.txt", datacell / "CMakeLists.txt")
+        for name in ("rabitq_split_datacell_factory_l2", "rabitq_split_datacell_factory_ip",
+                     "rabitq_split_datacell_factory_cosine", "flatten_datacell_factory_ip",
+                     "extra_info_interface"):
+            (datacell / (name + ".cpp")).write_text("int " + name + "() { return 0; }\n")
+        (self.source / "CMakeLists.txt").write_text(
+            "cmake_minimum_required(VERSION 3.18)\nproject(pool_fixture LANGUAGES CXX)\n"
+            f'include("{ROOT.as_posix()}/cmake/VSAGOptions.cmake")\n'
+            "foreach(dep IN ITEMS transform quantizer io attr coverage_config vsag_src_common)\n"
+            "  add_library(${dep} INTERFACE)\nendforeach()\nadd_subdirectory(datacell)\n"
+        )
+
+    def configure(self, value=None, generator="Ninja", asan=True):
+        command = ["cmake", "-S", str(self.source), "-B", str(self.build), "-G", generator,
+                   "-DENABLE_TESTS=OFF", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+                   "-DENABLE_ASAN=" + ("ON" if asan else "OFF")]
+        if value is not None:
+            command.append("-DVSAG_DATACELL_COMPILE_JOBS=" + str(value))
+        return subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+    def assert_configured(self, value=None, **kwargs):
+        result = self.configure(value, **kwargs)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        return (self.build / "build.ninja").read_text()
+
+    def test_default_has_no_extra_pool(self):
+        graph = self.assert_configured()
+        self.assertNotIn("pool = vsag_datacell_compile_pool", graph)
+        self.assertNotIn("depth = 1", (self.build / "CMakeFiles/rules.ninja").read_text())
+
+    def test_shared_cap_and_reset_leave_compile_commands_unchanged(self):
+        self.assert_configured()
+        baseline = (self.build / "compile_commands.json").read_text()
+        for value in (1, 2, 24):
+            with self.subTest(value=value):
+                graph = self.assert_configured(value)
+                # All five fixture objects, including both libraries, share one pool.
+                self.assertEqual(graph.count("pool = vsag_datacell_compile_pool"), 5)
+                self.assertIn(f"depth = {value}", (self.build / "CMakeFiles/rules.ninja").read_text())
+                self.assertEqual((self.build / "compile_commands.json").read_text(), baseline)
+        self.assertNotIn("pool = vsag_datacell_compile_pool", self.assert_configured(0))
+        self.assertEqual((self.build / "compile_commands.json").read_text(), baseline)
+
+    def test_explicit_cap_also_applies_without_asan(self):
+        self.assertEqual(self.assert_configured(1, asan=False).count("pool = vsag_datacell_compile_pool"), 5)
+
+    def test_invalid_limits_fail_configuration(self):
+        for value in ("", "-1", "1.5", "ON", "01", "1;2"):
+            with self.subTest(value=value):
+                result = self.configure(value)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("must be 0 or a positive integer", result.stdout)
+
+    def test_other_generators_do_not_silently_ignore_requested_cap(self):
+        result = self.configure(1, generator="Unix Makefiles")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requires Ninja", result.stdout)
+        result = self.configure(0, generator="Unix Makefiles")
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_make_forwards_limit_and_preserves_global_jobs(self):
+        for value in (0, 1, 4):
+            result = subprocess.run(
+                ["make", "-n", "asan", "COMPILE_JOBS=24", f"DATACELL_COMPILE_JOBS={value}"],
+                cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout)
+            self.assertIn(f"-DVSAG_DATACELL_COMPILE_JOBS={value}", result.stdout)
+            self.assertIn("--parallel 24", result.stdout)
+
+    def test_ninja_enforces_combined_cap_and_global_default(self):
+        # A compiler launcher records actual overlap across the two object libraries.
+        # The sleep makes scheduling observable even for these tiny fixture sources.
+        import sys
+        launcher = self.root / "launcher.py"
+        events = self.root / "events.jsonl"
+        launcher.write_text(textwrap.dedent("""\
+            import fcntl, json, os, subprocess, sys, time
+            def emit(kind):
+                with open(sys.argv[1], 'a') as out:
+                    fcntl.flock(out, fcntl.LOCK_EX)
+                    out.write(json.dumps([time.monotonic_ns(), os.getpid(), kind]) + '\\n')
+            emit('start')
+            time.sleep(0.2)
+            result = subprocess.run(sys.argv[2:])
+            emit('end')
+            sys.exit(result.returncode)
+        """))
+        for limit in (1, 2, 0):
+            self.assert_configured(limit)
+            result = subprocess.run(
+                ["cmake", "-S", str(self.source), "-B", str(self.build),
+                 f"-DCMAKE_CXX_COMPILER_LAUNCHER={sys.executable};{launcher};{events}"],
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout)
+            events.write_text("")
+            result = subprocess.run(
+                ["cmake", "--build", str(self.build), "--clean-first", "--parallel", "4"],
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout)
+            active = peak = starts = 0
+            for _, _, kind in sorted(json.loads(line) for line in events.read_text().splitlines()):
+                active += 1 if kind == "start" else -1
+                starts += kind == "start"
+                peak = max(peak, active)
+            self.assertEqual((starts, active), (5, 0))
+            self.assertLessEqual(peak, limit or 4)
+            self.assertGreaterEqual(peak, 1 if limit == 1 else 2)
+
+    def test_arm_asan_entrypoints_keep_low_cap(self):
+        files = (
+            ".github/actions/asan-build-and-test-build-asan-aarch64/action.yml",
+            ".github/actions/asan-build-and-test-build-asan-macos-arm64/action.yml",
+        )
+        for name in files:
+            self.assertIn("COMPILE_JOBS=3 DATACELL_COMPILE_JOBS=1", (ROOT / name).read_text())
+        daily = job_text(ROOT / ".github/workflows/daily_test.yml", "daily_build_asan_aarch64")
+        self.assertIn("COMPILE_JOBS=3 DATACELL_COMPILE_JOBS=1", daily)
+        community = job_text(ROOT / ".github/workflows/pr-ci-community.yml", "build-asan-macos-arm64")
+        self.assertIn("COMPILE_JOBS=3 DATACELL_COMPILE_JOBS=1", community)
+        team = (ROOT / ".github/workflows/pr-ci-team.yml").read_text()
+        self.assertNotIn("DATACELL_COMPILE_JOBS=1", team)
 
 if __name__ == "__main__":
     unittest.main()

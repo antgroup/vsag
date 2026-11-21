@@ -16,8 +16,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <random>
+#include <vector>
 
 #include "dataset_impl.h"
 #include "impl/heap/standard_heap.h"
@@ -26,6 +28,7 @@
 #include "query_context.h"
 #include "typing.h"
 #include "vsag/dataset.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -102,7 +105,7 @@ PyramidAnalyzer::AnalyzeIndexBySearch(const SearchRequest& request) {
 
     auto query = request.query_;
     const auto query_num = query->GetNumElements();
-    const float* query_vectors = query->GetFloat32Vectors();
+    const void* query_vectors = pyramid_->get_data(query);
     if (query_num == 0) {
         return stats;
     }
@@ -112,7 +115,7 @@ PyramidAnalyzer::AnalyzeIndexBySearch(const SearchRequest& request) {
     CHECK_ARGUMENT(
         query->GetDim() == dim_,
         fmt::format("query.dim({}) must be equal to index.dim({})", query->GetDim(), dim_));
-    CHECK_ARGUMENT(query_vectors != nullptr, "query vectors is required");
+    CHECK_ARGUMENT(query_vectors != nullptr, "query vectors must match the index dtype");
     const auto query_count = static_cast<uint32_t>(query_num);
 
     auto parsed_param = PyramidSearchParameters::FromJson(request.params_str_);
@@ -165,9 +168,12 @@ PyramidAnalyzer::AnalyzeIndexBySearch(const SearchRequest& request) {
 
     Vector<float> query_datas(allocator_);
     query_datas.resize(static_cast<uint64_t>(query_count) * dim_);
-    std::memcpy(query_datas.data(),
-                query_vectors,
-                static_cast<uint64_t>(query_count) * dim_ * sizeof(float));
+    const auto row_bytes = static_cast<uint64_t>(dim_) * pyramid_->data_type_element_size();
+    for (uint64_t i = 0; i < query_count; ++i) {
+        std::memcpy(query_datas.data() + i * dim_,
+                    pyramid_->element_ptr(query_vectors, static_cast<int64_t>(i)),
+                    row_bytes);
+    }
 
     UnorderedSet<InnerIdType> deleted_ids(allocator_);
     for (const auto id : pyramid_->label_table_->GetAllDeletedIds()) {
@@ -206,6 +212,20 @@ PyramidAnalyzer::AnalyzeIndexBySearch(const SearchRequest& request) {
     }
 
     return stats;
+}
+
+DatasetPtr
+PyramidAnalyzer::make_query_dataset(const float* native_query) const {
+    auto query = Dataset::Make()->Dim(dim_)->NumElements(1)->Owner(false);
+    // Decoded samples retain the datacell's native representation. The float
+    // storage provides enough space for either float32 or packed half values.
+    if (pyramid_->data_type_ == DataTypes::DATA_TYPE_FP16 or
+        pyramid_->data_type_ == DataTypes::DATA_TYPE_BF16) {
+        query->Float16Vectors(reinterpret_cast<const uint16_t*>(native_query));
+    } else {
+        query->Float32Vectors(native_query);
+    }
+    return query;
 }
 
 JsonType
@@ -757,16 +777,12 @@ PyramidAnalyzer::calculate_quantization_result(
         }
 
         auto result_size = static_cast<uint32_t>(unique_result.size());
+        const auto query =
+            make_query_dataset(sample_datas.data() + static_cast<uint64_t>(i) * dim_);
         auto base_result =
-            pyramid_->CalcDistancesById(sample_datas.data() + static_cast<size_t>(i) * dim_,
-                                        unique_result.data(),
-                                        result_size,
-                                        false);
+            pyramid_->CalcDistancesById(query, unique_result.data(), result_size, false);
         auto precise_result =
-            pyramid_->CalcDistancesById(sample_datas.data() + static_cast<size_t>(i) * dim_,
-                                        unique_result.data(),
-                                        result_size,
-                                        true);
+            pyramid_->CalcDistancesById(query, unique_result.data(), result_size, true);
         if (base_result == nullptr || precise_result == nullptr) {
             continue;
         }
@@ -776,24 +792,42 @@ PyramidAnalyzer::calculate_quantization_result(
             continue;
         }
 
+        const auto* base_valids = base_result->GetValids();
+        const auto* precise_valids = precise_result->GetValids();
+        if (base_valids == nullptr || precise_valids == nullptr) {
+            continue;
+        }
+        // Skip labels that were removed concurrently; their distances are NaN.
+        std::vector<uint32_t> kept;
+        kept.reserve(result_size);
+        for (uint32_t j = 0; j < result_size; ++j) {
+            if (base_valids[j] && precise_valids[j]) {
+                kept.push_back(j);
+            }
+        }
+        if (kept.empty()) {
+            continue;
+        }
+        const auto kept_count = static_cast<uint32_t>(kept.size());
+
         float sample_error = 0.0F;
         uint32_t inversion_count = 0;
-        for (uint32_t j = 0; j < result_size; ++j) {
-            sample_error += std::abs(base_distance[j] - precise_distance[j]);
-            for (uint32_t k = j + 1; k < result_size; ++k) {
-                if ((base_distance[j] - base_distance[k]) *
-                        (precise_distance[j] - precise_distance[k]) <
+        for (uint32_t j = 0; j < kept_count; ++j) {
+            sample_error += std::abs(base_distance[kept[j]] - precise_distance[kept[j]]);
+            for (uint32_t k = j + 1; k < kept_count; ++k) {
+                if ((base_distance[kept[j]] - base_distance[kept[k]]) *
+                        (precise_distance[kept[j]] - precise_distance[kept[k]]) <
                     0) {
                     inversion_count++;
                 }
             }
         }
 
-        total_quantization_error += sample_error / static_cast<float>(result_size);
-        if (result_size > 1) {
+        total_quantization_error += sample_error / static_cast<float>(kept_count);
+        if (kept_count > 1) {
             total_quantization_inversion_count_rate +=
                 static_cast<float>(inversion_count) /
-                (static_cast<float>(result_size) * static_cast<float>(result_size - 1) / 2.0F);
+                (static_cast<float>(kept_count) * static_cast<float>(kept_count - 1) / 2.0F);
             valid_inversion_sample_count++;
         }
         valid_sample_count++;
@@ -842,9 +876,7 @@ PyramidAnalyzer::calculate_search_result(
                 eta_ms);
         }
 
-        auto query = Dataset::Make();
-        query->Dim(dim_)->NumElements(1)->Owner(false)->Float32Vectors(
-            sample_datas.data() + static_cast<size_t>(i) * dim_);
+        auto query = make_query_dataset(sample_datas.data() + static_cast<uint64_t>(i) * dim_);
         if (query_paths != nullptr) {
             std::vector<std::string> atomic_paths;
             atomic_paths.reserve((*query_paths)[i].size());
@@ -940,9 +972,14 @@ PyramidAnalyzer::get_search_recall(
             }
             bool is_hit = gt_set.find(label) != gt_set.end();
             if (not is_hit) {
-                const auto distance = pyramid_->CalcDistanceById(
-                    sample_datas.data() + static_cast<uint64_t>(i) * dim_, label, true);
-                is_hit = distance <= distance_threshold + tie_tolerance;
+                try {
+                    const auto distance = pyramid_->CalcDistanceById(
+                        sample_datas.data() + static_cast<uint64_t>(i) * dim_, label, true);
+                    is_hit = distance <= distance_threshold + tie_tolerance;
+                } catch (const VsagException&) {
+                    // A label returned by search that is no longer present cannot be a hit.
+                    is_hit = false;
+                }
             }
             if (is_hit) {
                 hit_count++;
@@ -1093,8 +1130,7 @@ PyramidAnalyzer::search_single_node(const IndexNode* node,
             ef_search = static_cast<uint64_t>(params["pyramid"]["pyramid"]["ef_search"].GetInt());
         }
 
-        auto query_dataset = Dataset::Make();
-        query_dataset->Dim(dim_)->NumElements(1)->Owner(false)->Float32Vectors(query);
+        auto query_dataset = make_query_dataset(query);
 
         InnerSearchParam inner_param;
         inner_param.topk = static_cast<int64_t>(topk_);

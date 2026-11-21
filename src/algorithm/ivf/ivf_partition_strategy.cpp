@@ -15,6 +15,8 @@
 
 #include "ivf_partition_strategy.h"
 
+#include <cstring>
+
 #include "impl/blas/blas_function.h"
 
 namespace vsag {
@@ -23,7 +25,7 @@ void
 IVFPartitionStrategy::GetResidual(
     uint64_t n, const float* x, float* residuals, float* centroids, BucketIdType* assign) {
     // TODO: Directly implement c = a - b.
-    memcpy(residuals, x, sizeof(float) * n * dim_);
+    std::memcpy(residuals, x, sizeof(float) * n * dim_);
     for (uint64_t i = 0; i < n; ++i) {
         BucketIdType bucket_id = assign[i];
         BlasFunction::Saxpy(static_cast<int32_t>(dim_),

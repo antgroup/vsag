@@ -96,10 +96,35 @@ Each call advances `iter_ctx`; the union of the returned ids is a non-overlappin
 the search ordered by distance. Pass `is_last_search=true` on a trailing call instead if you want
 the index to also emit the candidates still buffered in the context.
 
-> **`SearchRequest` API.** `SearchRequest` declares `enable_iterator_search_`, `p_iter_ctx_`, and
-> `is_last_search_` fields, but no in-tree `SearchWithRequest` implementation currently consults
-> them. Until that wiring lands, use one of the two `KnnSearch` forms above to drive iterator
-> search.
+> **`SearchRequest` API.** `SearchWithRequest` honours the same fields for HGraph indexes: set
+> `enable_iterator_search_ = true` and point `p_iter_ctx_` at an `IteratorContext*` that starts as
+> `nullptr` (the first call creates it). `topk_`, `params_str_`, `filter_`, `threshold_` and
+> `search_allocator_` mean exactly what they mean in the `KnnSearch` forms above.
+
+```cpp
+vsag::IteratorContext* ctx = nullptr;
+
+vsag::SearchRequest request;
+request.query_ = query;
+request.topk_ = 10;
+request.params_str_ = param_str;
+request.enable_iterator_search_ = true;
+request.p_iter_ctx_ = &ctx;   // filled in on the first call
+
+auto page1 = index->SearchWithRequest(request);   // creates ctx
+auto page2 = index->SearchWithRequest(request);   // continuation, no overlap with page1
+
+request.is_last_search_ = true;                   // optional: drain buffered candidates
+auto tail = index->SearchWithRequest(request);
+
+delete ctx;                                       // releases the iterator state
+```
+
+Iterator search through `SearchWithRequest` is HGraph-only; other indexes return
+`UNSUPPORTED_INDEX_OPERATION`. Iterator mode rejects range search, custom scoring
+(`distance_batch_func_`), attribute filters and reasoning (`expected_labels_`) — nest the filtering
+you need inside `filter_` instead. `request.threshold_` is the single distance bound in both
+modes: a `"threshold"` key inside `params_str_` is ignored.
 
 ## Combining With Filters
 

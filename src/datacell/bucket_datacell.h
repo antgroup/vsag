@@ -16,6 +16,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstring>
 #include <limits>
 #include <shared_mutex>
 #include <type_traits>
@@ -510,6 +511,9 @@ BucketDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
         io_cost_ms += group_io_cost_ms;
 
         computer->ScanBatchDists(unique_offsets.size(), codes.data, unique_dists.data());
+        if (ctx != nullptr and ctx->stats != nullptr and ctx->track_distance_evaluations) {
+            ctx->stats->AddDistance(ctx->distance_phase, backend_, unique_offsets.size());
+        }
         if (use_residual_) {
             Vector<float> centroid(this->quantizer_->GetDim(), search_alloc);
             strategy_->GetCentroid(bucket_id, centroid);
@@ -611,7 +615,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::FactoryComputer(const void* query) {
         if (metric_ == MetricType::METRIC_TYPE_COSINE) {
             Normalize(float_query, comp->raw_query_.data(), this->quantizer_->GetDim());
         } else {
-            memcpy(
+            std::memcpy(
                 comp->raw_query_.data(), float_query, sizeof(float) * this->quantizer_->GetDim());
         }
         float_query = comp->raw_query_.data();

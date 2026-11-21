@@ -62,6 +62,15 @@ public:
                       const uint8_t* codes,
                       float* dists) const;
 
+    // Ordinary SQ8Uniform rows already match the native optimized batch layout.
+    void
+    ScanRowBatchDistImpl(Computer<SQ8UniformQuantizer>& computer,
+                         uint64_t count,
+                         const uint8_t* codes,
+                         float* dists) const {
+        this->ScanBatchDistImpl(computer, count, codes, dists);
+    }
+
     void
     ComputeDistsBatch4Impl(Computer<SQ8UniformQuantizer>& computer,
                            const uint8_t* codes1,

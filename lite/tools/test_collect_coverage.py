@@ -35,12 +35,8 @@ class CoverageTest(unittest.TestCase):
 class StandaloneWorkflowTest(unittest.TestCase):
     def test_repository_dependencies_trigger_lite_ci(self):
         root = Path(__file__).resolve().parents[2]
-        workflow = (root / '.github/workflows/lite.yml').read_text()
-        path_block = workflow.split('    paths:\n', 1)[1].split('\n\n', 1)[0]
-        patterns = [
-            line.strip()[2:].strip().strip('"').strip("'")
-            for line in path_block.splitlines() if line.strip().startswith('- ')
-        ]
+        workflow = (root / '.github/workflows/pr-ci-community.yml').read_text()
+        patterns = __import__('json').loads((root / 'scripts/ci/checks_paths.json').read_text())['lite']
         cmake = (root / 'lite/CMakeLists.txt').read_text()
         dependencies = {
             name for name in re.findall(r'VSAG_ROOT\}/([^"]+)', cmake)

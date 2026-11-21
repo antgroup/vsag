@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import unittest
 
-WORKFLOW = Path(__file__).resolve().parents[2] / '.github/workflows/pr-simd-coverage.yml'
+WORKFLOW = Path(__file__).resolve().parents[2] / '.github/workflows/pr-ci-community.yml'
 
 def snippet():
     text = WORKFLOW.read_text()

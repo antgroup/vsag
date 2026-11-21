@@ -101,6 +101,9 @@ public:
     friend class HGraphFGIM;
     friend class HGraphFGIMTestAccessor;
     friend class HGraphCodeWriteTestAccess;
+    friend class HGraphCacheTestAccess;
+    friend class HGraphFusedInputTestAccess;
+    friend struct HGraphMCITestAccess;
     friend class HGraphOptimizedBuildSession;
     friend class MciIncrementalAddExecutor;
 
@@ -382,6 +385,13 @@ public:
     bool
     UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) override;
 
+    // Internal SIMQ clustering synchronization. The owner pins graph structure.
+    void
+    SetClusterVectorNodeLocks(bool enabled);
+
+    LockGuard
+    AcquireClusterNodeWriteLock(int64_t label);
+
     bool
     UpdateId(int64_t old_id, int64_t new_id) override;
 
@@ -533,6 +543,8 @@ public:
                      RaBitQSearchCandidateBuffers* rabitq_candidates = nullptr) const;
 
 private:
+    static constexpr uint64_t cache_refine_block_size_ = 128;
+
     float
     calc_native_distance_by_id(const void* native_query,
                                int64_t id,
@@ -540,6 +552,9 @@ private:
 
     void
     check_fused_mutation_supported(std::string_view operation) const;
+
+    void
+    check_user_defined_precise_io_supported(std::string_view operation) const;
 
     std::vector<int64_t>
     add_impl(const DatasetPtr& data);
@@ -586,9 +601,13 @@ private:
 
     // Batch-local encoded rows, indexed by input position rather than reserved inner ID.
     // Keep them alive until every insertion task has drained, including on failure.
-    struct FusedAddCodes {
-        explicit FusedAddCodes(Allocator* allocator) : codes(allocator), clusters(allocator) {
+    struct FusedBatchCodes {
+        explicit FusedBatchCodes(Allocator* allocator) : codes(allocator), clusters(allocator) {
         }
+
+        [[nodiscard]] RaBitQFusedCodeView
+        View(uint64_t input_idx) const;
+
         Vector<uint8_t> codes;
         Vector<uint32_t> clusters;
         uint64_t one_bit_size{0};
@@ -600,7 +619,7 @@ private:
         bool use_dedup_storage{false};
         bool need_temporary_sq8_build_data{false};
         bool use_parallel_add{false};
-        std::unique_ptr<FusedAddCodes> fused_codes;
+        std::unique_ptr<FusedBatchCodes> fused_codes;
         DatasetPtr train_data{nullptr};
         FlattenInterfacePtr graph_read_codes{nullptr};
     };
@@ -656,14 +675,14 @@ private:
     void
     validate_add_data(const DatasetPtr& data) const;
 
-    void
-    validate_fused_vector_data(const float* data, uint64_t count) const;
+    const float*
+    fused_float_input(const void* data, uint64_t count, Vector<float>& scratch) const;
+
+    std::unique_ptr<FusedBatchCodes>
+    prepare_fused_codes(const DatasetPtr& data) const;
 
     void
-    validate_fused_encoding_data(const float* data, uint64_t count) const;
-
-    void
-    prepare_fused_add_codes(const DatasetPtr& data, AddContext& context) const;
+    validate_fused_vector_data(const void* input, uint64_t count) const;
 
     AddContext
     prepare_add_context(const DatasetPtr& data);
@@ -1354,5 +1373,7 @@ private:
     float build_cache_hit_rate_{-1.0F};     // cache hit rate from last cache-based build
     uint64_t build_cache_hit_nodes_{0};     // number of nodes with cache hit
     uint64_t build_cache_missed_nodes_{0};  // number of nodes without cache hit
+
+    bool cluster_vector_node_locks_{false};  // temporary clustering graph only
 };
 }  // namespace vsag

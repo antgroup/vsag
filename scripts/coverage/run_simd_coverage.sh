@@ -24,7 +24,15 @@ if ! git rev-parse --show-toplevel ||
 fi
 # Both builds consume the pinned source checkout prepared by the workflow. If
 # those pins change, reusing it for the base would measure the wrong dependency.
-if git diff --quiet "$base" "$head" -- extern .github/actions/prepare-fetchcontent; then
+# Transitional: extern/pybind11/pybind11.cmake was removed unreferenced, so no build consumes it.
+# Drop this exclude once no supported base still contains it.
+# OpenBLAS is supplied by the same container for both revisions (strict system
+# mode below), not by the shared FetchContent checkout. Its bundled build recipe
+# cannot change the shared sources. Keep all other extern paths guarded by default.
+if git diff --quiet "$base" "$head" -- extern \
+    ':(exclude)extern/pybind11/pybind11.cmake' \
+    ':(exclude)extern/openblas/openblas.cmake' \
+    .github/actions/prepare-fetchcontent; then
     :
 else
     diff_status=$?
@@ -33,6 +41,7 @@ else
     else
         echo 'SIMD coverage unavailable: Git dependency comparison failed.' > simd-coverage/summary.md
     fi
+    cat simd-coverage/summary.md >&2
     exit "$diff_status"
 fi
 for role in base head; do
@@ -46,10 +55,10 @@ for role in base head; do
         export VSAG_THIRDPARTY_DOWNLOAD_DIR="$PWD/.ci-downloads"
         export CMAKE_GENERATOR=Ninja
         export EXTRA_DEFINED=-DVSAG_USE_SYSTEM_OPENBLAS=ON
-        make cov COMPILE_JOBS=4
+        make -f Makefile -f "$root/scripts/coverage/simd_coverage.mk" cov-simd COMPILE_JOBS=4
         python3 "$root/scripts/coverage/verify_cpp_coverage.py" instrumentation \
             build/compile_commands.json --source-root "$PWD"
-        timeout 15m ./build/tests/unittests '[simd]~[!benchmark]' --rng-seed 424242 --order lex
+        timeout 15m ./build/tests/unittests_simd '[simd]~[!benchmark]' --rng-seed 424242 --order lex
         bash scripts/coverage/collect_cpp_coverage.sh
         cp coverage/coverage.info "$root/simd-coverage/$role.info"
         python3 - "$root" "$role" "$sha" <<'PY'

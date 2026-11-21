@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <string_view>
+
 #include "vsag/constants.h"
 
 namespace vsag {
@@ -76,12 +78,14 @@ const char* const IO_TYPE_VALUE_MEMORY_IO = "memory_io";
 const char* const IO_TYPE_VALUE_BUFFER_IO = "buffer_io";
 const char* const IO_TYPE_VALUE_MMAP_IO = "mmap_io";
 const char* const IO_TYPE_VALUE_READER_IO = "reader_io";
+const char* const IO_TYPE_VALUE_USER_DEFINED_IO = "user_defined_io";
 const char* const IO_TYPE_VALUE_ASYNC_IO = "async_io";
 const char* const IO_TYPE_VALUE_URING_IO = "uring_io";
 const char* const IO_TYPE_VALUE_BLOCK_MEMORY_IO = "block_memory_io";
 const char* const READ_CACHE_TOTAL_CACHE_SIZE_KEY = "total_cache_size";
 const char* const READ_CACHE_ENABLED_KEY = "enable_read_cache";
 const char* const IO_PREFETCH_HINT_KEY = "enable_prefetch_hint";
+const char* const IO_USER_DEFINED_IO_KEY = "user_defined_io";
 const char* const BLOCK_IO_BLOCK_SIZE_KEY = "block_size";
 
 // IO param for file
@@ -91,6 +95,18 @@ const char* const DEFAULT_FILE_PATH_VALUE = "./default_file_path";
 
 // quantization params key
 const char* const QUANTIZATION_PARAMS_KEY = "quantization_params";
+// Strip only the exact adapter prefix; callers retain ownership of the input name.
+inline constexpr std::string_view QUANTIZATION_ADAPTER_NAME_PREFIX = "QUANTIZATION_ADAPTER_";
+
+inline std::string_view
+GetBaseQuantizerName(std::string_view name) {
+    if (name.compare(
+            0, QUANTIZATION_ADAPTER_NAME_PREFIX.size(), QUANTIZATION_ADAPTER_NAME_PREFIX) == 0) {
+        name.remove_prefix(QUANTIZATION_ADAPTER_NAME_PREFIX.size());
+    }
+    return name;
+}
+
 // quantization type
 const char* const QUANTIZATION_TYPE_VALUE_SQ8 = "sq8";
 const char* const QUANTIZATION_TYPE_VALUE_SQ4_LOCAL = "sq4_local";
@@ -105,6 +121,7 @@ const char* const QUANTIZATION_TYPE_VALUE_INT8 = "int8";
 const char* const QUANTIZATION_TYPE_VALUE_PQ = "pq";
 const char* const QUANTIZATION_TYPE_VALUE_PQFS = "pqfs";
 const char* const QUANTIZATION_TYPE_VALUE_RABITQ = "rabitq";
+const char* const QUANTIZATION_TYPE_VALUE_SAQ = "saq";
 const char* const QUANTIZATION_TYPE_VALUE_SPARSE = "sparse";
 const char* const QUANTIZATION_TYPE_VALUE_SPARSE_FP16 = "sparse_fp16";
 const char* const QUANTIZATION_TYPE_VALUE_TQ = "tq";
@@ -132,6 +149,9 @@ const char* const RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY = "rabitq_bits_per
 const char* const RABITQ_QUANTIZATION_ERROR_RATE_KEY = "rabitq_error_rate";
 const char* const FAST_ENCODE_RABITQ_KEY = "fast_encode_rabitq";
 const char* const FAST_ENCODE_RABITQ_ROUNDS_KEY = "fast_encode_rabitq_rounds";
+const char* const SAQ_AVG_BITS_KEY = "saq_avg_bits";
+const char* const SAQ_SEGMENT_COUNT_KEY = "saq_segment_count";
+const char* const SAQ_RANDOM_ROTATION_KEY = "saq_random_rotation";
 const char* const SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY = "sq4_uniform_trunc_rate";
 const char* const PRODUCT_QUANTIZATION_DIM_KEY = "pq_dim";
 const char* const PRODUCT_QUANTIZATION_BITS_KEY = "pq_bits";
@@ -174,6 +194,7 @@ const char* const BUCKET_USE_RESIDUAL_KEY = "use_residual";
 const char* const IVF_TRAIN_TYPE_KEY = "ivf_train_type";
 const char* const IVF_TRAIN_TYPE_RANDOM = "random";
 const char* const IVF_TRAIN_TYPE_KMEANS = "kmeans";
+const char* const IVF_TRAIN_TYPE_E_MEANS = "e_means";
 
 const char* const TRAIN_SAMPLE_COUNT_KEY =
     "train_sample_count";  // used after v0.18 for both Hgraph and IVF
@@ -189,6 +210,7 @@ const char* const IVF_GPU_DEVICE_ID_KEY = "gpu_device_id";
 const char* const IVF_GPU_MEMORY_BUDGET_KEY = "gpu_memory_budget";
 const char* const IVF_GPU_MIN_WORK_THRESHOLD_KEY = "gpu_min_work_threshold";
 const char* const IVF_KMEANS_ITER_COUNT_KEY = "kmeans_iter_count";
+const char* const IVF_E_MEANS_EPOCHS_KEY = "e_means_epochs";
 
 const char* const GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY = "first_order_buckets_count";
 const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY = "second_order_buckets_count";

@@ -17,6 +17,8 @@
 #include <datacell/compressed_graph_datacell_parameter.h>
 #include <fmt/format.h>
 
+#include <cstring>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -32,6 +34,7 @@
 #include "datacell/rabitq_split_datacell.h"
 #include "datacell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
+#include "hgraph_fgim.h"
 #include "impl/filter/filter_headers.h"
 #include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
@@ -42,6 +45,7 @@
 #include "impl/searcher/hgraph_rabitq_searcher.h"
 #include "index/index_impl.h"
 #include "io/reader_io/reader_io_parameter.h"
+#include "io/user_defined_io/user_defined_io_parameter.h"
 #include "typing.h"
 #include "utils/util_functions.h"
 #include "utils/visited_list.h"
@@ -56,6 +60,28 @@ HGraph::check_fused_mutation_supported(std::string_view operation) const {
     if (this->rabitq_fused_datacell_ != nullptr) {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             fmt::format("fused RaBitQ HGraph does not support {}", operation));
+    }
+}
+
+void
+HGraph::check_user_defined_precise_io_supported(std::string_view operation) const {
+    // Cloning or exporting a model re-creates datacells from the same IO parameters, which
+    // for user-defined IO re-binds this index's Reader/Writer pair into the copy: the copy
+    // would share (Clone) or resize (ExportModel + build) the source backing store. Reject
+    // until user-defined storage can supply independent bytes for lifecycle copies.
+    if (this->has_precise_reorder() and this->high_precise_codes_ != nullptr) {
+        const auto hgraph_param =
+            std::dynamic_pointer_cast<HGraphParameter>(this->create_param_ptr_);
+        if (hgraph_param != nullptr and hgraph_param->precise_codes_param != nullptr and
+            std::dynamic_pointer_cast<UserDefinedIOParameter>(
+                hgraph_param->precise_codes_param->io_parameter) != nullptr) {
+            throw VsagException(
+                ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                fmt::format(
+                    "user_defined_io precise codes do not support {}: the bound Reader/Writer "
+                    "pair would be shared with the copy",
+                    operation));
+        }
     }
 }
 
@@ -101,9 +127,11 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
                                            common_param.metric_ == MetricType::METRIC_TYPE_L2SQR;
         CHECK_ARGUMENT(valid_adaptive_metric, "PiPNN adaptive pruning only supports L2");
         if (common_param.repr_ != RecordRepr::DENSE or
-            common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
+            (common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT and
+             common_param.data_type_ != DataTypes::DATA_TYPE_FP16 and
+             common_param.data_type_ != DataTypes::DATA_TYPE_BF16)) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                "HGraph PiPNN only supports dense float32 indexes");
+                                "HGraph PiPNN only supports dense floating-point indexes");
         }
     }
     if (this->deduplicate_storage_ && this->graph_type_ != GRAPH_TYPE_VALUE_NSW &&
@@ -301,10 +329,29 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     };
 
     auto train_count = std::min(this->train_sample_count_, this->GetNumElements());
-    Vector<float> train_data(train_count * dim_, 0, allocator_);
+    const auto element_size =
+        (data_type_ == DataTypes::DATA_TYPE_FP16 or data_type_ == DataTypes::DATA_TYPE_BF16)
+            ? sizeof(uint16_t)
+            : sizeof(float);
+    CHECK_ARGUMENT(dim_ > 0, "Tune training dimension must be positive");
+    CHECK_ARGUMENT(static_cast<uint64_t>(dim_) <= std::numeric_limits<size_t>::max() / element_size,
+                   "Tune training row size overflows");
+    const auto row_bytes = static_cast<size_t>(dim_) * element_size;
+    CHECK_ARGUMENT(static_cast<uint64_t>(train_count) <=
+                       (std::numeric_limits<size_t>::max() - (sizeof(float) - 1)) / row_bytes,
+                   "Tune training buffer size overflows");
+    const auto train_bytes = static_cast<size_t>(train_count) * row_bytes;
+    // Train consumes tightly packed native input, including FP16/BF16. Keep the
+    // allocation float-aligned, and decode through aligned scratch: odd half
+    // dimensions need not leave each packed row aligned for Decode's float* API.
+    Vector<float> train_data((train_bytes + sizeof(float) - 1) / sizeof(float), 0, allocator_);
     if (is_tune_base_code or is_tune_precise_code or is_tune_raw_code) {
+        Vector<float> decoded_row(dim_, 0, allocator_);
+        auto* packed_data = reinterpret_cast<uint8_t*>(train_data.data());
         for (InnerIdType i = 0; i < train_count; i++) {
-            decode_tune_source(i, train_data.data() + i * dim_);
+            decode_tune_source(i, decoded_row.data());
+            std::memcpy(
+                packed_data + static_cast<size_t>(i) * row_bytes, decoded_row.data(), row_bytes);
         }
     }
 
@@ -602,6 +649,7 @@ HGraph::GetMinAndMaxId() const {
 InnerIndexPtr
 HGraph::ExportModel(const IndexCommonParam& param) const {
     this->check_fused_mutation_supported("ExportModel");
+    this->check_user_defined_precise_io_supported("ExportModel");
     auto index = std::make_shared<HGraph>(this->create_param_ptr_, param);
     this->basic_flatten_codes_->ExportModel(index->basic_flatten_codes_);
     if (has_precise_reorder()) {
@@ -613,6 +661,7 @@ HGraph::ExportModel(const IndexCommonParam& param) const {
 InnerIndexPtr
 HGraph::Clone(const IndexCommonParam& param) {
     this->check_fused_mutation_supported("Clone");
+    this->check_user_defined_precise_io_supported("Clone");
     return InnerIndexInterface::Clone(param);
 }
 
@@ -640,6 +689,12 @@ HGraph::GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const {
 
 void
 HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
+    const auto parameters = std::dynamic_pointer_cast<HGraphParameter>(create_param_ptr_);
+    CHECK_ARGUMENT(parameters != nullptr, "HGraph Merge requires HGraph parameters");
+    if (parameters->merge_strategy == "fgim") {
+        HGraphFGIM::Merge(*this, merge_units, parameters->fgim_refinement_iterations);
+        return;
+    }
     this->check_fused_mutation_supported("Merge");
     CHECK_ARGUMENT(not this->using_dedup_storage(),
                    "HGraph deduplicate_storage does not support Merge");
@@ -764,7 +819,15 @@ void
 HGraph::SetIO(const std::shared_ptr<Reader> reader) {
     auto reader_param = std::make_shared<ReaderIOParameter>();
     reader_param->reader = reader;
-    if (has_precise_reorder()) {
+    const auto hgraph_param = std::dynamic_pointer_cast<HGraphParameter>(create_param_ptr_);
+    const bool user_defined_precise_io =
+        hgraph_param != nullptr and hgraph_param->precise_codes_param != nullptr and
+        std::dynamic_pointer_cast<UserDefinedIOParameter>(
+            hgraph_param->precise_codes_param->io_parameter) != nullptr;
+    // Deserialize has already written precise codes into the bound writable pair. Only
+    // reader_io datacells need to attach to the serialized input reader here; replacing
+    // the user-defined pair with a ReaderIOParameter would fail after loading the data.
+    if (has_precise_reorder() and not user_defined_precise_io) {
         high_precise_codes_->InitIO(reader_param);
     }
     basic_flatten_codes_->InitIO(reader_param);
@@ -921,8 +984,38 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
     }
 }
 
+void
+HGraph::SetClusterVectorNodeLocks(bool enabled) {
+    if (rabitq_fused_datacell_ != nullptr or mci_parameters_.enabled or using_dedup_storage() or
+        create_new_raw_vector_) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "cluster vector node locks require a plain, non-MCI graph");
+    }
+    auto mutexes = enabled ? neighbors_mutex_ : nullptr;
+    basic_flatten_codes_->SetExternalReadMutexArray(mutexes);
+    if (has_precise_reorder()) {
+        high_precise_codes_->SetExternalReadMutexArray(mutexes);
+    }
+    cluster_vector_node_locks_ = enabled;
+}
+
+LockGuard
+HGraph::AcquireClusterNodeWriteLock(int64_t label) {
+    CHECK_ARGUMENT(cluster_vector_node_locks_, "cluster vector node locks are not enabled");
+    InnerIdType id;
+    {
+        std::shared_lock label_lock(label_lookup_mutex_);
+        id = label_table_->GetIdByLabel(label);
+    }
+    return {neighbors_mutex_, id};
+}
+
 bool
 HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
+    if (cluster_vector_node_locks_ and not force_update) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "externally locked node updates must use force_update");
+    }
     std::shared_lock<std::shared_mutex> force_remove_rlock;
     if (this->support_force_remove()) {
         force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
@@ -953,13 +1046,13 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
             Vector<int8_t> base_data(data_size, allocator_);
             GetVectorByInnerId(inner_id, reinterpret_cast<float*>(base_data.data()));
             const float old_self_dist =
-                this->CalcDistanceById(reinterpret_cast<float*>(base_data.data()), id);
-            self_dist = this->CalcDistanceById(static_cast<float*>(new_base_vec), id);
+                this->calc_native_distance_by_id(base_data.data(), id, true);
+            self_dist = this->calc_native_distance_by_id(new_base_vec, id, true);
             if (std::abs(old_self_dist - self_dist) < 1e-3) {
                 return true;
             }
         } else {
-            self_dist = this->CalcDistanceById(static_cast<float*>(new_base_vec), id);
+            self_dist = this->calc_native_distance_by_id(new_base_vec, id, true);
         }
 
         // 2. check whether the neighborhood relationship is same
@@ -973,9 +1066,8 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
 
             float neighbor_dist = 0;
             try {
-                neighbor_dist =
-                    this->CalcDistanceById(static_cast<float*>(new_base_vec),
-                                           this->label_table_->GetLabelById(neighbor_inner_id));
+                neighbor_dist = this->calc_native_distance_by_id(
+                    new_base_vec, this->label_table_->GetLabelById(neighbor_inner_id), true);
             } catch (const std::runtime_error& e) {
                 // incase that neighbor has been deleted
                 continue;
@@ -1006,7 +1098,12 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
     } else if (this->using_dedup_storage() && !this->immutable_.load(std::memory_order_acquire)) {
         map_lock = this->acquire_global_read_lock();
     }
-    std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
+    std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_, std::defer_lock);
+    if (not cluster_vector_node_locks_) {
+        codes_lock.lock();
+    }
+    // The owner pins storage and holds this node exclusively. Reacquiring the
+    // codes lock here would invert a brute-force reader's codes -> node order.
     bool update_status = basic_flatten_codes_->UpdateVector(new_base_vec, inner_id);
     if (update_status and rabitq_fused_datacell_ != nullptr) {
         this->sync_fused_node_codes(inner_id, new_base_vec);

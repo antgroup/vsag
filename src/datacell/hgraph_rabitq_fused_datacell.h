@@ -147,7 +147,7 @@ public:
 
     [[nodiscard]] const uint8_t*
     GetNodeRecord(InnerIdType id) const {
-        return storage_->GetRecord(id);
+        return storage_->GetRecord32(id);
     }
 
     [[nodiscard]] const InnerIdType*

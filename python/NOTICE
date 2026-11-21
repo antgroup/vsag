@@ -1,0 +1,8 @@
+VSAG Python bindings
+Copyright 2024-present the vsag project
+
+macOS wheels include a statically linked LLVM OpenMP runtime, built by default
+from LLVM 20.1.8 (https://github.com/llvm/llvm-project/tree/llvmorg-20.1.8/openmp).
+LLVM OpenMP is distributed under the Apache License 2.0 with LLVM Exceptions;
+the complete license is included in licenses/LLVM-OpenMP.txt in the source
+package and licenses/LLVM-OpenMP.txt under the wheel's dist-info/licenses directory.

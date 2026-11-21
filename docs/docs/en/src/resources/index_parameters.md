@@ -1,7 +1,8 @@
 # Index Parameters
 
-This page summarises the commonly used parameters for every VSAG index type. For the full
-enumeration, consult the source:
+This page summarises cross-index defaults and the top-level common fields. Each index page
+carries the complete list of public build and search keys for that index; the source remains
+the final authority:
 
 - Build parameter keys: `src/constants.cpp`
 - Public constants: `include/vsag/constants.h`
@@ -49,7 +50,7 @@ HGraph places its build parameters under the generic `index_param` key (see
 | `max_degree` | 16–48 | Maximum out-degree per node |
 | `ef_construction` | 200–500 | Candidate set size during build; larger = higher recall, slower build |
 | `alpha` | `1.0` | Final robust-pruning factor; PiPNN requires a finite value at least `1.0` |
-| `base_quantization_type` | `fp32` / `fp16` / `bf16` / `sq8` / `sq8_local` / `sq4_local` / `sq4` / `pq` | Quantization of the base storage — see the [Quantization chapter](../quantization/) for all supported values |
+| `base_quantization_type` | `fp32` / `fp16` / `bf16` / `sq8` / `sq8_local` / `sq4_local` / `sq4` / `pq` / `rabitq` / `saq` / `tq` | Quantization of the base storage; see the [Quantization chapter](../quantization/) for behavior and per-index restrictions |
 | `use_reverse_edges` | `false` | Track incoming neighbors for O(1) reverse-edge lookup; roughly doubles edge storage and is unsupported with compressed graph storage |
 | `label_remap_type` | `pg` | Label-map implementation: `pg` (default) or `robin` |
 | `reorder_source` | `precise` | Reorder from the `precise` store or directly from `base`; RaBitQ x+y split, including `tq_chain="mrle, rabitq"`, selects `base` automatically |
@@ -60,6 +61,21 @@ HGraph places its build parameters under the generic `index_param` key (see
 | `fast_encode_rabitq_rounds` | `6` | Fast-encoder refinement rounds in `[1, 32]` |
 
 For HGraph float32 L2/IP/cosine, `sq8_local` and `sq4_local` can select either `base_quantization_type` or `precise_quantization_type` (the latter requires `use_reorder: true`). See [local SQ4/SQ8](../quantization/sq.md#local-sq4--sq8-float32-l2-ip-and-cosine) for memory, persistence and limitations.
+
+### SAQ base-quantizer parameters
+
+When `base_quantization_type` is `saq`, HGraph, IVF, and Pyramid accept the following parameters.
+They are part of the trained model state and must remain consistent when loading or merging
+compatible index states.
+
+| Field | Type | Default | Valid values | Description |
+|-------|------|---------|--------------|-------------|
+| `saq_avg_bits` | float | `4.0` | `[1, 8]` | Average payload target per input dimension. The complete record reserves the same 12-byte allowance as equal-length multi-bit RaBitQ; SAQ's 8-byte metadata per segment and byte-aligned bit planes are charged against that fixed record budget. |
+| `saq_segment_count` | unsigned integer | `0` | `0` or a feasible positive value | `0` jointly learns the segment count, 64-dimension-aligned boundaries, and bit widths. A positive value fixes evenly distributed aligned boundaries and still learns bit widths. Training rejects requests that cannot fit the dimension or record budget. |
+| `saq_random_rotation` | boolean | `true` | `true` / `false` | Apply a deterministic, persisted orthogonal rotation within every segment. |
+
+See the [SAQ guide](../quantization/saq.md) for record layout, metric semantics, persistence, and a
+complete HGraph example.
 
 ### PiPNN build parameters
 
@@ -79,7 +95,7 @@ When `graph_type` is `pipnn`, HGraph and Pyramid also accept the following build
 The existing `alpha` field controls PiPNN's final robust pruning. `ef_construction` only tunes NSW
 and has no effect on PiPNN.
 
-HGraph additionally supports the experimental L2-only options `pipnn_adaptive_pruning` (default `false`) and `pipnn_adaptive_pruning_adjust_step` (default `0.06`). They adapt the final per-point pruning threshold during initial `Build`; see [HGraph adaptive PiPNN pruning](../indexes/hgraph.md). These options are not exposed by Pyramid.
+HGraph additionally supports the experimental L2-only options `pipnn_adaptive_pruning` (default `false`) and `pipnn_adaptive_pruning_adjust_step` (default `0.06`). They adapt the final per-point pruning threshold during initial `Build`; see [HGraph adaptive PiPNN pruning](../indexes/hgraph.md). Pyramid exposes the same two options; see its [build parameter table](../indexes/pyramid.md#build-parameters).
 
 At search time:
 
@@ -142,12 +158,13 @@ The `hgraph` search-param object also accepts the following filter-related param
 ```json
 {
     "ivf": {
-        "nlist": 4096,
-        "base_quantization_type": "sq8",
-        "nprobe": 32
+        "buckets_count": 4096,
+        "base_quantization_type": "sq8"
     }
 }
 ```
+
+See the [IVF index page](../indexes/ivf.md) for the full build-parameter table.
 
 ## Brute Force
 
@@ -155,7 +172,9 @@ The `hgraph` search-param object also accepts the following filter-related param
 {"brute_force": {}}
 ```
 
-No extra parameters.
+Quantization, IO, and thread-pool parameters are available under
+`index_param`. See the [BruteForce index page](../indexes/brute_force.md)
+for the full parameter table.
 
 ## Pyramid
 
@@ -188,8 +207,11 @@ persistence semantics.
 
 MRLE with split RaBitQ uses `base_quantization_type: "tq"`,
 `tq_chain: "mrle, rabitq"`, `mrle_dim`, and the
-`rabitq_bits_per_dim_base`/`rabitq_bits_per_dim_precise` pair. It automatically reorders from the
-split base codes and retains original FP32 vectors for decode-only operations. See the
+`rabitq_bits_per_dim_base`/`rabitq_bits_per_dim_precise` pair. It reorders from the split base codes. Original FP32 vectors are **not** retained for this
+combination: Pyramid only auto-enables `store_raw_vector` when the transform quantizer needs raw
+vectors *and* the case is not MRLE with a RaBitQ split (`RequiresRawVectorForTransformQuantizer`
+and not `RequiresRawVectorForMRLERaBitQSplit`). HGraph differs and does auto-enable it for this
+exact combination. See the
 [Pyramid page](../indexes/pyramid.md#mrle-with-split-rabitq) for a complete configuration and
 storage/recall tradeoffs.
 
@@ -236,6 +258,22 @@ SINDI_V2 supports all SINDI features with both in-memory and disk-based I/O.
 
 See the [SINDI_V2 page](../indexes/sindi_v2.md) for build parameters and search parameters such as
 `n_candidate` and `filter_callback_limit`.
+
+## SIMQ (multi-vector retrieval)
+
+SIMQ requires top-level `dim > 0`, `dtype: "float32"`, and `metric_type: "ip"`;
+`repr: "multi_vector"` can describe the layout explicitly. Its 15 public build fields live under
+`index_param`: `base_io_type`, `base_file_path`, `base_enable_read_cache`, `base_cache_total_size`,
+`quantization_type`, `build_thread_count`, `init_cluster_ratio`, `max_cluster_size`,
+`split_start_idx`, `random_seed`, `coarse_k`, `rerank_k`, `split_delay_seconds`,
+`support_duplicate`, and `deduplicate_storage`.
+
+Both KNN and range search accept `simq.coarse_k`, `simq.rerank_k` (omitted/non-positive values
+use build defaults), and soft `simq.timeout_ms`. Root-level finite `threshold` limits KNN final
+distances only; range search uses `radius`. Shared `parallelism`, `factor`, and `enable_reorder`
+are parsed inside `simq` but ignored; MaxSim reranking cannot be disabled. See the
+[SIMQ parameter tables](../indexes/simq.md) for defaults, constraints, storage/quantization caveats,
+and the distinction between input dtype and storage format.
 
 ## Runtime Parameters
 

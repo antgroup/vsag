@@ -30,8 +30,11 @@
 #include <sstream>
 #include <thread>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 
+#include "allocator/memory_record_allocator.h"
+#include "core/temp_dir.h"
 #include "flatten_interface_test.h"
 #include "flatten_optimized_build_interface.h"
 #include "hgraph_rabitq_fused_datacell.h"
@@ -39,6 +42,8 @@
 #include "impl/allocator/safe_allocator.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index_common_param.h"
+#include "inner_string_params.h"
+#include "io/common/io_type_dispatch.h"
 #include "io/memory_io/memory_io_parameter.h"
 #include "quantization/fp32_quantizer.h"
 #include "quantization/rabitq_quantization/rabitq_quantizer.h"
@@ -49,6 +54,24 @@
 using namespace vsag;
 
 namespace {
+
+template <typename Callback>
+void
+WithRaBitQSplitTestCell(const FlattenInterfacePtr& flatten,
+                        const IOParamPtr& io_param,
+                        Callback&& callback) {
+    VisitIOKind(io_param->Kind(), [&](auto tag) {
+        using IO = typename decltype(tag)::Type;
+        if constexpr (std::is_void_v<IO> or std::is_same_v<IO, UringIO>) {
+            FAIL("unsupported IO in the split RaBitQ regression");
+        } else {
+            using Split = RaBitQSplitDataCell<MetricType::METRIC_TYPE_L2SQR, IO>;
+            auto cell = std::dynamic_pointer_cast<Split>(flatten);
+            REQUIRE(cell != nullptr);
+            callback(*cell);
+        }
+    });
+}
 
 class FailingBatchLayout : public FixedLayout<MemoryIO> {
 public:
@@ -264,6 +287,51 @@ TEST_CASE("FlattenDataCell scattered half input preserves stored rows",
         for (const auto value : decoded) {
             CHECK(value == values[row]);
         }
+    }
+}
+
+TEST_CASE("FlattenDataCell supports SAQ", "[ut][FlattenDataCell][SAQ]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 64;
+    constexpr InnerIdType count = 24;
+    auto vectors = fixtures::generate_vectors(count, dim, false, 2026);
+    auto query = fixtures::generate_vectors(1, dim, false, 83);
+
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(JsonType::Parse(R"({
+        "io_params": {"type": "memory_io"},
+        "quantization_params": {
+            "type": "saq",
+            "saq_avg_bits": 4,
+            "saq_segment_count": 0,
+            "saq_random_rotation": false
+        }
+    })"));
+
+    const std::vector<MetricType> metrics = {
+        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP, MetricType::METRIC_TYPE_COSINE};
+    for (const auto metric : metrics) {
+        IndexCommonParam common_param;
+        common_param.allocator_ = allocator;
+        common_param.dim_ = dim;
+        common_param.metric_ = metric;
+
+        auto flatten = FlattenInterface::MakeInstance(param, common_param);
+        REQUIRE(flatten != nullptr);
+        REQUIRE(flatten->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_SAQ);
+        REQUIRE_THROWS_AS(flatten->Train(vectors.data(), 1), VsagException);
+        flatten->Train(vectors.data(), count);
+        flatten->Resize(count);
+        flatten->BatchInsertVector(vectors.data(), count);
+
+        std::vector<InnerIdType> ids(count);
+        std::iota(ids.begin(), ids.end(), 0);
+        std::vector<float> distances(count);
+        auto computer = flatten->FactoryComputer(query.data());
+        flatten->Query(distances.data(), computer, ids.data(), count);
+        REQUIRE(std::all_of(distances.begin(), distances.end(), [](float distance) {
+            return std::isfinite(distance);
+        }));
     }
 }
 
@@ -1816,7 +1884,8 @@ TEST_CASE("RaBitQSplitDataCell hybrid IO (1bit in memory, supplement on disk)",
 
 TEST_CASE("RaBitQSplitDataCell optimized scalar-code build",
           "[ut][RaBitQSplitDataCell][optimized_build]") {
-    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto recorded = std::make_shared<fixtures::MemoryRecordAllocator>();
+    auto allocator = std::make_shared<SafeAllocator>(recorded);
     constexpr uint64_t dim = 64;
     constexpr InnerIdType count = 24;
     auto vectors = fixtures::generate_vectors(count, dim);
@@ -1843,6 +1912,9 @@ TEST_CASE("RaBitQSplitDataCell optimized scalar-code build",
         )";
 
     auto param_json = JsonType::Parse(param_str);
+    auto io_type = GENERATE("memory_io", "block_memory_io");
+    CAPTURE(metric, bits, io_type);
+    param_json["io_params"]["type"].SetString(io_type);
     param_json["quantization_params"]["rabitq_bits_per_dim_base"].SetInt(std::get<0>(bits));
     param_json["quantization_params"]["rabitq_bits_per_dim_filter"].SetInt(std::get<1>(bits));
     auto param = std::make_shared<FlattenDataCellParameter>();
@@ -1868,10 +1940,16 @@ TEST_CASE("RaBitQSplitDataCell optimized scalar-code build",
     FlattenOptimizedBuildContext build_context{finalize_pool, 4};
     REQUIRE(optimized_build->BeginOptimizedBuild(build_context));
     REQUIRE(optimized_build->IsOptimizedBuildActive());
+    auto pairwise_interface = std::dynamic_pointer_cast<FlattenPairwiseDistanceInterface>(flatten);
+    REQUIRE(pairwise_interface != nullptr);
+    REQUIRE(pairwise_interface->FactoryPairwiseDistanceComputer() == nullptr);
     flatten->ShrinkToFit(0);
     REQUIRE_THROWS(flatten->InsertVector(vectors.data()));
     REQUIRE(flatten->TotalCount() == 0);
+    const auto memory_before_resize = recorded->GetCurrentMemory();
     flatten->Resize(count);
+    // Allow scalar codes, metadata and sums, but not another full split-code allocation.
+    REQUIRE(recorded->GetCurrentMemory() - memory_before_resize <= count * (dim + 64));
     flatten->BatchInsertVector(vectors.data(), count);
     REQUIRE(std::isfinite(flatten->ComputePairVectors(0, 1)));
     auto build_computer = optimized_build->FactoryComputerForBuild(vectors.data(), 0);
@@ -1923,6 +2001,7 @@ TEST_CASE("RaBitQSplitDataCell optimized scalar-code build",
 
     optimized_build->FinalizeOptimizedBuild();
     REQUIRE_FALSE(optimized_build->IsOptimizedBuildActive());
+    REQUIRE(pairwise_interface->FactoryPairwiseDistanceComputer() != nullptr);
     REQUIRE(std::abs(flatten->ComputePairVectors(0, 2) - build_pair_distance) <= 1e-5F);
     flatten->QueryById(id_dists.data(), 0, build_ids.data(), count, &ctx);
     statistics = JsonType::Parse(stats.Dump());
@@ -1950,6 +2029,224 @@ TEST_CASE("RaBitQSplitDataCell optimized scalar-code build",
     optimized_build->AbortOptimizedBuild();
     REQUIRE_FALSE(optimized_build->IsOptimizedBuildActive());
     REQUIRE(flatten->GetMemoryUsage() == memory_after_finalize);
+}
+
+TEST_CASE("RaBitQSplitDataCell restores deferred capacity after abort",
+          "[ut][RaBitQSplitDataCell][optimized_build]") {
+    fixtures::TempDir temp("rabitq_abort");
+    constexpr uint64_t dim = 64;
+    constexpr InnerIdType count = 32;
+    auto initial_count = GENERATE(0U, 8U);
+    auto serialize_after_abort = GENERATE(false, true);
+    auto io_type = GENERATE("memory_io", "block_memory_io", "buffer_io", "async_io", "mmap_io");
+    CAPTURE(initial_count, serialize_after_abort, io_type);
+    auto vectors = fixtures::generate_vectors(count, dim);
+    IndexCommonParam common_param;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    IOParamPtr io_param;
+    auto make_cell = [&]() {
+        auto json = JsonType::Parse(R"({
+            "codes_type": "rabitq_split",
+            "io_params": {"type": "memory_io"},
+            "quantization_params": {
+                "type": "rabitq",
+                "rabitq_version": "split",
+                "rabitq_bits_per_dim_query": 32,
+                "rabitq_bits_per_dim_base": 8,
+                "rabitq_bits_per_dim_filter": 3,
+                "fast_encode_rabitq": true
+            }
+        })");
+        json["io_params"]["type"].SetString(io_type);
+        json["io_params"]["file_path"].SetString(temp.GenerateRandomFile(false));
+        auto param = std::make_shared<FlattenDataCellParameter>();
+        param->FromJson(json);
+        io_param = param->io_parameter;
+        return FlattenInterface::MakeInstance(param, common_param);
+    };
+    auto flatten = make_cell();
+    flatten->Train(vectors.data(), count);
+    std::vector<uint8_t> expected_codes(flatten->code_size_ * count);
+    for (InnerIdType id = 0; id < count; ++id) {
+        REQUIRE(flatten->Encode(vectors.data() + id * dim,
+                                expected_codes.data() + id * flatten->code_size_));
+    }
+    flatten->ShrinkToFit(0);
+    flatten->Resize(initial_count);
+    flatten->BatchInsertVector(vectors.data(), initial_count);
+    auto check_layout_sizes = [&](InnerIdType capacity) {
+        WithRaBitQSplitTestCell(flatten, io_param, [&](const auto& cell) {
+            REQUIRE(cell.x_bit_layout_->GetIOSize() == capacity * cell.OneBitCodeSize());
+            REQUIRE(cell.supplement_layout_->GetIOSize() == capacity * cell.SupplementCodeSize());
+        });
+    };
+    auto optimized = std::dynamic_pointer_cast<FlattenOptimizedBuildInterface>(flatten);
+    REQUIRE(optimized != nullptr);
+    REQUIRE(optimized->BeginOptimizedBuild({}));
+    flatten->Resize(count);
+    // Neither final split layout may grow during optimized construction or abort.
+    check_layout_sizes(initial_count);
+    optimized->AbortOptimizedBuild();
+    REQUIRE_FALSE(optimized->IsOptimizedBuildActive());
+    REQUIRE(flatten->TotalCount() == initial_count);
+    check_layout_sizes(initial_count);
+
+    InnerIdType begin_id = initial_count;
+    if (serialize_after_abort) {
+        std::stringstream stream;
+        IOStreamWriter writer(stream);
+        flatten->Serialize(writer);
+        auto restored = make_cell();
+        IOStreamReader reader(stream);
+        restored->Deserialize(reader);
+        flatten = restored;
+    } else if (initial_count > 0) {
+        REQUIRE(flatten->UpdateVector(vectors.data(), 0));
+    } else {
+        flatten->InsertVector(vectors.data(), 0);
+        begin_id = 1;
+    }
+    // The full reservation must precede concurrent writes, even if the outer index skips Resize.
+    check_layout_sizes(count);
+    std::vector<std::future<void>> futures;
+    for (InnerIdType worker = 0; worker < 4; ++worker) {
+        futures.emplace_back(std::async(std::launch::async, [&, worker]() {
+            for (InnerIdType id = begin_id + worker; id < count; id += 4) {
+                flatten->InsertVector(vectors.data() + id * dim, id);
+            }
+        }));
+    }
+    for (auto& future : futures) {
+        future.get();
+    }
+    REQUIRE(flatten->TotalCount() == count);
+    for (InnerIdType id = 0; id < count; ++id) {
+        std::vector<uint8_t> actual(flatten->code_size_);
+        REQUIRE(flatten->GetCodesById(id, actual.data()));
+        REQUIRE(std::memcmp(actual.data(),
+                            expected_codes.data() + id * flatten->code_size_,
+                            flatten->code_size_) == 0);
+    }
+}
+
+TEST_CASE("RaBitQSplitDataCell restores external filter capacity after abort",
+          "[ut][RaBitQSplitDataCell][optimized_build]") {
+    fixtures::TempDir temp("rabitq_external_abort");
+    constexpr uint64_t dim = 64;
+    constexpr InnerIdType count = 32;
+    auto initial_count = GENERATE(0U, 8U);
+    auto first_insert_residual = GENERATE(false, true);
+    auto io_type = GENERATE("memory_io", "block_memory_io", "buffer_io", "async_io", "mmap_io");
+    CAPTURE(initial_count, first_insert_residual, io_type);
+    auto vectors = fixtures::generate_vectors(count, dim);
+    IndexCommonParam common_param;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto json = JsonType::Parse(R"({
+        "codes_type": "rabitq_split",
+        "io_params": {"type": "memory_io"},
+        "quantization_params": {
+            "type": "rabitq",
+            "rabitq_version": "split",
+            "rabitq_bits_per_dim_query": 32,
+            "rabitq_bits_per_dim_base": 8,
+            "rabitq_bits_per_dim_filter": 1,
+            "fast_encode_rabitq": true
+        }
+    })");
+    json["io_params"]["type"].SetString(io_type);
+    json["io_params"]["file_path"].SetString(temp.GenerateRandomFile(false));
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(json);
+    auto flatten = FlattenInterface::MakeInstance(param, common_param);
+    flatten->EnableExternalFilterCodeStorage();
+    flatten->Train(vectors.data(), count);
+    auto split = std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(flatten);
+    auto residual = std::dynamic_pointer_cast<RaBitQSplitResidualOriginalQueryInterface>(flatten);
+    auto optimized = std::dynamic_pointer_cast<FlattenOptimizedBuildInterface>(flatten);
+    REQUIRE(split != nullptr);
+    REQUIRE(residual != nullptr);
+    REQUIRE(optimized != nullptr);
+    std::vector<uint8_t> expected_codes(flatten->code_size_ * count);
+    for (InnerIdType id = 0; id < count; ++id) {
+        REQUIRE(flatten->Encode(vectors.data() + id * dim,
+                                expected_codes.data() + id * flatten->code_size_));
+    }
+    std::vector<uint8_t> filter_codes(split->OneBitCodeSize() * count);
+    std::vector<float> full_adds(count, std::numeric_limits<float>::quiet_NaN());
+    std::vector<uint8_t> used_residual(count, 0);
+    std::vector<float> transformed_centroid(dim, 0.0F);
+    auto insert = [&](InnerIdType id, bool use_residual) {
+        auto* filter_code = filter_codes.data() + id * split->OneBitCodeSize();
+        if (use_residual) {
+            residual->InsertVectorWithFilterCodeAndResidualFullFactor(vectors.data() + id * dim,
+                                                                      id,
+                                                                      transformed_centroid.data(),
+                                                                      filter_code,
+                                                                      &full_adds[id]);
+            used_residual[id] = 1;
+        } else {
+            flatten->InsertVectorWithFilterCode(vectors.data() + id * dim, id, filter_code);
+        }
+    };
+    auto check_layout_sizes = [&](InnerIdType capacity) {
+        WithRaBitQSplitTestCell(flatten, param->io_parameter, [&](const auto& cell) {
+            REQUIRE(cell.x_bit_layout_->GetIOSize() == 0);
+            REQUIRE(cell.supplement_layout_->GetIOSize() == capacity * cell.SupplementCodeSize());
+        });
+    };
+    flatten->ShrinkToFit(0);
+    flatten->Resize(initial_count);
+    for (InnerIdType id = 0; id < initial_count; ++id) {
+        insert(id, id % 2 == 0);
+    }
+    REQUIRE(optimized->BeginOptimizedBuild({}));
+    flatten->Resize(count);
+    check_layout_sizes(initial_count);
+    optimized->AbortOptimizedBuild();
+    REQUIRE_FALSE(optimized->IsOptimizedBuildActive());
+    REQUIRE(flatten->TotalCount() == initial_count);
+    check_layout_sizes(initial_count);
+
+    // Each external entry point must restore the whole reservation before later workers write.
+    insert(initial_count, first_insert_residual);
+    check_layout_sizes(count);
+    std::vector<std::future<void>> futures;
+    for (InnerIdType worker = 0; worker < 4; ++worker) {
+        futures.emplace_back(std::async(std::launch::async, [&, worker]() {
+            for (InnerIdType id = initial_count + 1 + worker; id < count; id += 4) {
+                insert(id, id % 2 == 0);
+            }
+        }));
+    }
+    for (auto& future : futures) {
+        future.get();
+    }
+    REQUIRE(flatten->TotalCount() == count);
+    WithRaBitQSplitTestCell(flatten, param->io_parameter, [&](const auto& cell) {
+        std::vector<uint8_t> expected_filter(cell.OneBitCodeSize());
+        std::vector<uint8_t> expected_supplement(cell.SupplementCodeSize());
+        std::vector<uint8_t> actual_supplement(cell.SupplementCodeSize());
+        for (InnerIdType id = 0; id < count; ++id) {
+            cell.quantizer_->SplitCode(expected_codes.data() + id * flatten->code_size_,
+                                       expected_filter.data(),
+                                       expected_supplement.data());
+            REQUIRE(std::memcmp(filter_codes.data() + id * cell.OneBitCodeSize(),
+                                expected_filter.data(),
+                                cell.OneBitCodeSize()) == 0);
+            REQUIRE(cell.supplement_layout_->Read(id, actual_supplement.data()));
+            REQUIRE(std::memcmp(actual_supplement.data(),
+                                expected_supplement.data(),
+                                cell.SupplementCodeSize()) == 0);
+            if (used_residual[id] != 0) {
+                REQUIRE(std::isfinite(full_adds[id]));
+            }
+        }
+    });
+    check_layout_sizes(count);
 }
 
 TEST_CASE("RaBitQSplitDataCell waits submitted finalize tasks after enqueue failure",

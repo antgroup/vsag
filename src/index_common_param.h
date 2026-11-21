@@ -22,10 +22,12 @@
 #include "json_types.h"
 #include "metric_type.h"
 #include "vsag/allocator.h"
+#include "vsag/readerset.h"
 
 namespace vsag {
 
 class Resource;
+class SearchExecutionContext;
 
 class IndexCommonParam {
 public:
@@ -36,6 +38,8 @@ public:
     int64_t extra_info_size_{0};
     std::shared_ptr<Allocator> allocator_{nullptr};
     std::shared_ptr<SafeThreadPool> thread_pool_{nullptr};
+    std::shared_ptr<SearchExecutionContext> search_resources_;
+    std::shared_ptr<const UserDefinedIOSet> user_defined_ios_{nullptr};
 
     // FIXME(wxyu): this option is used for special purposes, like compatibility testing
     bool use_old_serial_format_{false};

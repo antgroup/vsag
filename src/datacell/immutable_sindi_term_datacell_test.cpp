@@ -292,3 +292,91 @@ TEST_CASE("ImmutableSindiTermDataCell term-first memory load uses exact capacity
         }
     }
 }
+
+namespace {
+class StopAfterCallback final : public Filter {
+public:
+    StopAfterCallback(bool& stopped, uint32_t& calls) : stopped(stopped), calls(calls) {
+    }
+    bool
+    CheckValid(int64_t) const override {
+        ++calls;
+        stopped = true;
+        return true;
+    }
+    bool& stopped;
+    uint32_t& calls;
+};
+}  // namespace
+
+TEST_CASE("Immutable SINDI insertion cancels candidate loops and keeps the last accepted result",
+          "[ut][SINDI][ImmutableSindiTermDataCell][SINDIScanCancellation]") {
+    const bool terms = GENERATE(false, true);
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto quantization = std::make_shared<QuantizationParams>();
+    MutableSindiTermDataCell staging(
+        4, 32, allocator.get(), SparseValueQuantizationType::FP32, quantization);
+    uint32_t term = 1;
+    for (uint32_t id = 0; id < 32; ++id) {
+        float value = static_cast<float>(32 - id);
+        SparseVector vector{1, &term, &value};
+        staging.InsertVector(vector, id);
+    }
+    ImmutableSindiTermDataCell cell(
+        4, 32, false, SparseValueQuantizationType::FP32, quantization, allocator.get());
+    cell.AppendWindow(staging.GetWindow(0));
+    float query_value = 1;
+    SparseVector query{1, &term, &query_value};
+    SINDISearchParameter search;
+    search.query_prune_ratio = 0;
+    {
+        CAPTURE(terms);
+        auto computer = std::make_shared<SparseTermComputer>(query, search, allocator.get());
+        SindiQueryContext context(allocator.get());
+        std::array<float, 32> dists{};
+        cell.QueryWindow(dists.data(), 0, computer, terms, context);
+        MaxHeap heap(allocator.get());
+        InnerSearchParam param;
+        param.ef = param.topk = 1;
+        bool cancelled = false;
+        uint32_t calls = 0;
+        param.is_inner_id_allowed = std::make_shared<StopAfterCallback>(cancelled, calls);
+        param.scan_cancelled = [&] { return cancelled; };
+        const auto insert = [&] {
+            return terms
+                       ? cell.InsertHeapByWindow(
+                             dists.data(), 0, computer, heap, param, 0, KNN_SEARCH, true, context)
+                       : cell.InsertHeapByDists(dists.data(), 32, heap, param, 0, KNN_SEARCH, true);
+        };
+        REQUIRE(insert());
+        REQUIRE(calls == 1);
+        REQUIRE(heap.size() == 1);
+        REQUIRE(heap.top().second == 0);
+        // Internal heap stores -IP; public distances use 1-IP.
+        REQUIRE(heap.top().first == -32.0F);
+
+        // Model another worker stopping while remaining scores cannot improve the heap:
+        // no filter callback occurs, so cancellation must be polled by the scanner.
+        heap.pop();
+        heap.push({-1000, 0});
+        calls = 0;
+        uint32_t polls = 0;
+        param.scan_cancelled = [&] { return ++polls >= 6; };
+        REQUIRE(insert());
+        REQUIRE(polls == 6);
+        REQUIRE(calls == 0);
+        REQUIRE(heap.size() == 1);
+        REQUIRE(heap.top().first == -1000.0F);
+
+        // Already-cancelled work must also stop with no user filter.
+        param.is_inner_id_allowed.reset();
+        param.scan_cancelled = [] { return true; };
+        heap.pop();
+        const auto stopped =
+            terms ? cell.InsertHeapByWindow(
+                        dists.data(), 0, computer, heap, param, 0, KNN_SEARCH, false, context)
+                  : cell.InsertHeapByDists(dists.data(), 32, heap, param, 0, KNN_SEARCH, false);
+        REQUIRE(stopped);
+        REQUIRE(heap.empty());
+    }
+}

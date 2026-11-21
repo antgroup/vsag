@@ -72,6 +72,12 @@ HGraph search loop reads the record directly and prefetches graph links and
 quantized codes together. The codec uses 16 reproducibly trained residual
 clusters.
 
+For latency-sensitive single-query searches, `rabitq_use_fht: true` selects
+FHT/Kac rotation in place of the dense random orthogonal matrix. This option
+is independent of `rabitq_fused_datacell`. Both options must be set before
+`Build`; changing an existing dense-rotation or ordinary split index requires
+a rebuild. They cannot be enabled through search parameters.
+
 By default, fused HGraph trains the base RaBitQ quantizer and fused KMeans codec on at most 65,536
 vectors. When `train_sample_count` is smaller than the dataset, it selects that many vectors using
 fixed-seed uniform reservoir sampling. Increasing the value can improve cluster-centroid quality at
@@ -99,6 +105,11 @@ graph construction, then discards them. The completed index keeps only the
 fused RaBitQ records. Post-build `Add` decodes fused records on demand for
 pairwise graph updates, so it does not retain an SQ8 or raw-vector copy; batch
 adds are preferable when insertion throughput matters.
+
+For `graph_type="pipnn"`, fused HGraph preencodes the batch in parallel and reuses
+those bytes when publishing the index, so each input is encoded once. The temporary
+code buffer grows with the input batch. When all input labels are accepted, it is
+released before PiPNN builds the bottom graph.
 
 The fused layout is opt-in and has stricter constraints than ordinary split
 storage:
@@ -555,6 +566,9 @@ second count-scaled copy of the split codes.
 
 ## Operational notes
 
+- Pyramid incremental `Add` reuses decoded scalar codes in bounded, operation-local
+  caches during graph traversal and pruning, including after model deserialization.
+  No additional parameter is needed; persisted split records remain unchanged.
 - Split storage is currently available on HGraph, IVF, and Pyramid and requires
   fp32 query codes. Pyramid enables the one-bit split search path by default for
   split indexes; pass `rabitq_one_bit_search: false` under `pyramid` to force the

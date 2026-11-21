@@ -77,8 +77,12 @@ NearestCentroidAssign(const float* centroids,
         }
     };
     for (uint64_t i = 0; i < centroid_count; i += bs) {
-        futures.emplace_back(
-            thread_pool_ref->GeneralEnqueue(compute_ip_func, i, std::min(i + bs, centroid_count)));
+        if (thread_pool_ref->IsCurrentThread()) {
+            compute_ip_func(i, std::min(i + bs, centroid_count));
+        } else {
+            futures.emplace_back(thread_pool_ref->GeneralEnqueue(
+                compute_ip_func, i, std::min(i + bs, centroid_count)));
+        }
     }
     wait_futures_and_clear();
 
@@ -159,8 +163,12 @@ NearestCentroidAssign(const float* centroids,
             }
         };
         for (uint64_t j = 0; j < cur_query_count; j += bs) {
-            futures.emplace_back(thread_pool_ref->GeneralEnqueue(
-                assign_labels_func, j, std::min(j + bs, cur_query_count)));
+            if (thread_pool_ref->IsCurrentThread()) {
+                assign_labels_func(j, std::min(j + bs, cur_query_count));
+            } else {
+                futures.emplace_back(thread_pool_ref->GeneralEnqueue(
+                    assign_labels_func, j, std::min(j + bs, cur_query_count)));
+            }
         }
         wait_futures_and_clear();
     }

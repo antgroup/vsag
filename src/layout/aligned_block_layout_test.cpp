@@ -162,4 +162,38 @@ TEST_CASE("Aligned blocks validate sizes and support large records and parallel 
         REQUIRE(record[8191] == id);
     }
 }
+TEST_CASE("Aligned blocks multiply-high addressing matches division for uint32 ids",
+          "[ut][AlignedBlockLayout]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    for (uint64_t record_size : {64UL, 192UL, 320UL, 1280UL, 4096UL}) {
+        for (uint64_t block_limit : {128UL, 1024UL, 4096UL, 65536UL, 2097152UL}) {
+            AlignedBlockLayout layout(record_size, allocator.get(), block_limit);
+            const auto divisor = layout.RecordsPerBlock();
+            const uint32_t edge_ids[] = {0,
+                                         1,
+                                         static_cast<uint32_t>(divisor - 1),
+                                         static_cast<uint32_t>(divisor),
+                                         static_cast<uint32_t>(divisor + 1),
+                                         0x7FFFFFFFU,
+                                         0x80000000U,
+                                         0xFFFFFFFEU,
+                                         0xFFFFFFFFU};
+            for (const auto id : edge_ids) {
+                CHECK(layout.BlockIndex32(id) == id / divisor);
+            }
+            uint32_t state = 20261031;
+            bool all_equal = true;
+            for (uint64_t i = 0; i < 10000; ++i) {
+                state = state * 1664525U + 1013904223U;
+                all_equal &= layout.BlockIndex32(state) == state / divisor;
+            }
+            CHECK(all_equal);
+            const auto count = std::min<uint64_t>(2 * divisor + 3, 1000);
+            layout.Reserve(count);
+            for (uint32_t id = 0; id < count; ++id) {
+                CHECK(layout.GetRecord32(id) == layout.GetRecord(id));
+            }
+        }
+    }
+}
 }  // namespace vsag

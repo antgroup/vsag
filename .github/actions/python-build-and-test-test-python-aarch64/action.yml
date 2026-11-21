@@ -1,0 +1,18 @@
+name: Test Python wheel aarch64
+description: Shared installed-wheel tests.
+inputs:
+  numpy-version:
+    description: NumPy version or wildcard pattern, e.g. 1.26.4 or 2.* (not a comparison specifier)
+    default: '2.*'
+  mode:
+    description: ordinary or openmp
+    default: ordinary
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/python-wheel-test
+      with:
+        arch: aarch64
+        artifact: wheelhouse_aarch64-${{ github.run_id }}
+        numpy-version: ${{ inputs.numpy-version }}
+        mode: ${{ inputs.mode }}

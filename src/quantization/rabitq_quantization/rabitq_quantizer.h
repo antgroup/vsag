@@ -90,6 +90,13 @@ public:
     bool
     TrainImpl(const float* data, uint64_t count);
 
+    // Internal typed-input training. PCA retains the original dense conversion fallback.
+    bool
+    TrainHalf(const void* data, uint64_t count, DataTypes data_type);
+
+    bool
+    ReTrainHalf(const void* data, uint64_t count, DataTypes data_type);
+
     void
     SetCentroid(const float* centroid);
 
@@ -115,6 +122,11 @@ public:
 
     float
     ComputeQueryBaseImpl(const uint8_t* query_codes, const uint8_t* base_codes) const;
+
+    float
+    RecoverQueryBaseDistance(const uint8_t* query_codes,
+                             const uint8_t* base_codes,
+                             float ip_bq_estimate) const;
 
     void
     ProcessQueryImpl(const float* query, Computer<RaBitQuantizer>& computer) const;
@@ -281,6 +293,17 @@ public:
     ComputeDistImpl(Computer<RaBitQuantizer>& computer, const uint8_t* codes, float* dists) const;
 
     void
+    ComputeDistsBatch4Impl(Computer<RaBitQuantizer>& computer,
+                           const uint8_t* codes1,
+                           const uint8_t* codes2,
+                           const uint8_t* codes3,
+                           const uint8_t* codes4,
+                           float& dist1,
+                           float& dist2,
+                           float& dist3,
+                           float& dist4) const;
+
+    void
     ScanBatchDistImpl(Computer<RaBitQuantizer<metric>>& computer,
                       uint64_t count,
                       const uint8_t* codes,
@@ -375,6 +398,12 @@ public:
 
     [[nodiscard]] uint64_t
     GetScalarCodeSize() const;
+
+    // Decode a persisted code into the same scalar representation used during Build.
+    uint64_t
+    UnpackScalarCode(const uint8_t* codes, uint8_t* scalar_code) const {
+        return this->unpack_scalar_code(codes, scalar_code);
+    }
 
     bool
     EncodeOneToScalarCode(const float* data, uint8_t* scalar_code, uint64_t& code_sum) const;
@@ -639,6 +668,9 @@ public:
     AlignCodeField(uint64_t size) const;
 
 private:
+    bool
+    finish_training(const float* rotation_input, uint64_t count);
+
     struct FastScan32Layout {
         uint64_t packed_size{0};
         uint64_t metadata_record_offset{0};
