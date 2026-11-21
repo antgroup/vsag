@@ -190,3 +190,4 @@ and the `json`, `table`, `text` and `line_protocol` formats with `stdout`, `file
 - Source: `tools/eval/`
 - Local tool entry point: `tools/eval/README.md`
 - Reference numbers on standard hardware: [Reference Performance](performance.md).
+- Runnable Python examples: `examples/python/333_feature_eval_api.py` (API) and `examples/python/334_feature_eval_job.py` (HDF5 + YAML job + CLI).

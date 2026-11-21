@@ -180,3 +180,4 @@ pyvsag-eval job.yaml
 - 源码：`tools/eval/`
 - 本地工具入口：`tools/eval/README.md`
 - 标准机型的基准结果见 [标准环境性能参考](performance.md)。
+- 可直接运行的 Python 示例：`examples/python/333_feature_eval_api.py`（API）与 `examples/python/334_feature_eval_job.py`（HDF5 + YAML 任务 + CLI）。
