@@ -244,6 +244,6 @@ typed `TuneIndex` 和 `TuneSearch` 绝不会写报告文件，而是通过返回
 
 ## V1 边界
 
-V1 评测一个 KNN workload；除已支持的 HGraph `ef_search` 自适应搜索外，其他候选仍完整遍历。
-它暂不支持过滤或范围查询 workload、query sampling、跨请求 build cache，以及基于模型的
-候选生成。
+V1 评测一个 KNN workload；除已支持的 HGraph `ef_search` 自适应搜索外，其他候选仍按完整
+空间规划。已知违反索引内存约束的候选会跳过 search。它暂不支持过滤或范围查询 workload、query
+sampling、跨请求 build cache，以及基于模型的候选生成。
