@@ -23,6 +23,7 @@
 #include "inner_string_params.h"
 #include "utils/param_compat_macros.h"
 #include "vsag/constants.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -68,12 +69,24 @@ IVFPartitionStrategyParameters::IVFPartitionStrategyParameters() = default;
 
 void
 IVFPartitionStrategyParameters::FromJson(const JsonType& json) {
-    if (json[IVF_TRAIN_TYPE_KEY].GetString() == IVF_TRAIN_TYPE_KMEANS) {
+    const auto train_type = json[IVF_TRAIN_TYPE_KEY].GetString();
+    if (train_type == IVF_TRAIN_TYPE_KMEANS) {
         this->partition_train_type = IVFNearestPartitionTrainerType::KMeansTrainer;
-    } else if (json[IVF_TRAIN_TYPE_KEY].GetString() == IVF_TRAIN_TYPE_RANDOM) {
+    } else if (train_type == IVF_TRAIN_TYPE_RANDOM) {
         this->partition_train_type = IVFNearestPartitionTrainerType::RandomTrainer;
-    } else if (json[IVF_TRAIN_TYPE_KEY].GetString() == IVF_TRAIN_TYPE_E_MEANS) {
+    } else if (train_type == IVF_TRAIN_TYPE_E_MEANS) {
         this->partition_train_type = IVFNearestPartitionTrainerType::EMeansTrainer;
+    } else if (train_type == IVF_TRAIN_TYPE_BALANCED_KMEANS) {
+        this->partition_train_type = IVFNearestPartitionTrainerType::BalancedKMeansTrainer;
+    } else {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("unknown {} '{}': expected '{}', '{}', '{}' or '{}'",
+                                        IVF_TRAIN_TYPE_KEY,
+                                        train_type,
+                                        IVF_TRAIN_TYPE_KMEANS,
+                                        IVF_TRAIN_TYPE_RANDOM,
+                                        IVF_TRAIN_TYPE_E_MEANS,
+                                        IVF_TRAIN_TYPE_BALANCED_KMEANS));
     }
 
     if (json[IVF_PARTITION_STRATEGY_TYPE_KEY].GetString() == IVF_PARTITION_STRATEGY_TYPE_NEAREST) {
@@ -134,6 +147,18 @@ IVFPartitionStrategyParameters::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(not e_means_with_gno_imi,
                    "ivf_train_type e_means is only supported with partition_strategy_type ivf");
 
+    // GNO-IMI trains its two levels with plain k-means whatever the trainer says; for
+    // "random" that has always been tolerated, but a balanced request cannot be met.
+    if (this->partition_strategy_type == IVFPartitionStrategyType::GNO_IMI and
+        this->partition_train_type == IVFNearestPartitionTrainerType::BalancedKMeansTrainer) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("{} '{}' requires {} '{}'",
+                                        IVF_TRAIN_TYPE_KEY,
+                                        IVF_TRAIN_TYPE_BALANCED_KMEANS,
+                                        IVF_PARTITION_STRATEGY_TYPE_KEY,
+                                        IVF_PARTITION_STRATEGY_TYPE_NEAREST));
+    }
+
     this->gnoimi_param = std::make_shared<GNOIMIParameter>();
     if (this->partition_strategy_type == IVFPartitionStrategyType::GNO_IMI) {
         CHECK_ARGUMENT(
@@ -154,6 +179,9 @@ IVFPartitionStrategyParameters::ToJson() const {
         json[IVF_TRAIN_TYPE_KEY].SetString(IVF_TRAIN_TYPE_RANDOM);
     } else if (this->partition_train_type == IVFNearestPartitionTrainerType::EMeansTrainer) {
         json[IVF_TRAIN_TYPE_KEY].SetString(IVF_TRAIN_TYPE_E_MEANS);
+    } else if (this->partition_train_type ==
+               IVFNearestPartitionTrainerType::BalancedKMeansTrainer) {
+        json[IVF_TRAIN_TYPE_KEY].SetString(IVF_TRAIN_TYPE_BALANCED_KMEANS);
     }
 
     if (this->partition_strategy_type == IVFPartitionStrategyType::IVF) {
@@ -205,6 +233,8 @@ IVFPartitionStrategyParameters::CheckCompatibility(const ParamPtr& other) const 
     CHECK_FIELD_EQ(*this, *p, e_means_epochs);
     // use_route_graph selects the layout only when a new index is trained. Serialized partitions
     // are self-describing and must remain loadable by readers created with either setting.
+    // partition_train_type is not compared either: kmeans, random, e_means and balanced_kmeans
+    // decide only how the centroids and the first buckets were computed, and store the same layout.
     CHECK_SUB_PARAM(*this, *p, gnoimi_param);
     return true;
 }
