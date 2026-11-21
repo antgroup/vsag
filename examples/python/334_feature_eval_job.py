@@ -76,7 +76,8 @@ def write_job(path, datapath, result_path, index_path):
             "search_params": search_params,
             "topk": TOP_K,
         },
-        # Build and save the index; a second case can then search it from index_path.
+        # Cases run in the order written, so a search case must come after the build case
+        # that saves its index_path.
         "hgraph_build": {
             "datapath": datapath,
             "type": "build",
@@ -95,7 +96,7 @@ def write_job(path, datapath, result_path, index_path):
         },
     }
     with open(path, "w", encoding="utf-8") as file:
-        yaml.safe_dump(job, file)
+        yaml.safe_dump(job, file, sort_keys=False)
 
 
 def main():
