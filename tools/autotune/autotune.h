@@ -76,9 +76,11 @@ struct Config {
 struct IndexSpace {
     /// Concrete index type, currently hgraph or ivf.
     std::string name;
-    /// JSON object whose scalar, array, and range leaves define build candidates.
+    /// JSON object with concrete values, explicit $choices, or $range build expressions. Bare
+    /// arrays are concrete values.
     std::string create_parameter_space{"{}"};
-    /// JSON object whose scalar, array, and range leaves define search candidates.
+    /// JSON object with concrete values, explicit $choices, or $range search expressions. Bare
+    /// arrays are concrete values.
     std::string search_parameter_space{"{}"};
 };
 
@@ -100,7 +102,8 @@ struct SearchRequest {
     /// Existing index reused in place; TuneSearch neither rebuilds nor takes exclusive ownership.
     IndexPtr index;
     Workload workload;
-    /// JSON search candidate space; missing supported fields receive built-in proposals.
+    /// JSON search space with explicit $choices or $range candidate expressions; missing supported
+    /// fields receive built-in proposals.
     std::string parameter_space{"{}"};
     std::vector<Constraint> constraints;
     Metric objective{Metric::UNSPECIFIED};

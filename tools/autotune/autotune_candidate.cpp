@@ -27,6 +27,11 @@ namespace {
 
 using Emit = std::function<void(const JsonType&)>;
 
+JsonType
+candidate_choices(JsonType values) {
+    return {{"$choices", std::move(values)}};
+}
+
 int64_t
 range_integer(const JsonType& value) {
     if (value.is_number_unsigned()) {
@@ -149,22 +154,36 @@ expand_range(const JsonType& range, const Emit& emit) {
 }
 
 void
+expand_choices(const JsonType& choices, const Emit& emit) {
+    if (!choices.is_array()) {
+        throw std::invalid_argument("$choices must be an array");
+    }
+    if (choices.empty()) {
+        throw std::invalid_argument("$choices must not be empty");
+    }
+
+    std::set<std::string> seen;
+    for (const auto& choice : choices) {
+        if (seen.emplace(choice.dump()).second) {
+            emit(choice);
+        }
+    }
+}
+
+void
 expand(const JsonType& value, const Emit& emit) {
     if (value.is_array()) {
-        if (value.empty()) {
-            throw std::invalid_argument("candidate array must not be empty");
-        }
-        std::set<std::string> seen;
-        for (const auto& item : value) {
-            expand(item, [&](const JsonType& expanded) {
-                if (seen.emplace(expanded.dump()).second) {
-                    emit(expanded);
-                }
-            });
-        }
+        emit(value);
         return;
     }
     if (value.is_object()) {
+        if (value.contains("$choices")) {
+            if (value.size() != 1) {
+                throw std::invalid_argument("$choices cannot be mixed with other keys");
+            }
+            expand_choices(value["$choices"], emit);
+            return;
+        }
         if (value.contains("$range")) {
             if (value.size() != 1) {
                 throw std::invalid_argument("$range cannot be mixed with other keys");
@@ -188,13 +207,14 @@ fill_hgraph_create(JsonType& create_params) {
         throw std::invalid_argument("hgraph create_params.index_param must be an object");
     }
     if (!params.contains("base_quantization_type")) {
-        params["base_quantization_type"] = JsonType::array({"fp32", "sq8_uniform"});
+        params["base_quantization_type"] =
+            candidate_choices(JsonType::array({"fp32", "sq8_uniform"}));
     }
     if (!params.contains("max_degree")) {
-        params["max_degree"] = JsonType::array({16, 32});
+        params["max_degree"] = candidate_choices(JsonType::array({16, 32}));
     }
     if (!params.contains("ef_construction")) {
-        params["ef_construction"] = JsonType::array({100, 200});
+        params["ef_construction"] = candidate_choices(JsonType::array({100, 200}));
     }
 }
 
@@ -208,13 +228,14 @@ fill_ivf_create(JsonType& create_params, uint64_t base_count) {
         throw std::invalid_argument("ivf create_params.index_param must be an object");
     }
     if (!params.contains("base_quantization_type")) {
-        params["base_quantization_type"] = JsonType::array({"fp32", "sq8_uniform"});
+        params["base_quantization_type"] =
+            candidate_choices(JsonType::array({"fp32", "sq8_uniform"}));
     }
     if (!params.contains("buckets_count")) {
         const auto first = std::min<uint64_t>(1024, base_count);
         const auto second = std::min<uint64_t>(2048, base_count);
         params["buckets_count"] =
-            first == second ? JsonType(first) : JsonType::array({first, second});
+            first == second ? JsonType(first) : candidate_choices(JsonType::array({first, second}));
     }
 }
 
@@ -231,7 +252,7 @@ fill_hgraph_search(JsonType& search_params, uint64_t top_k) {
         std::set<uint64_t> values{std::max<uint64_t>(40, top_k),
                                   std::max<uint64_t>(80, top_k * 2),
                                   std::max<uint64_t>(120, top_k * 4)};
-        params["ef_search"] = values;
+        params["ef_search"] = candidate_choices(values);
     }
 }
 
@@ -248,7 +269,7 @@ fill_pyramid_search(JsonType& search_params, uint64_t top_k) {
         std::set<uint64_t> values{std::max<uint64_t>(40, top_k),
                                   std::max<uint64_t>(80, top_k * 2),
                                   std::max<uint64_t>(120, top_k * 4)};
-        params["ef_search"] = values;
+        params["ef_search"] = candidate_choices(values);
     }
 }
 
@@ -268,7 +289,7 @@ fill_ivf_search(JsonType& search_params, const JsonType& create_params) {
     std::set<uint64_t> values;
     if (!create_params.contains("index_param") ||
         !create_params["index_param"].contains("buckets_count")) {
-        params["scan_buckets_count"] = std::set<uint64_t>{1, 4, 16, 64};
+        params["scan_buckets_count"] = candidate_choices(std::set<uint64_t>{1, 4, 16, 64});
         return;
     }
 
@@ -282,7 +303,7 @@ fill_ivf_search(JsonType& search_params, const JsonType& create_params) {
                   std::min<uint64_t>(32, buckets),
                   std::min<uint64_t>(64, buckets)};
     }
-    params["scan_buckets_count"] = values;
+    params["scan_buckets_count"] = candidate_choices(values);
 }
 
 bool
