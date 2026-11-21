@@ -16,6 +16,7 @@
 from ._index import Index, _check
 from ._lib import lib as _lib
 from ._version import __version__
+from .index_analysis import ANALYZE_INDEX_SCHEMA_VERSION, IndexAnalysisError, analyze_index
 
 _LOG_LEVELS = {"off": _lib.VSAG_LOG_OFF, "info": _lib.VSAG_LOG_INFO, "debug": _lib.VSAG_LOG_DEBUG}
 
@@ -39,5 +40,14 @@ def set_logger_debug():
     _set_log_level("debug")
 
 
-__all__ = ["Index", "set_logger_off", "set_logger_info", "set_logger_debug", "__version__"]
+__all__ = [
+    "ANALYZE_INDEX_SCHEMA_VERSION",
+    "Index",
+    "IndexAnalysisError",
+    "analyze_index",
+    "set_logger_off",
+    "set_logger_info",
+    "set_logger_debug",
+    "__version__",
+]
 

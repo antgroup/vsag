@@ -129,6 +129,11 @@ depending on the state of your current environment, install it into a clean virt
 above before running pytest. To run against an in-tree build instead, see [pyvsag](../guide/pyvsag.md#build-from-source). `test_openmp_coexistence.py`
 needs `torch` and `scikit-learn` and is skipped when they are missing.
 
+`scripts/python/wheel_smoke_test.sh WHEELHOUSE [PYTHON]` checks `pyvsag.analyze_index()` and
+`pyvsag-analyze-index` from a built wheel in a fresh virtual environment that contains only the
+wheel and its dependencies, and in a `python:<version>-slim` container (no CMake or compiler) when
+Docker is available. `make pyvsag` and the wheel CI jobs run it.
+
 ## Report Testcase Budgets and Time
 
 `scripts/testing/test_budget_report.py` reads saved test listings, results and cost records

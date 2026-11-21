@@ -113,6 +113,10 @@ callback and are safe while other threads log.
 - **Persistence:** `vsag_index_serialize_file`, `vsag_index_deserialize_file`, and, for hosts that
   keep index bytes in their own storage, `vsag_index_serialize_writer` and
   `vsag_index_deserialize_reader`.
+- **Index file analysis:** `vsag_analyze_index` returns a `vsag_index_analysis_t` whose
+  `vsag_index_analysis_report` is the JSON report of
+  [analyze_index](../resources/analyze_index.md#analyzing-index-files); release it with
+  `vsag_index_analysis_destroy`.
 
 Support still depends on the selected index. An unsupported operation returns
 `VSAG_UNSUPPORTED_INDEX_OPERATION`. Check the returned error code for `VSAG_READ_ERROR`,
