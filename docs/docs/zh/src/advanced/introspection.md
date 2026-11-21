@@ -117,6 +117,7 @@ std::string dt = detail->GetDataScalarString();
 | `INDEX_DETAIL_NAME_NUM_ELEMENTS`    | `TYPE_SCALAR_INT64`     | 索引当前包含的向量数。                          |
 | `INDEX_DETAIL_NAME_LABEL_TABLE`     | `TYPE_2DArray_INT64`    | 逐向量的 label 表（如内部 id ↔ 用户 id 映射）。 |
 | `INDEX_DETAIL_DATA_TYPE`            | `TYPE_SCALAR_STRING`    | 底层向量数据类型（如 `"float32"`）。           |
+| `INDEX_DETAIL_NAME_DIM`             | `TYPE_SCALAR_INT64`     | 所存向量的维度（二进制索引按 bit 计）；`Deserialize` 会恢复保存时的维度。 |
 
 具体索引可能额外暴露其他名称；运行期通过 `GetIndexDetailInfos()` 遍历即可发现。可运行示例：
 `examples/cpp/317_feature_get_detail_data.cpp`。

@@ -165,6 +165,39 @@ namespace vsag {
 //
 // Usage:
 //     VSAG_DEFINE_SIMD_DISPATCH_PREFETCH(Prefetch, PrefetchFuncType);
+// Register a dispatch for population-count kernels. AVX-512 VPOPCNTDQ counts 64-bit lanes
+// directly and, like the AVX-512BW kernels, uses byte-masked loads for tails, so it is selected
+// only together with AVX-512 F/BW/DQ/VL. AVX2 counts bytes with a nibble lookup; the SSE unit is
+// built with
+// SSE4.2, which enables the scalar POPCNT instruction, so it is selected only when the CPU
+// reports POPCNT. AVX without AVX2 has no 256-bit integer instructions and is skipped.
+//
+// Usage:
+//     VSAG_DEFINE_SIMD_DISPATCH_POPCOUNT(HammingDistance, HammingDistanceType);
+#define VSAG_DEFINE_SIMD_DISPATCH_POPCOUNT(FnName, FnType)      \
+    static FnType Get##FnName() {                               \
+        if (SimdStatus::SupportAVX512()) {                      \
+            if (SimdStatus::SupportAVX512VPOPCNTDQ()) {         \
+                VSAG_SIMD_DISPATCH_BODY_AVX512VPOPCNTDQ(FnName) \
+            }                                                   \
+            VSAG_SIMD_DISPATCH_BODY_AVX512(FnName)              \
+        }                                                       \
+        if (SimdStatus::SupportAVX2()) {                        \
+            VSAG_SIMD_DISPATCH_BODY_AVX2(FnName)                \
+        }                                                       \
+        if (SimdStatus::SupportPOPCNT()) {                      \
+            VSAG_SIMD_DISPATCH_BODY_SSE(FnName)                 \
+        }                                                       \
+        if (SimdStatus::SupportSVE()) {                         \
+            VSAG_SIMD_DISPATCH_BODY_SVE(FnName)                 \
+        }                                                       \
+        if (SimdStatus::SupportNEON()) {                        \
+            VSAG_SIMD_DISPATCH_BODY_NEON(FnName)                \
+        }                                                       \
+        return generic::FnName;                                 \
+    }                                                           \
+    FnType FnName = Get##FnName()
+
 #define VSAG_DEFINE_SIMD_DISPATCH_PREFETCH(FnName, FnType) \
     static FnType Get##FnName() {                          \
         if (SimdStatus::SupportSSE()) {                    \

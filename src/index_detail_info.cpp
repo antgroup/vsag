@@ -20,5 +20,6 @@ namespace vsag {
 const char* INDEX_DETAIL_NAME_NUM_ELEMENTS = "num_elements";
 const char* INDEX_DETAIL_NAME_LABEL_TABLE = "label_table";
 const char* INDEX_DETAIL_DATA_TYPE = "data_type";
+const char* INDEX_DETAIL_NAME_DIM = "dim";
 
 }  // namespace vsag

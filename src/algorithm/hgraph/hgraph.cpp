@@ -1031,15 +1031,18 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
     void* new_base_vec = nullptr;
     uint64_t data_size = 0;
     get_vectors(data_type_, dim_, new_base, &new_base_vec, &data_size);
+    // Every path below reads data_size bytes from new_base_vec.
+    CHECK_ARGUMENT(new_base->GetDim() == dim_,
+                   "updated vector dimension must match the index dimension");
+    CHECK_ARGUMENT(new_base_vec != nullptr, "updated vector must not be null");
     if (this->rabitq_fused_datacell_ != nullptr) {
-        CHECK_ARGUMENT(new_base->GetDim() == dim_,
-                       "updated vector dimension must match the index dimension");
-        CHECK_ARGUMENT(new_base_vec != nullptr, "updated vector must not be null");
         this->validate_fused_vector_data(static_cast<const float*>(new_base_vec), 1);
     }
     if (not force_update) {
         std::shared_lock label_lock(this->label_lookup_mutex_);
 
+        // The vectors are in the index dtype, so distances go through the native path, which
+        // also serves the non-float32 dtypes.
         float self_dist = 0.0F;
         if (this->rabitq_fused_datacell_ == nullptr) {
             // 1. check whether vectors are same
@@ -1110,6 +1113,11 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
     }
     if (has_precise_reorder()) {
         update_status = update_status && high_precise_codes_->UpdateVector(new_base_vec, inner_id);
+    }
+    if (this->create_new_raw_vector_ and this->raw_vector_ != nullptr) {
+        // A raw datacell of its own (store_raw_vector without FP32 codes to alias) serves
+        // GetRawVectorByIds and the precise distances, so it must take the new vector as well.
+        update_status = update_status && raw_vector_->UpdateVector(new_base_vec, inner_id);
     }
     return update_status;
 }

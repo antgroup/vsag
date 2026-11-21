@@ -527,10 +527,10 @@ InnerIndexInterface::CalcDistancesById(const DatasetPtr& query,
     CHECK_ARGUMENT(not distance_count_overflows,
                    "CalcDistancesById distance buffer size overflows");
     const bool is_sparse = (query->GetSparseVectors() != nullptr);
-    const bool is_float_query = query->GetFloat32Vectors() != nullptr && !is_sparse &&
-                                query->GetMultiVectors() == nullptr &&
-                                query->GetInt8Vectors() == nullptr &&
-                                query->GetFloat16Vectors() == nullptr;
+    const bool is_float_query =
+        query->GetFloat32Vectors() != nullptr && !is_sparse &&
+        query->GetMultiVectors() == nullptr && query->GetInt8Vectors() == nullptr &&
+        query->GetFloat16Vectors() == nullptr && query->GetBinaryVectors() == nullptr;
     if (is_float_query) {
         CHECK_ARGUMENT(query->GetDim() == dim_, "CalcDistancesById query dimension mismatch");
     }
@@ -614,6 +614,11 @@ InnerIndexInterface::CalcDistancesById(const DatasetPtr& query,
             }
             if (query->GetFloat16Vectors() != nullptr) {
                 sub->Float16Vectors(query->GetFloat16Vectors() + q * query->GetDim());
+            }
+            if (query->GetBinaryVectors() != nullptr) {
+                sub->BinaryVectors(query->GetBinaryVectors() +
+                                   static_cast<uint64_t>(q) *
+                                       BinaryVectorBytes(static_cast<uint64_t>(query->GetDim())));
             }
             if (query->GetMultiVectors() != nullptr) {
                 sub->MultiVectors(query->GetMultiVectors() + q)
@@ -822,6 +827,27 @@ InnerIndexInterface::GetVectorByIds(const int64_t* ids,
         return vectors;
     }
 
+    if (data_type_ == DataTypes::DATA_TYPE_BINARY) {
+        const uint64_t row_bytes = BinaryVectorBytes(static_cast<uint64_t>(dim_));
+        auto* binary_vectors =
+            static_cast<uint8_t*>(allocator->Allocate(row_bytes * static_cast<uint64_t>(count)));
+        if (binary_vectors == nullptr) {
+            throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                                "failed to allocate memory for vectors");
+        }
+        vectors->NumElements(count)
+            ->Dim(dim_)
+            ->BinaryVectors(binary_vectors)
+            ->Owner(/*auto release=*/not has_specified_allocator, allocator);
+        for (int i = 0; i < count; ++i) {
+            InnerIdType inner_id = this->label_table_->GetIdByLabel(ids[i]);
+            // The binary quantizer decodes into the raw packed bytes of the row.
+            this->GetVectorByInnerId(inner_id,
+                                     reinterpret_cast<float*>(binary_vectors + i * row_bytes));
+        }
+        return vectors;
+    }
+
     auto* float_vectors = static_cast<float*>(allocator->Allocate(sizeof(float) * count * dim_));
     if (float_vectors == nullptr) {
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate memory for vectors");
@@ -1010,6 +1036,9 @@ InnerIndexInterface::GetIndexDetailInfos() const {
     infos.emplace_back(INDEX_DETAIL_DATA_TYPE,
                        "Data type of current index (e.g., float32, int8, sparse...)",
                        IndexDetailDataType::TYPE_SCALAR_STRING);
+    infos.emplace_back(INDEX_DETAIL_NAME_DIM,
+                       "Dimension of the vectors in current index (bits for binary indexes)",
+                       IndexDetailDataType::TYPE_SCALAR_INT64);
     return infos;
 }
 
@@ -1156,6 +1185,8 @@ InnerIndexInterface::get_detail_data_by_info(const IndexDetailInfo& info) const 
         data->SetData2DArrayInt64(label_tables);
     } else if (name == INDEX_DETAIL_DATA_TYPE) {
         data->SetDataScalarString(ToString(data_type_));
+    } else if (name == INDEX_DETAIL_NAME_DIM) {
+        data->SetDataScalarInt64(dim_);
     }
     return data;
 }
@@ -1372,6 +1403,12 @@ InnerIndexInterface::validate_search_query(const DatasetPtr& query) const {
             fmt::format("query.dim({}) must be equal to index.dim({})", query_dim, dim_));
     }
     CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
+    if (data_type_ == DataTypes::DATA_TYPE_BINARY) {
+        // Search computers read ceil(dim / 8) bytes from the binary field, so a query that only
+        // carries another representation must be rejected here.
+        CHECK_ARGUMENT(query->GetBinaryVectors() != nullptr,
+                       "binary index requires a query with binary vectors");
+    }
 }
 
 void
@@ -1414,6 +1451,13 @@ InnerIndexInterface::get_data(const DatasetPtr& dataset, int64_t index) const {
     if (data_type_ == DataTypes::DATA_TYPE_SPARSE) {
         const auto* ptr = dataset->GetSparseVectors();
         return ptr != nullptr ? ptr + index : nullptr;
+    }
+    if (data_type_ == DataTypes::DATA_TYPE_BINARY) {
+        // dim counts bits, so binary rows are ceil(dim / 8) bytes apart.
+        const auto* ptr = dataset->GetBinaryVectors();
+        return ptr != nullptr ? ptr + static_cast<uint64_t>(index) *
+                                          BinaryVectorBytes(static_cast<uint64_t>(dim_))
+                              : nullptr;
     }
     throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid data_type in get_data");
 }

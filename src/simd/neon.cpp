@@ -21,11 +21,13 @@
 #include "simd/traits/simd_traits_neon.h"
 #endif
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 
 #include "kernels/local_sq_compute.h"
 #include "simd.h"
+#include "simd/kernels/hamming_compute.h"
 #include "sq4_local_simd.h"
 #include "sq8_local_simd.h"
 
@@ -1353,6 +1355,101 @@ SQ4LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
         nullptr, a, b, dim);
 #else
     return generic::SQ4LocalComputeCodesIP(a, b, dim);
+#endif
+}
+
+#if defined(ENABLE_NEON)
+namespace {
+struct HammingNeonTag {};
+
+// vcntq_u8 yields at most 8 per byte and vpadalq_u8 folds two bytes into each uint16 lane, so a
+// lane grows by at most 16 per 16-byte block; flushing every 2048 blocks keeps it below 65536.
+constexpr uint64_t K_HAMMING_NEON_BLOCK = 16;
+constexpr uint64_t K_HAMMING_NEON_BLOCKS_PER_FLUSH = 2048;
+
+inline uint16x8_t
+hamming_accumulate(uint16x8_t acc, uint8x16_t a, const uint8_t* b) {
+    return vpadalq_u8(acc, vcntq_u8(veorq_u8(a, vld1q_u8(b))));
+}
+}  // namespace
+#endif
+
+uint64_t
+HammingDistance(const uint8_t* x, const uint8_t* y, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    const uint64_t full_bytes = simd::HammingFullBytes(dim);
+    uint64x2_t total = vdupq_n_u64(0);
+    uint64_t i = 0;
+    while (i + K_HAMMING_NEON_BLOCK <= full_bytes) {
+        const uint64_t blocks =
+            std::min((full_bytes - i) / K_HAMMING_NEON_BLOCK, K_HAMMING_NEON_BLOCKS_PER_FLUSH);
+        const uint64_t end = i + blocks * K_HAMMING_NEON_BLOCK;
+        uint16x8_t acc = vdupq_n_u16(0);
+        for (; i < end; i += K_HAMMING_NEON_BLOCK) {
+            acc = hamming_accumulate(acc, vld1q_u8(x + i), y + i);
+        }
+        total = vpadalq_u32(total, vpaddlq_u16(acc));
+    }
+    return vaddvq_u64(total) + simd::HammingScalarRange<HammingNeonTag>(x, y, i, dim);
+#else
+    return generic::HammingDistance(x, y, dim);
+#endif
+}
+
+void
+HammingDistanceBatch4(const uint8_t* query,
+                      const uint8_t* codes1,
+                      const uint8_t* codes2,
+                      const uint8_t* codes3,
+                      const uint8_t* codes4,
+                      uint64_t dim,
+                      uint64_t* results) {
+#if defined(ENABLE_NEON)
+    const uint64_t full_bytes = simd::HammingFullBytes(dim);
+    uint64x2_t total1 = vdupq_n_u64(0);
+    uint64x2_t total2 = vdupq_n_u64(0);
+    uint64x2_t total3 = vdupq_n_u64(0);
+    uint64x2_t total4 = vdupq_n_u64(0);
+    uint64_t i = 0;
+    while (i + K_HAMMING_NEON_BLOCK <= full_bytes) {
+        const uint64_t blocks =
+            std::min((full_bytes - i) / K_HAMMING_NEON_BLOCK, K_HAMMING_NEON_BLOCKS_PER_FLUSH);
+        const uint64_t end = i + blocks * K_HAMMING_NEON_BLOCK;
+        uint16x8_t acc1 = vdupq_n_u16(0);
+        uint16x8_t acc2 = vdupq_n_u16(0);
+        uint16x8_t acc3 = vdupq_n_u16(0);
+        uint16x8_t acc4 = vdupq_n_u16(0);
+        for (; i < end; i += K_HAMMING_NEON_BLOCK) {
+            const uint8x16_t q = vld1q_u8(query + i);
+            acc1 = hamming_accumulate(acc1, q, codes1 + i);
+            acc2 = hamming_accumulate(acc2, q, codes2 + i);
+            acc3 = hamming_accumulate(acc3, q, codes3 + i);
+            acc4 = hamming_accumulate(acc4, q, codes4 + i);
+        }
+        total1 = vpadalq_u32(total1, vpaddlq_u16(acc1));
+        total2 = vpadalq_u32(total2, vpaddlq_u16(acc2));
+        total3 = vpadalq_u32(total3, vpaddlq_u16(acc3));
+        total4 = vpadalq_u32(total4, vpaddlq_u16(acc4));
+    }
+    results[0] = vaddvq_u64(total1);
+    results[1] = vaddvq_u64(total2);
+    results[2] = vaddvq_u64(total3);
+    results[3] = vaddvq_u64(total4);
+    simd::HammingScalarRangeBatch4<HammingNeonTag>(
+        query, codes1, codes2, codes3, codes4, i, dim, results);
+#else
+    generic::HammingDistanceBatch4(query, codes1, codes2, codes3, codes4, dim, results);
+#endif
+}
+
+void
+HammingDistanceScan(
+    const uint8_t* query, const uint8_t* codes, uint64_t dim, uint64_t count, float* dists) {
+#if defined(ENABLE_NEON)
+    simd::HammingScanByBatch4<HammingNeonTag>(
+        query, codes, dim, count, dists, HammingDistanceBatch4, HammingDistance);
+#else
+    generic::HammingDistanceScan(query, codes, dim, count, dists);
 #endif
 }
 }  // namespace vsag::neon

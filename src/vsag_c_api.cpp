@@ -51,6 +51,7 @@ struct vsag_dataset {
     const float* float32_vectors{nullptr};
     const uint16_t* float16_vectors{nullptr};
     const int8_t* int8_vectors{nullptr};
+    const uint8_t* binary_vectors{nullptr};
     const uint32_t* index_pointers{nullptr};
     const uint32_t* indices{nullptr};
     const float* values{nullptr};
@@ -169,7 +170,8 @@ make_view(const vsag_dataset_t* handle, bool single_query) {
     }
     const bool is_sparse = handle->index_pointers != nullptr;
     const bool is_dense = handle->float32_vectors != nullptr or
-                          handle->float16_vectors != nullptr or handle->int8_vectors != nullptr;
+                          handle->float16_vectors != nullptr or handle->int8_vectors != nullptr or
+                          handle->binary_vectors != nullptr;
     if (not is_sparse and not is_dense) {
         throw std::invalid_argument("dataset has no vectors");
     }
@@ -194,6 +196,9 @@ make_view(const vsag_dataset_t* handle, bool single_query) {
     }
     if (handle->int8_vectors != nullptr) {
         view.dataset->Int8Vectors(handle->int8_vectors);
+    }
+    if (handle->binary_vectors != nullptr) {
+        view.dataset->BinaryVectors(handle->binary_vectors);
     }
     if (is_sparse) {
         const auto* pointers = handle->index_pointers;
@@ -709,6 +714,13 @@ vsag_error_t*
 vsag_dataset_set_int8_vectors(vsag_dataset_t* dataset, const int8_t* vectors) {
     VSAG_REQUIRE(dataset != nullptr, "dataset is NULL");
     dataset->int8_vectors = vectors;
+    return nullptr;
+}
+
+vsag_error_t*
+vsag_dataset_set_binary_vectors(vsag_dataset_t* dataset, const uint8_t* vectors) {
+    VSAG_REQUIRE(dataset != nullptr, "dataset is NULL");
+    dataset->binary_vectors = vectors;
     return nullptr;
 }
 
@@ -1260,6 +1272,21 @@ vsag_index_get_num_elements(const vsag_index_t* index, int64_t* out_num_elements
         VSAG_REQUIRE(index != nullptr, "index is NULL");
         VSAG_REQUIRE(out_num_elements != nullptr, "out_num_elements is NULL");
         *out_num_elements = index->index->GetNumElements();
+        return nullptr;
+    });
+}
+
+vsag_error_t*
+vsag_index_get_dim(const vsag_index_t* index, int64_t* out_dim) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        VSAG_REQUIRE(out_dim != nullptr, "out_dim is NULL");
+        vsag::IndexDetailInfo info;
+        auto detail = index->index->GetDetailDataByName(vsag::INDEX_DETAIL_NAME_DIM, info);
+        if (not detail.has_value()) {
+            return make_error(detail.error());
+        }
+        *out_dim = detail.value()->GetDataScalarInt64();
         return nullptr;
     });
 }

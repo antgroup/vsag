@@ -155,6 +155,13 @@ vsag_error_t*
 vsag_dataset_set_int8_vectors(vsag_dataset_t* dataset, const int8_t* vectors);
 
 /**
+ * Bit-packed binary vectors, for indexes created with dtype binary: dim counts bits, each vector
+ * takes ceil(dim / 8) bytes, and bit i is (vector[i / 8] >> (7 - i % 8)) & 1 (numpy.packbits).
+ */
+vsag_error_t*
+vsag_dataset_set_binary_vectors(vsag_dataset_t* dataset, const uint8_t* vectors);
+
+/**
  * Sparse vectors in CSR form: row i owns indices[index_pointers[i] .. index_pointers[i + 1])
  * and the matching values. `index_pointers` holds num_elements + 1 entries and starts at 0.
  */
@@ -436,6 +443,13 @@ vsag_index_deserialize_reader(vsag_index_t* index,
 
 vsag_error_t*
 vsag_index_get_num_elements(const vsag_index_t* index, int64_t* out_num_elements);
+
+/**
+ * The dimension of the stored vectors, in bits for binary indexes. Deserialization restores the
+ * dimension that was saved, which may differ from the one the index was created with.
+ */
+vsag_error_t*
+vsag_index_get_dim(const vsag_index_t* index, int64_t* out_dim);
 
 vsag_error_t*
 vsag_index_get_memory_usage(const vsag_index_t* index, int64_t* out_memory_usage);

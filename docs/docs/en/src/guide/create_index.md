@@ -20,8 +20,8 @@ index-specific options.
 | Field | Values | Notes |
 |-------|--------|-------|
 | `dim` | positive integer | Fixed after build |
-| `dtype` | `float32` / `fp16` / `bf16` / `int8` | Public API currently uses `float32` |
-| `metric_type` | `l2` / `ip` / `cosine` | Must match at query time |
+| `dtype` | `float32` / `fp16` / `bf16` / `int8` / `binary` | Public API currently uses `float32`; `binary` holds bit-packed vectors (see [Binary Vectors](binary_vectors.md)) |
+| `metric_type` | `l2` / `ip` / `cosine` / `hamming` | Must match at query time; `hamming` requires `dtype: binary` and vice versa |
 
 ## Examples
 
