@@ -162,7 +162,7 @@ wget http://ann-benchmarks.com/fashion-mnist-784-euclidean.hdf5 -O /tmp/data/fas
 | `cross_split.standardized_mean_shift` | 全量 | 每个维度的 \|mean_test - mean_train\| / std_train（稠密）；在 train 中恒定的维度，若 test 均值相同则记为 0，否则计入 `shifted_constant_dimensions` |
 | `cross_split.out_of_distribution_ratio` | 样本 | 到 train 最近距离超过 train 行自身最近邻距离第 95 百分位的采样查询比例 |
 | `cross_split.query_term_coverage`、`postings_per_query`、`nonzeros_ks_statistic` | 样本 / 全量 | 仅稀疏数据：查询词项在 train 中出现的比例、穷举倒排扫描需要访问的条目数、条目数分布的 KS 统计量 |
-| `ground_truth` | 样本 | 采样查询的 `/neighbors`、`/distances` 与重新计算的精确近邻对比：id 召回率、距离召回率（重新计算距离后落在精确第 k 近邻距离之内的不重复存储 id 比例，因此容忍并列）、重复的存储 id、非有限的存储距离、有限存储距离与存储 id 重新计算的距离之间最匹配的距离约定（`euclidean` 为 `sqrt(L2Sqr)` 还是平方；`ip`/`angular` 为 `1 - 相似度` 还是相似度本身）、越界 id、未排序的行。同时存在两个标签数组时，每个查询还会只在与其标签相同的行中检索（即 `eval_performance` 的 `knn_filter` 模式）：`search_scope` 给出存储的近邻与哪种检索相符，`scope_distance_recall` 给出两种检索的距离召回率，上述召回率取相符的那种 |
+| `ground_truth` | 样本 | 采样查询的 `/neighbors`、`/distances` 与重新计算的精确近邻对比：id 召回率、距离召回率（重新计算距离后落在精确第 k 近邻距离之内的不重复存储 id 比例，因此容忍并列）、重复的存储 id、非有限的存储距离、有限存储距离与存储 id 重新计算的距离之间最匹配的距离约定（`euclidean` 为 `sqrt(L2Sqr)` 还是平方；`ip`/`angular` 为 `1 - 相似度` 还是相似度本身）、越界 id、未排序的行。同时存在两个标签数组时，每个查询还会只在与其标签相同的行中检索（即 `eval_performance` 的 `knn_filter` 模式）：`search_scope` 给出存储的近邻更符合哪种检索，`scope_distance_recall` 在相同的查询（`label_filtered_queries`，即底库中有同标签行的查询）和相同的存储条目（前 min(k, 同标签行数) 个）上给出两种检索的距离召回率，上述召回率取更相符的那种，相同时取不过滤的检索 |
 | `labels` | 全量 | 标签数量、最大标签占比、归一化熵、每个查询的过滤选择率、标签在底库中不存在的查询数、`valid_ratios` 摘要 |
 
 ### 基于规则的观察结论

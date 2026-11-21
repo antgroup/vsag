@@ -98,6 +98,9 @@ private:
     Int64RangeReader reader_;
     std::vector<int64_t> labels_;
     std::vector<TopK> heaps_;
+    /// A slot per distinct query label, and the slot of each filter query, set once.
+    std::unordered_map<int64_t, uint64_t> slot_of_label_;
+    std::vector<uint64_t> query_slot_;
 };
 
 JsonType

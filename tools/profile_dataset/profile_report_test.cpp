@@ -748,6 +748,91 @@ TEST_CASE("Sparse label-filtered ground truth is recognized", "[profile][report]
     CHECK_FALSE(has_signal(report, "ground_truth.mismatch"));
 }
 
+TEST_CASE("Both ground-truth searches are scored on the same queries and entries",
+          "[profile][report]") {
+    // 20 tight pairs of base rows, one label per pair (fewer rows than k per label). Queries 0-19
+    // sit next to pair q; queries 20-29 carry a label that no base row has.
+    TempDir dir;
+    const uint64_t pairs = 20;
+    const uint64_t rows = 2 * pairs;
+    const uint64_t queries = 30;
+    const uint64_t dim = 4;
+    const uint64_t k = 10;
+    DeterministicRng rng(79);
+    std::vector<float> train(rows * dim, 0.0F);
+    std::vector<int64_t> train_labels(rows);
+    for (uint64_t i = 0; i < pairs; ++i) {
+        float* first = train.data() + 2 * i * dim;
+        for (uint64_t d = 0; d < dim; ++d) {
+            first[d] = static_cast<float>(rng.UniformDouble() * 0.1);
+        }
+        first[0] += static_cast<float>(10 * i);
+        float* second = first + dim;
+        std::copy_n(first, dim, second);
+        second[0] += 0.05F;
+        second[1] += 0.05F;
+        train_labels[2 * i] = static_cast<int64_t>(i);
+        train_labels[2 * i + 1] = static_cast<int64_t>(i);
+    }
+    std::vector<float> test(queries * dim, 0.0F);
+    std::vector<int64_t> test_labels(queries);
+    for (uint64_t q = 0; q < queries; ++q) {
+        if (q < pairs) {
+            std::copy_n(train.data() + 2 * q * dim, dim, test.data() + q * dim);
+            test[q * dim] += 0.02F;
+            test[q * dim + 1] += 0.01F;
+            test_labels[q] = static_cast<int64_t>(q);
+        } else {
+            test[q * dim] = static_cast<float>(rng.UniformDouble() * 190.0);
+            test[q * dim + 1] = static_cast<float>(rng.UniformDouble());
+            test_labels[q] = 999;
+        }
+    }
+    // Plain, unfiltered ground truth: exact for queries 0-19, the farthest rows for 20-29.
+    std::vector<int64_t> ids(queries * k);
+    std::vector<float> distances(queries * k);
+    for (uint64_t q = 0; q < queries; ++q) {
+        std::vector<std::pair<double, int64_t>> all;
+        for (uint64_t r = 0; r < rows; ++r) {
+            double sum = 0.0;
+            for (uint64_t d = 0; d < dim; ++d) {
+                const double diff = static_cast<double>(test[q * dim + d]) - train[r * dim + d];
+                sum += diff * diff;
+            }
+            all.emplace_back(sum, static_cast<int64_t>(r));
+        }
+        std::sort(all.begin(), all.end());
+        if (q >= pairs) {
+            std::reverse(all.begin(), all.end());
+        }
+        for (uint64_t j = 0; j < k; ++j) {
+            ids[q * k + j] = all[j].second;
+            distances[q * k + j] = static_cast<float>(std::sqrt(all[j].first));
+        }
+    }
+    const auto path = dir.File("plain_truth_rare_labels.hdf5");
+    {
+        H5::H5File file(path, H5F_ACC_TRUNC);
+        write_string_attribute(file, "distance", "euclidean");
+        write_matrix(file, "train", train, rows, dim, H5::PredType::NATIVE_FLOAT);
+        write_matrix(file, "test", test, queries, dim, H5::PredType::NATIVE_FLOAT);
+        write_matrix(file, "neighbors", ids, queries, k, H5::PredType::NATIVE_INT64);
+        write_matrix(file, "distances", distances, queries, k, H5::PredType::NATIVE_FLOAT);
+        write_vector(file, "train_labels", train_labels, H5::PredType::NATIVE_INT64);
+        write_vector(file, "test_labels", test_labels, H5::PredType::NATIVE_INT64);
+    }
+    const JsonType report = profile_dataset(small_options(path), nullptr);
+    // On the 20 queries whose label exists, the first two stored ids are the pair: both searches
+    // match there. A tie keeps the unfiltered search, whose recall over all queries shows the
+    // ten wrong rows; scoring the filtered search on fewer queries and entries used to hide them.
+    CHECK(at(report, "ground_truth.label_filtered_queries") == pairs);
+    CHECK(at(report, "ground_truth.scope_distance_recall.label_filtered") == 1.0);
+    CHECK(at(report, "ground_truth.scope_distance_recall.unfiltered") == 1.0);
+    CHECK(at(report, "ground_truth.search_scope") == "unfiltered");
+    CHECK(at(report, "ground_truth.distance_recall_at_k").get<double>() < 0.7);
+    CHECK(has_signal(report, "ground_truth.mismatch"));
+}
+
 TEST_CASE("Auxiliary arrays must match the split row counts for eval_performance",
           "[profile][report]") {
     TempDir dir;

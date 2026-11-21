@@ -174,6 +174,11 @@ LabelFilteredSearch::LabelFilteredSearch(const std::string& path, RowDistancePro
       heaps_(probe.filter_queries.size(), TopK(probe.filter_k)) {
     probe_.labels.assign(probe_.rows.size(), 0);
     probe_.labeled.assign(probe_.rows.size(), 0);
+    query_slot_.reserve(probe_.filter_labels.size());
+    for (const int64_t label : probe_.filter_labels) {
+        const uint64_t next = slot_of_label_.size();
+        query_slot_.push_back(slot_of_label_.emplace(label, next).first->second);
+    }
 }
 
 const std::vector<int64_t>&
@@ -186,30 +191,26 @@ void
 LabelFilteredSearch::Scan(const uint8_t* valid,
                           uint64_t first_row,
                           const std::function<double(uint64_t, uint64_t)>& distance) {
-    // Rows of the chunk grouped by label, for the labels that some query needs.
-    std::unordered_map<int64_t, std::vector<uint64_t>> rows_by_label;
-    for (const int64_t label : probe_.filter_labels) {
-        rows_by_label.emplace(label, std::vector<uint64_t>());
-    }
+    // Valid rows of the chunk per label slot; rows whose label no query has are skipped.
+    std::vector<std::vector<uint64_t>> rows_by_slot(slot_of_label_.size());
     for (uint64_t r = 0; r < labels_.size(); ++r) {
         if (valid[r] != 0) {
-            const auto it = rows_by_label.find(labels_[r]);
-            if (it != rows_by_label.end()) {
-                it->second.push_back(r);
+            const auto it = slot_of_label_.find(labels_[r]);
+            if (it != slot_of_label_.end()) {
+                rows_by_slot[it->second].push_back(r);
             }
         }
     }
     const std::vector<uint64_t>& queries = probe_.filter_queries;
-    const std::vector<int64_t>& labels = probe_.filter_labels;
+    const std::vector<uint64_t>& slots = query_slot_;
     std::vector<TopK>& heaps = heaps_;
     const auto signed_queries = static_cast<int64_t>(queries.size());
     // clang-format off
 #pragma omp parallel for schedule(dynamic, 1) default(none) \
-    shared(queries, labels, heaps, signed_queries, rows_by_label, distance, first_row)
+    shared(queries, slots, heaps, signed_queries, rows_by_slot, distance, first_row)
     // clang-format on
     for (int64_t j = 0; j < signed_queries; ++j) {
-        // Every query label was inserted above.
-        for (const uint64_t r : rows_by_label.find(labels[j])->second) {
+        for (const uint64_t r : rows_by_slot[slots[j]]) {
             heaps[j].Push(distance(queries[j], r), first_row + r);
         }
     }

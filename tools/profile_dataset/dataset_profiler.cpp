@@ -199,10 +199,13 @@ prepare_label_filter(const DatasetInfo& info, GroundTruthCheck& check) {
     }
 }
 
-/// Judges the stored ids against the label-filtered search as well (see prepare_label_filter)
-/// and keeps the recalls of the search they match best; ties keep the unfiltered search.
+/// Judges the stored ids against the label-filtered search as well (see prepare_label_filter).
+/// Both searches are scored on the same population: the queries with at least one row of their
+/// label, and per query the first min(k, rows with the label) stored entries. The recalls of the
+/// search that the stored ids match better are kept; ties keep the unfiltered search.
 void
 add_label_filtered_scope(const GroundTruthCheck& check,
+                         const std::vector<std::vector<Neighbor>>& computed,
                          const std::vector<double>& recomputed,
                          uint64_t k,
                          JsonType& report) {
@@ -220,8 +223,33 @@ add_label_filtered_scope(const GroundTruthCheck& check,
             stored_labeled[check.probe_entries[p]] = 1;
         }
     }
+    // Share of the `count` stored entries from `first` that are distinct and lie within the
+    // count-th distance of `exact` (with the relative tie margin), counting only entries that
+    // carry `label` when it is given.
+    auto share_within = [&](uint64_t first,
+                            uint64_t count,
+                            const std::vector<Neighbor>& exact,
+                            const int64_t* label) {
+        const double kth = exact[count - 1].distance;
+        const double tolerance =
+            RELATIVE_TIE_TOLERANCE * std::max(std::abs(kth), std::abs(exact.front().distance));
+        uint64_t hits = 0;
+        std::set<int64_t> seen;
+        for (uint64_t e = first; e < first + count; ++e) {
+            // A repeated id is one neighbor.
+            if (!seen.insert(check.neighbors[e]).second) {
+                continue;
+            }
+            if (label != nullptr && (stored_labeled[e] == 0 || stored_label[e] != *label)) {
+                continue;
+            }
+            hits += std::isfinite(recomputed[e]) && recomputed[e] <= kth + tolerance ? 1 : 0;
+        }
+        return static_cast<double>(hits) / static_cast<double>(count);
+    };
     double id_recall = 0.0;
-    double distance_recall = 0.0;
+    double filtered_recall = 0.0;
+    double unfiltered_recall = 0.0;
     uint64_t queries = 0;
     for (uint64_t j = 0; j < probe.filter_queries.size(); ++j) {
         const std::vector<Neighbor>& exact = probe.filtered[j];
@@ -230,7 +258,8 @@ add_label_filtered_scope(const GroundTruthCheck& check,
         if (compared == 0) {
             continue;
         }
-        const uint64_t first = check.filter_rows[j] * check.k;
+        const uint64_t row = check.filter_rows[j];
+        const uint64_t first = row * check.k;
         std::vector<int64_t> exact_ids;
         exact_ids.reserve(compared);
         for (uint64_t e = 0; e < compared; ++e) {
@@ -248,20 +277,9 @@ add_label_filtered_scope(const GroundTruthCheck& check,
                               stored.end(),
                               std::back_inserter(common));
         id_recall += static_cast<double>(common.size()) / static_cast<double>(compared);
-        const double kth = exact[compared - 1].distance;
-        const double tolerance =
-            RELATIVE_TIE_TOLERANCE * std::max(std::abs(kth), std::abs(exact.front().distance));
-        uint64_t within = 0;
-        std::set<int64_t> seen;
-        for (uint64_t e = first; e < first + compared; ++e) {
-            // A repeated id is one neighbor, and only rows with the query's label qualify.
-            if (!seen.insert(check.neighbors[e]).second || stored_labeled[e] == 0 ||
-                stored_label[e] != probe.filter_labels[j]) {
-                continue;
-            }
-            within += std::isfinite(recomputed[e]) && recomputed[e] <= kth + tolerance ? 1 : 0;
-        }
-        distance_recall += static_cast<double>(within) / static_cast<double>(compared);
+        filtered_recall += share_within(first, compared, exact, &probe.filter_labels[j]);
+        // The same entries against the unfiltered search, at the same depth.
+        unfiltered_recall += share_within(first, compared, computed[check.positions[row]], nullptr);
         ++queries;
     }
     report["label_filtered_queries"] = queries;
@@ -269,14 +287,13 @@ add_label_filtered_scope(const GroundTruthCheck& check,
     if (queries == 0) {
         return;
     }
-    const double unfiltered = report["distance_recall_at_k"].get<double>();
-    const double filtered = distance_recall / static_cast<double>(queries);
-    report["scope_distance_recall"] =
-        JsonType{{"unfiltered", unfiltered}, {"label_filtered", filtered}};
-    if (filtered > unfiltered) {
+    const auto count = static_cast<double>(queries);
+    report["scope_distance_recall"] = JsonType{{"unfiltered", unfiltered_recall / count},
+                                               {"label_filtered", filtered_recall / count}};
+    if (filtered_recall > unfiltered_recall) {
         report["search_scope"] = "label_filtered";
-        report["id_recall_at_k"] = id_recall / static_cast<double>(queries);
-        report["distance_recall_at_k"] = filtered;
+        report["id_recall_at_k"] = id_recall / count;
+        report["distance_recall_at_k"] = filtered_recall / count;
     }
 }
 
@@ -411,7 +428,7 @@ ground_truth_report(const DatasetInfo& info,
     report["status"] = "checked";
     report["id_recall_at_k"] = id_recall / checked;
     report["distance_recall_at_k"] = distance_recall / checked;
-    add_label_filtered_scope(check, recomputed, k, report);
+    add_label_filtered_scope(check, computed, recomputed, k, report);
     report["recomputed_stored_ids"] = recomputed_entries;
     report["repeated_stored_ids"] = repeated_ids;
     report["non_finite_stored_distances"] = non_finite_stored;
