@@ -581,6 +581,11 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::QueryRange(float* result_dists,
     // in-memory range can be scanned in place with the batched kernel. Other quantizers keep the
     // per-id path, whose results they are tested against.
     if constexpr (LayoutTmpl::InMemory and std::is_same_v<QuantTmpl, BinaryQuantizer>) {
+        if (external_read_mutex_ != nullptr) {
+            // Query() takes the per-node read locks of the external owner.
+            FlattenInterface::QueryRange(result_dists, computer, begin, count, ctx);
+            return;
+        }
         if (count == 0) {
             return;
         }
