@@ -65,11 +65,11 @@ auto result = index->KnnSearch(
 ## 构建参数
 
 构建参数放在 `index_param` 下。`dtype` **必须** 为 `"sparse"`，`metric_type` **必须**
-为 `"ip"`。
+为 `"ip"`。`dim` 是**顶层**字段，不属于 `index_param`：稀疏数据可以省略，省略后取默认值
+`4096`（`MAX_DIM_SPARSE`），因此应按词表显式设置 `term_id_limit` 而不是依赖 `dim`。
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `dim` | int | —（必填） | 单条稀疏向量允许的最大非零项数量，**不是** 词表大小 |
 | `term_id_limit` | int | `1000000` | 词项 ID 的上界（应 ≥ 最大词项 ID + 1，最高 50 000 000） |
 | `window_size` | int | `50000` | 每个窗口容纳的文档数（取值范围 10 000 – 60 000） |
 | `doc_prune_ratio` | float | `0.0` | 构建阶段按文档丢弃权重最低词项的比例，取值范围为 `[0.0, 1.0)` |
@@ -82,6 +82,8 @@ auto result = index->KnnSearch(
 | `remap_term_ids` | bool | `false` | 是否在建索引前重映射词项 ID，适用于词项 ID 很稀疏或存在大量空洞的词表 |
 | `avg_doc_term_length` | int | `100` | 仅用于内存估算 |
 | `immutable` | bool | `false` | 构建或加载紧凑的只读运行态；`Build()` 会逐窗口压缩以降低峰值内存，增量 `Add()` 会被拒绝 |
+| `deserialize_without_footer` | bool | `false` | 加载时跳过读取尾部 footer；仅用于 footer 出现之前写入的旧版快照。没有 footer 时，倒排链是否有序以及是否为 DMQ 精排格式只能按约定假定，不再自动探测 |
+| `deserialize_without_buffer` | bool | `false` | 加载时直接从调用方传入的 `Reader` 反序列化，而不先整体流入内存缓冲；用更多 IO 换取更低的加载峰值内存。以 `immutable: true` 构建的索引始终从 reader 读取，此参数无效 |
 
 > **`dim` 与 `term_id_limit` 的区别。** 对于稀疏向量 `{0:0.1, 2:0.5, 177:0.8}`，
 > `dim` 为 `3`（三个非零项），而 `term_id_limit` 至少应为 `178`（最大词项 ID + 1）。
@@ -237,6 +239,12 @@ posting，较宽的范围也会选择更多 window。在启用时间的索引上
 | `query_prune_ratio` | float | `0.0` | 查询时丢弃权重最低查询项的比例，取值范围为 `[0.0, 1.0)` |
 | `term_prune_ratio` | float | `0.0` | 每条倒排链中按 value 丢弃低权 posting 的比例，取值范围为 `[0.0, 1.0)` |
 | `term_retain_threshold` | uint64 | `0` | 单个 term 在所有 window 中最多扫描的 posting 总数；`0` 表示关闭此限制，正数使每个 window 的非空 posting list 最多扫描 `max(1, floor(threshold / window_count))` 个 |
+
+继承自 `IndexSearchParameter` 的字段中只有 `timeout_ms` 真正生效：它限制 window 扫描并作为
+软超时使用。`parallelism`、`factor`、`enable_reorder` 虽被接受但对 SINDI 无效果——并行度由
+`window_parallelism` 控制，`enable_reorder` 取自构建时的 `use_reorder`。根级 `threshold`
+键（与 `sindi` 平级）同样生效：取有限数值时，距离超过该值的 KNN 候选会被丢弃。
+`worker_n_candidate`、`filter_callback_limit_weight`、`window_scheduler` 会被拒绝。
 
 逻辑分区数还受 `floor(总候选容量 / topk)` 限制，保证每个局部堆至少可保留 TopK，同时不突破总候选预算。候选预算较小时，可用的执行槽位也可能减少。
 

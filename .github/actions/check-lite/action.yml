@@ -87,7 +87,7 @@ runs:
         ./lite-rabitq-consumer
     - name: Retain diagnostics
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: lite-${{ inputs.mode }}-diagnostics
         if-no-files-found: ignore

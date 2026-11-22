@@ -53,7 +53,17 @@ public:
           InnerIdType id_count,
           QueryContext* ctx = nullptr) override {
         auto comp = static_cast<Computer<QuantTmpl>*>(computer.get());
+        if (external_read_mutex_ and id_count > 0) {
+            BatchNodeReadGuard guard(*external_read_mutex_, idx, id_count, this->TotalCount());
+            this->query(result_dists, comp, idx, id_count, ctx);
+            return;
+        }
         this->query(result_dists, comp, idx, id_count, ctx);
+    }
+
+    void
+    SetExternalReadMutexArray(MutexArrayPtr mutexes) override {
+        external_read_mutex_ = std::move(mutexes);
     }
 
     ComputerInterfacePtr
@@ -266,6 +276,19 @@ public:
     Allocator* const allocator_{nullptr};
 
 private:
+    struct NodeReadLock {
+        MutexArray* mutexes;
+        InnerIdType id;
+        void
+        lock_shared() {
+            mutexes->SharedLock(id);
+        }
+        void
+        unlock_shared() {
+            mutexes->SharedUnlock(id);
+        }
+    };
+
     inline void
     query(float* result_dists,
           Computer<QuantTmpl>* computer,
@@ -279,6 +302,8 @@ private:
         computer->SetQuery(query);
         return computer;
     }
+
+    MutexArrayPtr external_read_mutex_;
 };
 
 template <typename QuantTmpl, typename LayoutTmpl>
@@ -529,6 +554,16 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::ComputePairVectors(InnerIdType id1, Inne
     if (id1 >= total_count or id2 >= total_count) {
         throw VsagException(ErrorType::READ_ERROR,
                             "invalid internal id for pair distance evaluation");
+    }
+    NodeReadLock first{external_read_mutex_.get(), std::min(id1, id2)};
+    NodeReadLock second{external_read_mutex_.get(), std::max(id1, id2)};
+    std::shared_lock<NodeReadLock> first_guard;
+    std::shared_lock<NodeReadLock> second_guard;
+    if (external_read_mutex_) {
+        first_guard = std::shared_lock<NodeReadLock>(first);
+        if (first.id != second.id) {
+            second_guard = std::shared_lock<NodeReadLock>(second);
+        }
     }
     auto lease1 = this->layout_->Acquire(id1);
     auto lease2 = this->layout_->Acquire(id2);

@@ -36,7 +36,7 @@ The token-path prerequisite check detects the standard ServiceAccount token moun
 
 ## Team execution contract
 
-The caller serializes the complete team reusable-workflow invocation with `concurrency.queue: max` and `cancel-in-progress: false`. Different PRs wait for the shared team execution capacity; four test jobs and the independent compatibility job within the admitted run may execute concurrently when execution capacity permits. The outer per-PR concurrency rule still cancels an older run when that PR is updated. Runner cleanup must finish before shared storage can be reused; GitHub concurrency alone does not establish this condition.
+By default, the caller serializes the complete team reusable-workflow invocation with `concurrency.queue: max` and `cancel-in-progress: false`. Different PRs wait for the shared team execution capacity; four test jobs and the independent compatibility job within the admitted run may execute concurrently when execution capacity permits. The outer per-PR concurrency rule still cancels an older run when that PR is updated. Runner cleanup must finish before shared storage can be reused; GitHub concurrency alone does not establish this condition.
 
 For relevant C++ and CI changes, the workflow follows this sequence:
 
@@ -61,6 +61,14 @@ Compatibility inputs have a different contract: the complete release snapshot an
 The deployment must provide capacity for four test consumers plus the independent compatibility consumer to overlap, with adequate resources, run-scoped artifact storage, a writable build mount followed by read-only consumer mounts, and private writable work and temporary directories. It must authenticate each mount's association with the admitted run, stop all artifact writers before allowing consumers, prevent access to other runs and trusted publishers, and clean up after success, failure and cancellation. Checkout credentials must not persist in the worktree. Workflow consistency checks do not replace these deployment controls.
 
 Use **Re-run all jobs** after a failed or cancelled team run. A new attempt must rebuild and republish its own artifacts and plan. Re-running only failed jobs can leave successful build jobs in an older attempt; consumers then reject that stale identity or missing artifact directory. Do not reuse another attempt's files or let individual shards rebuild independently. Verify cancellation, cleanup and a full rerun against the deployed runner before enabling this workflow for PRs.
+
+### Team slot dispatch pilot
+
+Canonical main may specify `team_slots` in `.github/ci-routing.json`. The policy contains the trusted GitHub App `app_id` and `pilot_prs` for the selected main-targeted PRs. A null `pilot_prs` applies to all eligible main-targeted Team PRs after rollout. With the policy absent, Team uses the original runner and caller concurrency group.
+
+A hosted job waits only when the Team path requires internal execution and the PR is selected by this policy. It reads an allocation Check Run on the tested merge SHA using a read-only token. The job validates the App, repository, PR, head, tested SHA, run, attempt and expiry. Build, four test shards and index compatibility use one returned runner label. The Team manager independently verifies the assignment, workflow trust and resource ownership before issuing a grant. The waiter is bounded to one hour and reports a failure if the dispatcher does not supply a valid allocation. A full rerun provides a fresh attempt identity.
+
+Deploy and validate the dispatcher, the GitHub App, the isolated runner pool and its admission policy before enabling the pilot. Keep existing PR cancellation and Gate rules through the transition.
 
 ## Required checks and rollback
 
@@ -133,7 +141,7 @@ Only the final Team Summary job publishes Markdown; execution jobs retain their 
 ## Community failure propagation
 
 Community and standalone Python jobs use the pytest process exit status, including
-pipeline failures, as their result. Logs are uploaded even when pytest fails;
+pipeline failures, as their result. Structured JUnit/JSON evidence is uploaded even when pytest fails;
 matching words such as `passed` in a log never overrides a nonzero exit status.
 Community changed-source lint passes the generated pattern through a quoted
 environment variable, and manual dispatch defaults its comparison branch to `main`.
@@ -191,25 +199,67 @@ The image workflow watches both the Dockerfiles and the shared installer. PR eve
 
 ## Main-target PR check scope
 
+A newer push cancels the previous PR run, including the Community reusable-workflow
+caller (`!cancelled()`). Final Gate reporting still uses `always()` to retain failed
+or incomplete results; manual shared checks still run when route selection is
+intentionally skipped.
+
 PRs targeting `main` keep the Linux ASan tests, examples, compatibility, changed-source
 lint, formatting, routing checks and `PR CI Gate`. Team and Community remain alternative
 Linux execution paths, not different correctness requirements.
 
-- Python wheel build/test (`build-python-x86` and `test-python-x86`) runs on main-target PRs
-  that change Python/bindings, the C ABI, or CMake/packaging files (the `python` and `cmake`
-  path filters). It builds the `py3-none` wheel with `make pyvsag` and runs pytest against it
-  (#3295). Main PRs test one primary environment (Python 3.12, NumPy 2); the Python 3.10-3.14 /
-  NumPy 1.x-2.x matrix and the OpenMP coexistence test stay on version branches and manual runs, and
-  belong in Daily. The wheel build tolerates the intentionally skipped Community format job on
-  Team-routed C++ changes, but still stops on failed or cancelled prerequisites. Automatic main-push Python checks remain paused
-  (see [Temporary main-push Python pause](#temporary-main-push-python-pause-3295));
-  explicit manual Python checks remain available.
+- Python wheel build/test (`build-python-x86` and `test-python-x86`) uses the dedicated
+  `wheel` path filter for main-target PRs. It builds the `py3-none` wheel with the shared
+  Linux cibuildwheel action and runs complete ordinary pytest against that installed artifact.
+  Main PRs test Python 3.12 / NumPy 2; version/manual scope retains the existing `python` OR
+  `cmake` selection and Python 3.10–3.14 / NumPy 1.x–2.x matrix including OpenMP coexistence.
+  Branch, Nightly and release behavior is unchanged.
+
+  | Main PR category | Wheel policy and reason |
+  | --- | --- |
+  | Python package and metadata | Include `python/pyvsag/**`, `setup.py`, `setup.cfg`, `pyproject.toml`, `MANIFEST.in`, `requirements*.txt`, package license/notice files and `python/licenses/**`. Root `README.md` is an intentional documentation exception: `setup.py` reads it into wheel metadata. `python/README.md`, `python/docs/**` and website docs do not select a wheel. |
+  | C ABI and shared build configuration | Include `src/vsag_c_api.cpp`, public `include/vsag/*.h` / `*.hpp`, `src/version.h.in`, root `CMakeLists.txt`, `Makefile`, `cmake/**`, native `src/**/CMakeLists.txt` / `*.cmake` and `extern/**`. These can affect the `vsag_c` build, ABI, linkage or dependencies. Public headers are conservative because they can break the bindings' native build. |
+  | Wheel construction and installed-wheel validation | Include the Linux wheel build/test actions, their Community caller, `prepare_python_build.sh`, `check_wheel_libs.py`, `local_build_wheel.sh`, `install_deps_centos.sh`, `python_ci.py`, `collect_python_cache.sh` and `tests/python/**`. These govern packaging, audits, provenance or required installed tests. The manylinux container/toolchain is configured in `pyproject.toml` and the build action, not `docker/Dockerfile.x86.base`. |
+  | Helper and regression-only changes | Exclude `tests/scripts/test_python*.py`, `test_local_build_wheel.py`, `daily_measure.py`, `daily_plan.py` and `team_test_shards.py` from wheel selection. The router's required **CI Routing Tests** job runs Python CI/packaging, workflow-selection, Daily planner/measurement and Team shard regressions without compiling a wheel. Planner imports in the installed-test wrapper alone do not justify repackaging. |
+  | Other native and CI changes | Native algorithm implementation-only changes (for example `src/algorithm/hgraph.cpp`), C++ tests/examples, coverage/lint/planning helpers, Ubuntu/macOS dependency installers, macOS-only wheel actions and other workflow callers (`pr-ci.yml`, Branch, Nightly, TestPyPI) do not select this wheel. Existing Team/Community native checks and helper regressions retain their scopes. |
+
+  This is a path policy, not a semantic dependency analyzer. Root Makefile, all CMake
+  modules, `extern/**`, package licenses and the Community caller intentionally allow
+  false positives (for example a macOS-only CMake edit or a non-Python job edit in that
+  caller). Keeping shared build failures visible is preferable to fragile per-line rules.
+  A mixed PR selects a wheel if any changed path matches; added, modified and deleted
+  inputs use the same policy. Pure Python test changes still build: the existing provenance
+  contract requires a fresh wheel from the exact tested SHA, and cannot reuse a published
+  wheel or an unrelated run's artifact.
+
+  Nightly CI remains the wheel build/test backstop for native implementation-only
+  changes excluded by this main-PR filter, including wheel-specific link or visibility
+  failures. Team/Community native PR checks retain their existing scope; they do not
+  validate wheel construction for those changes.
+
+  Both jobs preserve `!cancelled()` and prerequisite failure handling, including the
+  intentionally skipped Community formatter on Team-routed C++ changes. The consumer
+  requires a successful build before downloading wheel/provenance artifacts. **Python Checks
+  Result** always runs: it requires both selected jobs to succeed, rejects missing/failed/
+  cancelled/unexpectedly skipped results and accepts skipped jobs when inapplicable. The
+  existing Community result and top-level **PR CI Gate** still propagate failures; an
+  inapplicable Python check never skips the whole PR workflow.
 - `.github/workflows/pyvsag-testpypi.yml` builds the pyvsag `py3-none` wheels for x86_64
   and aarch64 from `main` every night (03:17 Beijing time, cron `17 19 * * *`) and on manual
-  dispatch, and can upload them to TestPyPI with the `TEST_PYPI_API_TOKEN` secret. Uploading is
+  dispatch, and can upload them to TestPyPI through Trusted Publishing (OIDC; no stored token). The two
+  publish jobs run in the GitHub environment `testpypi` with `id-token: write`, and TestPyPI
+  must list this repository, workflow `pyvsag-testpypi.yml` and environment `testpypi` as a
+  trusted publisher of `pyvsag`; an unconfigured publisher fails the upload. Uploading is
   on by default: manual runs can set `publish: false` to only build, and the repository variable
-  `PYVSAG_NIGHTLY_PUBLISH=false` pauses the nightly upload. The build mounts a ccache directory restored with `actions/cache` into the cibuildwheel container, so nightly builds only recompile changed files. It never publishes to PyPI or a GitHub Release, and is not part
-  of PR CI.
+  `PYVSAG_NIGHTLY_PUBLISH=false` pauses the nightly upload. Its shared build action restores
+  the compiler cache described below; only Nightly CI publishes weekly snapshots. A scheduled
+  TestPyPI run skips when the last successful scheduled run already built the same main commit
+  (manual runs do not skip). Every shared build uses `VSAG_USE_SYSTEM_DEPS=OFF` and checks the
+  repaired wheel with `scripts/python/check_wheel_libs.py`, rejecting bundled or linked libgfortran,
+  libquadmath, libaio and liburing before artifacts are uploaded. `make pyvsag` retains the same
+  check for its Docker path when system dependencies are unset or OFF; explicit local AUTO builds
+  may legitimately depend on system libraries. TestPyPI publication remains independent of PR CI
+  and never uploads to PyPI or a GitHub Release.
 - macOS ASan builds and TSan no longer run for main-target PRs. Their main-push and
   manual workflows remain unchanged. Platform-specific and race regressions can thus
   be discovered after merge rather than before it.
@@ -242,8 +292,8 @@ failed diff operations conservatively select heavy checks and full lint.
 
 | Layer | Checks |
 | --- | --- |
-| Each main push | ARM64/macOS ASan builds plus fixed platform smoke inventory; Python X86 temporarily paused pending #3295; existing TSan concurrent tests; changed implementation lint, expanded to full lint for headers/build/dependencies/unknown changes |
-| Daily, manual until separately activated | Existing daily/SIMD/bundled-OpenBLAS/concurrent tests plus full X86/ARM64/macOS ASan suites, all numbered examples (including macOS), both Python architectures, full lint, Coverage and historical compatibility |
+| Each main push | ARM64/macOS ASan builds plus fixed platform smoke inventory; Python X86 wheel plus Python 3.12 / NumPy 2 ordinary tests; existing TSan concurrent tests; changed implementation lint, expanded to full lint for headers/build/dependencies/unknown changes |
+| Nightly scheduled/manual | Existing daily/SIMD/bundled-OpenBLAS/concurrent tests plus full X86/ARM64/macOS ASan suites, all numbered examples (including macOS), both Python architectures, full lint, Coverage and historical compatibility |
 | Version branches and standalone manual workflows | Existing full scope; reusable workflow inputs default to full behavior |
 
 Format and path-selected documentation checks use `main-ci.yml`; image publishing remains separate.
@@ -302,7 +352,7 @@ Job names are short and fixed; only Lite includes its matrix mode.
 | Format | Push to main or `0.*`, except documentation-only changes | Manual Checks: format |
 | Docs | PR opened/reopened/synchronize against any branch, or main push; original path filters | Manual Checks: docs |
 | Issue Link | PR opened/edited/reopened/synchronize/labeled/unlabeled targeting main or `0.*` | None |
-| SIMD Coverage | PR opened/reopened/synchronize targeting main; original path filters | None |
+| SIMD Coverage | PR opened/reopened/synchronize targeting main; SIMD code/test/build paths, excluding external step Action revision-only changes | None |
 | Lite | PR opened/reopened/synchronize targeting main or `0.*`; original path filters | Manual Checks: lite |
 | Core PR CI | PR opened/reopened/synchronize targeting main or `0.*` | Manual Checks: full-pr |
 | Main integration | Non-deleted main pushes | Manual Checks: full-branch |
@@ -328,6 +378,10 @@ checks that intended route explicitly. Metadata remains independently enforced
 by Mergify; it does not rerun code checks. Other names
 include `Community / Docs`, `Branch Docs`, `Community / SIMD Coverage`,
 `Issue Link` and `Community / Lite <mode>`.
+
+SIMD selection uses `scripts/ci/checks_paths.json` and compares relevant workflow/composite Action YAML at the PR merge base and head. A file is exempt only when its semantic changes are revisions of the same external step Actions (version tags or commit SHAs in `steps[].uses`). Commands, inputs, dependency pins, images, runner selection, Action identity and local/Docker Action changes still select coverage. Added/deleted files, ambiguous YAML and unavailable parser/blob data conservatively retain selection. Mixed PRs with SIMD code, tests, public headers, Local SQ reference tests or build changes still run coverage; Docs and Lite selection are unchanged. The selector and its regression tests use an isolated environment with the pinned parser in `scripts/ci/check-selection-requirements.txt`. If selector environment creation or installation fails, `scripts/ci/select_checks.sh` warns and runs the original path policy without Action exemptions; unrelated checks remain unselected.
+
+This exemption changes job selection only. If coverage is selected, the dependency comparability preflight and coverage thresholds below still apply; an Action upgrade does not waive that preflight in a mixed PR.
 
 SIMD Coverage still compares clean base/head coverage with the same test filter,
 seed and thresholds. It builds only `unittests_simd` and its dependencies using
@@ -401,7 +455,7 @@ caller's token permissions even when the Team branch will be skipped.
 
 ## Workflow entry layout
 
-The Actions entries are PR CI, Branch CI, Daily CI, Release, Maintenance, CI Images,
+The Actions entries are PR CI, Branch CI, Nightly CI, Release, Maintenance, CI Images,
 Manual Checks, and PR Metadata. Team CI and Community CI remain reusable groups
 under PR CI; their standalone Actions pages do not own independent run history.
 Common hosted execution steps live under `.github/actions/`; entry workflows own
@@ -410,15 +464,17 @@ job runners, dependencies, selection and permissions. No workflow generator is n
 - PR CI retains the required `PR CI Gate` name. PR Metadata alone handles body/label
   edits. Retargeting a PR still requires pushing a new commit before code validation.
 - Branch CI retains a separate run for each main commit. Main uses platform smoke,
-  TSan and selected lint (automatic Python x86 is temporarily paused pending #3295); version branches retain their full standalone
+  TSan, selected lint and Python x86 wheel/install/ordinary tests; version branches retain their full standalone
   scopes, including Coverage and compatibility. SIMD path checks are also here.
 - Manual Checks offers full PR/branch profiles and individual ASan, TSan, Python,
   lint, Coverage, compatibility, SIMD, toolchain and performance checks. The actual
   selected jobs appear inside that manual run, not a separately dispatched run.
-- Daily CI defaults to a manually selected `regression` profile. Full regression
-  scheduling remains disabled. The pre-existing weekday performance and weekly
-  build-performance schedules select only their respective profiles; they do not
-  start full regression. No nightly compiler-cache scheduling is changed here.
+- Nightly CI runs complete regression on upstream main at 22:00 Asia/Shanghai daily
+  (`0 14 * * *` UTC), including supplemental x86 work and the final Nightly Summary.
+  The workflow filename remains `daily_test.yml`; manual/reusable regression is
+  still available. The weekday runtime-performance schedule is removed; runtime
+  performance remains manual. The weekly build-performance schedule is unchanged
+  and never selects regression. No compiler-cache or package-publishing schedule changes.
 - Maintenance preserves docs-only push filtering for docs synchronization and
   main-push contributor updates. It never executes on PR events.
 - Release consolidates release creation, Wheels and old-version indexes. The
@@ -440,8 +496,8 @@ by itself remove historical entries from the Actions sidebar.
 
 ### Performance profile source and concurrency
 
-The Daily CI `performance` profile runs only in the canonical repository's main
-context (scheduled, manual, or a reusable call from a main push). Like
+The Nightly CI `performance` profile runs only in the canonical repository's main
+context (manual, or a reusable call from a main push; no scheduled execution). Like
 `build-performance`, it accepts `inputs.ref` only as `main` or a full commit SHA
 reachable from fetched upstream main. Both profiles share the same inline ref
 validator through a YAML anchor; validation precedes dependency installation and
@@ -449,33 +505,102 @@ execution, and the actual commit is recorded in the job summary. Notification
 credentials are scoped to the runtime profile's report step.
 
 Each runtime-performance run/attempt has its own concurrency group with
-`cancel-in-progress: false`; a manual invocation cannot cancel a scheduled run.
+`cancel-in-progress: false`; separate invocations do not cancel each other.
 Runs can execute concurrently if GitHub-hosted capacity permits. This does not
-change the Team pool or enable full daily regression scheduling.
+change the Team pool. A future nightly performance service on dedicated Team CI
+resources is outside the current activation change.
 
-See [Daily regression budgets and seven-day rotation](daily-regression.md) for the opt-in Daily profile, reproduction, and acceptance boundaries.
+See [Nightly regression budgets and seven-day rotation](daily-regression.md) for scheduled and manual regression, reproduction, and acceptance boundaries.
 
-### Temporary main-push Python pause (#3295)
+### Shared Linux Python build and restored Branch checks
 
-Automatic main pushes currently skip Python wheel construction and pytest. The
-pyvsag/manylinux upgrade in [#3295](https://github.com/antgroup/vsag/issues/3295) has
-landed: the wheel is now built in the `manylinux_2_28` image (GCC 14) as one `py3-none` wheel per
-architecture. The checks stay paused until that packaging has been validated in the development
-environment. This pause accepts that post-merge Python regressions will not be detected
-automatically during the transition.
+PR, Branch, Nightly and TestPyPI build jobs call `.github/actions/python-wheel-build`.
+It requires native Linux Docker, pins cibuildwheel v3.3.1, and uses the maintained
+`python/pyproject.toml` manylinux 2.28 / repair configuration. The dependency policy
+is `VSAG_USE_SYSTEM_DEPS=OFF`; x86 OpenBLAS uses `GENERIC`. CI never silently falls
+back to a host wheel. Source preparation and the `vsag_c` Release build remain shared.
+The in-container repaired-wheel gate deliberately runs the complete ordinary `tests/python`
+directory, excluding only the separately required OpenMP integration module. Its report is
+`build-tests.json`; a failure blocks artifact upload and all consumers, including publication.
+Dedicated environment lanes additionally check compatibility on their respective host runtimes.
+After repair, `check_wheel_libs.py` rejects forbidden bundled/NEEDED libraries before upload.
 
-`main_ci_policy.py` emits an explicit `python=false` only for main pushes (or
-when heavy checks are unnecessary). `main_ci_summary.py` requires that the
-Python result is skipped and explains the suspension; it still rejects failures,
-missing selection outputs, and failures in other selected checks. Daily, manual
-Python/full-branch checks, version branches and local contributor validation
-requirements retain their existing scope. No repository-wide workflow is disabled.
+The compressed ccache is capped at 3 GB per architecture. Restore keys include architecture
+and build configuration, and immutable save keys additionally use the UTC ISO week (not a
+run ID or source SHA). Only successful canonical-main **Nightly CI** scheduled/manual builds
+save, and only on an exact-key miss; PR, Branch and TestPyPI restore only. Thus unchanged
+configuration writes at most two snapshots a week. Older snapshots remain subject to GitHub
+cache eviction; this cap is not a repository-wide storage guarantee. New namespaces start cold.
+Changes to hashed build inputs (including `python/setup.py`, `extern/**/*.cmake` and the
+shared build action) create a new namespace: without a compatible entry, PR builds stay cold
+until that configuration reaches main and a successful Nightly CI build populates it.
+Fork PRs can read base-branch caches subject to GitHub's cache scope rules; they do not write
+trusted main entries. Restoring an entry does not prove compilation hits.
 
-Once the packaging upgrade from #3295 passes wheel build/install/pytest validation in the
-development environment,
-remove the main-push exception in `select_for_event`, update the pause regressions
-and these docs, and verify an actual main Branch CI Python run before considering
-automatic Python coverage restored.
+Container counters are best-effort diagnostics: machine-readable counters are preferred, with
+portable `ccache -s` text retained separately for older versions. Unavailable or unknown counters
+remain unmeasured and never fall back to an unrelated host cache or fail the build. No PR
+artifacts or cache writes are promoted to publication.
+
+Each caller retains its immutable source selection: PR validation SHA, actual
+Branch push SHA, frozen Nightly SHA, or TestPyPI's independently resolved main SHA.
+A separate manifest binds that SHA, architecture, filename and SHA-256 to exactly
+one wheel. Test jobs verify it before installation and reject source-tree imports.
+The publication job selects only wheel artifacts; provenance is separate. TestPyPI retains
+its source-selection policy, triggers and credentials; macOS publication adds the gates below.
+
+Branch main pushes run x86 wheel construction plus Python 3.12 / NumPy 2 full
+ordinary tests. Pure documentation skips heavy work; unknown changes/missing diffs
+conservatively select Python. Branch Summary rejects missing, failed, cancelled or
+unexpectedly skipped selected Python jobs. Version/manual routing keeps its scope.
+No OpenMP dependency requirement is added to the main PR or Branch primary lane.
+
+See [the Nightly Linux matrix](daily-regression.md#linux-python-matrix) for mandatory
+Python/NumPy compatibility and OpenMP environments. The independent `pyvsag TestPyPI`
+workflow builds macOS arm64 wheels with `make pyvsag`, audits Mach-O contents and tests
+one provenance-verified artifact in ten clean environments on `macos-15`: eight ordinary
+Python/NumPy combinations and two Python 3.12 OpenMP lanes (NumPy 1.26.4 and 2.x).
+Both OpenMP lanes require `torch==2.15.0`, `scikit-learn==1.9.1` and all six import orders with
+`KMP_DUPLICATE_LIB_OK=FALSE`. The authoritative pins live in
+`OPENMP_PACKAGES` in `scripts/ci/macos_wheel_ci.py`; installation and tests read that tuple, and
+a regression checks that this document and both user guides match it. Review the pins when
+preparing a pyvsag release, when a pinned wheel is yanked/unavailable, or when an upstream
+compatibility/security fix is needed. Edit the tuple and the three documentation pages, run
+`python3 -m unittest tests.scripts.test_python_ci`, then dispatch `publish: false` on the branch
+and require both NumPy 1.26.4 and 2.x OpenMP lanes on macOS 15 to pass before adopting the update.
+The wheel tag records the native CMake architecture even when the runner Python is universal2.
+The wheel's minimum macOS version and deployment target are 15 / 15.0, matching the CI runner.
+The build action uses the image's CMake (>= 3.20), Ninja (>= 1.10) and Perl (>= 5.10), asserts
+those versions and logs Clang; it does not install or upgrade Homebrew packages. `make pyvsag`
+retains its own installed-wheel tests as an early gate, before the clean-environment matrix.
+The explicit second Mach-O audit is a cheap guard immediately before artifact creation.
+
+Linux and macOS publish independently. `publish-linux` needs only the Linux builds and selects
+only their two wheel artifacts; `publish-macos` needs its own build and full matrix and selects
+only the macOS wheel. Both preserve the publish switch and `skip-existing: true`.
+Before macOS upload, a TestPyPI JSON lookup rejects an already present exact filename with an
+explicit recovery message (other platforms' files do not block it). Manual dispatches and full
+workflow reruns on an unchanged, already-published main intentionally end red in `publish-macos`
+and skip macOS verification, while Linux may succeed through `skip-existing`. This means
+"already published", not a build/test regression; use `publish: false` to retest that source.
+The lookup retries transient network, timeout, 429/5xx and malformed-JSON errors three times
+with 5/10-second delays, then fails closed with a publication-blocked diagnostic. Non-404
+client errors fail closed immediately. Files are immutable and
+rebuilding a source commit is not assumed to reproduce identical bytes. If verification failed
+after upload, rerun only that failed job in the original run to reuse its manifest; do not rerun
+all jobs or redispatch the same version for publication. To publish a rebuild, use a new main
+commit/version. A concurrent upload or stale JSON response still cannot silently substitute a
+file: the post-upload job strictly checks the build manifest's filename and SHA-256.
+
+The post-upload job downloads only from TestPyPI without dependencies/cache, with a ten-minute
+bounded retry window (15/30/60-second backoff, each pip attempt capped at 60 seconds), audits the
+wheel and reruns ordinary tests. Pip errors and attempts remain in the job log. Missing files
+fail when the window expires; hash mismatches fail immediately.
+Manual `publish: false` skips both uploads and the round trip and permits a branch dry run,
+including from a fork; publication remains main-only. The checkout uses the immutable triggering SHA; its resolved HEAD supplies both matrix
+generation and every later checkout. The extra equality assertion is a maintenance guard against
+a future intervening checkout, not an independent check of branch resolution.
+This does not change `daily_test.yml` or enable macOS publication in the production PyPI flow.
 
 ## Branch ARM build diagnostics
 
@@ -581,3 +706,43 @@ These reports are observations, **not authorization or trusted shared history**.
 They do not automatically replace the planner's existing ID-to-seconds JSON or
 update the production cache publisher. Promotion and scheduling changes require
 separate validation; a digest verifies consistency, not who produced the data.
+
+
+### Nightly regression reporting and spare-capacity expansion
+
+Nightly regression publishes one final **Nightly Summary**. Individual jobs upload
+small diagnostic records instead of ccache Summary panels; PR, Branch and manual
+checks keep their existing panels. The final report distinguishes scoped C++ line
+coverage (90% target) from test/collection/upload success. Missing coverage is
+reported as unmeasured. A green Coverage job alone does not certify the target.
+The README Nightly badge is a budget/report link, not a status claim: the same entry
+also contains performance-only profiles, whose green runs must not stand in for a
+complete regression.
+
+Named-case counts deduplicate by source file and exact case name. Configuration
+execution counts retain repeated parameter/platform executions and deduplicate
+sibling shards. Neither number counts assertions; examples, Python and compatibility
+remain separately reported command groups.
+
+After mandatory regression checks succeed, **X86 Extra Coverage** reuses the
+original OpenBLAS binaries in four shards, with two test workers per shard. A
+frozen proposal contains only other days' non-quarantined functional configurations.
+It uses at most four additional hours and stops testing by nine hours from the
+current attempt start, leaving an hour within the ten-hour envelope. Queueing and
+artifact setup consume that allowance. Workers select additional configurations
+while their measured same-case estimate (with margin; conservative fallback for
+unknown cases) fits the remaining quota. They never delay completion just to fill
+time. Original core/rotation selection and ARM scope are unchanged.
+
+The final report separates supplemental wall time, runner-minutes, test-process
+minutes, started/passed/failed configurations and budget-deferred candidates.
+Deferred candidates are **not validated**, never passed; an executed failure or
+missing shard evidence still fails the run. Runner/process minutes are not actual
+CPU-core consumption. The initial cutoff is an operating target, not a guarantee
+against GitHub capacity delays. No separate Weekly full rerun is introduced: the
+seven-day planned union still needs execution evidence, and release-only scope
+remains a separate obligation. Scheduled regression uses the same checked execution
+and reporting path as manual regression. The intended 22:00–08:00 window may shift
+when GitHub delays dispatch; the ten-hour allowance is measured from attempt start.
+
+Daily diagnostic identity (source SHA, run ID, attempt, job and job status) is required. Missing identity fails with an explicit diagnostic; optional compiler-cache measurements may be unavailable without failing collection. Full functional inventories must match every configured quarantine exactly; stale or core-targeted rules fail planning instead of silently disappearing.

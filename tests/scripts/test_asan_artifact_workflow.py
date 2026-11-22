@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check Aarch64 artifact and build diagnostics contracts without ARM binaries."""
+"""Check ASan artifact and build diagnostics contracts without compiling binaries."""
 
 from pathlib import Path
 import os
@@ -20,8 +20,8 @@ from tests.scripts.test_dependency_workflows import job_text
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/main-ci.yml"
-# v6's toolkit rejects its inactivity timeout; v5 can exit zero with a pending promise.
-DOWNLOAD_ACTION = "actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53"
+# v7's toolkit rejects its inactivity timeout; v5 can exit zero with a pending promise.
+DOWNLOAD_ACTION = "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131"
 JOBS = ("platforms-test-asan-aarch64", "platforms-test-example-aarch64")
 
 
@@ -266,6 +266,79 @@ class BuildMonitorTest(unittest.TestCase):
         build_step = text.split('    - name: Make Asan\n', 1)[1].split('    - name:', 1)[0]
         self.assertNotIn('continue-on-error', build_step)
         self.assertIn('if: always()\n      continue-on-error: true', text)
+
+
+class NightlySimdBuildTest(unittest.TestCase):
+    def build_job(self):
+        return job_text(ROOT / '.github/workflows/daily_test.yml', 'daily_build_simd')
+
+    def test_monitor_wraps_effective_limits_and_preserves_failures(self):
+        step = self.build_job().split('      - name: Make Asan\n', 1)[1].split('      - name:', 1)[0]
+        self.assertNotIn('continue-on-error', step)
+        script = textwrap.dedent(step.split('        run: |\n', 1)[1])
+        script = script.replace('${{ matrix.simd_option }}', 'sse;-DDISABLE_AVX_FORCE=1')
+        for make_exit, simd_exit in ((0, 0), (7, 0), (137, 0), (0, 9)):
+            with self.subTest(make_exit=make_exit, simd_exit=simd_exit), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bindir = root / 'bin'
+                bindir.mkdir()
+                (bindir / 'python3').symlink_to(sys.executable)
+                shim = '#!' + sys.executable + '\n' + textwrap.dedent('''\
+                    import json, os, sys
+                    from pathlib import Path
+                    tool = Path(sys.argv[0]).name
+                    with Path(os.environ['COMMAND_LOG']).open('a') as output:
+                        output.write(json.dumps({'tool': tool, 'args': sys.argv[1:],
+                            'mkl': os.environ.get('VSAG_ENABLE_INTEL_MKL'),
+                            'generator': os.environ.get('CMAKE_GENERATOR'),
+                            'simd': os.environ.get('EXTRA_DEFINED')}) + '\\n')
+                    raise SystemExit(int(os.environ['MAKE_EXIT' if tool == 'make' else 'SIMD_EXIT']))
+                    ''')
+                for tool in ('make', 'cmake'):
+                    path = bindir / tool
+                    path.write_text(shim)
+                    path.chmod(0o755)
+                env = dict(os.environ, PATH=str(bindir) + os.pathsep + os.environ['PATH'],
+                           RUNNER_TEMP=str(root), GITHUB_ENV=str(root / 'github-env'),
+                           COMMAND_LOG=str(root / 'commands.jsonl'), MAKE_EXIT=str(make_exit),
+                           SIMD_EXIT=str(simd_exit), COMPILE_JOBS='24', DATACELL_COMPILE_JOBS='24')
+                result = subprocess.run(['sh', '-e', '-c', script], cwd=ROOT, env=env,
+                                        capture_output=True, text=True, timeout=15)
+                self.assertEqual(result.returncode, make_exit or simd_exit, result.stdout + result.stderr)
+                calls = [json.loads(line) for line in (root / 'commands.jsonl').read_text().splitlines()]
+                self.assertEqual(calls[0]['args'], ['asan', 'COMPILE_JOBS=3', 'DATACELL_COMPILE_JOBS=1'])
+                self.assertEqual(calls[0]['mkl'], 'ON')
+                self.assertEqual(calls[0]['generator'], 'Ninja')
+                self.assertEqual(calls[0]['simd'], '-DDISABLE_AVX_FORCE=1')
+                self.assertEqual(len(calls), 1 if make_exit else 2)
+                if not make_exit:
+                    self.assertEqual(calls[1]['args'],
+                                     ['--build', 'build', '--target', 'unittests_simd', '--parallel', '3'])
+                for stage, status in [('asan', make_exit)] + ([] if make_exit else [('simd', simd_exit)]):
+                    summary = json.loads((root / 'simd-build-diagnostics' / stage / 'summary.json').read_text())
+                    self.assertEqual(summary['exitCode'], status)
+                self.assertIn('[build-resource-result]', result.stdout)
+
+    def test_diagnostics_upload_is_failure_safe_and_matrix_unique(self):
+        step = self.build_job().split('      - name: Upload SIMD build diagnostics\n', 1)[1].split('      - name:', 1)[0]
+        self.assertIn('if: always()', step)
+        self.assertIn('continue-on-error: true', step)
+        self.assertIn('uses: actions/upload-artifact@v5', step)
+        self.assertIn('path: ${{ runner.temp }}/simd-build-diagnostics/', step)
+        self.assertIn('name: simd-build-diagnostics-${{ strategy.job-index }}-${{ github.run_id }}-${{ github.run_attempt }}', step)
+        self.assertIn('retention-days: 7', step)
+        self.assertIn('if-no-files-found: warn', step)
+
+    def test_simd_matrix_and_functional_sentinels_remain_required(self):
+        workflow = ROOT / '.github/workflows/daily_test.yml'
+        build = self.build_job()
+        tests = job_text(workflow, 'daily_test_asan_simd')
+        self.assertIn('simd_option: ${{ fromJSON(needs.daily-plan.outputs.simd_options) }}', build)
+        self.assertIn('test_type: [unittests_simd]', tests)
+        self.assertIn('simd_key: ${{ fromJSON(needs.daily-plan.outputs.simd_keys) }}', tests)
+        self.assertIn('python3 scripts/testing/daily_entry.py unittests_simd simd', tests)
+        self.assertIn('python3 scripts/testing/daily_measure.py --name sentinels --owner simd -- python3 scripts/ci/platform_smoke.py functests', tests)
+        self.assertNotIn('continue-on-error', tests)
 
 
 if __name__ == "__main__":

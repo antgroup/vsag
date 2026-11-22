@@ -71,11 +71,12 @@ auto result = index->KnnSearch(
 
 ## Build parameters
 
-Build parameters live under `index_param`.
+Build parameters live under `index_param`. `dim` is a **top-level** field, not an
+`index_param` member: for sparse data it may be omitted and then defaults to `4096`
+(`MAX_DIM_SPARSE`).
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `dim` | int | required | Maximum number of non-zero elements per sparse vector, not the vocabulary size. |
 | `term_id_limit` | int | `1000000` | Upper bound on term IDs; maximum 50 000 000. |
 | `window_size` | int | `50000` | Documents per window, from 10 000 to 60 000. |
 | `doc_prune_ratio` | float | `0.0` | Fraction of lowest-weight document terms removed during build (`[0.0, 1.0)`). |
@@ -100,6 +101,12 @@ derives it as `<term_io.file_path>.rerank`.
 `rerank_type: "fp16"` requires `use_reorder: true` and supports the same rerank I/O and layout
 options as `fp32`. `rerank_layout > 0` requires `use_reorder: true`. `rerank_type: "dmq8"`
 requires `rerank_layout: 0` and the default `block_memory_io` rerank backend.
+
+Of the inherited `IndexSearchParameter` fields only `timeout_ms` is honoured, applied as a soft
+timer over posting scans; `parallelism`, `factor` and `enable_reorder` are accepted but have no
+SINDI_V2 effect (`enable_reorder` comes from the build-time `use_reorder`). The root-level
+`threshold` key (sibling of `sindi_v2`) is also honoured: a finite numeric value discards KNN
+candidates whose distance exceeds it.
 
 ### Host filtering
 

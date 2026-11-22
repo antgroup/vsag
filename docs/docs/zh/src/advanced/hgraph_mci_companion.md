@@ -70,8 +70,9 @@ target = N <= 1 ? 0 :
 
 迁移提示：不再支持 `mci_incremental_added_mct`。请从 `index_param` 中删除这一旧的
 团数量配置，改用 `mci_incremental_degree_min`、`mci_incremental_degree_n_divisor`
-和 `mci_incremental_degree_mcs_divisor`。旧键会被忽略，不会自动转换；若保留旧键且未
-显式设置度数参数，将使用新默认值。由于团之间存在重叠，不同团贡献的去重邻居数量不同，
+和 `mci_incremental_degree_mcs_divisor`。旧键不会被忽略：HGraph 参数映射没有该键的分支，
+留在 JSON 中会让构建以 `invalid config param: mci_incremental_added_mct` 失败。请删除它并
+改用新的度相关键。由于团之间存在重叠，不同团贡献的去重邻居数量不同，
 不存在一一对应的转换公式。迁移后应重新评估 recall 和增删成本，并以新配置重建旧快照，
 不能认为删除参数就能保证快照兼容。
 

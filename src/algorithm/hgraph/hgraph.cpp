@@ -34,6 +34,7 @@
 #include "datacell/rabitq_split_datacell.h"
 #include "datacell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
+#include "hgraph_fgim.h"
 #include "impl/filter/filter_headers.h"
 #include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
@@ -728,6 +729,12 @@ HGraph::GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const {
 
 void
 HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
+    const auto parameters = std::dynamic_pointer_cast<HGraphParameter>(create_param_ptr_);
+    CHECK_ARGUMENT(parameters != nullptr, "HGraph Merge requires HGraph parameters");
+    if (parameters->merge_strategy == "fgim") {
+        HGraphFGIM::Merge(*this, merge_units, parameters->fgim_refinement_iterations);
+        return;
+    }
     this->check_fused_mutation_supported("Merge");
     CHECK_ARGUMENT(not this->using_dedup_storage(),
                    "HGraph deduplicate_storage does not support Merge");
@@ -1017,8 +1024,38 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
     }
 }
 
+void
+HGraph::SetClusterVectorNodeLocks(bool enabled) {
+    if (rabitq_fused_datacell_ != nullptr or mci_parameters_.enabled or using_dedup_storage() or
+        create_new_raw_vector_) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "cluster vector node locks require a plain, non-MCI graph");
+    }
+    auto mutexes = enabled ? neighbors_mutex_ : nullptr;
+    basic_flatten_codes_->SetExternalReadMutexArray(mutexes);
+    if (has_precise_reorder()) {
+        high_precise_codes_->SetExternalReadMutexArray(mutexes);
+    }
+    cluster_vector_node_locks_ = enabled;
+}
+
+LockGuard
+HGraph::AcquireClusterNodeWriteLock(int64_t label) {
+    CHECK_ARGUMENT(cluster_vector_node_locks_, "cluster vector node locks are not enabled");
+    InnerIdType id;
+    {
+        std::shared_lock label_lock(label_lookup_mutex_);
+        id = label_table_->GetIdByLabel(label);
+    }
+    return {neighbors_mutex_, id};
+}
+
 bool
 HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
+    if (cluster_vector_node_locks_ and not force_update) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "externally locked node updates must use force_update");
+    }
     std::shared_lock<std::shared_mutex> force_remove_rlock;
     if (this->support_force_remove()) {
         force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
@@ -1104,7 +1141,12 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
     } else if (this->using_dedup_storage() && !this->immutable_.load(std::memory_order_acquire)) {
         map_lock = this->acquire_global_read_lock();
     }
-    std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
+    std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_, std::defer_lock);
+    if (not cluster_vector_node_locks_) {
+        codes_lock.lock();
+    }
+    // The owner pins storage and holds this node exclusively. Reacquiring the
+    // codes lock here would invert a brute-force reader's codes -> node order.
     bool update_status = basic_flatten_codes_->UpdateVector(new_base_vec, inner_id);
     if (update_status and rabitq_fused_datacell_ != nullptr) {
         this->sync_fused_node_codes(inner_id, new_base_vec);

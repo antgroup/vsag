@@ -85,7 +85,9 @@ def inventory_units(binary, root, profile, output, seed, cancelled, deadline=Non
     for test in tests:
         test["binary"] = binary.name
         test["id"] = shards.stable_id(binary.name, test)
+    named_inventory = [dict(test) for test in tests]
     tests, inventory = capability_inventory(binary, tests)
+    inventory["named_cases"] = named_inventory
     core, extension = [], []
     for group in shards.case_groups(tests):
         inventory_timeout(deadline)
@@ -101,9 +103,12 @@ def inventory_units(binary, root, profile, output, seed, cancelled, deadline=Non
             if any("[daily]" in t["tags"].lower() for t in group):
                 continue
             core.append({**base, "key": key, "mode": "core"})
-        elif len(group) == 1 and test_source(root, group[0]).name in ("test_pyramid.cpp", "test_sindi.cpp"):
+        elif len(group) == 1 and test_source(root, group[0]).relative_to(root).as_posix() in params.PARAMETER_SOURCES:
             test = group[0]
-            axes, choices = params.configurations(test_source(root, test).read_text(), test["source_line"])
+            source = test_source(root, test)
+            axes, choices = params.configurations(
+                source.read_text(), test["source_line"],
+                source_file=str(source.relative_to(root)), case_name=test["name"])
             for i, choice in enumerate(choices):
                 unit = {**base, "key": dp.digest([key, axes, choice]), "axes": axes,
                         "configuration": choice, "mode": "core" if i == 0 else "rotation",
@@ -123,10 +128,19 @@ def inventory_units(binary, root, profile, output, seed, cancelled, deadline=Non
             configurations = dp.load(manifest)
             if not configurations or len({dp.digest(c) for c in configurations}) != len(configurations):
                 raise dp.PlanError("Empty/duplicate HGraph configuration inventory")
+            def hgraph_unit(configuration):
+                return {**base, "key": dp.digest([key, configuration]),
+                        "mode": "rotation", "configuration": configuration,
+                        "env": {"VSAG_DAILY_HGRAPH": json.dumps(configuration)}}
+
             for configuration in configurations:
-                extension.append({**base, "key": dp.digest([key, configuration]),
-                                  "mode": "rotation", "configuration": configuration,
-                                  "env": {"VSAG_DAILY_HGRAPH": json.dumps(configuration)}})
+                parts = configuration.pop("execution_parts", None)
+                unit = hgraph_unit(configuration)
+                if parts is not None:
+                    if not parts:
+                        raise dp.PlanError("Empty HGraph execution parts")
+                    unit["execution_parts"] = [hgraph_unit(part) for part in parts]
+                extension.append(unit)
         else:
             # Non-adapted tests are indivisible exhaustive groups; never silently sample them.
             target = extension if all("[daily]" in t["tags"].lower() for t in group) else core
@@ -144,6 +158,35 @@ def execution_events(logfile, report):
         events += "\n" + "\n".join(node.text or "" for node in tree.iter()
                                   if node.tag in ("StdOut", "StdErr"))
     return events
+
+
+def phase_diagnostics(path):
+    """Keep completed events and the active phase even after an interrupted XML report."""
+    if not path.is_file():
+        return {}
+    try:
+        lines = path.read_text(errors="replace").splitlines()
+    except OSError as exc:
+        return {"phase_trace": path.name, "phase_trace_error": "Cannot read phase trace: " + str(exc)}
+    events, active, error = [], [], None
+    for line in lines:
+        try:
+            event = json.loads(line)
+            if not isinstance(event, dict) or event.get("event") not in ("start", "end") or not isinstance(event.get("phase"), str):
+                raise ValueError("invalid phase event")
+            events.append(event)
+            if event["event"] == "start":
+                active.append(event)
+            elif active and active[-1]["phase"] == event["phase"]:
+                active.pop()
+        except (ValueError, TypeError) as exc:
+            error = "Incomplete or malformed phase trace: " + str(exc)
+            break
+    result = {"phase_trace": path.name, "phase_events": len(events),
+              "active_phases": active, "last_phase_event": events[-1] if events else None}
+    if error:
+        result["phase_trace_error"] = error
+    return result
 
 
 def run_unit(unit, number, output, timeout, cancelled, deadline=None):
@@ -174,7 +217,8 @@ def run_unit(unit, number, output, timeout, cancelled, deadline=None):
                 raise dp.PlanError("Execution window exhausted during test listing")
             timeout = min(timeout, max(1, math.floor(remaining)))
         report = directory / "report.xml"
-        command = ["env", "VSAG_DAILY_EVENTS=1", "VSAG_TEST_SEED=" + str(unit["seed"])]
+        command = ["env", "VSAG_DAILY_EVENTS=1", "VSAG_TEST_SEED=" + str(unit["seed"]),
+                   "VSAG_DAILY_PHASE_FILE=" + str(directory / "phases.jsonl")]
         command += [k + "=" + v for k, v in sorted(unit["env"].items())]
         command += [str(binary), shards.exact_filter([t["name"] for t in unit["tests"]]),
                     "--reporter", "xml", "--out", str(report), "--durations", "yes",
@@ -210,6 +254,7 @@ def run_unit(unit, number, output, timeout, cancelled, deadline=None):
     except (dp.PlanError, shards.ShardError, OSError, ValueError, ET.ParseError) as error:
         record["error"] = str(error)
         record["status"] = "failed"
+    record.update(phase_diagnostics(directory / "phases.jsonl"))
     dp.write(directory / "result.json", record)
     print(json.dumps({"case": unit["tests"][0]["name"], "key": unit["key"],
                       "status": record["status"], "seconds": record["seconds"]}), flush=True)
@@ -259,7 +304,7 @@ def main():
         core = [u for u in core if any("[concurrent]" in t["tags"].lower() for t in u["tests"])]
         extension = [u for u in extension if any("[concurrent]" in t["tags"].lower() for t in u["tests"])]
     plan = dp.build_plan(ctx, args.environment, core, extension, inventory=inventory, core_only=args.core_only,
-                         full_coverage=args.profile == "unit-coverage")
+                         full_coverage=args.profile == "unit-coverage", profile=args.profile)
     if args.shard_count != 1 or args.shard_index != 0:
         plan = dp.shard_plan(plan, args.shard_index, args.shard_count)
     dp.write(output / "plan.json", plan)

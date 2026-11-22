@@ -118,7 +118,7 @@ FP16 或 BF16 的单向量存储码占 `2 * dim` 字节，FP32 则占 `4 * dim` 
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `base_quantization_type` | string | — | 底层量化类型（`fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_local`、`sq4_local`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`saq`、`tq`）。各量化器细节见[量化章节](../quantization/)。 |
+| `base_quantization_type` | string | `"fp32"` | 底层量化类型（`fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_local`、`sq4_local`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`saq`、`tq`）。各量化器细节见[量化章节](../quantization/)。 |
 | `tq_chain` | string | — | `base_quantization_type` 为 `tq` 时使用的变换链，例如 `"mrle, rabitq"`。 |
 | `mrle_dim` | int | `0` | MRLE 保留的前缀维度；`0` 表示保持输入维度。 |
 | `max_degree` | int | `64` | 子图内节点的最大出度 |
@@ -156,6 +156,20 @@ FP16 或 BF16 的单向量存储码占 `2 * dim` 字节，FP32 则占 `4 * dim` 
 | `root_graph_type` | string | `"single_layer"` | 根图结构：`single_layer` 保留原有稀疏底图；`multi_layer` 使用预分配的 Flat 或 Compressed 底图、类似 HGraph 的稀疏路由层以及联合构图流程。`multi_layer` 支持 `graph_type: "nsw"` 和 `"pipnn"`。`no_build_levels` 禁用第 0 层时不要显式指定此选项。 |
 | `support_duplicate` | bool | `false` | 根据构建编码的 `CompareVectors` 语义对编码等价、外部标签不同的向量分组；外部标签仍须唯一。 |
 | `build_thread_count` | int | `1` | 构建阶段并发线程数 |
+| `rabitq_error_rate` | float | `1.9` | RaBitQ lower-bound 误差倍率，同时作用于 base 和 precise 量化器的编码阶段。必须有限且为正。 |
+| `rabitq_bits_per_dim_query` | uint | `32` | 查询端 bit 精度，取值必须为 `4` 或 `32`。使用 split storage 时必须为 `32`。 |
+| `rabitq_pca_dim` | uint | `0` | RaBitQ 编码前可选的 PCA 降维维度；`0` 表示不降维。 |
+| `rabitq_use_fht` | bool | `false` | RaBitQ 编码中使用 FHT 替代随机旋转。 |
+| `base_pq_dim` | int | `1` | Product Quantizer（PQ）子空间维度。仅在 `base_quantization_type` 为 `pq` 或 `pqfs` 时生效。 |
+| `base_supplement_io_type` | string | — | RaBitQ split 补充 plane 的独立 IO 后端。支持的值：`block_memory_io`、`async_io`、`buffer_io`。不传该键时补充 plane 共享 `base_io_type`。后端同构（base 与 supplement 使用同一 IO 类型）始终支持。混合后端仅支持 `base_io_type` = `block_memory_io` 搭配 `base_supplement_io_type` = `async_io`（无 libaio 时回退为 `buffer_io`）。无论 base 使用何种后端，split 补充 plane 均不支持 `uring_io`。仅在 RaBitQ split 模式下生效。 |
+| `base_supplement_file_path` | string | — | RaBitQ 补充 IO 后端的文件路径；`base_supplement_io_type` 为磁盘后端时必须设置。 |
+| `build_block_size` | int | `10000` | ODescent 构图的分块大小；仅在 `graph_type: "odescent"` 时生效。 |
+| `min_in_degree` | int | `1` | ODescent 节点的最小入度；仅在 `graph_type: "odescent"` 时生效。 |
+| `extra_info` | object | `{"io_params": {...block_memory_io...}}` | 每个底图节点附加信息块的 IO 配置。在公共参数中设置 `extra_info_size` 时使用。 |
+| `persist_source_id` | bool | `false` | 持久化 SourceID 表，使构建缓存在跨构建时可以匹配源标识。在对缓存在后续构建中将重用的索引进行序列化前设为 `true`。 |
+| `adaptive_pruning_adjust_step` | float | `0.06` | 实验性 NSW 自适应剪枝选择器的 alpha 调整步长。需开启 `adaptive_pruning`。 |
+| `adaptive_pruning_apply_to_reverse` | bool | `false` | 在 NSW 构图时将自适应剪枝策略应用于反向边。实验性。 |
+| `adaptive_pruning_apply_to_upper` | bool | `false` | 将自适应剪枝策略应用于上层路由。实验性，目前尚未支持，设置后会导致构建失败。 |
 | `hierarchies` | array | `[]` | 命名层级定义。每个元素可以是字符串（继承全部顶层参数）或对象（含 `name` 及可选覆盖参数：`max_degree`、`ef_construction`、`alpha`、`no_build_levels`、`index_min_size`、`root_graph_type`）。设置后激活多层级模式，每个层级维护独立的路径树。 |
 
 PiPNN 支持 `dtype: "float32"`、`"float16"` 或 `"bfloat16"`，以及
@@ -249,14 +263,21 @@ Pyramid 使用 split code 的 code-code 距离完成增量 FLAT→GRAPH 晋升�
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `ef_search` | int | `100` | 叶子层子图检索的候选集大小 |
+| `ef_search` | int | —（必填） | 叶子层子图检索的候选集大小。省略该键会解析失败；`KnnSearch` 还要求取值位于 `[1, max(100 * topk, 1000)]`。参数结构体中的 `100` 不是可省略的默认值 |
 | `factor` | float | 未设置 | KNN 重排候选倍率。值 `<= 1` 时不增加限制；值大于 `1` 时，Pyramid 保持各子图原有搜索行为，先合并子图结果，再将至多 `min(max(ef_search, topk), floor(topk * factor))` 个主图候选送入重排。与 HGraph 一致，RaBitQ lower-bound 安全候选可在该限制后额外并入，`reorder_candidate_count` 记录实际合并数量。参数必须为有限正数；范围检索或关闭重排时不生效。 |
 | `hops_limit` | int | 不限 | 根节点底图及每个非根 GRAPH 的逐图 KNN 跳数上限；不大于 `ef_search` 时忽略。根节点的稀疏路由层不受限制，FLAT 扫描与范围检索不受影响。 |
 | `subindex_ef_search` | int | `50` | 沿路径向下遍历中间子图时的候选集大小 |
 | `parallelism` | int | `1` | 单次请求同时检索子图的数量上限。大于 `1` 时使用索引线程池，各子图结果合并并按 inner id 去重后再重排；线程池前提见下方说明。 |
 | `hierarchies` | string[] | `[]` | 指定检索哪个层级。空数组表示使用默认（匿名）层级。 |
 | `hierarchy_op` | string | `"single"` | 多层级结果合并方式：`single`（检索单个层级）、`union`、`intersection`。**注意：** `union` 和 `intersection` 尚未实现——设置后 `KnnSearch`/`RangeSearch` 会返回错误。 |
+| `rabitq_one_bit_search` | bool | 自动 | 在图遍历时启用 RaBitQ 1-bit lower-bound 安全候选收集。未显式设置时，若同时启用了 `use_reorder` 且 base codes 以 RaBitQ split 数据单元存储，则默认为 `true`；否则为 `false`。 |
+| `timeout_ms` | int | — | 软超时毫秒数；超时后 coarse search 不再扩展，reorder 批次间检查计时器。**不传**该字段表示不超时；设为 `0` 会立即超时，并非不限时。 |
 | `rabitq_error_rate` | float | `1.9` | 本次搜索使用的正数 lower-bound 误差倍率。默认值 `1.9` 较大；值越大，精度越高，但搜索速度越慢。 |
+| `threshold` | float | — | （根级）KNN 距离上限。检索过程中距离超过该阈值的候选会被丢弃。仅对 `KnnSearch` 生效，`RangeSearch` 不受影响。 |
+
+
+> **注意：** 根级检索 JSON 中的 `enable_reorder` 虽然被解析但 **Pyramid 并不使用**；精排由构建时的 `use_reorder` 控制。
+
 
 ```cpp
 auto result = index->KnnSearch(

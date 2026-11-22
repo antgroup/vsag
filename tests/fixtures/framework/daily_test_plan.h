@@ -6,7 +6,9 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 #include <string>
@@ -41,29 +43,52 @@ Choices(uint64_t line, Args&&... args) {
     return Catch::Generators::value(generator.get());
 }
 
+// Catch2 captures stdout/stderr until a case finishes. Flush a separate trace so a
+// timed-out or killed process still leaves its last entered operation (#3225).
+inline void
+WritePhaseEvent(nlohmann::json event) {
+    event["unix_seconds"] =
+        std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
+    if (const auto* path = std::getenv("VSAG_DAILY_PHASE_FILE")) {
+        static std::mutex mutex;
+        std::lock_guard<std::mutex> lock(mutex);
+        std::ofstream output(path, std::ios::app);
+        output << event.dump() << std::endl;
+        if (!output) {
+            throw std::runtime_error("Cannot write Daily phase trace");
+        }
+    }
+    std::cerr << "DAILY_PHASE " << event << std::endl;
+}
+
 class Phase {
 public:
-    explicit Phase(const std::string& name)
+    explicit Phase(const std::string& name, nlohmann::json details = nlohmann::json::object())
         : name_(name),
+          details_(std::move(details)),
           start_(std::chrono::steady_clock::now()),
           enabled_(std::getenv("VSAG_DAILY_EVENTS") != nullptr) {
         if (enabled_) {
-            std::cerr << "DAILY_PHASE " << nlohmann::json({{"phase", name_}, {"event", "start"}})
-                      << std::endl;
+            WritePhaseEvent({{"phase", name_}, {"event", "start"}, {"details", details_}});
         }
     }
-    ~Phase() {
+    ~Phase() noexcept {
         if (enabled_) {
             const auto seconds =
                 std::chrono::duration<double>(std::chrono::steady_clock::now() - start_).count();
-            std::cerr << "DAILY_PHASE "
-                      << nlohmann::json({{"phase", name_}, {"event", "end"}, {"seconds", seconds}})
-                      << std::endl;
+            try {
+                WritePhaseEvent({{"phase", name_}, {"event", "end"}, {"seconds", seconds}});
+            } catch (const std::exception& error) {
+                // Do not terminate while unwinding a real assertion failure. The trace
+                // retains its unmatched start and the runner reports the incomplete phase.
+                std::cerr << "Daily phase trace error: " << error.what() << std::endl;
+            }
         }
     }
 
 private:
     std::string name_;
+    nlohmann::json details_;
     std::chrono::steady_clock::time_point start_;
     bool enabled_;
 };

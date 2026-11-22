@@ -126,7 +126,7 @@ Build-time parameters live under `index_param`.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `base_quantization_type` | string | — | Coarse storage quantizer (`fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_local`, `sq4_local`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`, `saq`, `tq`). See the [Quantization chapter](../quantization/) for per-quantizer details. |
+| `base_quantization_type` | string | `"fp32"` | Coarse storage quantizer (`fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_local`, `sq4_local`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`, `saq`, `tq`). See the [Quantization chapter](../quantization/) for per-quantizer details. |
 | `tq_chain` | string | — | Transform chain used when `base_quantization_type` is `tq`, for example `"mrle, rabitq"`. |
 | `mrle_dim` | int | `0` | Prefix dimension retained by MRLE; `0` keeps the input dimension. |
 | `max_degree` | int | `64` | Maximum out-degree per node within a sub-graph. |
@@ -164,6 +164,20 @@ Build-time parameters live under `index_param`.
 | `root_graph_type` | string | `"single_layer"` | Root graph layout: `single_layer` preserves the original sparse bottom graph; `multi_layer` uses a preallocated Flat or Compressed bottom graph with HGraph-style sparse routing layers and joint construction. `multi_layer` supports `graph_type: "nsw"` and `"pipnn"`. Do not specify this option when `no_build_levels` disables level 0. |
 | `support_duplicate` | bool | `false` | Group code-equivalent vectors with distinct external labels, using construction-code `CompareVectors` semantics. External labels must remain unique. |
 | `build_thread_count` | int | `1` | Threads used for parallel build. |
+| `rabitq_error_rate` | float | `1.9` | RaBitQ lower-bound error multiplier applied during encoding for both base and precise quantizers. Must be finite and positive. |
+| `rabitq_bits_per_dim_query` | uint | `32` | Query-side bit precision for RaBitQ encoding, either `4` or `32`. Must be `32` when split storage is used. |
+| `rabitq_pca_dim` | uint | `0` | Optional PCA dimension reduction applied before RaBitQ encoding; `0` disables PCA. |
+| `rabitq_use_fht` | bool | `false` | Use FHT instead of a random rotation in RaBitQ encoding. |
+| `base_pq_dim` | int | `1` | Product Quantizer subspace dimension. Effective only when `base_quantization_type` is `pq` or `pqfs`. |
+| `base_supplement_io_type` | string | — | Separate IO backend for RaBitQ split supplement planes. Supported values: `block_memory_io`, `async_io`, `buffer_io`. When this key is omitted, the supplement shares `base_io_type`. Homogeneous backends (same type for base and supplement) are always supported. Mixed backends support only `base_io_type` = `block_memory_io` with `base_supplement_io_type` = `async_io` (falls back to `buffer_io` when libaio is unavailable). `uring_io` is not supported for split supplements regardless of the base backend. Effective only in RaBitQ split mode. |
+| `base_supplement_file_path` | string | — | File path for the RaBitQ supplement IO backend, required when `base_supplement_io_type` is disk-backed. |
+| `build_block_size` | int | `10000` | ODescent block construction size; effective only with `graph_type: "odescent"`. |
+| `min_in_degree` | int | `1` | ODescent minimum in-degree; effective only with `graph_type: "odescent"`. |
+| `extra_info` | object | `{"io_params": {...block_memory_io...}}` | IO configuration for the extra-info block associated with each bottom-graph node. Use when `extra_info_size` is set in the common parameters. |
+| `persist_source_id` | bool | `false` | Persist the SourceID table so build-cache imports can match source identities across builds. Set to `true` before serializing an index whose cache will be reused. |
+| `adaptive_pruning_adjust_step` | float | `0.06` | Alpha adjustment step for the experimental NSW adaptive pruning selector. Requires `adaptive_pruning: true`. |
+| `adaptive_pruning_apply_to_reverse` | bool | `false` | Apply the adaptive pruning policy to reverse edges during NSW graph construction. Experimental. |
+| `adaptive_pruning_apply_to_upper` | bool | `false` | Apply the adaptive pruning policy to upper routing layers. Experimental; currently unsupported, setting it causes construction to fail. |
 | `hierarchies` | array | `[]` | Named hierarchy definitions. Each element is either a string (inherits all top-level params) or an object with `name` and optional overrides (`max_degree`, `ef_construction`, `alpha`, `no_build_levels`, `index_min_size`, `root_graph_type`). When present, multi-hierarchy mode is activated and each hierarchy maintains its own independent path tree. |
 
 PiPNN supports dense Pyramid builds with `dtype: "float32"`, `"float16"`, or `"bfloat16"` and
@@ -263,14 +277,21 @@ Search-time parameters live under the `pyramid` sub-object:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `ef_search` | int | `100` | Candidate list size for the leaf-level graph search. |
+| `ef_search` | int | — (required) | Candidate list size for the leaf-level graph search. Omitting it fails parsing; `KnnSearch` further requires it in `[1, max(100 * topk, 1000)]`. The `100` in the parameter struct is not an omittable default. |
 | `factor` | float | unset | KNN reorder candidate multiplier. Values `<= 1` add no limit. When greater than `1`, Pyramid first completes the unchanged subgraph searches and merges their results, then sends at most `min(max(ef_search, topk), floor(topk * factor))` main-graph candidates to reorder. RaBitQ lower-bound safety candidates may be merged after this limit, matching HGraph; `reorder_candidate_count` reports the actual merged count. The value must be finite and positive. It has no effect on range search or when reorder is disabled. |
 | `hops_limit` | int | unlimited | Per-graph KNN hop cap for the root bottom graph and every non-root graph; ignored when it is not greater than `ef_search`. Sparse root routing layers are never hop-limited. FLAT scans and range search are unaffected. |
 | `subindex_ef_search` | int | `50` | Candidate list size used when traversing intermediate sub-graphs on the path. |
 | `parallelism` | int | `1` | Maximum concurrent sub-graph searches for one request. Values greater than `1` use the index thread pool; results are merged and de-duplicated before reordering. See the thread pool requirement below. |
 | `hierarchies` | string[] | `[]` | Select which hierarchy to search. Empty means use the default (unnamed) hierarchy. |
 | `hierarchy_op` | string | `"single"` | How to combine results across hierarchies: `single` (search one hierarchy), `union`, or `intersection`. **Note:** `union` and `intersection` are not yet implemented — setting them will cause `KnnSearch`/`RangeSearch` to return an error. |
+| `rabitq_one_bit_search` | bool | auto | Enable RaBitQ one-bit lower-bound safety-candidate collection during graph traversal. When not set, defaults to `true` when both `use_reorder` is enabled and the base codes are stored as RaBitQ split data cells; otherwise `false`. |
+| `timeout_ms` | int | — | Soft timeout in milliseconds; graph traversal stops expanding during the coarse search after the timeout, and reorder batch loops check the timer between batches. **Omit** the key to disable the timeout; setting `0` causes an immediate timeout, not unlimited. |
 | `rabitq_error_rate` | float | `1.9` | Positive lower-bound error multiplier for this search. The default `1.9` is relatively large; increasing it improves accuracy but slows down search. |
+| `threshold` | float | — | (root-level) KNN distance upper bound. Candidates whose distance exceeds the threshold are discarded during search. Only effective for `KnnSearch`, not `RangeSearch`. |
+
+
+> **Note:** `enable_reorder` in the root-level search JSON is accepted but **ignored** by Pyramid; reorder is controlled at build time by `use_reorder`.
+
 
 ```cpp
 auto result = index->KnnSearch(

@@ -143,6 +143,9 @@ TEST_CASE("MCI stale complete seeds preserve fallback budget and timeout semanti
     constexpr auto count = FullSeedFixture::COUNT;
     const bool raw = GENERATE(false, true);
     const int invalid = GENERATE(0, 1, 2, 3);
+    CAPTURE(raw, invalid);
+    // The read view in params borrows the table and its mutex; destroy it first.
+    LabelTable labels(fixture.allocator.get());
     MCISearcherParam params;
     params.seed_inner_ids = &fixture.seeds;
     params.seed_count = count;
@@ -161,7 +164,6 @@ TEST_CASE("MCI stale complete seeds preserve fallback budget and timeout semanti
     search.ef = search.topk = 64;
     search.rerank_topk = 10;
     search.is_inner_id_allowed = predicate;
-    LabelTable labels(fixture.allocator.get());
     for (InnerIdType i = 0; i < count; ++i) {
         labels.Insert(i, i);
     }

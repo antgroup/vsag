@@ -278,6 +278,8 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
                 value);
         } else if (key == IVF_KMEANS_ITER_COUNT) {
             inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_KMEANS_ITER_COUNT_KEY].SetJson(value);
+        } else if (key == IVF_E_MEANS_EPOCHS) {
+            inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_E_MEANS_EPOCHS_KEY].SetJson(value);
         } else if (key == GNO_IMI_FIRST_ORDER_BUCKETS_COUNT) {
             inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_PARTITION_STRATEGY_TYPE_GNO_IMI]
                       [GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY]
@@ -725,10 +727,11 @@ IVF::CalcDistancesById(const float* query,
     }
     for (int64_t i = 0; i < count; ++i) {
         if (not validity[i]) {
-            distances[i] = -1.0F;
+            distances[i] = std::numeric_limits<float>::quiet_NaN();
         }
     }
     if (topk == -1) {
+        AttachValids(result, validity, allocator_);
         return result;
     }
     return ApplyTopkWithValidity(distances, ids, count, 1, topk, validity, allocator_);
@@ -740,7 +743,7 @@ IVF::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_dis
     std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
     auto [success, inner_id] = this->label_table_->TryGetIdByLabel(id);
     if (not success) {
-        return -1.0F;
+        ThrowLabelNotFound(id);
     }
     if (this->bucket_->SupportSplitCodeStorage() and calculate_precise_distance) {
         float dist = 0.0F;

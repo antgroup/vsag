@@ -89,7 +89,7 @@ HGraph float32 L2/IP/cosine 的 `base_quantization_type` 和 `precise_quantizati
 现有的 `alpha` 字段控制 PiPNN 的最终 robust pruning。`ef_construction` 只调节 NSW，
 对 PiPNN 不生效。
 
-HGraph 还支持实验性的 L2 参数 `pipnn_adaptive_pruning`（默认 `false`）和 `pipnn_adaptive_pruning_adjust_step`（默认 `0.06`），在首次 `Build` 时逐点调整最终剪枝阈值。详情见 [HGraph 动态 PiPNN 剪枝](../indexes/hgraph.md)。Pyramid 未暴露这两个选项。
+HGraph 还支持实验性的 L2 参数 `pipnn_adaptive_pruning`（默认 `false`）和 `pipnn_adaptive_pruning_adjust_step`（默认 `0.06`），在首次 `Build` 时逐点调整最终剪枝阈值。详情见 [HGraph 动态 PiPNN 剪枝](../indexes/hgraph.md)。Pyramid 也公开了这两个选项，见其[构建参数表](../indexes/pyramid.md#构建参数)。
 
 搜索时：
 
@@ -148,12 +148,13 @@ LazyHGraph 只支持 `dtype: "float32"`。搜索参数使用 `hgraph` 对象，�
 ```json
 {
     "ivf": {
-        "nlist": 4096,
-        "base_quantization_type": "sq8",
-        "nprobe": 32
+        "buckets_count": 4096,
+        "base_quantization_type": "sq8"
     }
 }
 ```
+
+完整构建参数表见 [IVF 索引页](../indexes/ivf.md)。
 
 ## Brute Force
 
@@ -161,7 +162,8 @@ LazyHGraph 只支持 `dtype: "float32"`。搜索参数使用 `hgraph` 对象，�
 {"brute_force": {}}
 ```
 
-无需额外参数。
+量化、IO 和线程池参数均可在 `index_param` 下配置，
+完整参数表见 [BruteForce 索引页](../indexes/brute_force.md)。
 
 ## Pyramid
 
@@ -191,8 +193,9 @@ Pyramid 构建参数同样放在 `index_param` 下：
 
 MRLE 与 split RaBitQ 组合使用 `base_quantization_type: "tq"`、
 `tq_chain: "mrle, rabitq"`、`mrle_dim`，以及
-`rabitq_bits_per_dim_base`/`rabitq_bits_per_dim_precise`。该配置会自动从 split base codes
-精排，并保留原始 FP32 向量供仅解码路径使用。完整配置及存储/召回权衡见
+`rabitq_bits_per_dim_base`/`rabitq_bits_per_dim_precise`。该配置会从 split base codes 精排，且 **不** 保留原始 FP32 向量：Pyramid 只在变换量化器需要 raw 向量
+**且** 不是「MRLE + RaBitQ split」这一组合时才自动打开 `store_raw_vector`（`RequiresRawVectorForTransformQuantizer`
+为真而 `RequiresRawVectorForMRLERaBitQSplit` 为假）。HGraph 在该组合下则会自动打开。完整配置及存储/召回权衡见
 [Pyramid 页面](../indexes/pyramid.md)。
 
 ## SINDI（稀疏向量）

@@ -4041,7 +4041,10 @@ TEST_CASE("Pyramid dense native distance contract", "[distance_contract]") {
             REQUIRE(batch.value()->GetNumElements() == 2);
             REQUIRE(batch.value()->GetDim() == 3);
             REQUIRE(std::abs(batch.value()->GetDistances()[0] - raw.value()) < 1e-5F);
-            REQUIRE(batch.value()->GetDistances()[1] == -1.0F);
+            REQUIRE(std::isnan(batch.value()->GetDistances()[1]));
+            REQUIRE(batch.value()->GetValids() != nullptr);
+            REQUIRE_FALSE(batch.value()->GetValids()[1]);
+            REQUIRE(batch.value()->GetValids()[0]);
             auto top = index->CalcDistancesById(query, candidates, 3, precise, 2);
             REQUIRE(top.has_value());
             REQUIRE(top.value()->GetDim() == 2);
@@ -4228,9 +4231,9 @@ TEST_CASE("Pyramid with extra_info: PIPNN dedup path", "[ft][pyramid][extra_info
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid adaptive PiPNN build search Add and restore",
                              "[ft][pyramid][pipnn][pyramid_pipnn_adaptive]") {
-    const auto root_type = GENERATE(std::string("single_layer"), std::string("multi_layer"));
-    const auto threads = GENERATE(1, 4);
-    const auto mode = GENERATE(0, 1, 2);
+    const auto root_type = DAILY_GENERATE(std::string("single_layer"), std::string("multi_layer"));
+    const auto threads = DAILY_GENERATE(1, 4);
+    const auto mode = DAILY_GENERATE(0, 1, 2);
     CAPTURE(root_type, threads, mode);
     PyramidParam pyramid_param;
     pyramid_param.graph_type = "pipnn";

@@ -735,7 +735,7 @@ BruteForce::CalcDistanceById(const DatasetPtr& query,
     std::lock(global_lock, label_lock);
     const auto [valid, inner_id] = label_table_->TryGetIdByLabel(id);
     if (not valid) {
-        return -1.0F;
+        ThrowLabelNotFound(id);
     }
     auto computer = inner_codes_->FactoryComputer(vectors);
     float distance = 0.0F;
@@ -756,7 +756,7 @@ BruteForce::CalcDistanceById(const float* vector,
     std::lock(global_lock, label_lock);
     const auto [success, inner_id] = label_table_->TryGetIdByLabel(id);
     if (not success) {
-        return -1.0F;
+        ThrowLabelNotFound(id);
     }
     auto computer = inner_codes_->FactoryComputer(vector);
     float result = 0.0F;

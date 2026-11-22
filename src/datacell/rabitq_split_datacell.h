@@ -1533,6 +1533,13 @@ public:
     void
     Train(const void* data, uint64_t count) override {
         if (this->quantizer_) {
+            // Do not bypass TransformQuantizer chains, even dimension-preserving ones.
+            if constexpr (std::is_same_v<QuantizerT, typename Accessor::BottomQuantizerType>) {
+                if (this->dense_input_element_size() == sizeof(uint16_t)) {
+                    this->quantizer_->TrainHalf(data, count, this->common_param_.data_type_);
+                    return;
+                }
+            }
             Vector<float> input_scratch(this->allocator_);
             this->quantizer_->Train(this->prepare_dense_input(data, count, input_scratch), count);
         }

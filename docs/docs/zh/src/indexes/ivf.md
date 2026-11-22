@@ -73,21 +73,20 @@ auto result = index->KnnSearch(
 | `buckets_count` | int | `10` | 倒排列表数量（`ivf` 策略下生效） |
 | `first_order_buckets_count` | int | `10` | 第一级桶数（`gno_imi` 策略下生效） |
 | `second_order_buckets_count` | int | `10` | 第二级桶数（`gno_imi` 策略下生效） |
-| `ivf_train_type` | string | `"kmeans"` | 中心训练方式：`kmeans` 或 `random` |
+| `ivf_train_type` | string | `"kmeans"` | 中心训练方式：`kmeans`、`e_means`（mini-batch EMA 聚类，[arXiv:2611.09501](https://arxiv.org/abs/2611.09501)，仅 `partition_strategy_type: "ivf"` 支持）或 `random` |
+| `e_means_epochs` | int | `3` | 训练采样的遍历轮数（`ivf_train_type: "e_means"` 时生效）。 |
 | `kmeans_iter_count` | int | `25`（`ivf`）、`30`（`gno_imi`） | KMeans 质心训练的迭代次数（`ivf_train_type: "kmeans"` 时生效）。越大桶划分质量越好，构建越慢。 |
-| `route_max_degree` | int | `64` | 路由 HGraph 的最大度数（`ivf` 策略下生效） |
-| `route_ef_construction` | int | `300` | 路由 HGraph 的构建搜索宽度（`ivf` 策略下生效） |
 | `enable_gpu_build` | bool | `false` | 构建时使用 CUDA 后端（`ivf` 策略下生效），参见 [GPU 加速构建](#gpu-加速构建) |
 | `gpu_device_id` | int | `0` | CUDA 设备序号（`ivf` 策略下生效）；机器上不存在该序号时构建留在 CPU |
 | `gpu_memory_budget` | int | `0` | 设备工作集的字节上限（`ivf` 策略下生效）；`0` 表示按设备空闲显存推导 |
 | `gpu_min_work_threshold` | int | `0` | 值得下放的最小 `count * buckets_count * dim`（`ivf` 策略下生效）；`0` 表示使用标定的默认值 |
 | `base_quantization_type` | string | `"fp32"` | `fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`saq` —— 各量化器细节见[量化章节](../quantization/) |
-| `base_pq_dim` | int | `1` | PQ 子空间数（`pq` / `pqfs` 时必填） |
+| `base_pq_dim` | int | `1` | PQ 子空间维度。仅在 `base_quantization_type` 为 `pq` 或 `pqfs` 时有效。必须整除 `dim`。 |
 | `rabitq_pca_dim` | int | `0` | `base_quantization_type: "rabitq"` 时可选的 PCA 预处理维度 |
 | `rabitq_bits_per_dim_query` | int | `32` | `rabitq` 查询每维位数；允许值为 `4` 或 `32` |
 | `rabitq_bits_per_dim_base` | int | `1` | `rabitq` 底库存储码每维位数；允许范围为 `[1, 8]` |
 | `rabitq_bits_per_dim_precise` | int | 未设置 | 启用 RaBitQ split storage 并设置补充码（`y`）位数；`rabitq_bits_per_dim_base` 表示过滤码（`x`）位数，且 `x + y <= 8` |
-| `rabitq_version` | string | `"standard"` | `rabitq` 布局：`"standard"` 或 `"split_1bit_7bit"` |
+| `rabitq_version` | string | `"standard"` | `rabitq` 布局：`"standard"`、`"split"` 或 `"split_1bit_7bit"`。`"split"` 与 `"split_1bit_7bit"` 互为别名。取值选择 RaBitQ 编码版本：`"standard"` 为单编解码 RaBitQ，`"split"` 为分离式 filter+supplement。 |
 | `rabitq_error_rate` | float | `1.9` | `rabitq` 编码的正数误差预算参数 |
 | `rabitq_use_fht` | bool | `false` | `rabitq` 二值化前是否启用 FHT 旋转 |
 | `fast_encode_rabitq` | bool | `true` | 多 bit `rabitq` 是否使用 CAQ 快速构建；设为 `false` 时使用精确编码 |
@@ -96,6 +95,18 @@ auto result = index->KnnSearch(
 | `saq_avg_bits` | float | `4.0` | SAQ 每维平均记录位预算，范围 `[1, 8]` |
 | `saq_segment_count` | int | `0` | SAQ 分段数；`0` 表示动态选择边界 |
 | `saq_random_rotation` | bool | `true` | 在每个 SAQ 分段内使用独立正交旋转 |
+| `base_file_path` | string | `"./default_file_path"` | IO 类型为磁盘后端时的文件路径 |
+| `base_cache_total_size` | int | `268435456` | base IO 后端的读缓存大小（字节） |
+| `precise_file_path` | string | `"./default_file_path"` | 精排 IO 为磁盘后端时的文件路径 |
+| `precise_cache_total_size` | int | `268435456` | 精排 IO 后端的读缓存大小（字节） |
+| `use_route_graph` | bool | `true` | 为 `ivf` 质心扫描启用路由图；`gno_imi` 忽略 |
+| `buckets_per_data` | int | `1` | 每个向量分配到的桶数。当 `precise_codes_layout` 为 `bucket` 或使用 RaBitQ split 存储时必须为 `1`。 |
+| `use_attribute_filter` | bool | `false` | 启用基于属性的过滤（参见 [属性过滤](../advanced/attribute_filter.md)） |
+| `thread_count` | int | `1` | 构建时的内部线程池大小 |
+| `train_sample_count` | int | `max(65536, 64*buckets_count)` | 训练采样数量。必须 ≥ 512。 |
+| `graph_build_threshold` | int | `0` | 每个桶中向量数超过此值时构建桶内图（度固定为 64）。RaBitQ split 存储要求此值为 `0`。 |
+| `base_enable_read_cache` | bool | `false` | 启用 base IO 后端的读缓存 |
+| `precise_enable_read_cache` | bool | `false` | 启用精排 IO 后端的读缓存 |
 | `use_reorder` | bool | `false` | 是否保留高精度副本用于精排 |
 | `precise_quantization_type` | string | `"fp32"` | 精排量化类型（`use_reorder: true` 时使用） |
 | `precise_codes_layout` | string | `"flat"` | 精排 codes 的存储布局：`"flat"` 保持旧的一向量一码布局；`"bucket"` 在 basic posting 的相同 bucket 和 offset 保存高精度 code |
@@ -103,7 +114,6 @@ auto result = index->KnnSearch(
 | `base_supplement_io_type` | string | 未设置 | RaBitQ split 补充码可选的 IO 后端 |
 | `base_supplement_file_path` | string | 自动派生 | 磁盘型 RaBitQ 补充码可选的文件路径 |
 | `precise_io_type` | string | `"block_memory_io"` | 精排向量的存储后端（`memory_io`、`block_memory_io`、`mmap_io`、`buffer_io`、`async_io`、`uring_io`、`reader_io`） |
-| `precise_file_path` | string | `""` | 当精排 IO 为磁盘后端时的文件路径 |
 
 `precise_codes_layout: "bucket"` 要求 `use_reorder: true`，支持 `memory_io`、
 `block_memory_io`、`buffer_io`、`async_io` 和 `uring_io`
@@ -256,12 +266,17 @@ split 配置要求 `x >= 1`、`y >= 1`、`x + y <= 8`、
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `scan_buckets_count` | int | —（必填） | 每次查询扫描的桶数，须 ≤ `buckets_count`（`disable_bucket_scan` 为 true 时可更大，空槽位补 `-1`） |
-| `disable_bucket_scan` | bool | `false` | 返回桶 ID 及到桶中心距离，不扫描桶内向量。支持批量查询。 |
+| `scan_buckets_count` | int | —（必填） | 每次查询扫描的桶数。超过实际桶数的值会被截断到桶数上限，除非 `disable_bucket_scan` 为 `true`（此时使用请求值原样）。 |
+| `disable_bucket_scan` | bool | `false` | 返回桶 ID 和距离而非重排结果。支持批量查询。 |
+| `first_order_scan_ratio` | float | `1.0` | 扫描的 GNO-IMI 一级桶比例；实际数量为 `max(1, floor(first_order_buckets * ratio))`。仅在 `gno_imi` 下有效。 |
+| `ef_search` | int | `100` | 桶内路由图遍历的搜索广度。≤ 0 使用默认值。 |
 | `factor` | float | `2.0` | 启用精排时，粗排阶段会预取 `factor * topk` 个候选再重打分 |
 | `enable_reorder` | bool | `true` | 即使索引构建时启用了 reorder，也可以在单次请求里设为 `false` 跳过最终精排 |
-| `parallelism` | int | `1` | 单次查询内扫描桶时使用的线程数 |
-| `timeout_ms` | double | `+∞` | 单次查询最长耗时（毫秒），超时会返回当前的部分结果 |
+| `parallelism` | int | `1` | 单次查询内扫描桶时使用的线程数。需要线程池，无池时回退到单线程。 |
+| `timeout_ms` | int | 不限 | 每桶扫描的毫秒级软截止。设为 `0` 会立即超时；不传该参数则不限制。 |
+
+根级 `threshold` 键（与 `ivf` 平级，不属于它）同样生效：取有限数值时，距离超过该值的 KNN
+候选会被丢弃。它在解析 `ivf` 对象之前读取。
 
 ```cpp
 auto result = index->KnnSearch(
@@ -290,3 +305,35 @@ auto fast_result = index->KnnSearch(
 - [创建索引](../guide/create_index.md)
 - [索引参数](../resources/index_parameters.md)
 - [序列化格式](../advanced/serialization.md)
+
+### 可选 worker 诊断（C++）
+
+对于带外部 `distance_batch_func_` 的 IVF 单 query KNN，可附加 `SearchProfile`，
+定位请求并行度已开启但 CPU 利用不足的问题。**默认关闭**；不改变检索结果及
+attribute、距离回调、通用 Filter 的执行顺序。
+
+```cpp
+request.profile_ = std::make_shared<vsag::SearchProfile>();
+auto result = index->SearchWithRequest(request);
+std::cout << request.profile_->ToString(query_id) << '\n';
+request.profile_ = nullptr;  // 关闭采集，而不只是停止打印。
+```
+
+仅在查询返回后读取或格式化。每个同时在途请求应有独立 profile；同一对象并发复用会拒绝，
+顺序复用会重置。库不在 worker 中打印。不支持的 IVF 路径（内置距离、范围查询、批量 query、
+迭代器、仅路由）会拒绝诊断；其他索引类型不采集此 profile。
+
+`ToString(query_id)` 返回一行 `[IVF_PROFILE]` 汇总和每个逻辑 worker 一行 `[IVF_WORKER]`：
+
+| 字段 | 含义 |
+| --- | --- |
+| `total_wall_ms`、`scan_wall_ms` | IVF 请求及并行扫描 elapsed 时间，扫描包含提交任务和等待；不含格式化和打印。 |
+| `worker_cpu_ms`、`scan_avg_cores` | worker 线程 CPU 增量总和及其除以扫描 wall 时间的平均核数；不含回调派生线程的 CPU。 |
+| `start_ms`、`end_ms`、`wall_ms`、`cpu_ms` | 相对扫描起点的执行区间、区间长度和线程 CPU。wall/CPU 差距本身不能区分阻塞、抢占或配额。 |
+| `buckets`、`candidates`、`batches` | 处理的有效桶数、提交距离回调的条目数、回调批次数；副本可能重复标签，抛异常的批次也计已提交条目。 |
+| `attr_ms`、`dist_ms` | 桶属性 executor `Clear/Run`、距离回调 elapsed，包含内部等待；不单独计时逐候选属性检查及通用 Filter。 |
+
+线程 CPU 使用 Linux `CLOCK_THREAD_CPUTIME_ID`；不可用输出 `NA`，不是零核。
+`complete=true` 表示正常返回，包含超时部分返回，不保证完整扫描。
+只在 worker 首尾、桶和批次边界采集，不逐候选埋点。诊断仍可能扰动性能，应按需开启；
+不表示开启零开销，也不保证关闭后与原版绝对无退化。

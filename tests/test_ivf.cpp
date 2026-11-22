@@ -20,6 +20,7 @@
 #include <condition_variable>
 #include <cstring>
 #include <filesystem>
+#include <future>
 #include <limits>
 #include <mutex>
 #include <nlohmann/json.hpp>
@@ -1553,11 +1554,11 @@ TestIVFCalcDistanceByIdMissingId(const fixtures::IVFResourcePtr& resource) {
             const auto missing_id = fixtures::get_missing_id(dataset->base_);
             auto distance = index->CalcDistanceById(query->GetFloat32Vectors(), missing_id);
 
-            REQUIRE(distance.has_value());
-            REQUIRE(distance.value() == -1.0F);
+            REQUIRE_FALSE(distance.has_value());
+            REQUIRE(distance.error().type == vsag::ErrorType::INVALID_ARGUMENT);
         });
 }
-IVF_PR_DAILY_CASE("IVF CalcDistanceById missing id returns -1",
+IVF_PR_DAILY_CASE("IVF CalcDistanceById missing id fails",
                   "[ft][distance][ivf]",
                   TestIVFCalcDistanceByIdMissingId)
 
@@ -2782,6 +2783,7 @@ TEST_CASE("IVF custom distance parallel attribute and post filtering",
     vsag::SearchRequest request;
     request.query_ = query;
     request.topk_ = 3;
+    request.profile_ = std::make_shared<vsag::SearchProfile>();
     request.distance_batch_size_ = 7;
     request.enable_attribute_filter_ = true;
     request.attribute_filter_str_ = R"(multi_in(group, "callback", "|"))";
@@ -2819,6 +2821,11 @@ TEST_CASE("IVF custom distance parallel attribute and post filtering",
             REQUIRE(result.value()->GetDistances()[i] == static_cast<float>(i * 4));
         }
         REQUIRE(seen.size() == count / 2 * buckets_per_data);
+        REQUIRE(request.profile_->complete);
+        REQUIRE(request.profile_->workers.size() == parallelism);
+        uint64_t scored = 0;
+        for (const auto& worker : request.profile_->workers) scored += worker.distance_candidates;
+        REQUIRE(scored == seen.size());
         for (auto label : seen) {
             REQUIRE((label >> 16) % 2 == 0);
         }
@@ -3050,6 +3057,7 @@ TEST_CASE("IVF custom distance parallel request without pool falls back",
     vsag::SearchRequest request;
     request.query_ = query;
     request.topk_ = 10;
+    request.profile_ = std::make_shared<vsag::SearchProfile>();
     request.params_str_ = R"({"ivf":{"scan_buckets_count":1,"parallelism":4}})";
     request.distance_batch_size_ = 2;
     const auto caller = std::this_thread::get_id();
@@ -3063,6 +3071,10 @@ TEST_CASE("IVF custom distance parallel request without pool falls back",
     auto result = created.value()->SearchWithRequest(request);
     REQUIRE(result.has_value());
     REQUIRE(on_caller);
+    REQUIRE(request.profile_->complete);
+    REQUIRE(request.profile_->workers.size() == 1);
+    REQUIRE(request.profile_->workers[0].start_ns <= request.profile_->wall.scan_ns);
+    REQUIRE(request.profile_->workers[0].distance_candidates == 3);
     REQUIRE(result.value()->GetDim() == 3);
     for (int64_t i = 0; i < 3; ++i) {
         REQUIRE(result.value()->GetIds()[i] == labels[i]);
@@ -4151,7 +4163,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     REQUIRE(batch_distances.has_value());
     REQUIRE(std::abs(batch_distances.value()->GetDistances()[0] - precise_distance.value()) <
             1e-6F);
-    REQUIRE(batch_distances.value()->GetDistances()[1] == -1.0F);
+    REQUIRE(std::isnan(batch_distances.value()->GetDistances()[1]));
+    REQUIRE(batch_distances.value()->GetValids() != nullptr);
+    REQUIRE(batch_distances.value()->GetValids()[0]);
+    REQUIRE_FALSE(batch_distances.value()->GetValids()[1]);
 
     constexpr int64_t topk = 10;
     constexpr auto search_param =
@@ -4407,7 +4422,9 @@ TEST_CASE("IVF dense native distance contract", "[distance_contract]") {
             REQUIRE(batch.value()->GetNumElements() == 2);
             REQUIRE(batch.value()->GetDim() == 3);
             REQUIRE(std::abs(batch.value()->GetDistances()[0] - raw.value()) < 1e-5F);
-            REQUIRE(batch.value()->GetDistances()[1] == -1.0F);
+            REQUIRE(std::isnan(batch.value()->GetDistances()[1]));
+            REQUIRE(batch.value()->GetValids() != nullptr);
+            REQUIRE_FALSE(batch.value()->GetValids()[1]);
             auto top = index->CalcDistancesById(query, candidates, 3, precise, 2);
             REQUIRE(top.has_value());
             REQUIRE(top.value()->GetDim() == 2);
@@ -4507,4 +4524,179 @@ TEST_CASE("IVF builds with the documented GPU configuration", "[ft][ivf][pr]") {
         REQUIRE(reloaded_result.has_value());
         REQUIRE(ids_of(reloaded_result.value(), topk) == ids);
     }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
+                             "IVF Build With E-Means Training",
+                             "[ft][ivf][pr]") {
+    auto dim = 64;
+    std::string param = fmt::format(R"(
+    {{
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": {},
+        "index_param": {{
+            "buckets_count": 32,
+            "base_quantization_type": "fp32",
+            "partition_strategy_type": "ivf",
+            "ivf_train_type": "e_means",
+            "e_means_epochs": 3,
+            "train_sample_count": 2048
+        }}
+    }}
+    )",
+                                    dim);
+
+    auto index = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, param, true);
+    auto dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, 2048, "l2");
+    fixtures::TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto serialize_result = index->Serialize();
+    REQUIRE(serialize_result.has_value());
+    auto restored = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, param, true);
+    REQUIRE(restored->Deserialize(serialize_result.value()).has_value());
+
+    auto search_param = fmt::format(fixtures::search_param_tmp, 32);
+    fixtures::IVFTestIndex::TestGeneral(restored, dataset, search_param, 0.90F);
+}
+
+TEST_CASE("IVF custom distance profiling isolates concurrent requests",
+          "[ft][search][ivf][custom_parallel][profile][pr]") {
+    constexpr int64_t count = 256;
+    constexpr int64_t dim = 4;
+    std::vector<float> vectors(count * dim);
+    std::vector<int64_t> labels(count);
+    for (int64_t i = 0; i < count; ++i) {
+        labels[i] = i << 16;
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[i * dim + d] = static_cast<float>((i * (d + 1)) % 37);
+        }
+    }
+    auto params = fixtures::IVFTestIndex::GenerateIVFBuildParametersString(
+        "l2", dim, "fp32", 8, "random", false, 1, false, 4);
+    auto index = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, params, true);
+    auto base = vsag::Dataset::Make();
+    base->NumElements(count)
+        ->Dim(dim)
+        ->Float32Vectors(vectors.data())
+        ->Ids(labels.data())
+        ->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 3;
+    request.params_str_ = R"({"ivf":{"scan_buckets_count":8,"parallelism":4}})";
+    request.distance_batch_size_ = 7;
+    request.enable_filter_ = true;
+    request.filter_ = std::make_shared<AllowEveryFourthLabelFilter>();
+    request.distance_batch_func_ = [](const int64_t* ids, uint64_t n, float* scores) {
+        for (uint64_t i = 0; i < n; ++i) {
+            scores[i] = static_cast<float>(ids[i] >> 16);
+        }
+    };
+    auto plain = index->SearchWithRequest(request);
+    REQUIRE(plain.has_value());
+    {
+        auto first = request;
+        auto second = request;
+        first.profile_ = std::make_shared<vsag::SearchProfile>();
+        second.profile_ = std::make_shared<vsag::SearchProfile>();
+        // Callers are independent of the index's own worker pool.
+        auto a = std::async(std::launch::async, [&] { return index->SearchWithRequest(first); });
+        auto b = std::async(std::launch::async, [&] { return index->SearchWithRequest(second); });
+        auto result_a = a.get();
+        auto result_b = b.get();
+        REQUIRE(result_a.has_value());
+        REQUIRE(result_b.has_value());
+        for (const auto& result : {result_a.value(), result_b.value()}) {
+            REQUIRE(result->GetDim() == 3);
+            for (int64_t k = 0; k < 3; ++k) {
+                REQUIRE(result->GetIds()[k] == plain.value()->GetIds()[k]);
+                REQUIRE(result->GetDistances()[k] == plain.value()->GetDistances()[k]);
+            }
+        }
+        for (const auto& profile : {first.profile_, second.profile_}) {
+            REQUIRE(profile->complete);
+            REQUIRE(profile->wall.total_ns > 0);
+            REQUIRE(profile->wall.scan_ns > 0);
+            REQUIRE(profile->wall.total_ns >= profile->wall.scan_ns);
+            REQUIRE(profile->workers.size() == 4);
+            uint64_t scored = 0, buckets = 0;
+            for (const auto& worker : profile->workers) {
+                scored += worker.distance_candidates;
+                buckets += worker.buckets;
+#if defined(__linux__)
+                REQUIRE(worker.cpu_available);
+#endif
+                REQUIRE(worker.end_ns >= worker.start_ns);
+                REQUIRE(worker.end_ns <= profile->wall.scan_ns);
+                REQUIRE(worker.execution_ns >= worker.distance_callback_ns);
+            }
+            REQUIRE(scored == count);
+            REQUIRE(buckets == 8);
+            const auto report = profile->ToString(42);
+            REQUIRE(report.find("[IVF_PROFILE] query=42") != std::string::npos);
+            REQUIRE(report.find("[IVF_WORKER] query=42 worker=3") != std::string::npos);
+            REQUIRE(report.find("scan_avg_cores=") != std::string::npos);
+            profile->workers[0].cpu_available = false;
+            const auto unavailable = profile->ToString(42);
+            REQUIRE(unavailable.find("worker_cpu_ms=NA") != std::string::npos);
+            REQUIRE(unavailable.find("scan_avg_cores=NA") != std::string::npos);
+        }
+        // Sequential reuse resets the output instead of accumulating a previous query.
+        REQUIRE(index->SearchWithRequest(first).has_value());
+        REQUIRE(first.profile_->complete);
+        uint64_t reused_count = 0;
+        for (const auto& worker : first.profile_->workers)
+            reused_count += worker.distance_candidates;
+        REQUIRE(reused_count == count);
+        first.distance_batch_func_ = [](const int64_t*, uint64_t, float*) {
+            throw std::runtime_error("profile callback failure");
+        };
+        REQUIRE_FALSE(index->SearchWithRequest(first).has_value());
+        REQUIRE_FALSE(first.profile_->complete);
+        REQUIRE(first.profile_->wall.total_ns > 0);
+        first.distance_batch_func_ = request.distance_batch_func_;
+        REQUIRE(index->SearchWithRequest(first).has_value());
+        REQUIRE(first.profile_->complete);
+    }
+    request.profile_ = std::make_shared<vsag::SearchProfile>();
+    auto original_callback = request.distance_batch_func_;
+    std::mutex gate;
+    std::condition_variable condition;
+    bool entered = false, release = false;
+    request.distance_batch_func_ = [&](const int64_t* ids, uint64_t n, float* scores) {
+        {
+            std::unique_lock<std::mutex> lock(gate);
+            entered = true;
+            condition.notify_all();
+            condition.wait(lock, [&] { return release; });
+        }
+        original_callback(ids, n, scores);
+    };
+    auto active = std::async(std::launch::async, [&] { return index->SearchWithRequest(request); });
+    bool started;
+    {
+        std::unique_lock<std::mutex> lock(gate);
+        started = condition.wait_for(lock, std::chrono::seconds(10), [&] { return entered; });
+    }
+    // Do not assert before releasing the waiting callback: an assertion unwinds futures.
+    bool rejected = false;
+    if (started) {
+        rejected = not index->SearchWithRequest(request).has_value();
+    }
+    {
+        std::lock_guard<std::mutex> lock(gate);
+        release = true;
+    }
+    condition.notify_all();
+    auto finished = active.get();
+    REQUIRE(started);
+    REQUIRE(rejected);
+    REQUIRE(finished.has_value());
+    REQUIRE(request.profile_->complete);
+    request.distance_batch_func_ = nullptr;
+    REQUIRE_FALSE(index->SearchWithRequest(request).has_value());
 }

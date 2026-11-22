@@ -56,10 +56,17 @@ public:
     static constexpr uint8_t kPoisonByte = 0xCD;
 #endif
 
+    /// Every block starts on a cache-line boundary. Records are stored back to back from the
+    /// start of a block, so a record whose size is a multiple of the line size then covers
+    /// exactly that many lines. A block that starts 16 bytes into a line (what malloc returns
+    /// for a large request) makes every such record touch one more line.
+    static constexpr uint64_t kBlockAlignment = 64;
+
     explicit BlockMemoryBackend(uint64_t block_size, Allocator* allocator)
         : allocator_(allocator),
           block_size_(MemoryBlockIOParameter::NearestPowerOfTwo(block_size)),
-          blocks_(AllocatorWrapper<uint8_t*>(allocator)) {
+          blocks_(AllocatorWrapper<uint8_t*>(allocator)),
+          allocations_(AllocatorWrapper<uint8_t*>(allocator)) {
         if (block_size_ == 0) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
                                 "BlockMemoryBackend block size must be greater than zero");
@@ -69,8 +76,8 @@ public:
     }
 
     ~BlockMemoryBackend() {
-        for (auto* block : blocks_) {
-            allocator_->Deallocate(block);
+        for (auto* allocation : allocations_) {
+            allocator_->Deallocate(allocation);
         }
     }
 
@@ -224,7 +231,8 @@ public:
     ShrinkPhysical(uint64_t size) {
         uint64_t block_count = size == 0 ? 0 : ((size - 1) >> block_bit_) + 1;
         while (blocks_.size() > block_count) {
-            allocator_->Deallocate(blocks_.back());
+            allocator_->Deallocate(allocations_.back());
+            allocations_.pop_back();
             blocks_.pop_back();
         }
     }
@@ -237,7 +245,7 @@ public:
 
     [[nodiscard]] int64_t
     MemoryUsage(uint64_t) const {
-        return static_cast<int64_t>(blocks_.size() * block_size_);
+        return static_cast<int64_t>(blocks_.size() * AllocationSize());
     }
 
     [[nodiscard]] const uint8_t*
@@ -259,6 +267,18 @@ private:
             ++count;
         }
         return count;
+    }
+
+    /// Bytes requested from the allocator for one block: the block plus room to align it.
+    [[nodiscard]] uint64_t
+    AllocationSize() const {
+        return block_size_ + kBlockAlignment - 1;
+    }
+
+    [[nodiscard]] static uint8_t*
+    AlignBlock(uint8_t* allocation) {
+        const uint64_t misalignment = reinterpret_cast<uintptr_t>(allocation) % kBlockAlignment;
+        return misalignment == 0 ? allocation : allocation + (kBlockAlignment - misalignment);
     }
 
     [[nodiscard]] bool
@@ -289,22 +309,28 @@ private:
     EnsureCapacity(uint64_t size, bool zero_fill = true) {
         uint64_t required_blocks = size == 0 ? 0 : ((size - 1) >> block_bit_) + 1;
         blocks_.reserve(required_blocks);
+        allocations_.reserve(required_blocks);
         while (blocks_.size() < required_blocks) {
-            auto* block = static_cast<uint8_t*>(allocator_->Allocate(block_size_));
-            if (block == nullptr) {
+            auto* allocation = static_cast<uint8_t*>(allocator_->Allocate(AllocationSize()));
+            if (allocation == nullptr) {
                 throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
                                     "BlockMemoryBackend allocation failed");
             }
+            auto* block = AlignBlock(allocation);
             if (zero_fill) {
                 std::memset(block, 0, block_size_);
             }
+            allocations_.emplace_back(allocation);
             blocks_.emplace_back(block);
         }
     }
 
     Allocator* allocator_{nullptr};
     uint64_t block_size_{0};
+    /// Cache-line aligned start of each block.
     Vector<uint8_t*> blocks_;
+    /// What the allocator returned for each block; this is the pointer to deallocate.
+    Vector<uint8_t*> allocations_;
     uint64_t block_bit_{0};
     uint64_t in_block_mask_{0};
 };

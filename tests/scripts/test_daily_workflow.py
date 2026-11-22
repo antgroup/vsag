@@ -13,7 +13,89 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/daily_test.yml"
 
 
+def job_dependencies(body):
+    body = re.sub(r"(?m)[ \t]+#.*$", "", body)
+    match = re.search(r"(?m)^    needs:[ \t]*(\[[^]]*\]|(?:\n      - [^\n]+)+|[^\n]*)", body)
+    return set(re.findall(r"[a-z0-9_][a-z0-9_-]*", match[1])) if match else set()
+
+
 class DailyWorkflowTests(unittest.TestCase):
+    def test_extra_stage_is_separate_bounded_and_reuses_the_original_build(self):
+        plan = job_text(WORKFLOW, "daily-extra-plan")
+        self.assertIn("daily_test_asan_x86", plan)
+        self.assertIn("full-coverage-coverage", plan)
+        self.assertIn("full-lint-clang-tidy-check", plan)
+        self.assertNotIn("always() &&", plan)
+        extra = job_text(WORKFLOW, "daily-extra-x86")
+        self.assertIn("daily_test_x86-${{ github.run_id }}", extra)
+        self.assertIn("daily-extra-plan", extra)
+        self.assertIn("timeout-minutes: 270", extra)
+        self.assertNotIn("make asan", extra)
+        self.assertNotIn("continue-on-error", extra)
+        summary = job_text(WORKFLOW, "daily-summary")
+        self.assertIn("daily-extra-x86", summary)
+        self.assertIn("--extra-proposal", summary)
+        download = summary.split("- name: Download extra quota plan\n", 1)[1].split("- name:", 1)[0]
+        self.assertIn("if: ${{ always() && needs.daily-extra-plan.result != 'skipped' }}", download)
+        self.assertNotIn("continue-on-error", download)
+        self.assertIn("--job-reports", summary)
+
+    def test_job_dependencies_accepts_scalar_block_and_multiline_flow(self):
+        for needs, expected in (
+                ("daily-plan", {"daily-plan"}),
+                ("\n      - daily-plan\n      - daily_build_asan_x86", {"daily-plan", "daily_build_asan_x86"}),
+                ("[daily-plan, daily_build_asan_x86]", {"daily-plan", "daily_build_asan_x86"}),
+                ("[daily-plan,\n      daily_build_asan_x86 # build status\n    ]",
+                 {"daily-plan", "daily_build_asan_x86"})):
+            with self.subTest(needs=needs):
+                self.assertEqual(job_dependencies(f"    needs: {needs}\n    steps:\n"), expected)
+        self.assertEqual(job_dependencies("    steps:\n"), set())
+
+    def test_summary_receives_all_supplemental_prerequisite_results(self):
+        def dependencies(name):
+            return job_dependencies(job_text(WORKFLOW, name))
+
+        prerequisites = dependencies("daily-extra-x86")
+        pending = list(prerequisites)
+        while pending:
+            unseen = dependencies(pending.pop()) - prerequisites
+            prerequisites.update(unseen)
+            pending.extend(unseen)
+        self.assertIn("daily_build_asan_x86", prerequisites)
+        self.assertIn("full-platform-build-asan-macos-arm64", prerequisites)
+        self.assertLessEqual(prerequisites | {"daily-extra-x86"}, dependencies("daily-summary"))
+
+    def test_only_final_regression_job_publishes_cache_summary(self):
+        workflow = WORKFLOW.read_text()
+        self.assertIn("VSAG_DAILY_AGGREGATE:", workflow)
+        for p in [WORKFLOW] + list((ROOT / '.github/actions').glob('*/action.yml')):
+            text = p.read_text()
+            if 'hendrikmuhs/ccache-action@v1.2.25' in text:
+                self.assertIn("job-summary: ${{ env.VSAG_DAILY_AGGREGATE != '1'", text, str(p))
+        self.assertIn('name: Nightly Summary', job_text(WORKFLOW,'daily-summary'))
+        self.assertIn('name: Coverage — C++ lines and branches',job_text(WORKFLOW,'full-coverage-coverage'))
+        for name in ('performance-performance', 'build-performance-benchmark-x86'):
+            self.assertNotIn('daily-job-report', job_text(WORKFLOW, name))
+        readme=(ROOT/'README.md').read_text()
+        self.assertIn('Nightly-10h%20regression',readme)
+        self.assertNotIn('img.shields.io/circleci/',readme)
+
+    def test_source_preflight_gates_heavy_regression_jobs(self):
+        plan = job_text(WORKFLOW, "daily-plan")
+        self.assertIn("run: python3 scripts/testing/daily_parameters.py", plan)
+        self.assertLess(plan.index("Preflight Nightly parameter inventory"),
+                        plan.index("Freeze source, date and matrix"))
+        self.assertNotIn("continue-on-error", plan)
+        for name in ("daily_build_asan_x86", "daily_build_asan_aarch64", "daily_build_simd",
+                     "daily_build_tsan", "full-platform-build-asan-x86",
+                     "full-platform-build-asan-macos-arm64", "full-python-build-python-wheel-x86",
+                     "full-python-build-python-wheel-aarch64", "full-lint-clang-tidy-check",
+                     "full-coverage-coverage", "full-compatibility-compatibility"):
+            body = job_text(WORKFLOW, name)
+            needs = re.search(r"(?m)^    needs:([^\n]*(?:\n      - [^\n]+)*)", body)
+            self.assertIsNotNone(needs, name)
+            self.assertIn("daily-plan", needs[1], name)
+
     def test_shared_arm_artifact_and_x86_shard_artifact_names(self):
         workflow = WORKFLOW.read_text()
         self.assertNotIn("  full-platform-build-asan-aarch64:", workflow)
@@ -42,11 +124,12 @@ class DailyWorkflowTests(unittest.TestCase):
         build = job_text(WORKFLOW, "daily_build_asan_x86")
         self.assertLess(build.index("Load Cache"), build.index("Check build/lint execution window"))
 
-    def test_regression_schedule_stays_off(self):
+    def test_nightly_schedule_and_display_name(self):
         text = WORKFLOW.read_text()
         self.assertEqual(re.findall(r'(?m)^    - cron: ["\x27]([^"\x27]+)', text),
-                         ["01 08 * * 1-5", "23 3 * * 1"])
-        self.assertIn("github.event_name != 'schedule'", job_text(WORKFLOW, "daily-plan"))
+                         ["0 14 * * *", "23 3 * * 1"])
+        self.assertTrue(text.startswith("name: Nightly CI\n"))
+        self.assertNotIn("01 08 * * 1-5", text)
 
     def test_context_and_evidence_survive_failed_job_reruns(self):
         text = job_text(WORKFLOW, "daily-plan")
@@ -76,16 +159,18 @@ class DailyWorkflowTests(unittest.TestCase):
         expected = ast.literal_eval(re.search(r"expected-lanes.json', (\[.*\])\)", text).group(1))
         expected += [f'daily_test_asan_x86-{binary}-shard{i}'
                      for binary in ('unittests', 'functests') for i in range(json.loads((ROOT/'scripts/testing/daily_budget_policy.json').read_text())['x86_shards'])]
+        from scripts.ci import python_ci
+        expected += python_ci.lanes()
         self.assertEqual(len(expected), len(set(expected)))
         workflow = WORKFLOW.read_text()
         names = re.findall(r"(?m)^  ([a-z0-9_-]+):$", workflow.split("jobs:\n", 1)[1])
         for name in names:
             job = job_text(WORKFLOW, name)
             if "VSAG_DAILY_CONTEXT:" in job:
-                self.assertIn("Download frozen Daily plan", job, name)
+                self.assertIn("Download frozen Nightly plan", job, name)
                 self.assertIn("uses: ./.github/actions/daily-execution-window", job, name)
-                self.assertIn("Upload Daily evidence", job, name)
-                self.assertRegex(job, r"Upload Daily evidence\n\s+if: always\(\)")
+                self.assertIn("Upload Nightly evidence", job, name)
+                self.assertRegex(job, r"Upload Nightly evidence\n\s+if: always\(\)")
                 self.assertTrue(any(lane.startswith(name + "-") for lane in expected), name)
         summary = job_text(WORKFLOW, "daily-summary")
         self.assertIn("always()", summary)
@@ -118,7 +203,7 @@ class DailyWorkflowTests(unittest.TestCase):
         assignments = []
         for source in sources:
             assignments += re.findall(r"export (?:LSAN|TSAN)_OPTIONS=.*", source.read_text())
-        self.assertEqual(len(assignments), 6)
+        self.assertEqual(len(assignments), 7)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "omp.supp").write_text("leak:libomp\n")

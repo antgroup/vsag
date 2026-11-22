@@ -705,6 +705,16 @@ public:
                 // Preserve the existing concrete-index validation for malformed IVF parameters.
             }
         }
+        // Iterator search is only implemented for HGraph; reject it early
+        // for non-HGraph inner indexes so callers get a clear error rather than
+        // silently receiving one-shot results.
+        if (effective_request.enable_iterator_search_) {
+            if (this->inner_index_->GetIndexType() != IndexType::HGRAPH) {
+                return tl::unexpected(
+                    Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                          "iterator search is only supported for HGraph indexes"));
+            }
+        }
         SAFE_CALL(
             ValidateSearchThreshold(effective_request.threshold_);
             if constexpr (HasTypedSearchWithRequest<T>::value) {

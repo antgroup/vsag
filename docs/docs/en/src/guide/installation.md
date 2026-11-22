@@ -17,7 +17,7 @@ docker run -it --rm -v $(pwd):/work -w /work vsaglib/vsag:ubuntu bash
 
 ### Requirements
 
-- **Operating System**: Ubuntu 20.04+, CentOS 7+, or macOS 14+ on Apple Silicon
+- **Operating System**: Ubuntu 20.04+, CentOS 7+, or macOS 15+ on Apple Silicon
 - **Compiler**: GCC 9.4.0+, Clang 13.0.0+, or Apple Clang from Xcode Command Line Tools
 - **CMake**: 3.18.0+
 - **clang-format / clang-tidy**: exactly version **20** (enforced by `make fmt` / `make lint`)
@@ -33,8 +33,8 @@ make release
 
 The dependency script detects Linux versus macOS. On macOS it installs or locates the
 Homebrew dependencies and uses Apple's Accelerate framework where appropriate. The supported
-macOS path is the arm64 C++ library build; published C++ archives and `pyvsag` wheels remain
-Linux-focused.
+macOS path includes native arm64 C++ and Python builds. Published C++ archives and production
+PyPI wheels remain Linux-only; macOS wheels are available through [TestPyPI](pyvsag.md#nightly-builds-testpypi).
 
 Other common Makefile targets:
 

@@ -15,8 +15,9 @@ runs:
         clang++ --version
         cmake --version
     - name: Load Cache
-      uses: hendrikmuhs/ccache-action@v1.2
+      uses: hendrikmuhs/ccache-action@v1.2.25
       with:
+        job-summary: ${{ env.VSAG_DAILY_AGGREGATE != '1' && 'CCache Statistics' || '' }}
         max-size: "2G"
         save: true
         key: build-macos-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
@@ -33,7 +34,7 @@ runs:
         rm -rf ./build/hdf5
         rm -rf ./build/tools
     - name: Save Test
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         path: ./build
         name: test_macos_arm64-${{ github.run_id }}

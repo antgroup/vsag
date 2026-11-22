@@ -388,6 +388,13 @@ public:
     bool
     UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) override;
 
+    // Internal SIMQ clustering synchronization. The owner pins graph structure.
+    void
+    SetClusterVectorNodeLocks(bool enabled);
+
+    LockGuard
+    AcquireClusterNodeWriteLock(int64_t label);
+
     bool
     UpdateId(int64_t old_id, int64_t new_id) override;
 
@@ -539,6 +546,8 @@ public:
                      RaBitQSearchCandidateBuffers* rabitq_candidates = nullptr) const;
 
 private:
+    static constexpr uint64_t cache_refine_block_size_ = 128;
+
     float
     calc_native_distance_by_id(const void* native_query,
                                int64_t id,
@@ -1367,5 +1376,7 @@ private:
     float build_cache_hit_rate_{-1.0F};     // cache hit rate from last cache-based build
     uint64_t build_cache_hit_nodes_{0};     // number of nodes with cache hit
     uint64_t build_cache_missed_nodes_{0};  // number of nodes without cache hit
+
+    bool cluster_vector_node_locks_{false};  // temporary clustering graph only
 };
 }  // namespace vsag
