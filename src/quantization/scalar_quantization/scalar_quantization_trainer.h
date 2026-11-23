@@ -18,6 +18,7 @@
 #include <cstdint>
 
 #include "typing.h"
+#include "utils/training_rows.h"
 
 namespace vsag {
 
@@ -46,6 +47,36 @@ public:
                  float& lower_bound,
                  bool need_normalize = false,
                  SQTrainMode mode = SQTrainMode::TRUNC_BOUND);
+
+    void
+    TrainHalf(const uint16_t* data,
+              uint64_t count,
+              bool bf16,
+              float* upper_bound,
+              float* lower_bound,
+              bool need_normalize = false,
+              SQTrainMode mode = SQTrainMode::TRUNC_BOUND);
+
+    void
+    TrainRows(const TrainingRows& input,
+              float* upper,
+              float* lower,
+              bool normalize = false,
+              SQTrainMode mode = SQTrainMode::TRUNC_BOUND);
+    void
+    TrainUniformRows(const TrainingRows& input,
+                     float& upper,
+                     float& lower,
+                     bool normalize = false,
+                     SQTrainMode mode = SQTrainMode::TRUNC_BOUND);
+    void
+    TrainUniformHalf(const uint16_t* data,
+                     uint64_t count,
+                     bool bf16,
+                     float& upper,
+                     float& lower,
+                     bool normalize = false,
+                     SQTrainMode mode = SQTrainMode::TRUNC_BOUND);
 
     inline void
     SetSampleCount(uint64_t sample) {

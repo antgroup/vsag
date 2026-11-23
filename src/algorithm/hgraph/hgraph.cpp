@@ -798,6 +798,59 @@ HGraph::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
     codes->Decode(buffer.Data(), data);
 }
 
+bool
+HGraph::TryDecodeStoredRow(InnerIdType inner_id, float* data) const {
+    std::shared_lock<std::shared_mutex> lock;
+    if (this->using_dedup_storage() && !this->immutable_.load(std::memory_order_acquire)) {
+        lock = this->acquire_global_read_lock();
+    }
+    auto codes = (has_precise_reorder()) ? high_precise_codes_ : basic_flatten_codes_;
+    codes = (create_new_raw_vector_) ? raw_vector_ : codes;
+    auto buffer = codes->AcquireCodesById(inner_id);
+    if (not buffer) {
+        return false;
+    }
+    return codes->Decode(buffer.Data(), data);
+}
+
+void
+HGraph::GetFloat32VectorByInnerId(InnerIdType inner_id, float* data) const {
+    if (data_type_ != DataTypes::DATA_TYPE_FP16 and data_type_ != DataTypes::DATA_TYPE_BF16) {
+        this->GetVectorByInnerId(inner_id, data);
+        return;
+    }
+    std::shared_lock<std::shared_mutex> lock;
+    if (this->using_dedup_storage() && !this->immutable_.load(std::memory_order_acquire)) {
+        lock = this->acquire_global_read_lock();
+    }
+    auto codes = (has_precise_reorder()) ? high_precise_codes_ : basic_flatten_codes_;
+    codes = (create_new_raw_vector_) ? raw_vector_ : codes;
+    auto buffer = codes->AcquireCodesById(inner_id);
+    if (not buffer) {
+        // Fused RaBitQ decode is already FP32, unlike the regular native Decode ABI.
+        if (rabitq_fused_datacell_ != nullptr and codes.get() == basic_flatten_codes_.get() and
+            rabitq_split_codes_ != nullptr and
+            rabitq_split_codes_->DecodeFusedById(inner_id, data)) {
+            return;
+        }
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            fmt::format("failed to get vector by inner id {}", inner_id));
+    }
+    if (GetCodeSlotPhysicalFlatten(codes)->SupportSplitCodeStorage()) {
+        if (not codes->Decode(buffer.Data(), data)) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "HGraph vector source does not support decode");
+        }
+        return;
+    }
+    Vector<float> native_row(dim_, allocator_);
+    if (not codes->Decode(buffer.Data(), native_row.data())) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "HGraph vector source does not support decode");
+    }
+    this->expand_native_half_row(native_row.data(), data);
+}
+
 void
 HGraph::SetImmutable() {
     if (this->immutable_.load(std::memory_order_acquire)) {
@@ -1022,6 +1075,10 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             "externally locked node updates must use force_update");
     }
+    CHECK_ARGUMENT(new_base != nullptr, "new_base is nullptr");
+    CHECK_ARGUMENT(new_base->GetNumElements() == 1, "updated dataset must contain one vector");
+    CHECK_ARGUMENT(new_base->GetDim() == dim_,
+                   "updated vector dimension must match the index dimension");
     std::shared_lock<std::shared_mutex> force_remove_rlock;
     if (this->support_force_remove()) {
         force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
@@ -1037,6 +1094,7 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
     void* new_base_vec = nullptr;
     uint64_t data_size = 0;
     get_vectors(data_type_, dim_, new_base, &new_base_vec, &data_size);
+    CHECK_ARGUMENT(new_base_vec != nullptr, "updated vector must not be null");
     if (this->rabitq_fused_datacell_ != nullptr) {
         CHECK_ARGUMENT(new_base->GetDim() == dim_,
                        "updated vector dimension must match the index dimension");
@@ -1049,12 +1107,19 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
         float self_dist = 0.0F;
         if (this->rabitq_fused_datacell_ == nullptr) {
             // 1. check whether vectors are same
-            Vector<int8_t> base_data(data_size, allocator_);
-            GetVectorByInnerId(inner_id, reinterpret_cast<float*>(base_data.data()));
-            const float old_self_dist =
-                this->calc_native_distance_by_id(base_data.data(), id, true);
+            // Decode() writes through a shared float* ABI whose payload width is per-cell:
+            // half-input adapter cells emit packed 16-bit words while an FP32 writer emits
+            // full floats. Size this scratch for the widest writer so neither layout
+            // overruns it, and skip the equality shortcut when the cell cannot decode at
+            // all (RaBitQ split codes report false) instead of comparing untouched bytes.
+            Vector<float> base_data(dim_, allocator_);
+            const bool have_old_self_dist = this->TryDecodeStoredRow(inner_id, base_data.data());
+            float old_self_dist = 0.0F;
+            if (have_old_self_dist) {
+                old_self_dist = this->calc_native_distance_by_id(base_data.data(), id, true);
+            }
             self_dist = this->calc_native_distance_by_id(new_base_vec, id, true);
-            if (std::abs(old_self_dist - self_dist) < 1e-3) {
+            if (have_old_self_dist and std::abs(old_self_dist - self_dist) < 1e-3) {
                 return true;
             }
         } else {
@@ -1116,6 +1181,13 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
     }
     if (has_precise_reorder()) {
         update_status = update_status && high_precise_codes_->UpdateVector(new_base_vec, inner_id);
+    }
+    if (update_status and create_new_raw_vector_ and raw_vector_ != nullptr and
+        raw_vector_.get() != basic_flatten_codes_.get() and
+        raw_vector_.get() != high_precise_codes_.get()) {
+        // Independent raw storage uses the same logical ID and native input
+        // dtype. Shared base/precise storage was updated above already.
+        update_status = raw_vector_->UpdateVector(new_base_vec, inner_id);
     }
     return update_status;
 }

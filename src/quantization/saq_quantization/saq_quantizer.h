@@ -61,6 +61,18 @@ public:
 
     bool
     TrainImpl(const float* data, uint64_t count);
+    static constexpr bool TRAINING_ROWS_SUPPORTED = true;
+    void
+    ValidateTrainingRowsShapeImpl(const TrainingRows& rows) const {
+        const uint64_t d = this->dim_;
+        if (rows.Dim() != d || d == 0 || d > INT32_MAX || rows.Count() < 2 ||
+            std::min(rows.Count(), MAX_TRAINING_SAMPLES) >
+                static_cast<uint64_t>(PTRDIFF_MAX) / sizeof(float) / d ||
+            d > static_cast<uint64_t>(PTRDIFF_MAX) / sizeof(float) / d)
+            throw std::invalid_argument("invalid SAQ TrainingRows shape or span");
+    }
+    bool
+    TrainRowsImpl(const TrainingRows& rows);
 
     bool
     EncodeOneImpl(const float* data, uint8_t* codes) const;

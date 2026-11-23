@@ -149,6 +149,25 @@ EMeansCluster::DefaultPeakStep(uint64_t count, uint32_t k, int epochs, uint64_t 
 
 Vector<int>
 EMeansCluster::Run(uint32_t k,
+                   const TrainingRows& rows,
+                   int epochs,
+                   double* err,
+                   std::optional<uint32_t> random_seed,
+                   uint64_t batch_size,
+                   double peak_step) {
+    if (dim_ <= 0 || rows.Dim() != static_cast<uint64_t>(dim_) || rows.Count() == 0 ||
+        rows.Count() > static_cast<uint64_t>(PTRDIFF_MAX) / sizeof(float) / rows.Dim()) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid e-means TrainingRows shape");
+    }
+    Vector<float> expanded(rows.Count() * rows.Dim(), allocator_);
+    for (uint64_t i = 0; i < rows.Count(); ++i) {
+        rows.Read(i, expanded.data() + i * rows.Dim());
+    }
+    return Run(k, expanded.data(), rows.Count(), epochs, err, random_seed, batch_size, peak_step);
+}
+
+Vector<int>
+EMeansCluster::Run(uint32_t k,
                    const float* datas,
                    uint64_t count,
                    int epochs,

@@ -95,6 +95,15 @@ public:
         return base_->FactoryComputer(query);
     }
 
+    bool
+    SupportsTrainingRows() const override {
+        return base_->SupportsTrainingRows();
+    }
+    void
+    TrainRows(const TrainingRows& rows) override {
+        base_->TrainRows(rows);
+        this->refresh_metadata();
+    }
     void
     Train(const void* data, uint64_t count) override {
         base_->Train(data, count);

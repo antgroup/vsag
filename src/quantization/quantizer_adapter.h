@@ -41,6 +41,27 @@ public:
 
     bool
     TrainImpl(const float* data, uint64_t count);
+    static constexpr bool TRAINING_ROWS_SUPPORTED = QuantT::SupportsTrainingRows();
+    bool
+    CanTrainRowsImpl() const {
+        return this->inner_quantizer_->CanTrainRows();
+    }
+    void
+    ValidateTrainingRowsShapeImpl(const TrainingRows& rows) const {
+        this->inner_quantizer_->ValidateTrainingRowsShape(rows);
+    }
+    bool
+    TrainRowsImpl(const TrainingRows& input) {
+        // Provider values are already FP32, regardless of external adapter dtype.
+        if constexpr (TRAINING_ROWS_SUPPORTED) {
+            if (input.Dim() != this->dim_ || input.Count() == 0)
+                throw std::invalid_argument("invalid adapter TrainingRows shape");
+            this->is_trained_ = false;
+            this->is_trained_ = this->inner_quantizer_->ReTrainRows(input);
+            return this->is_trained_;
+        }
+        throw std::invalid_argument("adapter inner quantizer rejects TrainingRows");
+    }
 
     bool
     EncodeOneImpl(const float* data, uint8_t* codes);

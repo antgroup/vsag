@@ -14,12 +14,12 @@
 // limitations under the License.
 
 #pragma once
-
 #include <limits>
 #include <string>
 
 #include "algorithm/ivf/ivf_partition_strategy.h"
 #include "bucket_datacell_parameter.h"
+#include "common.h"
 #include "flatten_optimized_build_interface.h"
 #include "index_common_param.h"
 #include "quantization/computer.h"
@@ -28,6 +28,7 @@
 #include "storage/stream_writer.h"
 #include "typing.h"
 #include "utils/pointer_define.h"
+#include "utils/training_rows.h"
 
 namespace vsag {
 DEFINE_POINTER(BucketInterface);
@@ -138,6 +139,14 @@ public:
 
     virtual void
     Train(const void* data, uint64_t count) = 0;
+    virtual bool
+    SupportsTrainingRows() const {
+        return false;
+    }
+    virtual void
+    TrainRows(const TrainingRows&) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "datacell does not support TrainingRows");
+    }
 
     // Optional lifecycle for bulk builds. Implementations must pre-size any storage that is
     // written concurrently and keep the normal InsertVector behavior when this returns false.
