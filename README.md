@@ -15,7 +15,7 @@ last-reviewed: 2026-05-12
   <h1><img alt="vsag-pages" src="docs/banner.svg" width=500/></h1>
 
 [![Nightly](https://img.shields.io/badge/Nightly-10h%20regression-blue?logo=githubactions)](https://github.com/antgroup/vsag/actions/workflows/daily_test.yml)
-[![codecov](https://codecov.io/gh/antgroup/vsag/graph/badge.svg?token=KDT3SpPMYS)](https://codecov.io/gh/antgroup/vsag)
+[![Nightly C++ line coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fantgroup%2Fvsag%2Fnightly-coverage-badge%2Fbadge.json)](https://github.com/antgroup/vsag/tree/nightly-coverage-badge)
 ![GitHub License](https://img.shields.io/github/license/antgroup/vsag)
 ![GitHub Release](https://img.shields.io/github/v/release/antgroup/vsag?label=last%20release)
 ![GitHub Contributors](https://img.shields.io/github/contributors/antgroup/vsag)
