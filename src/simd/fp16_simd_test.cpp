@@ -55,15 +55,15 @@ TEST_CASE("Encode & Decode FP16", "[ut][simd]") {
             sse = sse::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);       \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sse));                   \
         }                                                                             \
-        if (SimdStatus::SupportAVX()) {                                               \
+        if (SimdStatus::SupportAVXF16C()) {                                           \
             avx = avx::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);       \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx));                   \
         }                                                                             \
-        if (SimdStatus::SupportAVX2()) {                                              \
+        if (SimdStatus::SupportAVX2F16C()) {                                          \
             avx2 = avx2::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);     \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx2));                  \
         }                                                                             \
-        if (SimdStatus::SupportAVX512()) {                                            \
+        if (SimdStatus::SupportAVX512F16C()) {                                        \
             avx512 = avx512::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim); \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx512));                \
         }                                                                             \
@@ -89,6 +89,30 @@ TEST_CASE("FP16 SIMD Compute", "[ut][simd]") {
         auto i = j * 2;
         TEST_ACCURACY(FP16ComputeIP);
         TEST_ACCURACY(FP16ComputeL2Sqr);
+        REQUIRE(
+            fixtures::dist_t(FP16ComputeIP(vec1.data() + i * dim, vec2.data() + i * dim, dim)) ==
+            fixtures::dist_t(
+                generic::FP16ComputeIP(vec1.data() + i * dim, vec2.data() + i * dim, dim)));
+        REQUIRE(
+            fixtures::dist_t(FP16ComputeL2Sqr(vec1.data() + i * dim, vec2.data() + i * dim, dim)) ==
+            fixtures::dist_t(
+                generic::FP16ComputeL2Sqr(vec1.data() + i * dim, vec2.data() + i * dim, dim)));
+    }
+}
+
+TEST_CASE("SVE FP16 covers every lane at arbitrary vector lengths", "[ut][simd]") {
+    if (!SimdStatus::SupportSVE()) {
+        return;
+    }
+    // IEEE half encodings of 1 and 2; expected reductions are exact.
+    const std::vector<uint16_t> one(257, 0x3c00U);
+    const std::vector<uint16_t> two(257, 0x4000U);
+    const auto* x = reinterpret_cast<const uint8_t*>(one.data());
+    const auto* y = reinterpret_cast<const uint8_t*>(two.data());
+    for (uint64_t dim = 0; dim <= one.size(); ++dim) {
+        CAPTURE(dim);
+        REQUIRE(sve::FP16ComputeIP(x, y, dim) == static_cast<float>(2 * dim));
+        REQUIRE(sve::FP16ComputeL2Sqr(x, y, dim) == static_cast<float>(dim));
     }
 }
 
@@ -111,10 +135,10 @@ TEST_CASE("FP16 Benchmark", "[ut][simd][!benchmark]") {
     if (SimdStatus::SupportSSE()) {
         BENCHMARK_SIMD_COMPUTE(sse, FP16ComputeIP);
     }
-    if (SimdStatus::SupportAVX2()) {
+    if (SimdStatus::SupportAVX2F16C()) {
         BENCHMARK_SIMD_COMPUTE(avx2, FP16ComputeIP);
     }
-    if (SimdStatus::SupportAVX512()) {
+    if (SimdStatus::SupportAVX512F16C()) {
         BENCHMARK_SIMD_COMPUTE(avx512, FP16ComputeIP);
     }
     if (SimdStatus::SupportNEON()) {
@@ -128,10 +152,10 @@ TEST_CASE("FP16 Benchmark", "[ut][simd][!benchmark]") {
     if (SimdStatus::SupportSSE()) {
         BENCHMARK_SIMD_COMPUTE(sse, FP16ComputeL2Sqr);
     }
-    if (SimdStatus::SupportAVX2()) {
+    if (SimdStatus::SupportAVX2F16C()) {
         BENCHMARK_SIMD_COMPUTE(avx2, FP16ComputeL2Sqr);
     }
-    if (SimdStatus::SupportAVX512()) {
+    if (SimdStatus::SupportAVX512F16C()) {
         BENCHMARK_SIMD_COMPUTE(avx512, FP16ComputeL2Sqr);
     }
     if (SimdStatus::SupportNEON()) {

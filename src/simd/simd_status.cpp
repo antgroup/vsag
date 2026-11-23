@@ -42,7 +42,10 @@ SimdStatus::SupportAMX() {
     // thread-safe static-local initializer (a.k.a. "Magic Statics"),
     // which is simpler and safer than a hand-rolled DCLP.
     static const bool supported = []() -> bool {
-        Init();
+        // The INT8 kernel calls AVX-512 for short inputs and tails.
+        if (!SimdStatus::SupportAVX512()) {
+            return false;
+        }
 
         // cpuinfo currently lacks a dedicated AMX query in some versions, so
         // we fall back to a direct CPUID check (leaf 7, sub-leaf 0, EDX bits
@@ -72,7 +75,8 @@ SimdStatus::SupportAMXBF16() {
     static const bool supported = []() -> bool {
         // Require AMX_TILE + INT8 + the kernel XFEATURE_XTILEDATA grant
         // first; AMX_BF16 is meaningless without those.
-        if (!SimdStatus::SupportAMX()) {
+        // FP32-to-BF16 packing uses VCVTNE2PS2BF16 outside the AMX tiles.
+        if (!SimdStatus::SupportAMX() || !cpuinfo_has_x86_avx512bf16()) {
             return false;
         }
         // CPUID leaf 7, sub-leaf 0, EDX bit 22 == AMX_BF16.

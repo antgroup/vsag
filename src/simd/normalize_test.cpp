@@ -21,6 +21,25 @@
 
 using namespace vsag;
 
+TEST_CASE("Normalize zero vector returns the original norm", "[ut][simd]") {
+    const std::vector<float> input(33, 0.0F);
+    auto check = [&](bool supported, NormalizeType func) {
+        if (supported) {
+            std::vector<float> output(input.size(), 1.0F);
+            REQUIRE(func(input.data(), output.data(), input.size()) == 0.0F);
+            REQUIRE(output == input);
+        }
+    };
+
+    check(true, generic::Normalize);
+    check(SimdStatus::SupportSSE(), sse::Normalize);
+    check(SimdStatus::SupportAVX(), avx::Normalize);
+    check(SimdStatus::SupportAVX2(), avx2::Normalize);
+    check(SimdStatus::SupportAVX512(), avx512::Normalize);
+    check(SimdStatus::SupportNEON(), neon::Normalize);
+    check(SimdStatus::SupportSVE(), sve::Normalize);
+}
+
 TEST_CASE("Normalize Compute", "[ut][simd]") {
     auto dims = fixtures::get_common_used_dims();
     int64_t count = 100;
@@ -35,7 +54,8 @@ TEST_CASE("Normalize Compute", "[ut][simd]") {
             auto gt_zero_centroid = generic::NormalizeWithCentroid(
                 vec1.data() + i * dim, zero_centroid.data(), tmp_value.data(), dim);
             auto gt = generic::Normalize(vec1.data() + i * dim, tmp_value.data(), dim);
-            REQUIRE(gt_zero_centroid == gt);
+            // These two formulas may accumulate in different orders.
+            REQUIRE(fixtures::dist_t(gt_zero_centroid) == fixtures::dist_t(gt));
 
             if (SimdStatus::SupportSSE()) {
                 auto sse = sse::Normalize(vec1.data() + i * dim, tmp_value.data() + dim, dim);

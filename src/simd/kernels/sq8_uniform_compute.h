@@ -58,4 +58,49 @@ SQ8UniformComputeCodesIPImpl(const uint8_t* codes1,
     return static_cast<float>(result);
 }
 
+// Four candidate rows share query load, unpacking and lane masks.
+template <typename T>
+inline void
+SQ8UniformComputeCodesIPBatchImpl(const uint8_t* query,
+                                  const uint8_t* codes,
+                                  uint64_t dim,
+                                  uint64_t n_codes,
+                                  uint64_t code_stride,
+                                  float* out,
+                                  float (*single)(const uint8_t*, const uint8_t*, uint64_t)) {
+    constexpr uint64_t width = T::ByteWidth;
+    const auto mask = T::set1_epi16(0xff);
+    uint64_t row = 0;
+    if (dim >= width) {
+        for (; n_codes - row >= 4; row += 4) {
+            const uint8_t* rows[] = {codes + row * code_stride,
+                                     codes + (row + 1) * code_stride,
+                                     codes + (row + 2) * code_stride,
+                                     codes + (row + 3) * code_stride};
+            typename T::IntVec sums[] = {T::zero(), T::zero(), T::zero(), T::zero()};
+            uint64_t d = 0;
+            for (; dim - d >= width; d += width) {
+                const auto q = T::loadu(query + d);
+                const auto qlo = T::and_si(q, mask);
+                const auto qhi = T::srli_epi16(q, 8);
+                for (uint64_t j = 0; j < 4; ++j) {
+                    const auto c = T::loadu(rows[j] + d);
+                    sums[j] = T::add_epi32(sums[j], T::madd_epi16(qlo, T::and_si(c, mask)));
+                    sums[j] = T::add_epi32(sums[j], T::madd_epi16(qhi, T::srli_epi16(c, 8)));
+                }
+            }
+            for (uint64_t j = 0; j < 4; ++j) {
+                auto result = T::reduce_add_epi32(sums[j]);
+                if (d < dim) {
+                    result += static_cast<int32_t>(single(query + d, rows[j] + d, dim - d));
+                }
+                out[row + j] = static_cast<float>(result);
+            }
+        }
+    }
+    for (; row < n_codes; ++row) {
+        out[row] = single(query, codes + row * code_stride, dim);
+    }
+}
+
 }  // namespace vsag::simd

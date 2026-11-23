@@ -59,6 +59,10 @@ Dispatch
 ResolveDispatch(ImplementationSelection selection);
 
 namespace detail {
+#if defined(ENABLE_NEON)
+Dispatch
+ResolveNEONDispatch();
+#endif
 #if defined(ENABLE_AVX2)
 void
 DecodeRowBF16(const uint16_t*, float*, uint64_t);

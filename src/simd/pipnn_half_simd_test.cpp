@@ -78,6 +78,15 @@ TEST_CASE("PIPNN half dispatch capability combinations", "[ut][simd]") {
     // Exercise the actual cached production dispatch, without executing any
     // function selected using fabricated CPU capabilities.
     const auto& actual = GetDispatch();
+#if defined(ENABLE_NEON)
+    if (SimdStatus::SupportNEON()) {
+        const auto neon = detail::ResolveNEONDispatch();
+        REQUIRE(actual.decode_fp16 == neon.decode_fp16);
+        REQUIRE(actual.decode_bf16 == neon.decode_bf16);
+        REQUIRE(actual.preparation == neon.preparation);
+        return;
+    }
+#endif
 #if defined(ENABLE_AVX2)
     REQUIRE(actual.decode_bf16 ==
             (SimdStatus::SupportAVXAndAVX2() ? detail::DecodeRowBF16 : scalar.decode_bf16));
@@ -107,7 +116,13 @@ TEST_CASE("PIPNN half row decoding dispatched and scalar agree", "[ut][simd]") {
         REQUIRE(dispatch.decode_bf16 == scalar_dispatch.decode_bf16);
     }
 #else
+#if defined(ENABLE_NEON)
+    REQUIRE(dispatch.decode_bf16 == (SimdStatus::SupportNEON()
+                                         ? detail::ResolveNEONDispatch().decode_bf16
+                                         : scalar_dispatch.decode_bf16));
+#else
     REQUIRE(dispatch.decode_bf16 == scalar_dispatch.decode_bf16);
+#endif
 #endif
     for (const auto format : {Format::FP16, Format::BF16}) {
         const auto decode = format == Format::FP16 ? dispatch.decode_fp16 : dispatch.decode_bf16;

@@ -115,7 +115,8 @@ CheckFP32ComputeBatch4Accuracy(const std::vector<float>& vec1,
         if (not supported) {
             return;
         }
-        std::vector<float> actual(4, 0.0F);
+        std::vector<float> actual{1.0F, -2.0F, 3.0F, -4.0F};
+        const auto initial = actual;
         func(query,
              dim,
              vec2.data() + i * dim,
@@ -127,7 +128,7 @@ CheckFP32ComputeBatch4Accuracy(const std::vector<float>& vec1,
              actual[2],
              actual[3]);
         for (uint64_t j = 0; j < expected.size(); ++j) {
-            REQUIRE(fixtures::dist_t(expected[j]) == fixtures::dist_t(actual[j]));
+            REQUIRE(fixtures::dist_t(expected[j] + initial[j]) == fixtures::dist_t(actual[j]));
         }
     };
 

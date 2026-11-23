@@ -147,6 +147,24 @@ TEST_CASE("PQFastScan SIMD Compute High Dim", "[ut][simd]") {
     }
 }
 
+TEST_CASE("PQFastScan byte LUT flushes at narrow lane limit", "[ut][simd]") {
+    const auto pq_dim = GENERATE(0ULL, 257ULL, 258ULL, 771ULL, 772ULL, 4113ULL);
+    std::vector<uint8_t> lut(pq_dim * 16, 255);
+    std::vector<uint8_t> codes(pq_dim * 16, 0xDA);
+    auto verify = [&](auto kernel) {
+        std::array<int32_t, 32> result;
+        result.fill(17);
+        kernel(lut.data(), codes.data(), pq_dim, result.data());
+        for (const auto score : result) {
+            REQUIRE(score == 17 + static_cast<int32_t>(pq_dim * 255));
+        }
+    };
+    verify(PQFastScanLookUp32);
+    if (SimdStatus::SupportSVE()) {
+        verify(sve::PQFastScanLookUp32);
+    }
+}
+
 TEST_CASE("PQFastScan HighAcc SIMD parity and tail groups", "[ut][simd]") {
     const std::vector<uint64_t> group_counts = {0, 1, 2, 3, 4, 5, 240, 241, 2048};
     for (const uint64_t pq_dim : group_counts) {

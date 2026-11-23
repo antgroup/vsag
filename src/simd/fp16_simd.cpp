@@ -18,7 +18,34 @@
 
 namespace vsag {
 
-VSAG_DEFINE_SIMD_DISPATCH(FP16ComputeIP, FP16ComputeType);
-VSAG_DEFINE_SIMD_DISPATCH(FP16ComputeL2Sqr, FP16ComputeType);
-VSAG_DEFINE_SIMD_DISPATCH(FP16SparseAccumulate, FP16SparseAccumulateType);
+// The x86 half kernels and their tails use F16C in addition to their
+// nominal ISA. Keep the SSE software converter available without F16C.
+#define VSAG_DEFINE_FP16_DISPATCH(name, type)    \
+    static type Get##name() {                    \
+        if (SimdStatus::SupportAVX512F16C()) {   \
+            VSAG_SIMD_DISPATCH_BODY_AVX512(name) \
+        }                                        \
+        if (SimdStatus::SupportAVX2F16C()) {     \
+            VSAG_SIMD_DISPATCH_BODY_AVX2(name)   \
+        }                                        \
+        if (SimdStatus::SupportAVXF16C()) {      \
+            VSAG_SIMD_DISPATCH_BODY_AVX(name)    \
+        }                                        \
+        if (SimdStatus::SupportSSE()) {          \
+            VSAG_SIMD_DISPATCH_BODY_SSE(name)    \
+        }                                        \
+        if (SimdStatus::SupportSVE()) {          \
+            VSAG_SIMD_DISPATCH_BODY_SVE(name)    \
+        }                                        \
+        if (SimdStatus::SupportNEON()) {         \
+            VSAG_SIMD_DISPATCH_BODY_NEON(name)   \
+        }                                        \
+        return generic::name;                    \
+    }                                            \
+    type name = Get##name()
+
+VSAG_DEFINE_FP16_DISPATCH(FP16ComputeIP, FP16ComputeType);
+VSAG_DEFINE_FP16_DISPATCH(FP16ComputeL2Sqr, FP16ComputeType);
+VSAG_DEFINE_FP16_DISPATCH(FP16SparseAccumulate, FP16SparseAccumulateType);
+#undef VSAG_DEFINE_FP16_DISPATCH
 }  // namespace vsag

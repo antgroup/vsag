@@ -207,6 +207,82 @@ TEST_CASE("SQ8 IP Batch4 matches four single distances", "[ut][simd][batch4]") {
     }
 }
 
+TEST_CASE("SQ8 fused batch4 covers each enabled backend", "[ut][simd][batch4]") {
+    struct Backend {
+        const char* name;
+        bool enabled;
+        SQ8ComputeBatch4Type batch_ip;
+        SQ8ComputeBatch4Type batch_l2;
+    };
+    const Backend backends[] = {
+        {"SSE", SimdStatus::SupportSSE(), sse::SQ8ComputeIPBatch4, sse::SQ8ComputeL2SqrBatch4},
+        {"AVX", SimdStatus::SupportAVX(), avx::SQ8ComputeIPBatch4, avx::SQ8ComputeL2SqrBatch4},
+        {"AVX2", SimdStatus::SupportAVX2(), avx2::SQ8ComputeIPBatch4, avx2::SQ8ComputeL2SqrBatch4},
+        {"AVX-512",
+         SimdStatus::SupportAVX512(),
+         avx512::SQ8ComputeIPBatch4,
+         avx512::SQ8ComputeL2SqrBatch4},
+        {"NEON", SimdStatus::SupportNEON(), neon::SQ8ComputeIPBatch4, neon::SQ8ComputeL2SqrBatch4},
+        {"SVE", SimdStatus::SupportSVE(), sve::SQ8ComputeIPBatch4, sve::SQ8ComputeL2SqrBatch4},
+    };
+    for (const uint64_t dim : {0ULL,
+                               1ULL,
+                               3ULL,
+                               4ULL,
+                               5ULL,
+                               7ULL,
+                               8ULL,
+                               9ULL,
+                               15ULL,
+                               16ULL,
+                               17ULL,
+                               31ULL,
+                               32ULL,
+                               33ULL,
+                               127ULL,
+                               1024ULL}) {
+        const auto query = fixtures::generate_vectors(1, dim + 1, true, 183);
+        const auto lower = fixtures::generate_vectors(1, dim + 1, true, 186);
+        const auto diff = fixtures::generate_vectors(1, dim + 1, true, 657);
+        std::vector<uint8_t> codes(4 * dim + 1);
+        for (uint64_t i = 0; i < codes.size(); ++i) {
+            codes[i] = static_cast<uint8_t>((i * 37 + 19) % 256);
+        }
+        const auto* q = query.data() + 1;
+        const auto* lb = lower.data() + 1;
+        const auto* range = diff.data() + 1;
+        const auto* base = codes.data() + 1;
+        for (const auto& backend : backends) {
+            if (!backend.enabled) {
+                continue;
+            }
+            CAPTURE(backend.name, dim);
+            for (bool is_l2 : {false, true}) {
+                CAPTURE(is_l2);
+                const auto batch = is_l2 ? backend.batch_l2 : backend.batch_ip;
+                const auto single = is_l2 ? generic::SQ8ComputeL2Sqr : generic::SQ8ComputeIP;
+                float distances[4] = {-1.0F, 100.0F, -15.0F, 57.0F};
+                batch(q,
+                      base,
+                      base + dim,
+                      base + 2 * dim,
+                      base + 3 * dim,
+                      lb,
+                      range,
+                      dim,
+                      distances[0],
+                      distances[1],
+                      distances[2],
+                      distances[3]);
+                for (uint64_t i = 0; i < 4; ++i) {
+                    REQUIRE(fixtures::dist_t(distances[i]) ==
+                            fixtures::dist_t(single(q, base + i * dim, lb, range, dim)));
+                }
+            }
+        }
+    }
+}
+
 #define BENCHMARK_SIMD_COMPUTE_QUERY(Simd, Comp)                                                   \
     BENCHMARK_ADVANCED(#Simd #Comp) {                                                              \
         for (int i = 0; i < count; ++i) {                                                          \

@@ -18,6 +18,8 @@
 
 #if defined(__SSE2__)
 #include <emmintrin.h>
+#elif defined(__aarch64__) && defined(__ARM_NEON)
+#include <arm_neon.h>
 #endif
 
 namespace vsag::simd {
@@ -32,6 +34,11 @@ mci_hash_contains_two_int32x4(const int32_t* first, const int32_t* second, int32
         _mm_or_si128(_mm_cmpeq_epi32(cmp, first_values), _mm_cmpeq_epi32(cmp, second_values));
 
     return _mm_movemask_epi8(flag) != 0;
+#elif defined(__aarch64__) && defined(__ARM_NEON)
+    const auto needle = vdupq_n_s32(value);
+    const auto matches =
+        vorrq_u32(vceqq_s32(vld1q_s32(first), needle), vceqq_s32(vld1q_s32(second), needle));
+    return vmaxvq_u32(matches) != 0;
 #else
     for (uint32_t i = 0; i < 4; ++i) {
         if (first[i] == value || second[i] == value) {

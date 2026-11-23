@@ -72,49 +72,34 @@ using SQ8ComputeType = float (*)(const float* RESTRICT query,
 extern SQ8ComputeType SQ8ComputeIP;
 extern SQ8ComputeType SQ8ComputeL2Sqr;
 
-using SQ8ComputeBatch4Type = void (*)(const float*,
-                                      const uint8_t*,
-                                      const uint8_t*,
-                                      const uint8_t*,
-                                      const uint8_t*,
-                                      const float*,
-                                      const float*,
-                                      uint64_t,
-                                      float&,
-                                      float&,
-                                      float&,
-                                      float&);
+using SQ8ComputeBatch4Signature = void(const float*,
+                                       const uint8_t*,
+                                       const uint8_t*,
+                                       const uint8_t*,
+                                       const uint8_t*,
+                                       const float*,
+                                       const float*,
+                                       uint64_t,
+                                       float&,
+                                       float&,
+                                       float&,
+                                       float&);
+using SQ8ComputeBatch4Type = SQ8ComputeBatch4Signature*;
 extern SQ8ComputeBatch4Type SQ8ComputeL2SqrBatch4;
 extern SQ8ComputeBatch4Type SQ8ComputeIPBatch4;
 
-namespace avx512 {
-void
-SQ8ComputeL2SqrBatch4(const float* query,
-                      const uint8_t* codes1,
-                      const uint8_t* codes2,
-                      const uint8_t* codes3,
-                      const uint8_t* codes4,
-                      const float* lower_bound,
-                      const float* diff,
-                      uint64_t dim,
-                      float& dist1,
-                      float& dist2,
-                      float& dist3,
-                      float& dist4);
-void
-SQ8ComputeIPBatch4(const float* query,
-                   const uint8_t* codes1,
-                   const uint8_t* codes2,
-                   const uint8_t* codes3,
-                   const uint8_t* codes4,
-                   const float* lower_bound,
-                   const float* diff,
-                   uint64_t dim,
-                   float& dist1,
-                   float& dist2,
-                   float& dist3,
-                   float& dist4);
-}  // namespace avx512
+#define VSAG_DECLARE_SQ8_BATCH4(ns)                  \
+    namespace ns {                                   \
+    SQ8ComputeBatch4Signature SQ8ComputeL2SqrBatch4; \
+    SQ8ComputeBatch4Signature SQ8ComputeIPBatch4;    \
+    }
+VSAG_DECLARE_SQ8_BATCH4(sse)
+VSAG_DECLARE_SQ8_BATCH4(avx)
+VSAG_DECLARE_SQ8_BATCH4(avx2)
+VSAG_DECLARE_SQ8_BATCH4(avx512)
+VSAG_DECLARE_SQ8_BATCH4(neon)
+VSAG_DECLARE_SQ8_BATCH4(sve)
+#undef VSAG_DECLARE_SQ8_BATCH4
 
 // Four single-distance calls, used when the CPU has no batched kernel.
 void

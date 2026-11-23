@@ -230,6 +230,33 @@ struct SQ4Traits<SseSQ4Tag> : SimdTraits<SseTag> {
     }
 };
 
+// Convert IEEE binary16 with SSE2; do not require F16C on the SSE tier.
+struct SseFP16Tag {};
+template <>
+struct FP16Traits<SseFP16Tag> : SimdTraits<SseTag> {
+    static inline __attribute__((always_inline)) FloatVec
+    load_half(const uint16_t* p) {
+        const auto raw = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(p));
+        const auto zero = _mm_setzero_si128();
+        const auto bits = _mm_unpacklo_epi16(raw, zero);
+        const auto exp = _mm_and_si128(bits, _mm_set1_epi32(0x7c00));
+        const auto mantissa = _mm_and_si128(bits, _mm_set1_epi32(0x03ff));
+        const auto magnitude = _mm_and_si128(bits, _mm_set1_epi32(0x7fff));
+        const auto sign = _mm_slli_epi32(_mm_and_si128(bits, _mm_set1_epi32(0x8000)), 16);
+        const auto normal = _mm_add_epi32(_mm_slli_epi32(magnitude, 13), _mm_set1_epi32(112 << 23));
+        const auto subnormal =
+            _mm_castps_si128(_mm_mul_ps(_mm_cvtepi32_ps(mantissa), _mm_set1_ps(0x1p-24F)));
+        const auto special = _mm_or_si128(_mm_slli_epi32(mantissa, 13), _mm_set1_epi32(0x7f800000));
+        const auto is_subnormal = _mm_cmpeq_epi32(exp, zero);
+        const auto is_special = _mm_cmpeq_epi32(exp, _mm_set1_epi32(0x7c00));
+        const auto exceptional = _mm_or_si128(is_subnormal, is_special);
+        const auto encoded = _mm_or_si128(_mm_andnot_si128(exceptional, normal),
+                                          _mm_or_si128(_mm_and_si128(is_subnormal, subnormal),
+                                                       _mm_and_si128(is_special, special)));
+        return _mm_castsi128_ps(_mm_or_si128(encoded, sign));
+    }
+};
+
 // --- BF16Traits for SSE ---
 struct SseBF16Tag {};
 template <>
