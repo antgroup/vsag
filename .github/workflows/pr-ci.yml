@@ -150,6 +150,7 @@ jobs:
           tests/scripts/test_daily_plan.py
           tests/scripts/test_daily_extra.py
           tests/scripts/test_daily_workflow.py
+          tests/scripts/test_nightly_coverage_badge.py
           tests/scripts/test_team_test_shards.py
 
   community:
