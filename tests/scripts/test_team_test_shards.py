@@ -166,6 +166,36 @@ class ManifestTest(unittest.TestCase):
         self.assertEqual(sorted(test for shard in plan["shards"] for test in shard["test_ids"]),
                          sorted(test["id"] for test in inventory["tests"]))
 
+    def test_plan_cli_accepts_sealed_cache_history_and_supports_a_cold_run(self):
+        inventory = fixture_example_inventory(["001_slow"])
+        case_id = inventory["tests"][0]["id"]
+        example_id = SHARDS.example_duration_id("examples/cpp/001_slow")
+        expected = {case_id: 120, example_id: 300}
+        history = {"schema": 1, "source_main_sha": "a" * 40,
+                   "inventory_digest": inventory["digest"],
+                   "duration_history": {**expected, "f" * 64: 999}}
+        with tempfile.TemporaryDirectory() as directory:
+            inventory_path = Path(directory) / "inventory.json"
+            history_path = Path(directory) / "history.json"
+            output = Path(directory) / "plan.json"
+            SHARDS.write_json(inventory_path, inventory)
+            SHARDS.write_json(history_path, history)
+            command = [sys.executable, "-B", str(SCRIPT), "plan", "--inventory",
+                       str(inventory_path), "--shards", "4", "--output", str(output)]
+            for args, wanted in (([], {}), (["--durations", str(history_path)], expected)):
+                with self.subTest(use_history=bool(args)):
+                    process = subprocess.run(command + args, capture_output=True, text=True)
+                    self.assertEqual(process.returncode, 0, process.stderr)
+                    plan = json.loads(output.read_text())
+                    SHARDS.validate_plan(plan)
+                    self.assertEqual(plan["duration_history"], wanted)
+                    self.assertCountEqual([test_id for shard in plan["shards"]
+                                           for test_id in shard["test_ids"]],
+                                          [case["id"] for case in inventory["tests"]])
+                    self.assertCountEqual([binary for shard in plan["shards"]
+                                           for binary in shard.get("example_binaries", [])],
+                                          inventory["examples"])
+
     def test_duration_hints_match_only_current_exact_inventory_ids(self):
         inventory = fixture_inventory(["a", "b", "c"])
         tests = inventory["tests"]
