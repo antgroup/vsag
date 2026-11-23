@@ -68,6 +68,11 @@ Canonical main may specify `team_slots` in `.github/ci-routing.json`. The policy
 
 A hosted job waits only when the Team path requires internal execution and the PR is selected by this policy. It reads an allocation Check Run on the tested merge SHA using a read-only token. The job validates the App, repository, PR, head, tested SHA, run, attempt and expiry. Build, four test shards and index compatibility use one returned runner label. The Team manager independently verifies the assignment, workflow trust and resource ownership before issuing a grant. The waiter is bounded to one hour and reports a failure if the dispatcher does not supply a valid allocation. A full rerun provides a fresh attempt identity.
 
+The dispatcher reports a confirmed workflow digest mismatch before assigning a slot. The
+hosted waiter fails the current attempt and names `@wxyucs` as the reviewer who must
+approve the workflow changes and append the trusted digest. Select **Re-run all jobs**
+after approval. A temporary GitHub API error is retried without a workflow review failure.
+
 Deploy and validate the dispatcher, the GitHub App, the isolated runner pool and its admission policy before enabling the pilot. Keep existing PR cancellation and Gate rules through the transition.
 
 ## Required checks and rollback
