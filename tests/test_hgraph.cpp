@@ -4763,6 +4763,19 @@ TEST_CASE("HGraph EstimateBuildMemory rejects unmodelled storage", "[ft][memory]
         REQUIRE_THROWS_AS(index->EstimateBuildMemory(512), vsag::VsagException);
     }
 
+    SECTION("extra-info storage") {
+        HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+        build_param.graph_type = "nsw";
+        build_param.thread_count = 1;
+        build_param.extra_info_size = 64;
+        auto index = TestIndex::TestFactory(
+            HGraphTestIndex::name,
+            HGraphTestIndex::GenerateHGraphBuildParametersString(build_param),
+            true);
+        REQUIRE_FALSE(index->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+        REQUIRE_THROWS_AS(index->EstimateBuildMemory(512), vsag::VsagException);
+    }
+
     SECTION("attribute posting lists") {
         HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
         build_param.graph_type = "nsw";
@@ -4946,7 +4959,7 @@ TEST_CASE("HGraph EstimateBuildMemory bounds candidate heap growth",
     REQUIRE(pool.has_value());
     vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), pool.value());
     vsag::Engine engine(&resource);
-    auto make_index = [&](int thread_count) {
+    auto make_parameters = [&](int thread_count) {
         HGraphTestIndex::HGraphBuildParam build_param("l2", dim, "fp32");
         build_param.graph_type = "nsw";
         build_param.graph_io_type = "memory_io";
@@ -4959,19 +4972,28 @@ TEST_CASE("HGraph EstimateBuildMemory bounds candidate heap growth",
         param["index_param"]["max_degree"].SetUint64(4);
         param["index_param"]["ef_construction"].SetUint64(ef_construction);
         param["index_param"]["build_thread_count"].SetInt(thread_count);
-        auto index = engine.CreateIndex(HGraphTestIndex::name, param.Dump());
+        return param;
+    };
+    auto make_index = [&](int thread_count) {
+        auto index =
+            engine.CreateIndex(HGraphTestIndex::name, make_parameters(thread_count).Dump());
         REQUIRE(index.has_value());
         return index.value();
     };
     auto serial = make_index(1);
     auto parallel = make_index(2);
+    auto serial_without_pool =
+        TestIndex::TestFactory(HGraphTestIndex::name, make_parameters(1).Dump(), true);
     REQUIRE(serial->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
     REQUIRE(parallel->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+    REQUIRE(serial_without_pool->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
 
-    // Both indexes use the same supplied pool, so the O(N) task-state charge is identical.
-    // Their difference is exactly one additional worker's visited list, two heaps, four
-    // degree-sized probe vectors and encode row.
-    const auto extra_worker =
+    // A serial build stays on the calling thread, so supplying a pool adds no task-state charge.
+    REQUIRE(serial_without_pool->EstimateBuildMemory(count) == serial->EstimateBuildMemory(count));
+
+    // The parallel build adds one worker's visited list, two heaps, four degree-sized probe
+    // vectors and encode row, plus the per-row task/future allowance retained until the join.
+    const auto extra_parallel =
         parallel->EstimateBuildMemory(count) - serial->EstimateBuildMemory(count);
     constexpr uint64_t visited_list_bytes =
         (count + 63) / 64 * (sizeof(uint64_t) + sizeof(uint16_t));
@@ -4982,11 +5004,15 @@ TEST_CASE("HGraph EstimateBuildMemory bounds candidate heap growth",
     constexpr uint64_t max_degree = 4;
     constexpr uint64_t probe_vector_bytes =
         2 * max_degree * (sizeof(vsag::InnerIdType) + sizeof(float));
-    REQUIRE(extra_worker ==
-            visited_list_bytes + heap_bytes + probe_vector_bytes + dim * sizeof(float));
+    constexpr uint64_t worker_scratch =
+        visited_list_bytes + heap_bytes + probe_vector_bytes + dim * sizeof(float);
+    constexpr uint64_t parallel_task_state_bytes = 512;
+    REQUIRE(extra_parallel ==
+            worker_scratch + count * (parallel_task_state_bytes + sizeof(std::future<void>)));
 }
 
-TEST_CASE("HGraph Build limits tasks on a supplied thread pool", "[ft][memory][hgraph][build]") {
+TEST_CASE("HGraph Build honors NSW insertion thread count on a supplied pool",
+          "[ft][memory][hgraph][build]") {
     using namespace fixtures;
     constexpr int64_t dim = 16;
     constexpr uint64_t count = 512;
@@ -4996,23 +5022,39 @@ TEST_CASE("HGraph Build limits tasks on a supplied thread pool", "[ft][memory][h
     const auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
     auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim, count, "l2");
 
-    auto delegate = vsag::Engine::CreateThreadPool(4);
-    REQUIRE(delegate.has_value());
-    auto pool = std::make_shared<GatedThreadPool>(delegate.value());
-    vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), pool);
-    vsag::Engine engine(&resource);
-    auto index = engine.CreateIndex(HGraphTestIndex::name, param);
-    REQUIRE(index.has_value());
-    auto build = std::async(std::launch::async,
-                            [&] { return index.value()->Build(dataset->base_).has_value(); });
-    const bool started = pool->WaitForFirstTask();
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    const auto submissions = pool->Submissions();
-    pool->ReleaseFirstTask();
-    const bool succeeded = build.get();
-    REQUIRE(started);
-    REQUIRE(succeeded);
-    REQUIRE(submissions == 1);
+    SECTION("the default keeps insertion on the calling thread") {
+        auto delegate = vsag::Engine::CreateThreadPool(4);
+        REQUIRE(delegate.has_value());
+        auto pool = std::make_shared<CountingThreadPool>(delegate.value());
+        vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), pool);
+        vsag::Engine engine(&resource);
+        auto index = engine.CreateIndex(HGraphTestIndex::name, param);
+        REQUIRE(index.has_value());
+        REQUIRE(index.value()->Build(dataset->base_).has_value());
+        REQUIRE(pool->Submissions() == 0);
+    }
+
+    SECTION("parallel insertion caps unfinished tasks") {
+        auto parallel_param = vsag::JsonType::Parse(param);
+        parallel_param["index_param"]["build_thread_count"].SetInt(2);
+        auto delegate = vsag::Engine::CreateThreadPool(4);
+        REQUIRE(delegate.has_value());
+        auto pool = std::make_shared<GatedThreadPool>(delegate.value());
+        vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), pool);
+        vsag::Engine engine(&resource);
+        auto index = engine.CreateIndex(HGraphTestIndex::name, parallel_param.Dump());
+        REQUIRE(index.has_value());
+        auto build = std::async(std::launch::async,
+                                [&] { return index.value()->Build(dataset->base_).has_value(); });
+        const bool started = pool->WaitForFirstTask();
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        const auto submissions = pool->Submissions();
+        pool->ReleaseFirstTask();
+        const bool succeeded = build.get();
+        REQUIRE(started);
+        REQUIRE(succeeded);
+        REQUIRE(submissions == 2);
+    }
 }
 
 TEST_CASE("HGraph EstimateBuildMemory refreshes support after Tune",

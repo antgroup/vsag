@@ -127,10 +127,16 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 `sq8_local` and `sq4_local` support float32 L2/IP/cosine base and precise stores (including RaBitQ + local SQ4/SQ8 reranking). See [layout, numeric limits and Tune compatibility](../quantization/sq.md#local-sq4--sq8-float32-l2-ip-and-cosine).
 
 For NSW graph insertion, `build_thread_count` bounds the number of unfinished graph-insertion
-and probe tasks even when the `Resource` supplies a larger thread pool. The default of `1`
-therefore serializes this graph-insertion phase on a supplied pool; set it explicitly to enable
-more concurrent graph insertions. Code-preparation phases can have different concurrency.
-`EstimateBuildMemory` charges per-worker construction probe scratch using this same bound.
+and probe tasks even when the `Resource` supplies a larger thread pool. With the default of `1`,
+insertion runs directly on the calling thread and does not enqueue per-row tasks, even when a pool
+is supplied; set it explicitly above `1` to enable concurrent graph insertions. Code-preparation
+phases can have different concurrency. `EstimateBuildMemory` charges per-worker construction probe
+scratch using this same bound and charges per-row task/future state only for parallel insertion.
+
+Build-memory estimation is limited to the cold in-memory NSW configurations for which
+`SUPPORT_ESTIMATE_BUILD_MEMORY` is advertised. Extra-info columns and attribute filtering are
+outside the model and disable that feature. The estimate includes old/new overlap for contiguous
+code and graph stores, but excludes label-table and neighbor-mutex reallocation transients.
 
 `use_reverse_edges` is intended for workloads that need fast incoming-neighbor inspection, graph
 analysis, or future graph-maintenance algorithms. It is disabled by default because maintaining

@@ -843,9 +843,10 @@ HGraph::prepare_temporary_graph_read_codes(const DatasetPtr& data,
 
 void
 HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, const AddBatch& batch) {
-    // A worker must not submit and join nested tasks on the same pool.
-    const bool effective_parallel =
-        context.use_parallel_add and not this->thread_pool_->IsCurrentThread();
+    // A worker must not submit and join nested tasks on the same pool. The default single-threaded
+    // build stays on the calling thread instead of paying an enqueue/join round-trip per row.
+    const bool effective_parallel = context.use_parallel_add and this->build_thread_count_ > 1 and
+                                    not this->thread_pool_->IsCurrentThread();
     std::vector<std::future<void>> futures;
     HGraphBuildTaskGuard future_guard(
         futures, effective_parallel ? static_cast<uint64_t>(batch.rows.size()) : 0);
@@ -1408,6 +1409,11 @@ HGraph::can_estimate_build_memory() const {
         // are not represented by the vector/graph terms in EstimateMemory().
         return false;
     }
+    if (this->extra_infos_ != nullptr) {
+        // Extra-info columns are outside this narrow model. In particular, resize() grows their
+        // contiguous store after the code stores, which can retain another previous-row buffer.
+        return false;
+    }
     const auto hgraph_param = std::dynamic_pointer_cast<HGraphParameter>(this->create_param_ptr_);
     if (hgraph_param == nullptr) {
         return false;
@@ -1517,8 +1523,8 @@ HGraph::InitFeatures() {
 
     // Build-time memory estimation: only declared for configurations that can produce a
     // meaningful EstimateBuildMemory() result (in-memory NSW build, estimable quantization,
-    // no imported cache, no in-build MCI maintenance, and any separate raw-vector store
-    // in memory, where EstimateMemory() counts it).
+    // no imported cache, no in-build MCI maintenance, no extra-info or attribute storage, and
+    // any separate raw-vector store in memory, where EstimateMemory() counts it).
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ESTIMATE_BUILD_MEMORY,
                                           this->can_estimate_build_memory());
 
@@ -1693,12 +1699,12 @@ HGraph::EstimateBuildMemory(uint64_t num_elements) const {
 
     // Workers that may hold construction scratch at the same time. insert_add_batch() keeps at
     // most build_thread_count_ unfinished tasks even when the supplied pool has more workers.
-    // Without a pool, insertion runs on the calling thread.
+    // Without a pool, or with build_thread_count_ <= 1, insertion runs on the calling thread.
+    const bool parallel_insertion = this->thread_pool_ != nullptr and this->build_thread_count_ > 1;
     const uint64_t build_threads =
-        this->thread_pool_ == nullptr
-            ? 1
-            : std::min<uint64_t>(std::max<uint64_t>(this->build_thread_count_, 1),
-                                 static_cast<uint64_t>(num_elements));
+        parallel_insertion
+            ? std::min<uint64_t>(this->build_thread_count_, static_cast<uint64_t>(num_elements))
+            : 1;
 
     // (3) Per-worker construction scratch. Each NSW insertion probe takes one visited list from
     //     the pool: one tag word plus one bit word per 64 nodes held by the graph. The search's
@@ -1734,12 +1740,14 @@ HGraph::EstimateBuildMemory(uint64_t num_elements) const {
     build_memory += 2 * num_elements * sizeof(AddRow);
     build_memory += 2 * num_elements * sizeof(std::pair<const InnerIdType, uint8_t>);
 
-    if (this->thread_pool_ != nullptr) {
-        // (6) insert_add_batch() reserves one future per row and calls GeneralEnqueue for every
-        //     accepted row. Each future retains its packaged-task state until the whole batch is
-        //     joined. The standard library does not expose the size of that state or its
+    if (parallel_insertion) {
+        // (6) With build_thread_count_ > 1, insert_add_batch() reserves one future per row and
+        //     calls GeneralEnqueue for every accepted row. Each future retains its packaged-task
+        //     state until the whole batch is joined, including futures already drained with
+        //     wait(). The standard library does not expose the size of that state or its
         //     type-erased queue wrappers, so include a conservative per-task allowance as well
-        //     as the concrete future vector storage.
+        //     as the concrete future vector storage. Single-threaded insertion stays inline and
+        //     allocates none of this task state.
         constexpr uint64_t kParallelTaskStateBytes = 512;
         const uint64_t future_bytes = static_cast<uint64_t>(sizeof(std::future<void>));
         build_memory += num_elements * (kParallelTaskStateBytes + future_bytes);
@@ -1749,6 +1757,10 @@ HGraph::EstimateBuildMemory(uint64_t num_elements) const {
     //     old and new contiguous stores alive together. HGraph::resize() grows the bottom graph
     //     and code stores sequentially, so only the largest previous store is needed beyond the
     //     final footprint. BlockMemoryIO grows by adding independent blocks and has no transient.
+    //     Label-table and neighbor-mutex reallocation transients are explicitly outside this
+    //     model; their retained footprint is represented by EstimateMemory()'s bookkeeping terms.
+    //     Extra-info and attribute configurations are rejected by can_estimate_build_memory(),
+    //     so their storage and resize paths are not part of the supported estimate.
     const uint64_t resize_batch_size = uint64_t{1} << this->resize_increase_count_bit_;
     const uint64_t current_capacity = this->max_capacity_.load();
     const bool grows_code_stores = current_capacity < element_count;

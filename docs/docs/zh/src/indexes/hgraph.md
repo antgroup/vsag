@@ -115,8 +115,11 @@ auto result = index->KnnSearch(
 `sq8_local` 和 `sq4_local` 支持 float32 L2/IP/cosine 的基础与精排存储（包括 RaBitQ + local SQ4/SQ8 精排）。布局、数值限制和 Tune 兼容性见[local SQ4/SQ8](../quantization/sq.md)。
 
 对于 NSW 图插入，即使 `Resource` 提供了更大的线程池，`build_thread_count` 仍会限制未完成的图插入和探测任务数。
-默认值 `1` 因此会让外部线程池上的图插入阶段串行执行；如需更多并发图插入，请显式调大该参数。编码准备阶段可能使用不同的并发度。
-`EstimateBuildMemory` 使用相同的上限计算每个 worker 的构图探测临时内存。
+使用默认值 `1` 时，插入直接在调用线程上串行执行，即使提供了线程池也不会逐行提交任务；如需并发图插入，请显式将该参数调大到 `1` 以上。编码准备阶段可能使用不同的并发度。
+`EstimateBuildMemory` 使用相同的上限计算每个 worker 的构图探测临时内存，并且只在并行插入时计算逐行任务/future 状态开销。
+
+构建内存估算仅适用于声明 `SUPPORT_ESTIMATE_BUILD_MEMORY` 的冷启动内存 NSW 配置。extra-info 列和 attribute 过滤不在该模型范围内，配置后会关闭此能力。
+估算包含连续编码和图存储扩容时新旧缓冲区并存的开销，但不包含标签表和节点互斥锁数组的重分配瞬态。
 
 `use_reverse_edges` 面向需要快速检查入邻居、图分析或图维护算法的负载。维护反向邻接表会让边
 存储约翻倍，因此默认关闭。
