@@ -190,7 +190,7 @@ PiPNN 支持 `dtype: "float32"`、`"float16"` 或 `"bfloat16"`，以及
 
 在首次 Build 前设置 `graph_type: "pipnn"` 和 `pipnn_incremental_add: true`，默认仍使用普通 Add。增量模式接收稠密 FP32，分区路由、投影、叶内近邻、哈希筛选和图剪枝均读取原始行。Add 复用首次 Build 训练的查询量化器。SQ8 和普通 RaBitQ 使用底层码。RaBitQ split 同时指定基础位宽、补充位宽和 RaBitQ 精排。3-bit RaBitQ 配独立 SQ8 精排时，设置 `rabitq_bits_per_dim_base: 3`、`use_reorder: true`、`precise_quantization_type: "sq8"`，省略 `rabitq_bits_per_dim_precise`。
 
-Pyramid 以全局内部 ID 共享 FP32 行，平铺节点中的旧点也会保留原值。路径节点升级及根路由层可在重载后读取同一份数据。已有能精确还原原行的 FP32 存储时直接复用，否则额外保存每点 4 × 维度字节，100 万条 960 维向量合计 3.84 GB，另计查询码和图状态。流式快照只保存一份共享行。缺少增量状态的普通快照加载后仍使用普通 Add。Pyramid 增量模式暂不支持重复向量跟踪。
+Pyramid 以全局内部 ID 共享 FP32 行，平铺节点中的旧点也会保留原值。路径节点升级及根路由层可在重载后读取同一份数据。已有能精确还原原行的 FP32 存储时直接复用，否则额外保存每点 4 × 维度字节，100 万条 960 维向量合计 3.84 GB，另计查询码和图状态。文件流和 BinarySet 快照只保存一份共享行。增量模式不支持分块 streaming 写出。已有的普通快照（含分块格式）缺少增量状态时，加载后仍使用普通 Add。Pyramid 增量模式暂不支持重复向量跟踪。
 
 ### PiPNN 动态 alpha 剪枝
 
