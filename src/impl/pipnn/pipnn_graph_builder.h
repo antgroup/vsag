@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -97,7 +98,20 @@ public:
            const Vector<const float*>& batch_vectors,
            PiPNNIncrementalState& state) const;
 
+    void
+    UpdateFromSharedRows(const GraphInterfacePtr& graph,
+                         const Vector<InnerIdType>& ids,
+                         std::span<const float* const> rows_by_id,
+                         PiPNNIncrementalState& state) const;
+
 private:
+    void
+    update(const GraphInterfacePtr& graph,
+           const Vector<InnerIdType>& ids,
+           const Vector<const float*>& input,
+           PiPNNIncrementalState& state,
+           std::span<const float* const> rows_by_id) const;
+
     template <typename ElementType>
     void
     build_typed(const GraphInterfacePtr& graph,

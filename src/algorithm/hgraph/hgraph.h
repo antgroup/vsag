@@ -103,6 +103,7 @@ public:
     friend class HGraphCodeWriteTestAccess;
     friend class HGraphCacheTestAccess;
     friend class HGraphFusedInputTestAccess;
+    friend struct PiPNNQuantizedAddTestAccess;
     friend struct HGraphMCITestAccess;
     friend class HGraphOptimizedBuildSession;
     friend class MciIncrementalAddExecutor;

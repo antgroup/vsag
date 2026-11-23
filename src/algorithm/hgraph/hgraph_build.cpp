@@ -102,6 +102,46 @@ need_temporary_sq8_build_data(const FlattenInterfacePtr& basic_flatten_codes,
     return not has_precise_reorder and GetBaseQuantizerName(name) == QUANTIZATION_TYPE_VALUE_RABITQ;
 }
 
+// A non-split RaBitQ code supports a raw query against a stored target, but cannot
+// act as the source of a pairwise comparison. PiPNN already owns the exact source.
+class PiPNNRouteDistanceProvider final : public DistanceProviderForGraph {
+public:
+    PiPNNRouteDistanceProvider(const PiPNNIncrementalState& state,
+                               const FlattenInterfacePtr& codes,
+                               InnerIdType query_id)
+        : state_(state), codes_(codes), query_id_(query_id) {
+    }
+
+    float
+    QueryDistance(InnerIdType id, QueryContext* = nullptr) const override {
+        return PairwiseDistance(query_id_, id, nullptr);
+    }
+
+    float
+    PairwiseDistance(InnerIdType source,
+                     InnerIdType target,
+                     const ComputerInterfacePtr& computer) const override {
+        float distance;
+        codes_->Query(&distance, computer ? computer : FactoryComputerById(source), &target, 1);
+        return distance;
+    }
+
+    ComputerInterfacePtr
+    FactoryComputerById(InnerIdType id) const override {
+        return codes_->FactoryComputer(state_.GetVector(state_.LocalId(id)));
+    }
+
+    bool
+    SupportsComputerById() const override {
+        return true;
+    }
+
+private:
+    const PiPNNIncrementalState& state_;
+    const FlattenInterfacePtr& codes_;
+    InnerIdType query_id_;
+};
+
 static void
 wait_all_futures(std::vector<std::future<void>>& futures) {
     std::exception_ptr first_exception = nullptr;
@@ -306,8 +346,8 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         }
     }
     Vector<Vector<InnerIdType>> route_graph_ids(allocator_);
-    auto need_sq8_build_data =
-        need_temporary_sq8_build_data(this->basic_flatten_codes_, this->has_precise_reorder());
+    auto need_sq8_build_data = need_temporary_sq8_build_data(
+        this->basic_flatten_codes_, this->has_precise_reorder() && !build_by_base_);
     FlattenInterfacePtr temporary_sq8_build_data = nullptr;
     if (need_sq8_build_data and raw_vector_ == nullptr) {
         temporary_sq8_build_data =
@@ -674,8 +714,9 @@ HGraph::add_by_pipnn(const DatasetPtr& data) {
             [&](auto n) { ensure_physical_code_capacity_unlocked(n); },
             [&](auto i, auto slot) { insert_persistent_codes_to_slot(get_data(data, i), slot); });
     }
-    const auto codes =
-        has_precise_reorder() && !build_by_base_ ? high_precise_codes_ : basic_flatten_codes_;
+    AddContext context;
+    context.need_temporary_sq8_build_data = need_temporary_sq8_build_data_for_add();
+    prepare_graph_read_codes(data, context);
     for (const auto& row : batch.rows) {
         if (row.level >= 0 && bottom_graph_->GetGroupId(row.inner_id) == row.inner_id) {
             bool highest = row.level >= static_cast<int>(route_graphs_.size());
@@ -683,8 +724,11 @@ HGraph::add_by_pipnn(const DatasetPtr& data) {
             InnerSearchParam param;
             param.ep = entry_point_id_;
             param.ef = param.topk = ef_construct_;
-            publish_unique_to_route_graphs(
-                get_data(data, row.input_idx), row.level, row.inner_id, param, codes);
+            publish_unique_to_route_graphs(get_data(data, row.input_idx),
+                                           row.level,
+                                           row.inner_id,
+                                           param,
+                                           context.graph_read_codes);
             if (highest)
                 entry_point_id_ = row.inner_id;
         }
@@ -1423,6 +1467,15 @@ HGraph::publish_unique_to_route_graphs(const void* data,
     DistHeapPtr result = nullptr;
     const auto build_computer = this->make_build_computer(data, inner_id);
 
+    FlattenDistanceProvider stored_distances(flatten_codes, nullptr);
+    std::optional<PiPNNRouteDistanceProvider> raw_query_distances;
+    if (pipnn_add_state_ && !flatten_codes->SupportSplitCodeStorage() &&
+        GetBaseQuantizerName(flatten_codes->GetQuantizerName()) == QUANTIZATION_TYPE_VALUE_RABITQ) {
+        raw_query_distances.emplace(*pipnn_add_state_, flatten_codes, inner_id);
+    }
+    const DistanceProviderForGraph& distances =
+        raw_query_distances ? static_cast<const DistanceProviderForGraph&>(*raw_query_distances)
+                            : static_cast<const DistanceProviderForGraph&>(stored_distances);
     for (int64_t j = 0; j <= level; ++j) {
         if (route_graphs_[j]->TotalCount() != 0) {
             result = this->search_graph_for_build(
@@ -1439,7 +1492,7 @@ HGraph::publish_unique_to_route_graphs(const void* data,
                 mutually_connect_new_element(inner_id,
                                              filtered_result,
                                              route_graphs_[j],
-                                             flatten_codes,
+                                             distances,
                                              neighbors_mutex_,
                                              allocator_,
                                              alpha_);

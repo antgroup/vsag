@@ -2918,6 +2918,30 @@ PiPNNGraphBuilder::Update(const GraphInterfacePtr& graph,
                           const Vector<InnerIdType>& ids,
                           const Vector<const float*>& input,
                           PiPNNIncrementalState& state) const {
+    update(graph, ids, input, state, {});
+}
+
+void
+PiPNNGraphBuilder::UpdateFromSharedRows(const GraphInterfacePtr& graph,
+                                        const Vector<InnerIdType>& ids,
+                                        std::span<const float* const> rows_by_id,
+                                        PiPNNIncrementalState& state) const {
+    require_argument(!graph->GetDuplicateTracker(), "shared PiPNN rows require unique graph IDs");
+    Vector<const float*> input(allocator_);
+    input.reserve(ids.size());
+    for (auto id : ids) {
+        require_argument(id < rows_by_id.size(), "missing global PiPNN row");
+        input.push_back(rows_by_id[id]);
+    }
+    update(graph, ids, input, state, rows_by_id);
+}
+
+void
+PiPNNGraphBuilder::update(const GraphInterfacePtr& graph,
+                          const Vector<InnerIdType>& ids,
+                          const Vector<const float*>& input,
+                          PiPNNIncrementalState& state,
+                          std::span<const float* const> rows_by_id) const {
     require_argument(ids.size() == input.size(), "incremental row count mismatch");
     if (ids.empty())
         return;
@@ -2970,9 +2994,26 @@ PiPNNGraphBuilder::Update(const GraphInterfacePtr& graph,
     const auto& accepted = graph->GetDuplicateTracker() ? unique_ids : ids;
     const auto& accepted_rows = graph->GetDuplicateTracker() ? unique_rows : input;
     if (!accepted.empty()) {
-        state.ReserveVectors(old + accepted.size(), dimensions_, allocator_);
-        state.AppendIds(accepted);
-        for (uint64_t i = 0; i < accepted.size(); ++i) state.SetVector(old + i, accepted_rows[i]);
+        Vector<const float*> indirect(allocator_);
+        std::span<const float* const> local_rows;
+        if (rows_by_id.empty()) {
+            state.ReserveVectors(old + accepted.size(), dimensions_, allocator_);
+            state.AppendIds(accepted);
+            for (uint64_t i = 0; i < accepted.size(); ++i)
+                state.SetVector(old + i, accepted_rows[i]);
+            local_rows = state.Rows();
+        } else {
+            require_argument(state.RequiredCapacity() <= rows_by_id.size(),
+                             "missing historical PiPNN row");
+            state.AppendIds(accepted);
+            if (state.HasDenseIds()) {
+                local_rows = rows_by_id.first(state.ids.size());
+            } else {
+                indirect.reserve(state.ids.size());
+                for (auto id : state.ids) indirect.push_back(rows_by_id[id]);
+                local_rows = indirect;
+            }
+        }
         PiPNNPipeline pipeline(parameter_,
                                dimensions_,
                                metric_,
@@ -2980,7 +3021,7 @@ PiPNNGraphBuilder::Update(const GraphInterfacePtr& graph,
                                thread_pool_,
                                thread_count_,
                                graph,
-                               state.Rows());
+                               local_rows);
         if (old)
             pipeline.Increment(state, old);
         else

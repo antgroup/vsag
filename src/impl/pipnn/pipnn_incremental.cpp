@@ -140,6 +140,12 @@ PiPNNIncrementalState::SetVector(uint32_t row, const float* vector) {
 }
 
 void
+PiPNNIncrementalState::DropOwnedRows() {
+    vectors_.reset();
+    std::vector<const float*>().swap(row_pointers_);
+}
+
+void
 PiPNNIncrementalState::AppendIds(std::span<const uint32_t> incoming) {
     const auto first = ids.size();
     ids.insert(ids.end(), incoming.begin(), incoming.end());
@@ -178,12 +184,14 @@ PiPNNIncrementalState::MemoryUsage() const {
     return result;
 }
 void
-PiPNNIncrementalState::Serialize(StreamWriter& w) const {
+PiPNNIncrementalState::Serialize(StreamWriter& w, bool with_vectors) const {
     StreamWriter::WriteVector(w, ids);
     // Version 1 stores the flat FP32 element count followed by packed rows.
-    StreamWriter::WriteObj(w, static_cast<uint64_t>(ids.size()) * dimensions_);
-    if (!ids.empty())
-        vectors_->WriteRecords(w, ids.size());
+    if (with_vectors) {
+        StreamWriter::WriteObj(w, static_cast<uint64_t>(ids.size()) * dimensions_);
+        if (!ids.empty())
+            vectors_->WriteRecords(w, ids.size());
+    }
     StreamWriter::WriteVector(w, planes);
     projections.Write(w);
     norms.Write(w);
@@ -201,7 +209,8 @@ PiPNNIncrementalState::Deserialize(StreamReader& r,
                                    uint64_t dim,
                                    uint64_t h,
                                    uint64_t graph_capacity,
-                                   Allocator* allocator) {
+                                   Allocator* allocator,
+                                   bool with_vectors) {
     std::vector<uint32_t> loaded_ids;
     read_array(r, loaded_ids, std::min<uint64_t>(count, UINT32_MAX));
     ids.clear();
@@ -217,12 +226,14 @@ PiPNNIncrementalState::Deserialize(StreamReader& r,
         required_capacity_ = std::max(required_capacity_, uint64_t{id} + 1);
     }
     count = ids.size();
-    uint64_t elements;
-    StreamReader::ReadObj(r, elements);
-    CHECK_ARGUMENT(dim && count <= UINT64_MAX / dim && elements == count * dim,
-                   "bad PiPNN vector array");
-    ReserveVectors(count, dim, allocator);
-    vectors_->ReadRecords(r, count);
+    if (with_vectors) {
+        uint64_t elements;
+        StreamReader::ReadObj(r, elements);
+        CHECK_ARGUMENT(dim && count <= UINT64_MAX / dim && elements == count * dim,
+                       "bad PiPNN vector array");
+        ReserveVectors(count, dim, allocator);
+        vectors_->ReadRecords(r, count);
+    }
     CHECK_ARGUMENT(h && h <= UINT64_MAX / dim, "bad PiPNN plane dimensions");
     read_array(r, planes, h * dim);
     CHECK_ARGUMENT(planes.size() == h * dim, "bad PiPNN plane shape");

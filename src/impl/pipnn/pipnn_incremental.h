@@ -107,6 +107,12 @@ struct PiPNNIncrementalState {
     LocalId(uint32_t id) const {
         return id < ids.size() && ids[id] == id ? id : sparse_ids_.at(id);
     }
+    bool
+    HasDenseIds() const {
+        return sparse_ids_.empty();
+    }
+    void
+    DropOwnedRows();
     void
     AppendIds(std::span<const uint32_t> incoming);
     uint64_t
@@ -116,14 +122,15 @@ struct PiPNNIncrementalState {
     uint64_t
     MemoryUsage() const;
     void
-    Serialize(StreamWriter& writer) const;
+    Serialize(StreamWriter& writer, bool with_vectors = true) const;
     void
     Deserialize(StreamReader& reader,
                 uint64_t count,
                 uint64_t dim,
                 uint64_t planes_count,
                 uint64_t graph_capacity,
-                Allocator* allocator);
+                Allocator* allocator,
+                bool with_vectors = true);
 
 private:
     std::vector<const float*> row_pointers_;

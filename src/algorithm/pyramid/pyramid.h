@@ -33,6 +33,7 @@
 #include "impl/filter/filter_headers.h"
 #include "impl/heap/distance_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
+#include "impl/pipnn/pipnn_incremental.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/basic_searcher.h"
 #include "index_common_param.h"
@@ -113,9 +114,9 @@ public:
         base_codes_ = FlattenInterface::MakeInstance(pyramid_param->base_codes_param, common_param);
         if (pipnn_param_.incremental_add)
             CHECK_ARGUMENT(
-                common_param.data_type_ == DataTypes::DATA_TYPE_FLOAT && !support_duplicate_ &&
-                    base_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32,
-                "Pyramid incremental PiPNN requires FP32 storage without duplicate tracking");
+                graph_type_ == GRAPH_TYPE_VALUE_PIPNN &&
+                    common_param.data_type_ == DataTypes::DATA_TYPE_FLOAT && !support_duplicate_,
+                "Pyramid incremental PiPNN requires dense FP32 input without duplicate tracking");
         if (pyramid_param->has_hierarchies) {
             for (const auto& h_param : pyramid_param->hierarchies) {
                 auto graph_param = pyramid_param->graph_param;
@@ -297,6 +298,7 @@ public:
 
     friend class PyramidAnalyzer;
     friend class PyramidDuplicateTestPeer;
+    friend struct PiPNNQuantizedAddTestAccess;
     friend class PyramidOptimizedBuildSession;
 
 private:
@@ -689,9 +691,16 @@ private:
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};         // graph algorithm type
     std::unordered_map<const GraphInterface*, std::shared_ptr<PiPNNIncrementalState>>
         pipnn_graph_states_;
-    std::mutex pipnn_add_mutex_;
+    mutable std::mutex pipnn_add_mutex_;
+    PiPNNFloatRows pipnn_exact_rows_;
+    FlattenInterfacePtr
+    pipnn_exact_codes() const;
     void
-    add_pipnn_to_hierarchy(Hierarchy&, const DatasetPtr&, const std::string&, const AddBatch&);
+    add_pipnn_to_hierarchy(Hierarchy&,
+                           const DatasetPtr&,
+                           const std::string&,
+                           const AddBatch&,
+                           std::span<const float* const> rows);
     std::vector<GraphInterfacePtr>
     pipnn_graphs_in_path_order() const;
     PiPNNGraphBuilderParameter pipnn_param_{};   // PiPNN build parameters
