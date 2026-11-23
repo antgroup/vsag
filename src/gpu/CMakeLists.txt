@@ -18,6 +18,7 @@ if (ENABLE_CUDA)
         cuda_assign.cu
         cuda_seed.cu
         cuda_accumulate.cu
+        cuda_pipnn.cu
         cuda_pipnn_quantize.cu
         cuda_pipnn_score.cu
         cuda_pipnn_partition.cu
