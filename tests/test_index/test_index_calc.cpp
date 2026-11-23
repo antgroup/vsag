@@ -276,6 +276,60 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
 }
 
 void
+TestIndex::TestCalcDistanceByIdRemovedLabel(const IndexPtr& index,
+                                            const TestDatasetPtr& dataset,
+                                            bool is_sparse) {
+    REQUIRE(index->CheckFeature(vsag::SUPPORT_CAL_DISTANCE_BY_ID));
+    REQUIRE(index->CheckFeature(vsag::SUPPORT_BATCH_CALC_DISTANCE_BY_ID));
+    const auto base_count = dataset->base_->GetNumElements();
+    REQUIRE(base_count > 1);
+    const auto* base_ids = dataset->base_->GetIds();
+    const int64_t removed_id = base_ids[0];
+    const int64_t existing_id = base_ids[base_count - 1];
+    REQUIRE(removed_id != existing_id);
+
+    auto remove_result = index->Remove(removed_id, vsag::RemoveMode::MARK_REMOVE);
+    REQUIRE(remove_result.has_value());
+    REQUIRE(remove_result.value() == 1);
+
+    const auto queries = dataset->query_;
+    auto query = get_one_query(queries, 0);
+    const bool use_dataset = use_dataset_query(queries, is_sparse);
+
+    {
+        INFO("single-ID distance of a removed label must fail as a missing label");
+        tl::expected<float, vsag::Error> result;
+        if (use_dataset) {
+            result = index->CalcDistanceById(query, removed_id);
+        } else {
+            result = index->CalcDistanceById(query->GetFloat32Vectors(), removed_id);
+        }
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    }
+    {
+        INFO("batch distance marks the removed label invalid instead of failing");
+        std::vector<int64_t> batch_ids = {removed_id, existing_id};
+        const auto count = static_cast<int64_t>(batch_ids.size());
+        tl::expected<DatasetPtr, vsag::Error> result;
+        if (use_dataset) {
+            result = index->CalcDistancesById(query, batch_ids.data(), count);
+        } else {
+            result = index->CalcDistancesById(query->GetFloat32Vectors(), batch_ids.data(), count);
+        }
+        REQUIRE(result.has_value());
+        const auto* dists = result.value()->GetDistances();
+        const auto* valids = result.value()->GetValids();
+        REQUIRE(dists != nullptr);
+        REQUIRE(valids != nullptr);
+        REQUIRE_FALSE(valids[0]);
+        REQUIRE(std::isnan(dists[0]));
+        REQUIRE(valids[1]);
+        REQUIRE(std::isfinite(dists[1]));
+    }
+}
+
+void
 TestIndex::TestMultiQueryBatchCalcDistanceById(const IndexPtr& index,
                                                const TestDatasetPtr& dataset,
                                                float error,

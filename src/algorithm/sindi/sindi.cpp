@@ -2088,7 +2088,10 @@ SINDI::CalcDistancesById(const DatasetPtr& query,
 
     auto* distances =
         static_cast<float*>(allocator_->Allocate(sizeof(float) * num_queries_size * count_size));
-    CHECK_ARGUMENT(distances != nullptr, "Failed to allocate SINDI multi-query distance buffer");
+    if (distances == nullptr) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                            "Failed to allocate SINDI multi-query distance buffer");
+    }
     result->Distances(distances);
 
     std::shared_lock rlock(this->global_mutex_);

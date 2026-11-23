@@ -898,6 +898,21 @@ TEST_CASE("Dataset Valids Test", "[ut][dataset]") {
         }
     }
 
+    SECTION("Append zero-element dataset keeps existing valids") {
+        auto owner = vsag::Dataset::Make();
+        owner->NumElements(1)->Dim(3)->Valids(new bool[3]{true, false, true})->Owner(true);
+        auto empty = vsag::Dataset::Make();
+        empty->NumElements(0)->Dim(3)->Valids(new bool[3]{false, false, false})->Owner(true);
+
+        owner->Append(empty);
+        REQUIRE(owner->GetNumElements() == 1);
+        REQUIRE(owner->GetValids() != nullptr);
+        const bool expected[3] = {true, false, true};
+        for (int i = 0; i < 3; ++i) {
+            REQUIRE(owner->GetValids()[i] == expected[i]);
+        }
+    }
+
     SECTION("Append with valids on only one side throws before mutating") {
         auto with_valids = vsag::Dataset::Make();
         with_valids->NumElements(1)

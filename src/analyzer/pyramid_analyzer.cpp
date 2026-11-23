@@ -965,8 +965,13 @@ PyramidAnalyzer::get_search_recall(
                     const auto distance = pyramid_->CalcDistanceById(
                         sample_datas.data() + (static_cast<uint64_t>(i) * dim_), label, true);
                     is_hit = distance <= distance_threshold + tie_tolerance;
-                } catch (const VsagException&) {
-                    // A label returned by search that is no longer present cannot be a hit.
+                } catch (const VsagException& e) {
+                    // Only a label that is no longer present counts as a miss; any other
+                    // failure (including a still-present label) must not be swallowed.
+                    if (e.error_.type != ErrorType::INVALID_ARGUMENT or
+                        pyramid_->label_table_->CheckLabel(label)) {
+                        throw;
+                    }
                     is_hit = false;
                 }
             }
