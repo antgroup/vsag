@@ -641,7 +641,13 @@ private:
 
     [[nodiscard]] FlattenInterfacePtr
     construction_codes() const {
-        return has_precise_reorder() ? precise_codes_ : base_codes_;
+        if (has_precise_reorder())
+            return precise_codes_;
+        // Plain RaBitQ cannot compare two stored codes when NSW prunes graph edges.
+        if (raw_vector_ && !base_codes_->SupportSplitCodeStorage() &&
+            GetBaseQuantizerName(base_codes_->GetQuantizerName()) == QUANTIZATION_TYPE_VALUE_RABITQ)
+            return raw_vector_;
+        return base_codes_;
     }
 
     [[nodiscard]] FlattenInterfacePtr

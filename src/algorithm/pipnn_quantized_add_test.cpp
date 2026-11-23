@@ -92,13 +92,14 @@ TEST_CASE("Quantized incremental PiPNN keeps FP32 graph state through path promo
     const std::string name = pyramid ? "pyramid" : "hgraph";
     auto parameters = vsag::JsonType::Parse(
         R"({"dim":64,"dtype":"float32","metric_type":"l2","index_param":{"graph_type":"pipnn","pipnn_incremental_add":true,"max_degree":16,"ef_construction":100,"alpha":1.2,"pipnn_max_leaf_size":64,"pipnn_min_leaf_size":12,"build_thread_count":1}})");
-    auto create = [&](bool reference) {
+    auto create = [&](bool reference, bool incremental = true) {
         auto p = vsag::JsonType::Parse(parameters.Dump());
         auto setting = p["index_param"];
         setting["base_quantization_type"].SetString(reference        ? "fp32"
                                                     : codec == "sq8" ? "sq8"
                                                                      : "rabitq");
         setting["store_raw_vector"].SetBool(raw);
+        setting["pipnn_incremental_add"].SetBool(incremental);
         if (!reference && codec != "sq8")
             setting["rabitq_bits_per_dim_base"].SetInt(codec == "rabitq" ? 1 : 3);
         if (!reference && (codec == "rq3sq8" || codec == "split")) {
@@ -168,6 +169,20 @@ TEST_CASE("Quantized incremental PiPNN keeps FP32 graph state through path promo
             REQUIRE(index->Deserialize(snapshot).has_value());
             REQUIRE(index->GetNumElements() == end);
             REQUIRE(vsag::PiPNNQuantizedAddTestAccess::topology(index, pyramid) == expected);
+        }
+        if (pyramid && raw && codec == "rabitq" && begin == 0) {
+            std::stringstream same_base;
+            REQUIRE(quantized->Serialize(same_base).has_value());
+            auto nsw = create(false, false);
+            REQUIRE(nsw->Deserialize(same_base).has_value());
+            auto add = nsw->Add(data(end, 40));
+            if (!add.has_value())
+                FAIL(add.error().message);
+            REQUIRE(add.value().empty());
+            REQUIRE(nsw->GetNumElements() == end + 40);
+            auto found = nsw->KnnSearch(data(end + 39, 1), 10, R"({"pyramid":{"ef_search":128}})");
+            REQUIRE(found.has_value());
+            REQUIRE(found.value()->GetDim() == 10);
         }
         auto stores = vsag::PiPNNQuantizedAddTestAccess::codes(quantized, pyramid);
         REQUIRE(stores.size() == (codec == "rq3sq8" ? 2 : 1));
