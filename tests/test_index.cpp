@@ -936,6 +936,42 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
 }
 
 void
+TestIndex::TestCalcDistanceByIdRemovedLabel(const IndexPtr& index, const TestDatasetPtr& dataset) {
+    // Covers the tombstone path: a label that was inserted and then removed must be reported as
+    // missing, both by the single-ID API (INVALID_ARGUMENT) and by the batch API (invalid flag).
+    if (index->GetIndexType() != vsag::IndexType::HNSW) {
+        auto train_result = index->Train(dataset->base_);
+        REQUIRE(train_result.has_value());
+    }
+    auto add_result = index->Add(dataset->base_);
+    REQUIRE(add_result.has_value());
+
+    const auto* base_ids = dataset->base_->GetIds();
+    const auto* base_vectors = dataset->base_->GetFloat32Vectors();
+    const int64_t removed_id = base_ids[0];
+    const int64_t existing_id = base_ids[1];
+
+    auto remove_result = index->Remove(removed_id);
+    REQUIRE(remove_result.has_value());
+    REQUIRE(index->GetNumberRemoved() == 1);
+
+    auto single_result = index->CalcDistanceById(base_vectors, removed_id);
+    REQUIRE_FALSE(single_result.has_value());
+    REQUIRE(single_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    const std::vector<int64_t> batch_ids = {removed_id, existing_id};
+    auto batch_result = index->CalDistanceById(base_vectors, batch_ids.data(), 2);
+    REQUIRE(batch_result.has_value());
+    const auto* valids = batch_result.value()->GetValids();
+    const auto* distances = batch_result.value()->GetDistances();
+    REQUIRE(valids != nullptr);
+    REQUIRE_FALSE(valids[0]);
+    REQUIRE(std::isnan(distances[0]));
+    REQUIRE(valids[1]);
+    REQUIRE(std::isfinite(distances[1]));
+}
+
+void
 TestIndex::TestGetMinAndMaxId(const IndexPtr& index,
                               const TestDatasetPtr& dataset,
                               bool expected_success) {

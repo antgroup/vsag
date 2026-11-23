@@ -859,3 +859,14 @@ TEST_CASE("Filtered search keeps bridges between filter-rejected nodes",
         REQUIRE(result.value()->GetIds()[1] >= count - 2);
     }
 }
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
+                             "HNSW CalcDistanceById Removed Label",
+                             "[ft][hnsw]") {
+    const std::string name = "hnsw";
+    const int64_t dim = 64;
+    auto param = GenerateHNSWBuildParametersString("l2", dim);
+    auto index = TestFactory(name, param, true);
+    auto dataset = pool.GetDatasetAndCreate(dim, 100, "l2");
+    TestIndex::TestCalcDistanceByIdRemovedLabel(index, dataset);
+}

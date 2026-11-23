@@ -280,7 +280,9 @@ public:
     /**
      * @brief Sets the per-entry validity flags of the dataset.
      *
-     * The array has one flag per entry of the Distances() array (NumElements() * Dim() entries).
+     * The array has one flag per requested ID, i.e. one flag per entry of the Distances() array.
+     * CalDistanceById results do not always populate NumElements()/Dim(), so consumers must derive
+     * the length from the number of requested IDs.
      * It follows the same ownership rules as the other pointer-backed Dataset fields. It is used
      * by CalDistanceById to mark which requested IDs existed at lookup time.
      *

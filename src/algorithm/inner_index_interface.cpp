@@ -17,6 +17,8 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
+
 #include "brute_force.h"
 #include "hgraph.h"
 #include "impl/filter/filter_headers.h"
@@ -307,7 +309,10 @@ AttachValids(const DatasetPtr& dataset, const std::vector<bool>& validity, Alloc
         return;
     }
     auto* valids = static_cast<bool*>(allocator->Allocate(sizeof(bool) * validity.size()));
-    CHECK_ARGUMENT(valids != nullptr, "CalDistanceById valids allocation failed");
+    if (valids == nullptr) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                            "CalDistanceById valids allocation failed");
+    }
     for (uint64_t i = 0; i < validity.size(); ++i) {
         valids[i] = validity[i];
     }
@@ -702,7 +707,8 @@ InnerIndexInterface::analyze_quantizer(JsonType& stats,
                                       ground_distances[pos];
                 }
             }
-            tmp_bias_ratio /= static_cast<float>(topk);
+            tmp_bias_ratio /=
+                static_cast<float>(std::min<int64_t>(topk, static_cast<int64_t>(kept.size())));
             bias_ratio += tmp_bias_ratio;
             // calculate inversion count rate
             int64_t inversion_count = 0;
@@ -714,9 +720,9 @@ InnerIndexInterface::analyze_quantizer(JsonType& stats,
                     }
                 }
             }
+            const auto pair_count = static_cast<float>(search_count * (search_count - 1)) / 2.0F;
             tmp_inversion_count_rate =
-                static_cast<float>(inversion_count) /
-                (static_cast<float>(search_count * (search_count - 1)) / 2.0F);
+                pair_count > 0 ? static_cast<float>(inversion_count) / pair_count : 0.0F;
             inversion_count_rate += tmp_inversion_count_rate;
         }
         stats["quantization_bias_ratio"].SetFloat(bias_ratio /
@@ -785,7 +791,9 @@ InnerIndexInterface::cal_distance_by_id(const float* query,
     }
     std::vector<bool> local_validity(count, false);
     auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
-    CHECK_ARGUMENT(distances != nullptr, "failed to allocate distance buffer");
+    if (distances == nullptr) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate distance buffer");
+    }
     result->Distances(distances);
     std::fill(distances, distances + count, std::numeric_limits<float>::quiet_NaN());
     Vector<InnerIdType> inner_ids(allocator_);
