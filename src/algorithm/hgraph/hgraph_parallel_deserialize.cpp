@@ -24,6 +24,7 @@
 #include "datacell/clique_datacell.h"
 #include "hgraph.h"
 #include "hgraph_component_names.h"  // IWYU pragma: keep
+#include "impl/pipnn/pipnn_incremental.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "storage/chunked_manifest.h"
 #include "storage/parallel_deserialize_utils.h"
@@ -64,7 +65,8 @@ is_known_component(const std::string& name) {
     return supports_chunked_granularity(name) || name == COMPONENT_LABEL_TABLE ||
            name == COMPONENT_CODE_SLOT_MAP || name == COMPONENT_ROUTE_GRAPHS ||
            name == COMPONENT_EXTRA_INFOS || name == COMPONENT_ATTR_FILTER ||
-           name == COMPONENT_MCI_CLIQUES || name == COMPONENT_CONJUGATE_GRAPH;
+           name == COMPONENT_MCI_CLIQUES || name == COMPONENT_CONJUGATE_GRAPH ||
+           name == "pipnn_incremental";
 }
 
 // components whose Deserialize seeks inside its own payload rather than reading
@@ -153,6 +155,12 @@ HGraph::ParallelDeserialize(DeserializeReader& reader) {
     }
     auto metadata = footer->GetMetadata();
 
+    if (metadata->Get("pipnn_incremental_version").IsNumberInteger() &&
+        !metadata->Get(CHUNKED_LAYOUT_KEY).IsObject()) {
+        footer_reader.Seek(0);
+        Deserialize(footer_reader);
+        return;
+    }
     const auto serialized_total_count = this->apply_footer_metadata(metadata);
     const auto basic_info = metadata->Get(BASIC_INFO);
 
@@ -174,6 +182,9 @@ HGraph::ParallelDeserialize(DeserializeReader& reader) {
     // The probe path parses graph tails before filling IO. Rebuild incoming edges only
     // after all fills have joined, before any FORCE_REMOVE may relocate tail IDs.
     this->bottom_graph_->FinishDeserialize();
+    CHECK_ARGUMENT(
+        !pipnn_add_state_ || pipnn_add_state_->RequiredCapacity() <= bottom_graph_->MaxCapacity(),
+        "PiPNN state ID exceeds loaded graph capacity");
     this->validate_and_publish_dedup_state(serialized_total_count);
     if (!this->using_dedup_storage()) {
         // Keep failed Add reservations unavailable to subsequent Adds after restore.
@@ -552,6 +563,16 @@ HGraph::deserialize_whole_component(const std::string& name,
     } else if (name == COMPONENT_RAW_VECTOR) {
         require_enabled(this->raw_vector_ != nullptr);
         this->raw_vector_->Deserialize(reader);
+    } else if (name == "pipnn_incremental") {
+        auto state = std::make_shared<PiPNNIncrementalState>();
+        state->Deserialize(reader,
+                           basic_info["total_count"].GetUint64(),
+                           dim_,
+                           pipnn_param_.hash_plane_count,
+                           basic_info["max_capacity"].GetUint64(),
+                           allocator_);
+        if (pipnn_param_.incremental_add)
+            pipnn_add_state_ = std::move(state);
     } else if (name == COMPONENT_MCI_CLIQUES) {
         require_enabled(this->mci_parameters_.enabled);
         // single-writer: each whole component is dispatched as exactly one task

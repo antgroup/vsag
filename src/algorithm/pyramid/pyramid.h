@@ -111,6 +111,11 @@ public:
                            common_param.metric_ == MetricType::METRIC_TYPE_L2SQR,
                        "Pyramid PiPNN adaptive pruning only supports L2");
         base_codes_ = FlattenInterface::MakeInstance(pyramid_param->base_codes_param, common_param);
+        if (pipnn_param_.incremental_add)
+            CHECK_ARGUMENT(
+                common_param.data_type_ == DataTypes::DATA_TYPE_FLOAT && !support_duplicate_ &&
+                    base_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32,
+                "Pyramid incremental PiPNN requires FP32 storage without duplicate tracking");
         if (pyramid_param->has_hierarchies) {
             for (const auto& h_param : pyramid_param->hierarchies) {
                 auto graph_param = pyramid_param->graph_param;
@@ -682,9 +687,16 @@ private:
     mutable std::mutex cur_element_count_mutex_;         // guards cur_element_count_ updates
     mutable std::once_flag parallel_without_pool_warned_;  // one-shot latch for the pool warning
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};         // graph algorithm type
-    PiPNNGraphBuilderParameter pipnn_param_{};             // PiPNN build parameters
-    AdaptivePruningParameter adaptive_pruning_;            // bottom-layer adaptive NSW policy
-    bool default_rabitq_one_bit_search_{false};            // default split lower-bound search
+    std::unordered_map<const GraphInterface*, std::shared_ptr<PiPNNIncrementalState>>
+        pipnn_graph_states_;
+    std::mutex pipnn_add_mutex_;
+    void
+    add_pipnn_to_hierarchy(Hierarchy&, const DatasetPtr&, const std::string&, const AddBatch&);
+    std::vector<GraphInterfacePtr>
+    pipnn_graphs_in_path_order() const;
+    PiPNNGraphBuilderParameter pipnn_param_{};   // PiPNN build parameters
+    AdaptivePruningParameter adaptive_pruning_;  // bottom-layer adaptive NSW policy
+    bool default_rabitq_one_bit_search_{false};  // default split lower-bound search
 
     std::mutex random_generator_mutex_;
     std::default_random_engine level_generator_{

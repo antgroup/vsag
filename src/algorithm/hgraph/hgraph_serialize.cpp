@@ -26,6 +26,7 @@
 #include "hgraph_component_names.h"  // IWYU pragma: keep
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
+#include "impl/pipnn/pipnn_incremental.h"
 #include "impl/pruning_strategy.h"
 #include "storage/chunked_stream_writer.h"
 #include "storage/serialization.h"
@@ -408,6 +409,8 @@ HGraph::Serialize(StreamWriter& writer) const {
 
     // FIXME(wxyu): this option is used for special purposes, like compatibility testing
     if (this->use_old_serial_format_) {
+        CHECK_ARGUMENT(!pipnn_add_state_,
+                       "incremental PiPNN state requires the current serialization format");
         if (this->use_conjugate_graph_) {
             throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                 "HGraph conjugate graph does not support v0.14 serialization");
@@ -469,6 +472,8 @@ HGraph::Serialize(StreamWriter& writer) const {
         this->conjugate_graph_->Serialize(writer);
     }
 
+    if (pipnn_add_state_)
+        pipnn_add_state_->Serialize(writer);
     // serialize footer (introduced since v0.15)
     auto jsonify_basic_info = this->serialize_basic_info();
     auto metadata = std::make_shared<Metadata>();
@@ -476,6 +481,8 @@ HGraph::Serialize(StreamWriter& writer) const {
     if (this->support_duplicate_) {
         metadata->Set("duplicate_format_version", 1);
     }
+    if (pipnn_add_state_)
+        metadata->Set("pipnn_incremental_version", 1);
     metadata->Set("has_conjugate_graph", this->use_conjugate_graph_);
     logger::debug(jsonify_basic_info.Dump());
 
@@ -604,6 +611,9 @@ HGraph::Serialize(SerializeWriter& writer, uint64_t chunk_size) const {
         });
     }
 
+    if (pipnn_add_state_)
+        serialize_whole("pipnn_incremental",
+                        [&]() { pipnn_add_state_->Serialize(chunked_writer); });
     // footer: plaintext, outside any component/frame
     auto jsonify_basic_info = this->serialize_basic_info();
     auto metadata = std::make_shared<Metadata>();
@@ -611,6 +621,8 @@ HGraph::Serialize(SerializeWriter& writer, uint64_t chunk_size) const {
     if (this->support_duplicate_) {
         metadata->Set("duplicate_format_version", 1);
     }
+    if (pipnn_add_state_)
+        metadata->Set("pipnn_incremental_version", 1);
     metadata->Set("has_conjugate_graph", this->use_conjugate_graph_);
     // physical bytes before the footer (same coordinate as the layout
     // offsets); chunked readers take the truth from the layout instead, the
@@ -623,6 +635,8 @@ HGraph::Serialize(SerializeWriter& writer, uint64_t chunk_size) const {
 
 MetadataPtr
 HGraph::collect_streaming_header() const {
+    CHECK_ARGUMENT(!pipnn_add_state_,
+                   "incremental PiPNN state requires file or binary-set serialization");
     if (this->mci_parameters_.enabled) {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "HGraph MCI does not support streaming serialization");
@@ -1240,6 +1254,19 @@ HGraph::Deserialize(StreamReader& reader) {
                 throw VsagException(result.error().type, result.error().message);
             }
         }
+        if (pipnn_param_.incremental_add &&
+            metadata->Get("pipnn_incremental_version").IsNumberInteger()) {
+            CHECK_ARGUMENT(metadata->Get("pipnn_incremental_version").GetInt() == 1,
+                           "unknown PiPNN state version");
+            auto state = std::make_shared<PiPNNIncrementalState>();
+            state->Deserialize(buffer_reader,
+                               total_count_.load(),
+                               dim_,
+                               pipnn_param_.hash_plane_count,
+                               bottom_graph_->MaxCapacity(),
+                               allocator_);
+            pipnn_add_state_ = std::move(state);
+        }
         if (this->raw_vector_ != nullptr) {
             this->has_raw_vector_ = true;
         }
@@ -1423,6 +1450,8 @@ std::unordered_map<std::string, uint64_t>
 HGraph::GetMemoryUsageDetail() const {
     std::unordered_map<std::string, uint64_t> memory_usage;
     memory_usage["pipnn_build_cache"] = pipnn_cache_memory_.load(std::memory_order_acquire);
+    if (pipnn_add_state_)
+        memory_usage["pipnn_incremental"] = pipnn_add_state_->MemoryUsage();
     memory_usage["neighbors_mutex"] = this->neighbors_mutex_->GetMemoryUsage();
     memory_usage["pool"] = this->pool_->GetMemoryUsage();
     memory_usage["label_table"] = this->label_table_->GetMemoryUsage();

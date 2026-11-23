@@ -39,6 +39,7 @@
 #include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
+#include "impl/pipnn/pipnn_incremental.h"
 #include "impl/pruning_strategy.h"
 #include "impl/reasoning/reasoning_context.h"
 #include "impl/reorder/flatten_reorder.h"
@@ -123,6 +124,13 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
                             "HGraph deduplicate_storage only supports dense vectors");
     }
     if (this->graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
+        if (pipnn_param_.incremental_add) {
+            CHECK_ARGUMENT(common_param.data_type_ == DataTypes::DATA_TYPE_FLOAT &&
+                               !support_force_remove_ && !mci_parameters_.enabled &&
+                               !use_conjugate_graph_ && !hgraph_param->rabitq_fused_datacell,
+                           "incremental PiPNN requires FP32 input without force removal, fused "
+                           "storage, conjugate graph or MCI");
+        }
         const bool valid_adaptive_metric = not this->pipnn_param_.adaptive_pruning or
                                            common_param.metric_ == MetricType::METRIC_TYPE_L2SQR;
         CHECK_ARGUMENT(valid_adaptive_metric, "PiPNN adaptive pruning only supports L2");
@@ -689,6 +697,8 @@ HGraph::GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const {
 
 void
 HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
+    CHECK_ARGUMENT(!pipnn_param_.incremental_add,
+                   "merging indexes invalidates the PiPNN routing tree");
     const auto parameters = std::dynamic_pointer_cast<HGraphParameter>(create_param_ptr_);
     CHECK_ARGUMENT(parameters != nullptr, "HGraph Merge requires HGraph parameters");
     if (parameters->merge_strategy == "fgim") {
@@ -1071,6 +1081,8 @@ HGraph::AcquireClusterNodeWriteLock(int64_t label) {
 
 bool
 HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
+    CHECK_ARGUMENT(!pipnn_param_.incremental_add,
+                   "in-place vector updates invalidate the PiPNN routing tree");
     if (cluster_vector_node_locks_ and not force_update) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             "externally locked node updates must use force_update");
@@ -1232,6 +1244,8 @@ HGraph::cal_memory_usage() const {
     // unaccounted and simply forces one more recalculation on the next query.
     const auto version = this->memory_usage_version_.load(std::memory_order_acquire);
     auto memory = sizeof(HGraph);
+    if (pipnn_add_state_)
+        memory += pipnn_add_state_->MemoryUsage();
     memory += this->neighbors_mutex_->GetMemoryUsage();
     memory += this->pool_->GetMemoryUsage();
     memory += this->label_table_->GetMemoryUsage();

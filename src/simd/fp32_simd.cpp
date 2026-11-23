@@ -15,6 +15,8 @@
 
 #include "fp32_simd.h"
 
+#include "pipnn_filter.h"
+#include "pipnn_ip_tile.h"
 #include "simd_dispatch.h"
 
 namespace vsag {
@@ -30,4 +32,55 @@ VSAG_DEFINE_SIMD_DISPATCH(FP32Mul, FP32ArithmeticType);
 VSAG_DEFINE_SIMD_DISPATCH(FP32Div, FP32ArithmeticType);
 VSAG_DEFINE_SIMD_DISPATCH(FP32ReduceAdd, FP32ReduceType);
 
+uint64_t
+ComputePiPNNOldRowTiles(const float* const* rows,
+                        const uint32_t* members,
+                        uint64_t old_count,
+                        uint64_t new_count,
+                        uint64_t dim,
+                        float* dots) {
+#if defined(ENABLE_AVX512)
+    if (dim == avx512::PIPNN_TILE_DIM && FP32ComputeIP == avx512::FP32ComputeIP &&
+        FP32ComputeIPBatch4 == avx512::FP32ComputeIPBatch4) {
+        return avx512::ComputePiPNNOldRowTiles960(rows, members, old_count, new_count, dots);
+    }
+#endif
+    return 0;
+}
+
+namespace pipnn_filter {
+namespace {
+RelativeHashes
+ScalarHash(const float* source, const float* target, uint64_t planes) {
+    RelativeHashes hash{};
+    bool coincident = true;
+    for (uint64_t i = 0; i < planes; ++i) {
+        const uint16_t bit = static_cast<uint16_t>(1U << i);
+        if (target[i] >= source[i])
+            hash.forward |= bit;
+        if (source[i] >= target[i])
+            hash.reverse |= bit;
+        coincident = coincident && source[i] == target[i];
+    }
+    if (coincident) {
+        hash.forward |= COINCIDENT_HASH_FLAG;
+        hash.reverse |= COINCIDENT_HASH_FLAG;
+    }
+    return hash;
+}
+}  // namespace
+
+const Kernels&
+GetKernels() {
+    static const Kernels kernels = []() -> Kernels {
+#if defined(ENABLE_AVX512)
+        if (SimdStatus::SupportAVX512()) {
+            return {avx512::Hash, avx512::SelectKth};
+        }
+#endif
+        return {ScalarHash, nullptr};
+    }();
+    return kernels;
+}
+}  // namespace pipnn_filter
 }  // namespace vsag

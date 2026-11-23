@@ -35,6 +35,7 @@
 #include "impl/logger/logger.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pipnn/pipnn_graph_builder.h"
+#include "impl/pipnn/pipnn_incremental.h"
 #include "impl/pruning_strategy.h"
 #include "impl/searcher/basic_searcher.h"
 #include "io/memory_io/memory_io_parameter.h"
@@ -498,8 +499,11 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
                                         this->allocator_,
                                         this->thread_pool_.get(),
                                         this->build_thread_count_);
-        if (half_input) {
-            // Reservoir caches only cover FP32 input; half input always builds cold.
+        if (pipnn_parameter.incremental_add) {
+            auto state = std::make_shared<PiPNNIncrementalState>();
+            pipnn_builder.Update(bottom_graph_, inner_ids, pipnn_f32_vectors, *state);
+            pipnn_add_state_ = std::move(state);
+        } else if (half_input) {
             pipnn_builder.Build(bottom_graph_, inner_ids, pipnn_half_vectors, data_type_);
         } else {
             std::vector<std::string> pipnn_sources;
@@ -620,8 +624,74 @@ HGraph::Add(const DatasetPtr& data) {
         if (this->total_count_.load() == 0) {
             return this->Build(data);
         }
+        if (pipnn_add_state_) {
+            return add_by_pipnn(data);
+        }
     }
     return this->add_impl(data);
+}
+
+std::vector<int64_t>
+HGraph::add_by_pipnn(const DatasetPtr& data) {
+    validate_add_data(data);
+    CHECK_ARGUMENT(!support_force_remove() && !rabitq_fused_datacell_ && !use_conjugate_graph_,
+                   "unsupported mutation mode for incremental PiPNN");
+    auto batch = prepare_add_batch(data);
+    if (batch.rows.empty())
+        return batch.failed_ids;
+    Vector<InnerIdType> ids(allocator_);
+    Vector<const float*> vectors(allocator_);
+    prepare_build_codes(data, batch.rows);
+    for (const auto& row : batch.rows) {
+        const auto* v = static_cast<const float*>(get_data(data, row.input_idx));
+        ids.push_back(row.inner_id);
+        vectors.push_back(v);
+        if (!using_dedup_storage())
+            insert_persistent_codes(v, row.inner_id);
+        if (extra_infos_)
+            extra_infos_->InsertExtraInfo(data->GetExtraInfos() + row.input_idx * extra_info_size_,
+                                          row.inner_id);
+        if (use_attribute_filter_ && data->GetAttributeSets())
+            attr_filter_index_->Insert(data->GetAttributeSets()[row.input_idx], row.inner_id);
+    }
+    std::unique_lock global(global_mutex_);
+    auto parameters = pipnn_param_;
+    parameters.alpha = alpha_;
+    PiPNNGraphBuilder builder(
+        parameters, dim_, metric_, allocator_, thread_pool_.get(), build_thread_count_);
+    builder.Update(bottom_graph_, ids, vectors, *pipnn_add_state_);
+    if (using_dedup_storage()) {
+        Vector<int64_t> positions(allocator_);
+        for (const auto& row : batch.rows) positions.push_back(row.input_idx);
+        materialize_pipnn_storage(
+            ids,
+            positions,
+            bottom_graph_,
+            *code_slot_map_,
+            allocator_,
+            thread_pool_.get(),
+            build_thread_count_,
+            [&](auto n) { ensure_physical_code_capacity_unlocked(n); },
+            [&](auto i, auto slot) { insert_persistent_codes_to_slot(get_data(data, i), slot); });
+    }
+    const auto codes =
+        has_precise_reorder() && !build_by_base_ ? high_precise_codes_ : basic_flatten_codes_;
+    for (const auto& row : batch.rows) {
+        if (row.level >= 0 && bottom_graph_->GetGroupId(row.inner_id) == row.inner_id) {
+            bool highest = row.level >= static_cast<int>(route_graphs_.size());
+            ensure_route_graphs_for_level(row.level);
+            InnerSearchParam param;
+            param.ep = entry_point_id_;
+            param.ef = param.topk = ef_construct_;
+            publish_unique_to_route_graphs(
+                get_data(data, row.input_idx), row.level, row.inner_id, param, codes);
+            if (highest)
+                entry_point_id_ = row.inner_id;
+        }
+        PublishNode(row.inner_id);
+    }
+    mark_memory_usage_dirty();
+    return batch.failed_ids;
 }
 
 std::vector<int64_t>
@@ -1481,7 +1551,7 @@ HGraph::InitFeatures() {
         IndexFeature::SUPPORT_BUILD_WITH_MULTI_THREAD,
         IndexFeature::SUPPORT_ADD_AFTER_BUILD,
     });
-    if (not this->using_dedup_storage()) {
+    if (not this->using_dedup_storage() && !pipnn_param_.incremental_add) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_MERGE_INDEX);
     }
     // search
@@ -1493,7 +1563,7 @@ HGraph::InitFeatures() {
         IndexFeature::SUPPORT_CONTINUE_SEARCH_SESSION,
     });
     // update
-    if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
+    if (data_type_ != DataTypes::DATA_TYPE_SPARSE && !pipnn_param_.incremental_add) {
         this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT});
     }
     this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_UPDATE_ID_CONCURRENT});

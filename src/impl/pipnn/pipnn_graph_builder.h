@@ -27,6 +27,7 @@
 
 namespace vsag {
 
+struct PiPNNIncrementalState;
 class Allocator;
 class SafeThreadPool;
 struct PiPNNBuildCache;
@@ -42,6 +43,7 @@ struct PiPNNGraphBuilderParameter {
     uint64_t hash_plane_count{12};
     uint64_t reservoir_size{64};
     float alpha{1.0F};
+    bool incremental_add{false};
     bool adaptive_pruning{false};
     float adaptive_pruning_adjust_step{0.06F};
 
@@ -88,6 +90,12 @@ public:
           const Vector<InnerIdType>& ids_sequence,
           const Vector<const uint16_t*>& rows,
           DataTypes data_type) const;
+
+    void
+    Update(const GraphInterfacePtr&,
+           const Vector<InnerIdType>& batch_ids,
+           const Vector<const float*>& batch_vectors,
+           PiPNNIncrementalState& state) const;
 
 private:
     template <typename ElementType>
