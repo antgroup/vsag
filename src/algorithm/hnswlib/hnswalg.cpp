@@ -15,6 +15,8 @@
 
 #include "hnswalg.h"
 
+#include <algorithm>
+#include <limits>
 #include <memory>
 
 #include "datacell/graph_interface.h"
@@ -256,13 +258,21 @@ HierarchicalNSW::getBatchDistanceByLabel(const int64_t* ids,
     result->Owner(true, allocator_);
     auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
     result->Distances(distances);
+    // Missing ids carry a NaN distance and a false entry in the validity mask.
+    bool* valids = nullptr;
+    if (count > 0) {
+        valids = static_cast<bool*>(allocator_->Allocate(sizeof(bool) * count));
+        std::fill(valids, valids + count, false);
+        result->Valids(valids);
+    }
     std::shared_ptr<float[]> normalize_query;
     normalizeVector(data_point, normalize_query);
     for (int i = 0; i < count; i++) {
         auto search = label_lookup_.find(ids[i]);
         if (search == label_lookup_.end()) {
-            distances[i] = -1;
+            distances[i] = std::numeric_limits<float>::quiet_NaN();
         } else {
+            valids[i] = true;
             InnerIdType internal_id = search->second;
             float dist =
                 fstdistfunc_(data_point, getDataByInternalId(internal_id), dist_func_param_);

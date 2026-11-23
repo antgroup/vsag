@@ -82,6 +82,7 @@ DatasetPtr DeepCopy(Allocator* allocator = nullptr) const;  // 独立副本
 | `AttributeSets(const AttributeSet*)` | `GetAttributeSets()` | [`AttributeSet`](types.md#attributeset) | 用于混合搜索的逐元素属性。 |
 | `ExtraInfos(const char*)` | `GetExtraInfos()` | `const char*` | 打包的 extra-info 数据块。 |
 | `ExtraInfoSize(int64_t)` | `GetExtraInfoSize()` | `int64_t` | 每个 extra-info 数据块的字节数。 |
+| `Valids(const bool*)` | `GetValids()` | `const bool*` | 逐项有效性掩码（如 `CalDistanceById` 结果），`false` 表示该项无效。 |
 | `Paths(const std::string*)` | `GetPaths()` | `const std::string*` | 层级路径（Pyramid）。默认层级。 |
 | `Paths(const std::string& hierarchy, const std::string*)` | `GetPaths(const std::string& hierarchy)` | `const std::string*` | 命名层级的路径。 |
 | `SourceID(const std::string*)` | `GetSourceID()` | `const std::string*` | 可选的来源标识。 |

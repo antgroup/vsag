@@ -219,7 +219,7 @@ error). See [Range Search](../advanced/range_search.md) and `examples/cpp/302_fe
 |--------|-----------|-------|
 | `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const float* vector, int64_t id, bool calculate_precise_distance = true) const` | Distance from a dense query to the stored vector `id`. |
 | `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const DatasetPtr& vector, int64_t id, bool calculate_precise_distance = true) const` | Same, accepting a `DatasetPtr` (works for sparse indexes such as SINDI). |
-| `CalDistanceById` | `tl::expected<DatasetPtr, Error> CalDistanceById(const float* query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true) const` | Batch variant; `-1` in the result marks an invalid distance. |
+| `CalDistanceById` | `tl::expected<DatasetPtr, Error> CalDistanceById(const float* query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true) const` | Batch variant; missing or removed IDs get `NaN` and `false` in `GetValids()`. The single-ID variants return `INVALID_ARGUMENT` for such IDs. |
 | `CalDistanceById` | `tl::expected<DatasetPtr, Error> CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true) const` | Batch variant accepting a `DatasetPtr` query. |
 
 `calculate_precise_distance = true` may load full-precision vectors (possibly from disk) instead of

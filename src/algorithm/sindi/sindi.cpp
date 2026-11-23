@@ -16,6 +16,7 @@
 #include "sindi.h"
 
 #include <cstring>
+#include <limits>
 #include <vector>
 
 #include "algorithm/sparse_distance.h"
@@ -1815,14 +1816,17 @@ SINDI::CalcDistanceById(const DatasetPtr& vector,
     if (use_reorder_ && calculate_precise_distance) {
         auto [success, inner_id] = this->label_table_->TryGetIdByLabel(id);
         if (not success) {
-            return -1.0F;
+            ThrowLabelNotFound(id);
         }
         auto [sorted_ids, sorted_vals] =
             sort_sparse_vector(vector->GetSparseVectors()[0], allocator_);
         return calc_distance_by_id_unsafe(rerank_flat_, sorted_ids, sorted_vals, inner_id);
     }
 
-    auto inner_id = this->label_table_->GetIdByLabel(id);
+    auto [found, inner_id] = this->label_table_->TryGetIdByLabel(id);
+    if (not found) {
+        ThrowLabelNotFound(id);
+    }
     auto cur_window = inner_id / window_size_;
     auto window_start_id = cur_window * window_size_;
     auto term_list = this->window_term_list_[cur_window];
@@ -1846,59 +1850,45 @@ SINDI::CalDistanceById(const DatasetPtr& query,
                        const int64_t* ids,
                        int64_t count,
                        bool calculate_precise_distance) const {
+    auto result = Dataset::Make();
+    result->Owner(true, allocator_);
+    auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
+    if (count > 0 and distances == nullptr) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate distance buffer");
+    }
+    std::fill_n(distances, count, std::numeric_limits<float>::quiet_NaN());
+    result->Distances(distances);
+    std::vector<bool> validity(count, false);
+
     if (use_reorder_ && calculate_precise_distance) {
         std::shared_lock rlock(this->global_mutex_);
-        auto result = Dataset::Make();
-        result->Owner(true, allocator_);
-        auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
-        result->Distances(distances);
         auto [sorted_ids, sorted_vals] =
             sort_sparse_vector(query->GetSparseVectors()[0], allocator_);
         for (int64_t i = 0; i < count; i++) {
             auto [success, inner_id] = this->label_table_->TryGetIdByLabel(ids[i]);
-            distances[i] = success ? calc_distance_by_id_unsafe(
-                                         rerank_flat_, sorted_ids, sorted_vals, inner_id)
-                                   : -1;
+            if (success) {
+                distances[i] =
+                    calc_distance_by_id_unsafe(rerank_flat_, sorted_ids, sorted_vals, inner_id);
+                validity[i] = true;
+            }
         }
+        AttachValids(result, validity, allocator_);
         return result;
     }
 
-    // prepare result
-    auto result = Dataset::Make();
-    result->Owner(true, allocator_);
-    auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
-    std::fill_n(distances, count, -1.0F);
-    result->Distances(distances);
-
-    // assume count is small, otherwise we should use bitmap to construct filter function
-    std::unordered_map<int64_t, uint32_t> valid_ids;
-    for (auto i = 0; i < count; i++) {
-        valid_ids[ids[i]] = i;
+    // Compute each existing id exactly; missing or removed ids keep a NaN distance.
+    for (int64_t i = 0; i < count; i++) {
+        try {
+            distances[i] = this->CalcDistanceById(query, ids[i], calculate_precise_distance);
+            validity[i] = true;
+        } catch (const VsagException& e) {
+            // The label is missing, removed, or removed concurrently.
+            if (e.error_.type != ErrorType::INVALID_ARGUMENT or this->label_exists(ids[i])) {
+                throw;
+            }
+        }
     }
-    auto filter = [&valid_ids](int64_t id) -> bool { return valid_ids.count(id) != 0; };
-    auto filter_ptr = std::make_shared<WhiteListFilter>(filter);
-
-    // search
-    CHECK_ARGUMENT(immutable_data_ == nullptr,
-                   "immutable SINDI runtime does not support CalDistanceById");
-    constexpr auto* search_param_fmt = R"(
-    {{
-        "sindi": {{
-            "query_prune_ratio": 0,
-            "n_candidate": {}
-        }}
-    }}
-    )";
-    auto search_res =
-        this->KnnSearch(query, count, fmt::format(search_param_fmt, count), filter_ptr);
-
-    // flush results
-    for (auto i = 0; i < search_res->GetDim(); i++) {
-        float dist = search_res->GetDistances()[i];
-        int64_t id = search_res->GetIds()[i];
-        distances[valid_ids[id]] = dist;
-    }
-
+    AttachValids(result, validity, allocator_);
     return result;
 }
 

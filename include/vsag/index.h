@@ -509,7 +509,9 @@ public:
      *        vectors (e.g., full-precision float32) for distance computation, even if it requires
      *        loading data from disk, which may incur I/O overhead. If false, the implementation may
      *        use quantized or approximate representations for faster computation.
-     * @return result is the distance between the query and the vector of the given ID.
+     * @return result is the distance between the query and the vector of the given ID. If the ID
+     *         does not exist or has been removed, an Error with ErrorType::INVALID_ARGUMENT is
+     *         returned instead of a distance.
      */
     [[nodiscard]] virtual tl::expected<float, Error>
     CalcDistanceById(const float* vector,
@@ -534,7 +536,9 @@ public:
      *        vectors (e.g., full-precision float32) for distance computation, even if it requires
      *        loading data from disk, which may incur I/O overhead. If false, the implementation may
      *        use quantized or approximate representations for faster computation.
-     * @return result is the distance between the query and the vector of the given ID.
+     * @return result is the distance between the query and the vector of the given ID. If the ID
+     *         does not exist or has been removed, an Error with ErrorType::INVALID_ARGUMENT is
+     *         returned instead of a distance.
      */
     [[nodiscard]] virtual tl::expected<float, Error>
     CalcDistanceById(const DatasetPtr& vector,
@@ -559,7 +563,8 @@ public:
      *        vectors (e.g., full-precision float32) for distance computation, even if it requires
      *        loading data from disk, which may incur I/O overhead. If false, the implementation may
      *        use quantized or approximate representations for faster computation.
-     * @return result is valid distance of input ids. '-1' indicates an invalid distance.
+     * @return result is the distances of input ids. Missing or removed ids have a quiet-NaN
+     *         distance and a false entry in result->GetValids() (label existence at lookup time).
      */
     [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     CalDistanceById(const float* query,
@@ -586,7 +591,8 @@ public:
      *        vectors (e.g., full-precision float32) for distance computation, even if it requires
      *        loading data from disk, which may incur I/O overhead. If false, the implementation may
      *        use quantized or approximate representations for faster computation.
-     * @return result is valid distance of input ids. '-1' indicates an invalid distance.
+     * @return result is the distances of input ids. Missing or removed ids have a quiet-NaN
+     *         distance and a false entry in result->GetValids() (label existence at lookup time).
      */
     [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     CalDistanceById(const DatasetPtr& query,
