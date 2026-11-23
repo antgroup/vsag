@@ -98,12 +98,16 @@ PQFS 可用于 IVF 基础桶编码，但不能用于 flat 重排编码，因为�
   不存在（或已删除），对应距离为 `NaN`（`std::numeric_limits<float>::quiet_NaN()`）。判断 ID 是否缺失
   必须使用 `GetValids()`，不能依赖距离值。
 - `topk == -1` 时，裸指针批量重载返回一行 `count` 个距离；`DatasetPtr` 重载返回
-  `NumElements()` 行、每行 `count` 个距离。两者都保持输入顺序，且不返回 ID。`GetValids()` 包含
-  `NumElements() * count` 个条目，与输入 ID 顺序对齐（多查询时为 row-major）。
+  `NumElements()` 行、每行 `count` 个距离。两者都保持输入顺序，且不返回 ID。`GetValids()` 每个请求的
+  ID 对应一个标记，顺序与输入 ID 一致（多查询时为 row-major）。
 - `topk > 0` 时，批量重载每个 query 返回按距离升序排列的最小 `min(topk, count)` 个
-  距离，`GetIds()` 包含对应 ID。`GetValids()` 包含 `NumElements() * Dim()` 个条目，与输出顺序对齐。
+  距离，`GetIds()` 包含对应 ID。`GetValids()` 每个返回的距离对应一个标记，即每个 query 行
+  `min(topk, count)` 个标记。
   缺失 ID 排在所有有效距离之后，不受有效距离的符号影响，仅在有效 ID 不足 `topk` 时才出现在结果中，
   其距离为 `NaN`、`Valids` 为 false。
+- 两种模式下 `GetValids()` 的条目数都与 `GetDistances()` 一致。这些结果不一定会填充
+  `NumElements()`/`Dim()`，因此标记数量应从请求的 ID 数量（或返回的 `GetDistances()` 数组）推导，
+  而不是 `NumElements() * Dim()`。
 - 距离的语义由建索引时设置的 `metric_type`（IP / L2 / cosine）决定，参见
   [度量语义](../resources/metric_semantics.md)。
 
