@@ -263,10 +263,27 @@ HGraphAnalyzer::calculate_quantization_result(
         auto precise_result =
             hgraph_->CalDistanceById(sample_datas.data() + i, result.data(), topk_);
         const auto* precise_distance = precise_result->GetDistances();
-        uint32_t inversion_count = 0;
+        const auto* base_valids = base_result->GetValids();
+        const auto* precise_valids = precise_result->GetValids();
+        // Skip entries whose label is missing or removed: their distance is NaN.
+        std::vector<uint32_t> kept;
+        kept.reserve(topk_);
         for (uint32_t j = 0; j < topk_; ++j) {
+            if ((base_valids == nullptr or base_valids[j]) and
+                (precise_valids == nullptr or precise_valids[j])) {
+                kept.push_back(j);
+            }
+        }
+        if (kept.empty()) {
+            continue;
+        }
+        const auto kept_count = static_cast<uint32_t>(kept.size());
+        uint32_t inversion_count = 0;
+        for (uint32_t a = 0; a < kept_count; ++a) {
+            const auto j = kept[a];
             sample_error += std::abs(base_distance[j] - precise_distance[j]);
-            for (uint32_t k = j + 1; k < topk_; ++k) {
+            for (uint32_t b = a + 1; b < kept_count; ++b) {
+                const auto k = kept[b];
                 if ((base_distance[j] - base_distance[k]) *
                         (precise_distance[j] - precise_distance[k]) <
                     0) {
@@ -274,10 +291,10 @@ HGraphAnalyzer::calculate_quantization_result(
                 }
             }
         }
-        total_quantization_error += sample_error / static_cast<float>(topk_);
+        total_quantization_error += sample_error / static_cast<float>(kept_count);
         total_quantization_inversion_count_rate +=
             static_cast<float>(inversion_count) /
-            (static_cast<float>(topk_) * static_cast<float>(topk_ - 1) / 2.0F);
+            (static_cast<float>(kept_count) * static_cast<float>(kept_count - 1) / 2.0F);
     }
     return {total_quantization_error / static_cast<float>(sample_size),
             total_quantization_inversion_count_rate / static_cast<float>(sample_size)};

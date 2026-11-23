@@ -558,12 +558,19 @@ SINDI::CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
         return this->rerank_flat_index_->CalcDistanceById(vector, id);
     }
 
-    auto inner_id = this->label_table_->GetIdByLabel(id);
+    auto [success, inner_id] = this->label_table_->TryGetIdByLabel(id);
+    if (not success) {
+        ThrowLabelNotFound(id);
+    }
+    return this->calc_distance_by_inner_id(vector->GetSparseVectors()[0], inner_id);
+}
+
+float
+SINDI::calc_distance_by_inner_id(const SparseVector& sparse_query, InnerIdType inner_id) const {
     auto cur_window = inner_id / window_size_;
     auto window_start_id = cur_window * window_size_;
     auto term_list = this->window_term_list_[cur_window];
 
-    const auto sparse_query = vector->GetSparseVectors()[0];
     SINDISearchParameter search_param;
     search_param.query_prune_ratio = 0;
     search_param.term_prune_ratio = 0;
@@ -583,13 +590,37 @@ SINDI::CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t coun
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
     auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
-    std::fill_n(distances, count, -1.0F);
+    if (distances == nullptr and count > 0) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate distance buffer");
+    }
+    std::fill_n(distances, count, std::numeric_limits<float>::quiet_NaN());
     result->Distances(distances);
+    if (count <= 0) {
+        return result;
+    }
+
+    // a label is valid iff it currently exists in the label table (and is not removed)
+    std::vector<bool> validity(count, false);
+    std::vector<InnerIdType> inner_ids(count, 0);
+    {
+        std::shared_lock rlock(this->global_mutex_);
+        for (int64_t i = 0; i < count; i++) {
+            auto [success, inner_id] = this->label_table_->TryGetIdByLabel(ids[i]);
+            validity[i] = success;
+            inner_ids[i] = inner_id;
+        }
+    }
 
     // assume count is small, otherwise we should use bitmap to construct filter function
-    std::unordered_map<int64_t, uint32_t> valid_ids;
-    for (auto i = 0; i < count; i++) {
-        valid_ids[ids[i]] = i;
+    std::unordered_map<int64_t, std::vector<int64_t>> valid_ids;
+    for (int64_t i = 0; i < count; i++) {
+        if (validity[i]) {
+            valid_ids[ids[i]].push_back(i);
+        }
+    }
+    if (valid_ids.empty()) {
+        AttachValids(result, validity, allocator_);
+        return result;
     }
     auto filter = [&valid_ids](int64_t id) -> bool { return valid_ids.count(id) != 0; };
     auto filter_ptr = std::make_shared<WhiteListFilter>(filter);
@@ -607,12 +638,31 @@ SINDI::CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t coun
         this->KnnSearch(query, count, fmt::format(search_param_fmt, count), filter_ptr);
 
     // flush results
+    std::vector<bool> computed(count, false);
     for (auto i = 0; i < search_res->GetDim(); i++) {
         float dist = search_res->GetDistances()[i];
         int64_t id = search_res->GetIds()[i];
-        distances[valid_ids[id]] = dist;
+        auto iter = valid_ids.find(id);
+        if (iter == valid_ids.end()) {
+            continue;
+        }
+        for (auto pos : iter->second) {
+            distances[pos] = dist;
+            computed[pos] = true;
+        }
     }
 
+    // existing labels that the search did not return (e.g. no overlapping terms) are computed
+    // directly, so that every existing label gets a real distance
+    const auto sparse_query = query->GetSparseVectors()[0];
+    for (int64_t i = 0; i < count; i++) {
+        if (validity[i] and not computed[i]) {
+            std::shared_lock rlock(this->global_mutex_);
+            distances[i] = this->calc_distance_by_inner_id(sparse_query, inner_ids[i]);
+        }
+    }
+
+    AttachValids(result, validity, allocator_);
     return result;
 }
 

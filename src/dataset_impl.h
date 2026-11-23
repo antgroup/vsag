@@ -35,7 +35,8 @@ class DatasetImpl : public Dataset {
                              const int64_t*,
                              const std::string*,
                              const SparseVector*,
-                             const AttributeSet*>;
+                             const AttributeSet*,
+                             const bool*>;
 
 public:
     DatasetImpl() = default;
@@ -124,6 +125,20 @@ public:
             return std::get<const float*>(iter->second);
         }
 
+        return nullptr;
+    }
+
+    DatasetPtr
+    Valids(const bool* valids) {
+        this->data_[VALIDS_KEY] = valids;
+        return shared_from_this();
+    }
+
+    const bool*
+    GetValids() const {
+        if (auto iter = this->data_.find(VALIDS_KEY); iter != this->data_.end()) {
+            return std::get<const bool*>(iter->second);
+        }
         return nullptr;
     }
 
@@ -246,6 +261,8 @@ public:
     MakeEmptyDataset();
 
 private:
+    static constexpr const char* VALIDS_KEY = "valids";
+
     bool owner_{true};
     std::unordered_map<std::string, var> data_;
     Allocator* allocator_ = nullptr;

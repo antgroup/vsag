@@ -119,6 +119,9 @@ public:
     SetImmutable() override;
 
 private:
+    float
+    calc_distance_by_inner_id(const SparseVector& sparse_query, InnerIdType inner_id) const;
+
     template <InnerSearchMode mode>
     DatasetPtr
     search_impl(const SparseTermComputerPtr& computer,

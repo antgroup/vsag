@@ -812,6 +812,23 @@ TestIndex::TestCalcDistanceById(const IndexPtr& index,
             REQUIRE(std::abs(dist - estimate_dist) < error);
         }
     }
+    if (not expected_success) {
+        return;
+    }
+    {
+        INFO("single-ID distance of a missing label must fail with INVALID_ARGUMENT");
+        auto query = get_one_query(queries, 0);
+        for (int64_t missing_id : {int64_t{-1}, int64_t{-12345}, int64_t{1} << 40}) {
+            tl::expected<float, vsag::Error> result;
+            if (is_sparse) {
+                result = index->CalcDistanceById(query, missing_id);
+            } else {
+                result = index->CalcDistanceById(query->GetFloat32Vectors(), missing_id);
+            }
+            REQUIRE_FALSE(result.has_value());
+            REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+        }
+    }
 }
 
 void
@@ -869,11 +886,52 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
             result =
                 index->CalDistanceById(queries->GetFloat32Vectors(), no_exist_ids.data(), test_num);
         }
+        REQUIRE(result.has_value());
+        const auto* valids = result.value()->GetValids();
+        REQUIRE(valids != nullptr);
         for (int i = 0; i < test_num; ++i) {
-            fixtures::dist_t dist = result.value()->GetDistances()[i];
-            REQUIRE(dist == -1);
+            REQUIRE(std::isnan(result.value()->GetDistances()[i]));
+            REQUIRE_FALSE(valids[i]);
         }
         queries->NumElements(query_count);
+    }
+
+    SECTION("test mixed valid and missing ids") {
+        auto query = get_one_query(queries, 0);
+        const auto* gt_ids = gts->GetIds();
+        const int64_t valid_a = gt_ids[0];
+        const int64_t valid_b = gt_ids[gt_topK > 1 ? 1 : 0];
+        // Layout: missing, valid, missing, valid, missing.
+        std::vector<int64_t> mixed_ids = {-101, valid_a, -102, valid_b, -103};
+        const auto count = static_cast<int64_t>(mixed_ids.size());
+        const std::vector<bool> expected_valid = {false, true, false, true, false};
+        tl::expected<DatasetPtr, vsag::Error> result;
+        if (is_sparse) {
+            result = index->CalDistanceById(query, mixed_ids.data(), count);
+        } else {
+            result = index->CalDistanceById(query->GetFloat32Vectors(), mixed_ids.data(), count);
+        }
+        REQUIRE(result.has_value());
+        const auto* valids = result.value()->GetValids();
+        const auto* dists = result.value()->GetDistances();
+        REQUIRE(valids != nullptr);
+        for (int64_t i = 0; i < count; ++i) {
+            REQUIRE(valids[i] == expected_valid[i]);
+            REQUIRE(std::isnan(dists[i]) == not expected_valid[i]);
+        }
+        REQUIRE(std::abs(dists[1] - gts->GetDistances()[0]) < error);
+    }
+
+    SECTION("test empty id list has no valids") {
+        auto query = get_one_query(queries, 0);
+        tl::expected<DatasetPtr, vsag::Error> result;
+        if (is_sparse) {
+            result = index->CalDistanceById(query, nullptr, 0);
+        } else {
+            result = index->CalDistanceById(query->GetFloat32Vectors(), nullptr, 0);
+        }
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetValids() == nullptr);
     }
 }
 
