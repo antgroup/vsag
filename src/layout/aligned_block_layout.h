@@ -26,7 +26,7 @@
 namespace vsag {
 
 /**
- * Cache-line-aligned records backed by MemoryBlockIO. Each record stays within one
+ * Aligned records (cache-line aligned by default) backed by MemoryBlockIO. Each record stays within one
  * physical block; growing the directory never moves existing records. Callers must
  * exclude reads/writes while Reserve changes the directory. Disjoint records may
  * be written concurrently after Reserve completes.
@@ -38,9 +38,10 @@ public:
     explicit AlignedBlockLayout(uint64_t record_size,
                                 Allocator* allocator,
                                 uint64_t block_size_limit = std::min<uint64_t>(
-                                    2 * 1024 * 1024, Options::Instance().block_size_limit()))
+                                    2 * 1024 * 1024, Options::Instance().block_size_limit()),
+                                uint64_t record_alignment = K_ALIGNMENT)
         : record_size_(record_size),
-          block_size_(ChooseBlockSize(record_size, block_size_limit)),
+          block_size_(ChooseBlockSize(record_size, block_size_limit, record_alignment)),
           records_per_block_((block_size_ - (K_ALIGNMENT - 1)) / record_size),
           io_(block_size_, allocator),
           blocks_(allocator),
@@ -135,9 +136,12 @@ private:
     static constexpr uint64_t K_ALIGNMENT = 64;
 
     static uint64_t
-    ChooseBlockSize(uint64_t record_size, uint64_t limit) {
-        CHECK_ARGUMENT(record_size > 0 and record_size % K_ALIGNMENT == 0,
-                       "aligned block layout requires a cache-line-sized record stride");
+    ChooseBlockSize(uint64_t record_size, uint64_t limit, uint64_t alignment) {
+        CHECK_ARGUMENT(
+            alignment > 0 && alignment <= K_ALIGNMENT && (alignment & (alignment - 1)) == 0,
+            "invalid block record alignment");
+        CHECK_ARGUMENT(record_size > 0 && record_size % alignment == 0,
+                       "block record stride must be a multiple of its alignment");
         CHECK_ARGUMENT(record_size <= (uint64_t{1} << 63) - (K_ALIGNMENT - 1),
                        "aligned block layout record size overflow");
         CHECK_ARGUMENT(limit > 0, "aligned block layout block size must be positive");

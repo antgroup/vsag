@@ -40,6 +40,7 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pipnn/pipnn_graph_builder.h"
+#include "impl/pipnn/pipnn_incremental.h"
 #include "impl/pruning_strategy.h"
 #include "impl/reasoning/reasoning_context.h"
 #include "io/common/io_parameter.h"
@@ -777,6 +778,11 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
                 rows.emplace_back(static_cast<const float*>(row));
             }
         }
+        if (pipnn_param_.incremental_add && !pipnn_exact_codes()) {
+            pipnn_exact_rows_.Resize(rows.size(), dim_, allocator_);
+            for (size_t i = 0; i < rows.size(); ++i)
+                std::copy_n(rows[i], dim_, pipnn_exact_rows_.Row(i));
+        }
         for (const auto& [hname, hierarchy] : hierarchies_) {
             auto pipnn_parameter = pipnn_param_;
             pipnn_parameter.alpha = hierarchy->alpha;
@@ -810,6 +816,12 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
                 node_rows.reserve(ids.size());
                 for (const auto id : ids) {
                     node_rows.emplace_back(rows[id]);
+                }
+                if (pipnn_parameter.incremental_add) {
+                    auto state = std::make_shared<PiPNNIncrementalState>();
+                    pipnn_builder.UpdateFromSharedRows(graph, ids, rows, *state);
+                    pipnn_graph_states_[graph.get()] = std::move(state);
+                    return;
                 }
                 std::vector<std::string> node_sources;
                 if (source_ids != nullptr) {
@@ -904,7 +916,14 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
                         pipnn_builder.Build(
                             route_graph, route_ids, half_route_rows, common_param_.data_type_);
                     } else {
-                        pipnn_builder.Build(route_graph, route_ids, route_rows);
+                        if (pipnn_parameter.incremental_add) {
+                            auto state = std::make_shared<PiPNNIncrementalState>();
+                            pipnn_builder.UpdateFromSharedRows(
+                                route_graph, route_ids, rows, *state);
+                            pipnn_graph_states_[route_graph.get()] = std::move(state);
+                        } else {
+                            pipnn_builder.Build(route_graph, route_ids, route_rows);
+                        }
                     }
                     root.routing_->graphs.emplace_back(std::move(route_graph));
                 }
@@ -1390,6 +1409,9 @@ Pyramid::GetMemoryUsage() const {
 
 std::unordered_map<std::string, uint64_t>
 Pyramid::GetMemoryUsageDetail() const {
+    std::unique_lock add_lock(pipnn_add_mutex_, std::defer_lock);
+    if (pipnn_param_.incremental_add)
+        add_lock.lock();
     std::shared_lock resize_lock(resize_mutex_);
     std::unordered_map<std::string, uint64_t> memory_usage;
     memory_usage["pipnn_build_cache"] = pipnn_cache_memory_.load(std::memory_order_acquire);
@@ -1419,6 +1441,10 @@ Pyramid::GetMemoryUsageDetail() const {
     }
     memory_usage["hierarchies"] = hierarchy_memory;
     memory_usage["root_route_graphs"] = route_memory;
+    if (pipnn_exact_rows_.Size())
+        memory_usage["pipnn_shared_fp32"] = pipnn_exact_rows_.MemoryUsage();
+    for (const auto& [graph, state] : pipnn_graph_states_)
+        memory_usage["pipnn_incremental"] += state->MemoryUsage();
     return memory_usage;
 }
 
@@ -1468,6 +1494,18 @@ Pyramid::Serialize(StreamWriter& writer) const {
 
     // serialize footer (introduced since v0.15)
     JsonType basic_info;
+    if (pipnn_param_.incremental_add) {
+        basic_info["pipnn_incremental_version"].SetInt(2);
+        if (!pipnn_exact_codes())
+            pipnn_exact_rows_.Write(writer);
+        for (auto& graph : pipnn_graphs_in_path_order()) {
+            auto it = pipnn_graph_states_.find(graph.get());
+            bool present = it != pipnn_graph_states_.end();
+            StreamWriter::WriteObj(writer, present);
+            if (present)
+                it->second->Serialize(writer, false);
+        }
+    }
     basic_info["max_capacity"].SetInt(max_capacity_);
     basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
     write_index_footer(writer, basic_info);
@@ -1510,6 +1548,8 @@ Pyramid::deserialize_source_id_table(StreamReader& reader) {
 
 MetadataPtr
 Pyramid::collect_streaming_header() const {
+    CHECK_ARGUMENT(!pipnn_param_.incremental_add,
+                   "incremental PiPNN requires file or binary-set serialization");
     auto metadata = std::make_shared<Metadata>();
     metadata->Set("format", "vsag_stream_v1");
     metadata->Set("index_name", this->GetName());
@@ -1829,6 +1869,7 @@ Pyramid::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) 
                             "Pyramid streaming serialization extra_info block is missing");
     }
 
+    pipnn_param_.incremental_add = false;  // Streaming snapshots contain no PiPNN state.
     label_table_->TrimUnusedSlots(base_codes_->TotalCount());
     resize(max_capacity);
     this->current_memory_usage_ = static_cast<int64_t>(this->CalSerializeSize());
@@ -1900,6 +1941,50 @@ Pyramid::Deserialize(StreamReader& reader) {
         extra_infos_->Deserialize(buffer_reader);
     }
 
+    if (pipnn_param_.incremental_add && basic_info.Contains("pipnn_incremental_version")) {
+        const auto version = basic_info["pipnn_incremental_version"].GetInt();
+        CHECK_ARGUMENT(version == 1 || version == 2, "unknown PiPNN state version");
+        std::vector<uint8_t> recovered;
+        if (!pipnn_exact_codes()) {
+            if (version == 2)
+                pipnn_exact_rows_.Read(buffer_reader, cur_element_count_, dim_, false, allocator_);
+            else {
+                pipnn_exact_rows_.Resize(cur_element_count_, dim_, allocator_);
+                recovered.resize(cur_element_count_);
+            }
+        }
+        for (auto& graph : pipnn_graphs_in_path_order()) {
+            bool present = false;
+            StreamReader::ReadObj(buffer_reader, present);
+            if (present) {
+                auto state = std::make_shared<PiPNNIncrementalState>();
+                state->Deserialize(buffer_reader,
+                                   cur_element_count_,
+                                   dim_,
+                                   pipnn_param_.hash_plane_count,
+                                   std::min<uint64_t>(graph->MaxCapacity(), cur_element_count_),
+                                   allocator_,
+                                   version == 1);
+                if (version == 1) {
+                    for (size_t i = 0; !recovered.empty() && i < state->ids.size(); ++i) {
+                        const auto id = state->ids[i];
+                        std::copy_n(state->GetVector(i), dim_, pipnn_exact_rows_.Row(id));
+                        recovered[id] = 1;
+                    }
+                    state->DropOwnedRows();
+                }
+                pipnn_graph_states_[graph.get()] = std::move(state);
+            }
+        }
+        // A v1 cosine flat-only member may have only a normalized query code.
+        if (std::find(recovered.begin(), recovered.end(), 0) != recovered.end()) {
+            pipnn_graph_states_.clear();
+            pipnn_exact_rows_ = {};
+            pipnn_param_.incremental_add = false;
+        }
+    } else {
+        pipnn_param_.incremental_add = false;
+    }
     resize(max_capacity);
     this->current_memory_usage_ = this->CalSerializeSize();
 }
@@ -1950,6 +2035,9 @@ Pyramid::Add(const DatasetPtr& base) {
     if (base->GetNumElements() == 0) {
         return {};
     }
+    std::unique_lock lock(pipnn_add_mutex_, std::defer_lock);
+    if (pipnn_param_.incremental_add)
+        lock.lock();
     auto batch = prepare_add_batch(base);
     insert_add_batch(base, batch);
     return batch.failed_ids;
@@ -2086,10 +2174,51 @@ Pyramid::encode_add_batch(const DatasetPtr& base, const AddBatch& batch) {
     }
 }
 
+FlattenInterfacePtr
+Pyramid::pipnn_exact_codes() const {
+    for (const auto& codes : {base_codes_, raw_vector_, precise_codes_}) {
+        if (codes && codes->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32 &&
+            (common_param_.metric_ != MetricType::METRIC_TYPE_COSINE ||
+             codes->GetQuantizerCodeSize() == (dim_ + 1) * sizeof(float))) {
+            return codes;
+        }
+    }
+    return nullptr;
+}
+
 void
 Pyramid::insert_add_batch(const DatasetPtr& base, const AddBatch& batch) {
     std::shared_lock<std::shared_mutex> storage_lock(resize_mutex_);
     const auto* data_vectors = get_data(base);
+    if (batch.input_indices.empty())
+        return;
+    // Leases can own a read buffer for file-backed or cross-block codes. Keep them alive
+    // until every hierarchy has finished borrowing the rows, and never across Resize.
+    std::vector<FlattenCodesLease> leases;
+    std::vector<const float*> exact;
+    if (pipnn_param_.incremental_add) {
+        const auto first = batch.first_inner_id;
+        const auto total = first + batch.input_indices.size();
+        exact.reserve(total);
+        auto codes = pipnn_exact_codes();
+        if (codes) {
+            leases.reserve(first);
+            for (InnerIdType id = 0; id < first; ++id) {
+                leases.push_back(codes->AcquireCodesById(id));
+                CHECK_ARGUMENT(leases.back(), "missing exact PiPNN code");
+                exact.push_back(reinterpret_cast<const float*>(leases.back().Data()));
+            }
+        } else {
+            pipnn_exact_rows_.Resize(total, dim_, allocator_);
+            for (InnerIdType id = 0; id < first; ++id) exact.push_back(pipnn_exact_rows_.Row(id));
+        }
+        for (auto index : batch.input_indices) {
+            auto* row = base->GetFloat32Vectors() + index * dim_;
+            if (!codes)
+                std::copy_n(row, dim_, pipnn_exact_rows_.Row(exact.size()));
+            exact.push_back(row);
+        }
+    }
     for (const auto& [hname, h_ptr] : hierarchies_) {
         if (store_paths_ and not batch.input_indices.empty()) {
             uint64_t total_path_count = 0;
@@ -2123,9 +2252,107 @@ Pyramid::insert_add_batch(const DatasetPtr& base, const AddBatch& batch) {
                 }
             }
         }
+        if (pipnn_param_.incremental_add) {
+            add_pipnn_to_hierarchy(*h_ptr, base, hname, batch, exact);
+            continue;
+        }
         add_to_hierarchy(
             *h_ptr, data_vectors, base, hname, batch.input_indices, batch.first_inner_id);
     }
+}
+
+void
+Pyramid::add_pipnn_to_hierarchy(Hierarchy& h,
+                                const DatasetPtr& dataset,
+                                const std::string& name,
+                                const AddBatch& batch,
+                                std::span<const float* const> exact) {
+    std::unordered_map<IndexNode*, Vector<InnerIdType>> groups;
+    std::vector<int> levels;
+    if (h.root->has_routing()) {
+        auto sampled = sample_route_levels(*h.root, batch.input_indices.size());
+        levels.assign(sampled.begin(), sampled.end());
+    }
+    for (uint64_t i = 0; i < batch.input_indices.size(); ++i) {
+        uint64_t count = 0;
+        auto paths = GetDatasetPaths(*dataset, name, batch.input_indices[i], count);
+        for (auto* node : collect_path_nodes(h, paths, count)) {
+            if (std::find(h.no_build_levels.begin(), h.no_build_levels.end(), node->level_) ==
+                h.no_build_levels.end())
+                groups.try_emplace(node, allocator_)
+                    .first->second.push_back(batch.first_inner_id + i);
+        }
+    }
+    auto parameters = pipnn_param_;
+    parameters.alpha = h.alpha;
+    PiPNNGraphBuilder builder(parameters,
+                              dim_,
+                              common_param_.metric_,
+                              allocator_,
+                              thread_pool_.get(),
+                              build_thread_count_);
+    auto update = [&](GraphInterfacePtr& graph, const Vector<InnerIdType>& ids) {
+        if (ids.empty())
+            return;
+        graph->SetMaxCapacity(max_capacity_);
+        auto& state = pipnn_graph_states_[graph.get()];
+        if (!state)
+            state = std::make_shared<PiPNNIncrementalState>();
+        builder.UpdateFromSharedRows(graph, ids, exact, *state);
+    };
+    for (auto& [node, ids] : groups) {
+        std::unique_lock lock(node->mutex_);
+        if (node->status_ != IndexNode::Status::GRAPH) {
+            node->ids_.insert(node->ids_.end(), ids.begin(), ids.end());
+            node->status_ = IndexNode::Status::NO_INDEX;
+            node->Init();
+            if (node->status_ != IndexNode::Status::GRAPH)
+                continue;
+            node->entry_point_ = node->ids_.front();
+            update(node->graph_, node->ids_);
+            node->ids_.clear();
+        } else {
+            update(node->graph_, ids);
+        }
+        if (!node->has_routing() || levels.empty())
+            continue;
+        const auto old_top = static_cast<int>(node->routing_->graphs.size()) - 1;
+        int top = old_top;
+        for (auto id : ids) {
+            const int level = levels.at(id - batch.first_inner_id);
+            if (level > top) {
+                top = level;
+                node->entry_point_ = id;
+            }
+        }
+        for (int j = 0; j <= top; ++j) {
+            if (j > old_top)
+                node->routing_->graphs.push_back(node->make_route_graph());
+            Vector<InnerIdType> route_ids(allocator_);
+            for (auto id : ids)
+                if (levels.at(id - batch.first_inner_id) >= j)
+                    route_ids.push_back(id);
+            update(node->routing_->graphs[j], route_ids);
+        }
+    }
+}
+
+std::vector<GraphInterfacePtr>
+Pyramid::pipnn_graphs_in_path_order() const {
+    std::vector<GraphInterfacePtr> graphs;
+    std::function<void(const IndexNode&)> visit = [&](const IndexNode& node) {
+        if (node.graph_)
+            graphs.push_back(node.graph_);
+        if (node.has_routing())
+            for (auto& graph : node.routing_->graphs) graphs.push_back(graph);
+        std::map<std::string, const IndexNode*> children;
+        for (auto& [name, child] : node.children_) children.emplace(name, child.get());
+        for (auto& [name, child] : children) visit(*child);
+    };
+    std::map<std::string, const IndexNode*> roots;
+    for (auto& [name, h] : hierarchies_) roots.emplace(name, h->root.get());
+    for (auto& [name, root] : roots) visit(*root);
+    return graphs;
 }
 
 void
@@ -2415,7 +2642,8 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
             inner_json[GRAPH_KEY][ODESCENT_PARAMETER_GRAPH_ITER_TURN].SetJson(value);
         } else if (key == ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE) {
             inner_json[GRAPH_KEY][ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE].SetJson(value);
-        } else if (key == PIPNN_PARAMETER_MAX_LEAF_SIZE or key == PIPNN_PARAMETER_MIN_LEAF_SIZE or
+        } else if (key == "pipnn_incremental_add" or key == PIPNN_PARAMETER_MAX_LEAF_SIZE or
+                   key == PIPNN_PARAMETER_MIN_LEAF_SIZE or
                    key == PIPNN_PARAMETER_LEADER_SAMPLE_RATE or key == PIPNN_PARAMETER_FANOUT or
                    key == PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT or
                    key == PIPNN_PARAMETER_HASH_PLANE_COUNT or

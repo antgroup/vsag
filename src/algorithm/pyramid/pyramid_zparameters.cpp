@@ -433,6 +433,10 @@ PyramidParameters::CheckCompatibility(const ParamPtr& other) const {
     }
 
     CHECK_SUB_PARAM(*this, *p, graph_param);
+    if (pipnn_param.incremental_add && p->pipnn_param.incremental_add &&
+        pipnn_param.ToJson().Dump() != p->pipnn_param.ToJson().Dump()) {
+        return false;
+    }
     CHECK_FIELD_EQ(*this, *p, pipnn_param.adaptive_pruning);
     if (pipnn_param.adaptive_pruning) {
         CHECK_FIELD_EQ(*this, *p, graph_type);

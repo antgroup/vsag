@@ -89,6 +89,7 @@ records cross-index defaults and the top-level common fields.
 | `ef_construction` | int | `400` | Candidate list size during build (higher = better recall, slower build) |
 | `alpha` | float | `1.0` | Final robust-pruning factor; PiPNN requires a finite value at least `1.0`. |
 | `graph_type` | string | `"nsw"` | Graph algorithm: `nsw`, `odescent`, or `pipnn` |
+| `pipnn_incremental_add` | bool | `false` | Persist PiPNN state for incremental Add with dense FP32 input. |
 | `pipnn_max_leaf_size` | int | `1024` | Maximum partition leaf size. Larger leaves increase candidate coverage and leaf distance work. |
 | `pipnn_min_leaf_size` | int | `64` | Target used when merging undersized leaves. |
 | `pipnn_leader_sample_rate` | float | `0.005` | Fraction sampled as partition leaders; each partition uses at least `2` and at most `1000` leaders, bounded by its point count. |
@@ -214,6 +215,12 @@ final pruning. Keep `OPENBLAS_NUM_THREADS=1` when benchmarking so BLAS threads d
 builder scaling. The reproducible `tools/eval/pipnn_parallel.yaml` workload compares NSW,
 ODescent, and PiPNN at a matched Recall@10 target on SIFT1M and query-validates every graph.
 
+
+### Incremental PiPNN Add
+
+Set `graph_type: "pipnn"` and `pipnn_incremental_add: true` before the initial Build. The default uses ordinary Add. With dense FP32 input, incremental PiPNN uses the original rows for partition routing, projections, leaf neighbors, hash selection and graph pruning. Add reuses the quantizers trained during Build. SQ8 and ordinary RaBitQ use base codes. For split RaBitQ set the base and precise bit counts and use RaBitQ reorder. For 3-bit RaBitQ with independent SQ8 reorder set `rabitq_bits_per_dim_base: 3`, `use_reorder: true` and `precise_quantization_type: "sq8"`. Omit `rabitq_bits_per_dim_precise` in this configuration.
+
+HGraph applies PiPNN to the bottom graph and uses its existing upper-layer insertion path. Supported storage-deduplication configurations map cross-batch identical rows to a common physical code slot. Fused RaBitQ storage is outside the incremental mode.
 
 ### Experimental PiPNN adaptive alpha
 
