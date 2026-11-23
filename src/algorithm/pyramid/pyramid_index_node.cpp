@@ -82,18 +82,19 @@ IndexNode::Build(ODescent& odescent) {
 }
 
 void
-IndexNode::Build(const GraphBuildFunc& build_graph) {
+IndexNode::Build(const GraphBuildFunc& build_graph, const std::string& node_path) {
     std::unique_lock lock(mutex_);
     if (not ids_.empty()) {
         Init();
     }
     if (status_ == Status::GRAPH) {
         entry_point_ = ids_[0];
-        build_graph(graph_, ids_, level_);
+        build_graph(graph_, ids_, level_, node_path);
         Vector<InnerIdType>(allocator_).swap(ids_);
     }
     for (const auto& item : children_) {
-        item.second->Build(build_graph);
+        const auto child_path = node_path.empty() ? item.first : node_path + "/" + item.first;
+        item.second->Build(build_graph, child_path);
     }
 }
 
