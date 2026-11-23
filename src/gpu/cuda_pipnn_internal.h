@@ -172,4 +172,82 @@ QuantizeRows(const float* vectors,
              DeviceArray<int8_t>& d_q,
              DeviceArray<int32_t>& d_norms);
 
+template <typename K, typename V>
+bool
+sort_pairs(Workspace& ws,
+           cub::DoubleBuffer<K>& keys,
+           cub::DoubleBuffer<V>& vals,
+           uint64_t n,
+           uint32_t end_bit) {
+    if (n == 0) {
+        return true;
+    }
+    size_t bytes = 0;
+    VSAG_CUDA_TRY(cub::DeviceRadixSort::SortPairs(
+        nullptr, bytes, keys, vals, static_cast<int>(n), 0, static_cast<int>(end_bit)));
+    if (not ws.ensure_temp(bytes)) {
+        return false;
+    }
+    VSAG_CUDA_TRY(cub::DeviceRadixSort::SortPairs(
+        ws.temp(), bytes, keys, vals, static_cast<int>(n), 0, static_cast<int>(end_bit)));
+    return true;
+}
+
+struct Tiles {
+    std::vector<uint32_t> seg;
+    std::vector<uint32_t> row0;
+};
+
+inline Tiles
+build_tiles(const std::vector<uint32_t>& member_off,
+            const std::vector<uint32_t>& cand_off,
+            bool need_candidates) {
+    Tiles tiles;
+    const uint64_t segs = member_off.size() - 1;
+    for (uint64_t s = 0; s < segs; ++s) {
+        uint32_t size = member_off[s + 1] - member_off[s];
+        if (need_candidates and cand_off[s + 1] == cand_off[s]) {
+            continue;
+        }
+        for (uint32_t r = 0; r < size; r += kTileRows) {
+            tiles.seg.push_back(static_cast<uint32_t>(s));
+            tiles.row0.push_back(r);
+        }
+    }
+    return tiles;
+}
+
+struct ScoreArgs {
+    const int8_t* q;
+    const int32_t* norms;
+    uint32_t dim_words;
+    uint32_t dim_pad;
+    const uint32_t* q_ids;
+    const uint32_t* c_ids;
+    const uint32_t* member_off;
+    const uint32_t* cand_off;
+    const uint32_t* tile_seg;
+    const uint32_t* tile_row0;
+    uint32_t out_k;
+    uint32_t* out_assign;
+    uint64_t* out_keys;
+    uint32_t* out_vals;
+    uint32_t pos_base;
+    uint32_t slab_begin;
+    uint32_t slab_end;
+    uint32_t count;
+    uint32_t hash_bits;
+};
+
+/// Runs the fused score-tile kernel over `tiles` thread blocks. kPick = false assigns
+/// every member of a segment its nearest candidate leaders; kPick = true emits the
+/// leaf-neighbour edges with their hash buckets.
+template <bool kPick>
+bool
+launch_score(const ScoreArgs& args, uint32_t tiles);
+
+/// Marks the edges of `keys` whose source vertex is a real one (< count).
+bool
+FlagEdges(const uint64_t* keys, uint64_t n, uint32_t count, uint8_t* flags);
+
 }  // namespace vsag::gpu::pipnn
