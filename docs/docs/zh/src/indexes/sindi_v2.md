@@ -131,6 +131,12 @@ SINDI_V2 仍保留 term-first posting 布局。发布时间过滤支持 mutable�
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `n_candidate` | int | `0` | 粗排候选数量；`0` 使用根据 `topk` 推导的索引默认值。 |
+| `window_parallelism` | integer | `1` | 请求执行槽位数，包含调用线程，范围 `[1,16]`；符合条件的immutable内存KNN在分区内完成累分、过滤和候选维护。 |
+| `parallel_n_candidate_ratio` | number | `2` | 总局部容量倍率R，有限且>=1；归并精排候选仍不超过N。 |
+| `parallel_rerank_reads` | bool | `false` | 在现有槽位上限内并行多个AsyncIO/libaio精排读取批次。 |
+| `profile_search` | bool | `false` | 采集阶段墙钟、window 工作量、批次摘要及精排逻辑读取量。 |
+| `diagnose_search` | bool | `false` | 采集有界候选堆和最终结果摘要，用于受控一致性对比；摘要相同不能代替逐项比较。 |
+| `profile_cpu` | bool | `false` | 采集调用线程及后台worker CPU时间；时钟不可用时明确标识。 |
 | `filter_callback_limit` | uint64 | `0` | 单次带过滤检索最多调用用户 `Filter::CheckValid` 回调的次数；`0` 表示不限制。达到正数上限时，在正常处理最后一次回调结果后停止候选及后续 window 扫描，并返回此前已经通过过滤的候选，因此结果可能不完整。该限制适用于常规 KNN 和范围检索 API。 |
 | `query_prune_ratio` | float | `0.0` | 跳过最低权重查询 term 的比例，范围为 `[0.0, 1.0)`。 |
 | `term_prune_ratio` | float | `0.0` | 每条 term list 中跳过最低存储权重的比例，范围为 `[0.0, 1.0)`。 |
@@ -141,6 +147,40 @@ SINDI_V2 仍保留 term-first posting 布局。发布时间过滤支持 mutable�
 SINDI V2 会根据构建阶段的 `doc_prune_ratio` 与检索阶段的 `query_prune_ratio`
 自动选择堆插入策略。按当前 `0.1` 阈值，当两个比例都 `<= 0.1` 时，使用基于距离数组的
 入堆路径；只要任一比例大于 `0.1`，就使用基于 term-list 的入堆路径。
+
+### 分区并行 KNN
+
+创建/加载索引前通过Engine注入共享SearchResource，请求示例：
+`{"sindi_v2":{"window_parallelism":4,"parallel_n_candidate_ratio":2}}`。
+P1、无资源、mutable/文件posting、范围和reasoning保持串行；符合条件但实际仅获准1槽时仍保留分区计划与deadline。
+
+每分区持有局部候选堆，少量持久槽位完成累分、独立Filter和候选维护，调用线程归并最多N个候选，
+保持原精排的候选、距离计算及入堆顺序。显式设置parallel_rerank_reads=true且AsyncIO具备libaio时，超过一个批次的全局合并读取范围
+可按相同请求槽位上限重新申请共享资源，并行读取；单批次保持完整，不按候选拆散读取计划。
+读取任务全部drain后才计算距离或传播异常；内存、mmap及其他精排后端保持原路径。
+读取准入与分区准入分开，实际槽位数可能不同；并行读取会占用共享worker槽位，也可能增加在途IO buffer内存。
+非空并行Filter必须实现ConcurrentFilterProvider，串行回退租借1个evaluator，不能用全局锁伪装独立Filter。
+
+精排并行读取默认关闭，仅作用于符合条件的分区检索；P1和串行回退保持原路径。
+设置parallel_rerank_reads=true可与原P4读取路径对照，不改变P/R/N及分区配额；
+非法类型即使在串行回退时也会被校验。
+
+C=ceil(R*N)，W为路由window数，K_plan通常为K、带distance threshold时为N。
+规划G=min(16,W,floor(C/K_plan))，配额之和为C；16是上限，并不保证恰好16区。
+分区数与请求、瞬时获准槽位数独立，槽位准入不改变G与配额。
+局部截断、剪枝及同分边界可能造成结果差异；串行近似结果不是真值。P1不启用分区与倍率。
+
+并行deadline覆盖锁等待、准备、执行、归并、精排和输出；取消是协作式，异常前先drain。
+回调预算在一次VSAG调用的所有分区间共享；额度耗尽可返回部分候选。
+
+profile_search记录分区墙钟、累计累分/消费/清零/Filter、join等待、归并及精排读算。
+累计工作时间与墙钟重叠，不能相加。清零统计另给出稀疏/稠密窗口数及实际写入项数；停止窗口可能不再清理，因为该槽位将被丢弃。profile_cpu记录caller及后台worker CPU。
+diagnose_search只摘要有界候选与结果，不再哈希全window距离数组。默认均关闭。
+execution_complete表示扫描完整性，原complete只描述距离计数覆盖。
+
+精排读取统计区分调用线程墙钟`sindi_v2_rerank_read_us`与重叠的任务累计读取时间`sindi_v2_rerank_read_sum_us`，
+并提供读取槽位、计划任务数、准入与等待时间；不能把这些指标相加。
+直接回退路径不调度执行器任务，任务累计时间和任务数为0，但读取墙钟、范围数与字节数仍记录实际读取。
 
 ## 如何选择 SINDI 与 SINDI_V2
 

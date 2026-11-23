@@ -17,7 +17,9 @@
 
 #include <fmt/format.h>
 
+#include <cmath>
 #include <limits>
+#include <nlohmann/json.hpp>
 
 #include "impl/logger/logger.h"
 #include "inner_string_params.h"
@@ -370,6 +372,29 @@ SINDIV2SearchParameter::FromJson(const JsonType& json) {
     // Parse common search parameters (timeout_ms, factor, etc.)
     IndexSearchParameter::FromJson(search_json);
 
+    window_parallelism = search_json.Contains("window_parallelism")
+                             ? parse_uint32(search_json["window_parallelism"], "window_parallelism")
+                             : 1;
+    const bool valid_width = window_parallelism >= 1 && window_parallelism <= 16;
+    CHECK_ARGUMENT(valid_width, "window_parallelism must be an integer in [1,16]");
+    parallel_n_candidate_ratio = 2.0;
+    if (search_json.Contains("parallel_n_candidate_ratio")) {
+        CHECK_ARGUMENT(search_json["parallel_n_candidate_ratio"].IsNumber(),
+                       "parallel_n_candidate_ratio must be a number");
+        parallel_n_candidate_ratio =
+            search_json["parallel_n_candidate_ratio"].GetInnerJson()->get<double>();
+    }
+    const bool valid_ratio =
+        std::isfinite(parallel_n_candidate_ratio) and parallel_n_candidate_ratio >= 1;
+    CHECK_ARGUMENT(valid_ratio, "parallel_n_candidate_ratio must be finite and >= 1");
+    parallel_rerank_reads = search_json.Contains("parallel_rerank_reads") &&
+                            search_json["parallel_rerank_reads"].GetBool();
+    profile_search =
+        search_json.Contains("profile_search") && search_json["profile_search"].GetBool();
+    diagnose_search =
+        search_json.Contains("diagnose_search") && search_json["diagnose_search"].GetBool();
+    profile_cpu = search_json.Contains("profile_cpu") && search_json["profile_cpu"].GetBool();
+
     term_prune_ratio = DEFAULT_TERM_PRUNE_RATIO;
     term_retain_threshold = DEFAULT_TERM_RETAIN_THRESHOLD;
     filter_callback_limit = DEFAULT_FILTER_CALLBACK_LIMIT;
@@ -437,6 +462,12 @@ SINDIV2SearchParameter::ToJson() const {
     json[INDEX_SINDI_V2][SPARSE_FILTER_CALLBACK_LIMIT].SetUint64(filter_callback_limit);
     json[INDEX_SINDI_V2][SPARSE_TERM_PRUNE_RATIO].SetFloat(term_prune_ratio);
     json[INDEX_SINDI_V2][SPARSE_TERM_RETAIN_THRESHOLD].SetUint64(term_retain_threshold);
+    json[INDEX_SINDI_V2]["window_parallelism"].SetUint64(window_parallelism);
+    json[INDEX_SINDI_V2]["parallel_n_candidate_ratio"].SetDouble(parallel_n_candidate_ratio);
+    json[INDEX_SINDI_V2]["parallel_rerank_reads"].SetBool(parallel_rerank_reads);
+    json[INDEX_SINDI_V2]["profile_search"].SetBool(profile_search);
+    json[INDEX_SINDI_V2]["diagnose_search"].SetBool(diagnose_search);
+    json[INDEX_SINDI_V2]["profile_cpu"].SetBool(profile_cpu);
     return json;
 }
 

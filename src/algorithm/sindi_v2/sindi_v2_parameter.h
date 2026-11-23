@@ -91,6 +91,13 @@ public:
     // search
     uint32_t n_candidate{0};
     uint64_t filter_callback_limit{0};
+    uint32_t window_parallelism{1};
+    double parallel_n_candidate_ratio{2};
+    // Experiment controls: omitted fields preserve the delivered partition path.
+    bool parallel_rerank_reads{false};
+    bool profile_search{false};
+    bool diagnose_search{false};
+    bool profile_cpu{false};
 
     // data cell
     float query_prune_ratio{0};

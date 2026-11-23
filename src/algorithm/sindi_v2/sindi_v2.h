@@ -18,6 +18,7 @@
 #include "algorithm/inner_index_interface.h"
 #include "algorithm/sindi/term_id_mapper.h"
 #include "algorithm/sindi_metadata_filter.h"
+#include "algorithm/sindi_v2/sindi_v2_parallel_search.h"
 #include "algorithm/sindi_v2/sindi_v2_parameter.h"
 #include "datacell/disk_sindi_term_datacell.h"
 #include "datacell/flatten_interface.h"
@@ -155,11 +156,21 @@ private:
                 Allocator* allocator,
                 bool use_term_lists_heap_insert,
                 SindiQueryContext& query_context,
+                SindiV2SearchProfile& profile,
                 const SparseVector* original_query = nullptr,
                 SearchStatistics* statistics = nullptr,
                 const uint64_t* filter_callback_remaining = nullptr,
                 const SindiMetadataSearchRoute& metadata_route = {},
-                ReasoningContext* reasoning_ctx = nullptr) const;
+                ReasoningContext* reasoning_ctx = nullptr,
+                SindiParallelState* parallel = nullptr) const;
+
+    DatasetPtr
+    knn_search(const DatasetPtr& query,
+               int64_t k,
+               const std::string& parameters,
+               const FilterPtr& filter,
+               Allocator* allocator,
+               SindiV2SearchProfile::Clock::time_point entry_time) const;
 
     bool
     UseTermListsHeapInsert(const SINDIV2SearchParameter& search_param) const;
