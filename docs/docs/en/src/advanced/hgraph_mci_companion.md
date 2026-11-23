@@ -577,9 +577,9 @@ member IDs four cliques ahead. It prefetches up to five cache lines per row, at
 With packed filtering enabled, the search clears visited seeds and clique members
 from the query's private bitmap so later cliques can skip them during SIMD filtering.
 
-The selected MCI path rejects non-RaBitQ bases and bases that are not fully
-resident, including split RaBitQ with a disk-backed supplement. It never falls
-back to precise reads to score seeds. Other routes keep their existing behavior.
+Full-width MCI scoring requires all RaBitQ base codes in memory. For a split
+index with resident x-bit filter codes and a disk-backed y-bit supplement,
+enable low-bit scoring as shown below.
 
 To use HGraph's one-bit scoring dispatch on this MCI path, also set
 `rabitq_one_bit_search: true` (default `false`):
@@ -589,21 +589,21 @@ To use HGraph's one-bit scoring dispatch on this MCI path, also set
 ```
 
 Seeds, complete-seed scans, and clique expansion then call the same
-`QueryWithDistanceLowerBound()` interface as HGraph. A resident split RaBitQ
-backend scores its configured low-bit filter; ordinary RaBitQ retains the same
-full-base fallback as HGraph. Merely enabling this option does not add split
+`QueryWithDistanceLowerBound()` interface as HGraph. A split RaBitQ backend
+scores its resident x-bit filter. Ordinary RaBitQ uses the same full-base
+fallback as HGraph. Merely enabling this option does not add split
 codes or a new one-bit representation to an existing ordinary RaBitQ index.
 For a 1.0 split-only RaBitQ MCI build, `store_raw_vector: true` supplies the
 pair distances required for clique construction. Opt-in queries still use the
-resident base rather than that raw copy.
-All base records must still be resident, so backend fallbacks cannot read disk
-precise or supplement records. The legacy MCI path ignores this dispatch.
+resident filter. With a disk-backed supplement, traversal also scores degenerate
+records from the filter. Only final reorder reads the y-bit supplement to
+compute the combined x+y distance.
 
 When reorder uses the same RaBitQ base, eligible lower-bound candidates are
 recovered through HGraph's existing reorder interface. This can refine more
-than `ef_search` resident records. A separate SQ8 store receives only the
+than `ef_search` records. A separate SQ8 store receives only the
 retained candidate heap: RaBitQ bounds are not SQ8 bounds. As in HGraph,
-`enable_reorder: true` also refines one-bit results against the resident base
+`enable_reorder: true` also refines one-bit results against the full-width base
 when no separate reorder is configured. Set `enable_reorder: false` to retain
 the coarse scores without refinement.
 
@@ -614,7 +614,7 @@ They do not change the sparse-graph or `use_hybrid_traversal=true` expansion alg
 
 | Search parameter | Default | Meaning |
 | --- | --- | --- |
-| `mci_use_memory_quantization` | `false` | Score routed MCI KNN seeds and clique members with fully resident RaBitQ base codes, deferring configured precise reorder to the finalists. |
+| `mci_use_memory_quantization` | `false` | Score routed MCI KNN seeds and clique members with resident RaBitQ codes. In split low-bit mode, final reorder reads the y-bit supplement. |
 | `mci_packed_filter` | `true` | Build a query-private one-bit predicate from complete mapped valid IDs, or an identity-mapped byte bitmap. Static CSR members use runtime-dispatched AVX512/AVX2, with a portable scalar fallback. Member order is preserved. When no complete source is available, use the existing predicate checks. |
 | `mci_batch_distance` | `true` | Score up to 64 newly visited legal points per datacell call. Submit the final batch before selecting another parent or checking convergence. FP32 kernels can choose different IDs among exactly tied distances. |
 | `mci_activation_cap` | `0` | Maximum number of outgoing clique incidences considered for each expanded point. Zero means all incidences. Already visited cliques still consume this prefix. This changes the explored graph and can lower recall. |

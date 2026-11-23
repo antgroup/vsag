@@ -524,9 +524,8 @@ SIMD pack 先筛选静态 CSR 团成员，再将首次访问且存活的成员�
 启用 packed 过滤时，搜索会在查询私有位图中清除已访问的种子和团成员，
 后续团在 SIMD 过滤阶段就能跳过这些 ID。
 
-进入该 MCI 路径时，如果 base 不是 RaBitQ，或者没有完整驻留内存，则明确报错。
-补充位放在磁盘上的 split RaBitQ 也会被拒绝，不会回退为读取 precise 来评分种子。
-其他搜索路由沿用其原有行为。
+MCI 用完整位宽评分时，RaBitQ base 必须全部驻留内存。若 split 索引把 x-bit
+过滤码放在内存、y-bit 补充码放在磁盘，请按下例开启低位评分。
 
 要在该 MCI 新路径上使用与 HGraph 相同的 one-bit 评分分派，还需设置
 `rabitq_one_bit_search: true`，其默认值仍为 `false`：
@@ -536,17 +535,17 @@ SIMD pack 先筛选静态 CSR 团成员，再将首次访问且存活的成员�
 ```
 
 种子评分、完整种子扫描和团扩展将调用 HGraph 使用的
-`QueryWithDistanceLowerBound()`。内存 split RaBitQ 后端使用配置的低位码筛选；
+`QueryWithDistanceLowerBound()`。split RaBitQ 后端使用内存中的 x-bit 过滤码评分；
 普通 RaBitQ 与 HGraph 一样回退到完整 base 评分。打开查询参数不会自动给已有的
 普通 RaBitQ 索引增加 split 码或新的 one-bit 表示。1.0 的纯 split RaBitQ MCI
 建库可通过 `store_raw_vector: true` 提供构团所需的两点距离；新查询路径仍使用
-内存 base，不使用该 raw 副本。base 仍必须完整驻留内存，
-因此后端回退也不会读取磁盘 precise 或补充位。旧 MCI 路径不受该分派影响。
+内存中的过滤码评分。补充码在磁盘时，遍历对退化记录也只使用过滤码；
+最终重排才读取 y-bit 补充码，得到 x+y 位宽的距离。
 
 当精排使用同一 RaBitQ base 时，通过 HGraph 现有精排接口恢复符合下界条件的
-候选，因此可能精算超过 `ef_search` 个内存记录。独立 SQ8 精排只接收保留的
+候选，因此可能精算超过 `ef_search` 条记录。独立 SQ8 精排只接收保留的
 候选堆，不把 RaBitQ 下界当作 SQ8 下界使用。与 HGraph 一样，即使没有单独配置
-精排，`enable_reorder: true` 也会对 one-bit 结果使用内存 base 进行精算；
+精排，`enable_reorder: true` 也会对 one-bit 结果使用完整位宽的 base 进行精算；
 `enable_reorder: false` 则保留粗评分结果。
 
 ## 压缩过滤位图与按点限制团激活
@@ -556,7 +555,7 @@ SIMD pack 先筛选静态 CSR 团成员，再将首次访问且存活的成员�
 
 | 搜索参数 | 默认值 | 含义 |
 | --- | --- | --- |
-| `mci_use_memory_quantization` | `false` | 独立 MCI KNN 使用完整驻留内存的 RaBitQ base 评分种子和团成员，仅最终候选按配置执行 precise 精排。 |
+| `mci_use_memory_quantization` | `false` | 独立 MCI KNN 使用内存中的 RaBitQ 编码对种子和团成员评分。split 低位模式只在最终重排读取 y-bit 补充码。 |
 | `mci_packed_filter` | `true` | 从完整的合法 inner ID 或身份映射下的字节位图构造查询私有的单比特位图。静态 CSR 支持运行时选择 AVX512／AVX2 和标量回退，保留成员顺序；没有完整来源时沿用原谓词检查。 |
 | `mci_batch_distance` | `true` | 每批最多对 64 个首次访问的合法点调用距离接口；选择下一父节点和检查收敛前提交剩余批次。FP32 内核可能选择不同的严格等距 ID。 |
 | `mci_activation_cap` | `0` | 每个展开点只考虑其存储顺序中的前若干条团归属，0 表示不限。已经访问过的团仍占用前缀。这会改变搜索图，可能降低召回。 |

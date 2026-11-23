@@ -1029,7 +1029,8 @@ RaBitQuantizer<metric>::ComputeDistWithOneBitLowerBound(Computer<RaBitQuantizer>
                                                         const uint8_t* one_bit_code,
                                                         float* dists,
                                                         float* lower_bound,
-                                                        float runtime_rabitq_error_rate) const {
+                                                        float runtime_rabitq_error_rate,
+                                                        bool allow_uncorrected_estimate) const {
     if (lower_bound != nullptr) {
         *lower_bound = std::numeric_limits<float>::max();
     }
@@ -1040,7 +1041,8 @@ RaBitQuantizer<metric>::ComputeDistWithOneBitLowerBound(Computer<RaBitQuantizer>
     const auto* query = computer.buf_;
     const error_type one_bit_error =
         std::fabs(*((error_type*)(one_bit_code + OneBitRecordOneBitErrorOffset())));
-    if (one_bit_error <= 1e-5F) {
+    const bool has_correction = one_bit_error > 1e-5F;
+    if (not has_correction and not allow_uncorrected_estimate) {
         return false;
     }
 
@@ -1078,7 +1080,9 @@ RaBitQuantizer<metric>::ComputeDistWithOneBitLowerBound(Computer<RaBitQuantizer>
                 ip_obar_q(filter_ip_yu_q, query_raw_sum, base_norm_code, FilterBits());
         }
     }
-    float ip_est = filter_ip_estimate / one_bit_error;
+    // A centered vector can have zero alignment. Use the same unit divisor as
+    // full-width scoring when the correction is unavailable.
+    const float ip_est = has_correction ? filter_ip_estimate / one_bit_error : filter_ip_estimate;
 
     norm_type query_norm = *((norm_type*)(query + query_offset_norm_));
     norm_type base_norm = *((norm_type*)(one_bit_code + OneBitRecordNormOffset()));
@@ -1119,6 +1123,11 @@ RaBitQuantizer<metric>::ComputeDistWithOneBitLowerBound(Computer<RaBitQuantizer>
 
     *dists = result;
     if (lower_bound == nullptr) {
+        return true;
+    }
+
+    if (not has_correction) {
+        *lower_bound = std::numeric_limits<float>::lowest();
         return true;
     }
 

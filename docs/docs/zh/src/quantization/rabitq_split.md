@@ -75,6 +75,12 @@ x + y <= 8
 `hgraph.rabitq_error_rate` 可以为单次搜索覆盖索引默认值。record 中保存的是乘倍率前的
 几何误差尺度，因此 sweep 这个搜索参数不需要重建索引。
 
+对于带过滤的 KNN，HGraph 图遍历和独立 MCI 均可只扫描内存中的 x-bit 过滤码，
+在最终重排时读取磁盘上的 y-bit 补充码。查询设置 `rabitq_one_bit_search: true`
+和 `enable_reorder: true`。要让路由选中的 MCI 使用该模式，还需开启 `use_mci`
+和 `mci_use_memory_quantization`。关闭 `enable_reorder` 时，两条路径都返回 x-bit
+距离。显式选中的精确暴力扫描仍使用其配置的完整精度存储。
+
 ## 搜索流程
 
 split 搜索分为四个阶段：

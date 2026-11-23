@@ -194,11 +194,8 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         }
     };
 
-    if (inner_search_param.enable_rabitq_one_bit_search) {
-        flatten->QueryWithDistanceLowerBound(&dist, nullptr, computer, &ep, 1, ctx);
-    } else {
-        flatten->Query(&dist, computer, &ep, 1, ctx);
-    }
+    query_traversal_distances(
+        flatten, inner_search_param.enable_rabitq_one_bit_search, &dist, computer, &ep, 1, ctx);
     if (is_result_distance_eligible(dist) and check_func(ep)) {
         top_candidates->Push(dist, ep);
         lower_bound = top_candidates->Top().first;
@@ -264,6 +261,8 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     // before enough results are found, they are expanded as bridges toward the eligible region.
     Vector<InnerIdType> deferred_ids(alloc);
     uint64_t deferred_pos = 0;
+    const bool use_split_filter =
+        use_resident_split_filter(flatten, inner_search_param.enable_rabitq_one_bit_search);
     auto rescue_deferred = [&]() {
         if constexpr (mode != InnerSearchMode::KNN_SEARCH) {
             return false;
@@ -278,7 +277,13 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                 to_be_visited_id[i] = deferred_ids[deferred_pos + i];
             }
             deferred_pos += count;
-            flatten->Query(line_dists.data(), computer, to_be_visited_id.data(), count, ctx);
+            query_traversal_distances(flatten,
+                                      use_split_filter,
+                                      line_dists.data(),
+                                      computer,
+                                      to_be_visited_id.data(),
+                                      count,
+                                      ctx);
             dist_cmp += count;
             for (uint32_t i = 0; i < count; ++i) {
                 candidate_set->Push(traversal_priority(line_dists[i]), to_be_visited_id[i]);

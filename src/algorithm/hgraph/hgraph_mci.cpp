@@ -710,11 +710,13 @@ HGraph::try_mci_search(const SearchRequest& request,
     auto scoring_flatten =
         params.mci_use_memory_quantization ? this->basic_flatten_codes_ : this->get_precise_codes();
     if (params.mci_use_memory_quantization) {
-        // Query() on split codes can read a disk supplement. Require the entire base cell
-        // to be resident, rather than silently falling back to precise or supplement IO.
-        CHECK_ARGUMENT(scoring_flatten != nullptr and scoring_flatten->InMemory() and
-                           scoring_flatten->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_RABITQ,
-                       "mci_use_memory_quantization requires fully in-memory RaBitQ base codes");
+        mci_param.use_one_bit_distance = search_param.enable_rabitq_one_bit_search;
+        CHECK_ARGUMENT(
+            scoring_flatten != nullptr and
+                scoring_flatten->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_RABITQ and
+                (mci_param.use_one_bit_distance ? scoring_flatten->IsDistanceLowerBoundInMemory()
+                                                : scoring_flatten->InMemory()),
+            "mci_use_memory_quantization requires resident RaBitQ scoring codes");
     } else if (scoring_flatten != nullptr) {
         uint64_t precise_vector_stride = 0;
         mci_param.precise_vectors =
@@ -738,8 +740,6 @@ HGraph::try_mci_search(const SearchRequest& request,
     query_filter->AppendFilter(mci_param.deleted_ids_filter);
     auto mci_search_param = search_param;
     mci_search_param.is_inner_id_allowed = query_filter;
-    mci_param.use_one_bit_distance =
-        params.mci_use_memory_quantization and search_param.enable_rabitq_one_bit_search;
     std::unique_ptr<DistanceRecordVector> one_bit_candidates;
     if (mci_param.use_one_bit_distance and this->use_reorder_ and search_param.enable_reorder and
         this->reorder_by_base_) {

@@ -23,6 +23,7 @@
 #include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/reasoning/search_reasoning.h"
+#include "impl/searcher/searcher_utils.h"
 #include "utils/search_lock.h"
 #include "utils/util_functions.h"
 
@@ -156,6 +157,8 @@ HGraph::KnnSearch(const DatasetPtr& query,
     // that pagination state itself or be wasted on subsequent calls. The
     // non-iterator KnnSearch overload (which delegates to SearchWithRequest)
     // still benefits from the brute-force fallback.
+    const bool use_split_filter =
+        use_resident_split_filter(this->basic_flatten_codes_, params.rabitq_one_bit_search);
     if (is_last_filter) {
         if (const auto* pending_duplicates = iter_filter_ctx->GetPendingDuplicates();
             pending_duplicates != nullptr) {
@@ -173,6 +176,11 @@ HGraph::KnnSearch(const DatasetPtr& query,
             }
             iter_filter_ctx->PopDiscard();
         }
+        if (use_split_filter and params.enable_reorder and not search_result->Empty()) {
+            // Discards can carry first-stage distances. Retain every refined candidate so the
+            // common page-trimming loop can return the rest to the iterator.
+            this->reorder(query_data, this->basic_flatten_codes_, search_result, -1, nullptr, ctx);
+        }
     } else {
         InnerSearchParam search_param;
         search_param.ep = this->entry_point_id_;
@@ -183,6 +191,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
             return make_empty_dataset_with_stats();
         }
         if (iter_filter_ctx->IsFirstUsed()) {
+            search_param.enable_rabitq_one_bit_search = use_split_filter;
             for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
                 auto result = this->search_one_graph(query_data,
                                                      this->route_graphs_[i],
@@ -489,13 +498,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         reasoning_ctx->InitializeExpectedTargets(expected_labels_vec, label_to_inner_id);
 
         const auto* const query_vector = get_data(query);
-        auto precise_flatten = this->basic_flatten_codes_;
-        if (use_reorder_) {
-            precise_flatten = this->high_precise_codes_;
-        }
-        if (create_new_raw_vector_) {
-            precise_flatten = this->raw_vector_;
-        }
+        const auto precise_flatten = this->get_precise_codes();
         auto computer = precise_flatten->FactoryComputer(query_vector);
         for (const auto& pair : label_to_inner_id) {
             float dist = 0.0F;
@@ -621,6 +624,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     // parameters (single nearest neighbor, no filter) so the final search configuration never
     // changes the upper-layer walk; only the resulting entry point is propagated. A successful
     // routed MCI query needs no navigation and takes no visited list.
+    const bool use_split_filter =
+        use_resident_split_filter(this->basic_flatten_codes_, params.rabitq_one_bit_search);
     if (mci_result.route != "mci") {
         // Route navigation keeps the pre-MCI greedy policy: a single nearest neighbor per
         // layer, KNN mode, no filter, one routing thread. The remaining fields keep the
@@ -633,6 +638,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         ep_search_param.search_mode = KNN_SEARCH;
         ep_search_param.parallel_search_thread_count = 1;
         ep_search_param.enable_reorder = true;
+        ep_search_param.enable_rabitq_one_bit_search = use_split_filter;
         vt = this->pool_->TakeOne();
         for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
             auto result = this->search_one_graph(raw_query,
@@ -664,6 +670,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     } else if (hybrid_available) {
         HybridTraversalParam hybrid_param;
         hybrid_param.ef = search_param.ef;
+        hybrid_param.use_split_filter = use_split_filter;
         // The result heap keeps ef candidates, not k: the reorder stage can only
         // rescore the candidates it is handed, so a k-deep heap lets coarse
         // quantization errors through unrecoverably. The outer layer trims to k

@@ -16,9 +16,31 @@
 
 #include <limits>
 
+#include "datacell/flatten_interface.h"
 #include "utils/float_utils.h"
 
 namespace vsag {
+
+// Split codes can keep their filter planes resident while storing their supplement on disk.
+inline bool
+use_resident_split_filter(const FlattenInterfacePtr& flatten, bool one_bit_search) {
+    return one_bit_search and not flatten->InMemory() and flatten->IsDistanceLowerBoundInMemory();
+}
+
+inline void
+query_traversal_distances(const FlattenInterfacePtr& flatten,
+                          bool use_filter,
+                          float* distances,
+                          const ComputerInterfacePtr& computer,
+                          const InnerIdType* ids,
+                          InnerIdType count,
+                          QueryContext* ctx) {
+    if (use_filter) {
+        flatten->QueryWithDistanceLowerBound(distances, nullptr, computer, ids, count, ctx);
+    } else {
+        flatten->Query(distances, computer, ids, count, ctx);
+    }
+}
 
 inline bool
 is_result_distance_eligible(float distance) {

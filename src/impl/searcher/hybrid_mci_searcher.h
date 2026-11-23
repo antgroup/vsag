@@ -111,6 +111,8 @@ struct HybridTraversalParam {
      * units.
      */
     double filter_cost_ratio{1.0};
+    /** Score traversal batches from the resident filter planes of a split RaBitQ cell. */
+    bool use_split_filter{false};
 };
 
 /** Per-search counters. Handy for tests and for tuning the budget. */

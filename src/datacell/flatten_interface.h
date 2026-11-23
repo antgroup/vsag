@@ -268,6 +268,12 @@ public:
         return true;
     }
 
+    // Residency of the records accessed by QueryWithDistanceLowerBound.
+    [[nodiscard]] virtual bool
+    IsDistanceLowerBoundInMemory() const {
+        return InMemory();
+    }
+
     [[nodiscard]] virtual bool
     HoldMolds() const {
         return false;

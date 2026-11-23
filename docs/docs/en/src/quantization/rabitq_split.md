@@ -77,6 +77,13 @@ it uses all `x` filter bits configured by `rabitq_bits_per_dim_base`.
 be swept without rebuilding because the stored record contains the geometric
 error scale before this multiplier is applied.
 
+For filtered KNN, HGraph and standalone MCI can both scan a resident x-bit
+filter and read the disk-backed y-bit supplement only at final reorder.
+Set `rabitq_one_bit_search: true` and `enable_reorder: true`. For queries
+routed to MCI, also set `use_mci: true` and `mci_use_memory_quantization: true`.
+With `enable_reorder: false`, both return x-bit scores. An explicitly selected
+exact brute-force scan uses its configured full-precision storage.
+
 ## Search pipeline
 
 The split search path has four stages:
