@@ -571,11 +571,43 @@ class DailyPlanTests(unittest.TestCase):
                     "env": {"VSAG_DAILY_HGRAPH": "{}"}}
             result = run.run_unit(unit, 0, root, 0.5, threading.Event())
             self.assertEqual(result["status"], "timeout", result)
+            self.assertEqual(result["timeout_scope"], "case")
             self.assertGreaterEqual(result["seconds"], 0.5)
             self.assertEqual(result["phase_events"], 1)
             self.assertEqual(result["active_phases"], [{"phase": "Build", "event": "start",
                                                       "details": {"quantizer": "fp32"}}])
             self.assertTrue((root / result["directory"] / result["phase_trace"]).is_file())
+
+    def test_timeout_distinguishes_execution_window_and_per_case_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            test = {"name": "case", "tags": "[hgraph]", "source_file": "test.cpp",
+                    "source_line": 1, "binary": "functests", "id": "test"}
+            unit = {**self.unit(), "binary": str(root / "functests"), "tests": [test],
+                    "seed": 42, "env": {}, "mode": "rotation"}
+            deadline = dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=2)
+            with (patch.object(run.shards, "listing", return_value=[test]),
+                  patch.object(run.shards, "execute", return_value={
+                      "status": "timeout", "seconds": 1, "exit_code": -15}) as execute):
+                result = run.run_unit(unit, 0, root, 1800, threading.Event(), deadline)
+            self.assertEqual(result["timeout_scope"], "window")
+            self.assertEqual(execute.call_args.args[4], 1)
+
+    def test_timeout_preserves_recorded_assertions_and_sanitizer_errors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            log, xml = root / "output.log", root / "report.xml"
+            log.write_text("terminated\n")
+            termination = ('<Expression success="false"><FatalErrorCondition>'
+                           'SIGTERM - Termination request signal</FatalErrorCondition></Expression>')
+            xml.write_text('<Catch2TestRun><TestCase>' + termination)
+            self.assertFalse(run.timeout_has_test_failure(xml, log))
+            for expression in ('<Expression success="false"/>', '<Expression success="false">'):
+                xml.write_text('<Catch2TestRun><TestCase>' + expression)
+                self.assertTrue(run.timeout_has_test_failure(xml, log))
+            xml.write_text('<Catch2TestRun>')
+            log.write_text("test.cpp:42:3: runtime error: division by zero\n")
+            self.assertTrue(run.timeout_has_test_failure(xml, log))
 
     def test_phase_trace_preserves_nested_progress_with_truncated_tail(self):
         with tempfile.TemporaryDirectory() as directory:
