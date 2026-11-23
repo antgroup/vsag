@@ -1,8 +1,11 @@
 // Copyright 2024-present the vsag project
 // SPDX-License-Identifier: Apache-2.0
+#include <chrono>
+#include <future>
 #include <numeric>
 #include <random>
 #include <sstream>
+#include <thread>
 
 #include "algorithm/hgraph/hgraph.h"
 #include "algorithm/pyramid/pyramid.h"
@@ -30,6 +33,19 @@ struct PiPNNQuantizedAddTestAccess {
     hgraph(const IndexPtr& index) {
         auto impl = std::dynamic_pointer_cast<IndexImpl<HGraph>>(index);
         return std::dynamic_pointer_cast<HGraph>(impl->GetInnerIndex());
+    }
+
+    static auto
+    lock_graph(const IndexPtr& index) {
+        return std::shared_lock(hgraph(index)->global_mutex_);
+    }
+
+    static bool
+    codes_ready(const IndexPtr& index, InnerIdType id) {
+        auto graph = hgraph(index);
+        std::shared_lock lock(graph->persistent_codes_mutex_);
+        return graph->total_count_.load() > id &&
+               graph->pending_code_writes_.find(id) == graph->pending_code_writes_.end();
     }
 
     static bool
@@ -267,4 +283,45 @@ TEST_CASE("PiPNN preserves quantized physical slots for cross-batch duplicates",
         if (end > 140)
             REQUIRE(vsag::PiPNNQuantizedAddTestAccess::same_code_slot(index, 0, 140));
     }
+}
+
+TEST_CASE("PiPNN publishes new labels after graph and quantized codes are ready",
+          "[ut][pipnn][add][quantized_add]") {
+    constexpr int dim = 64;
+    auto made = vsag::Factory::CreateIndex(
+        "hgraph",
+        R"({"dim":64,"dtype":"float32","metric_type":"l2","index_param":{"graph_type":"pipnn","pipnn_incremental_add":true,"base_quantization_type":"sq8","max_degree":16,"build_thread_count":1}})");
+    REQUIRE(made.has_value());
+    auto index = made.value();
+    std::array<float, 34 * dim> rows{};
+    std::mt19937 rng(401);
+    for (auto& x : rows) x = std::generate_canonical<float, 24>(rng);
+    std::array<int64_t, 34> ids;
+    std::iota(ids.begin(), ids.end(), 100);
+    ids.back() = ids[32];
+    auto dataset = [&](int start, int count) {
+        return vsag::Dataset::Make()
+            ->Dim(dim)
+            ->NumElements(count)
+            ->Float32Vectors(rows.data() + dim * start)
+            ->Ids(ids.data() + start)
+            ->Owner(false);
+    };
+    REQUIRE(index->Build(dataset(0, 32)).has_value());
+    auto gate = vsag::PiPNNQuantizedAddTestAccess::lock_graph(index);
+    auto add = std::async(std::launch::async, [&] { return index->Add(dataset(32, 2)); });
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!vsag::PiPNNQuantizedAddTestAccess::codes_ready(index, 32) &&
+           std::chrono::steady_clock::now() < deadline)
+        std::this_thread::yield();
+    bool prepared = vsag::PiPNNQuantizedAddTestAccess::codes_ready(index, 32);
+    bool published = index->CheckIdExist(ids[32]);
+    gate.unlock();
+    auto result = add.get();
+    REQUIRE(prepared);
+    REQUIRE_FALSE(published);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value() == std::vector<int64_t>{ids[32]});
+    REQUIRE(index->CheckIdExist(ids[32]));
+    REQUIRE(index->GetNumElements() == 33);
 }

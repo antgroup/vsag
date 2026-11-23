@@ -709,7 +709,7 @@ private:
     prepare_add_context(const DatasetPtr& data);
 
     AddBatch
-    prepare_add_batch(const DatasetPtr& data);
+    prepare_add_batch(const DatasetPtr& data, bool defer_labels = false);
 
     void
     prepare_graph_read_codes(const DatasetPtr& data, AddContext& context);

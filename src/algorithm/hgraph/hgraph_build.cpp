@@ -346,8 +346,11 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         }
     }
     Vector<Vector<InnerIdType>> route_graph_ids(allocator_);
-    auto need_sq8_build_data = need_temporary_sq8_build_data(
-        this->basic_flatten_codes_, this->has_precise_reorder() && !build_by_base_);
+    const bool use_precise_for_build =
+        this->has_precise_reorder() &&
+        !(use_pipnn && pipnn_param_.incremental_add && build_by_base_);
+    auto need_sq8_build_data =
+        need_temporary_sq8_build_data(this->basic_flatten_codes_, use_precise_for_build);
     FlattenInterfacePtr temporary_sq8_build_data = nullptr;
     if (need_sq8_build_data and raw_vector_ == nullptr) {
         temporary_sq8_build_data =
@@ -676,7 +679,7 @@ HGraph::add_by_pipnn(const DatasetPtr& data) {
     validate_add_data(data);
     CHECK_ARGUMENT(!support_force_remove() && !rabitq_fused_datacell_ && !use_conjugate_graph_,
                    "unsupported mutation mode for incremental PiPNN");
-    auto batch = prepare_add_batch(data);
+    auto batch = prepare_add_batch(data, true);
     if (batch.rows.empty())
         return batch.failed_ids;
     Vector<InnerIdType> ids(allocator_);
@@ -731,6 +734,13 @@ HGraph::add_by_pipnn(const DatasetPtr& data) {
                                            context.graph_read_codes);
             if (highest)
                 entry_point_id_ = row.inner_id;
+        }
+        const auto* source_ids = data->GetSourceID();
+        {
+            std::scoped_lock label_lock(label_lookup_mutex_);
+            label_table_->Insert(row.inner_id, data->GetIds()[row.input_idx]);
+            if (source_ids && !source_ids[row.input_idx].empty())
+                label_table_->InsertSourceId(row.inner_id, source_ids[row.input_idx]);
         }
         PublishNode(row.inner_id);
     }
@@ -947,7 +957,8 @@ HGraph::assign_batch_levels(Vector<AddRow>& rows) {
 }
 
 HGraph::AddBatch
-HGraph::prepare_add_batch(const DatasetPtr& data) {
+HGraph::prepare_add_batch(const DatasetPtr& data, bool defer_labels) {
+    std::unordered_set<int64_t> batch_labels;
     AddBatch batch(this->allocator_);
 
     auto total = data->GetNumElements();
@@ -957,7 +968,7 @@ HGraph::prepare_add_batch(const DatasetPtr& data) {
         {
             std::shared_lock label_lock(this->label_lookup_mutex_);
             auto [found, _] = this->label_table_->TryGetIdByLabel(labels[j]);
-            if (found) {
+            if (found || (defer_labels && !batch_labels.insert(labels[j]).second)) {
                 batch.failed_ids.emplace_back(labels[j]);
                 continue;
             }
@@ -988,17 +999,15 @@ HGraph::prepare_add_batch(const DatasetPtr& data) {
         AddRow row;
         row.input_idx = j;
         row.inner_id = inner_id;
-        {
+        if (!defer_labels) {
             std::scoped_lock label_lock(this->label_lookup_mutex_);
             this->label_table_->Insert(inner_id, labels[j]);
             // Same array-indexing semantics as build_with_cache().
             if (source_id != nullptr && not source_id[j].empty()) {
                 this->label_table_->InsertSourceId(inner_id, source_id[j]);
             }
-            // Level is assigned in a separate, deterministic pass (see
-            // assign_batch_levels) so that it cannot depend on thread scheduling.
-            batch.rows.emplace_back(row);
         }
+        batch.rows.emplace_back(row);
     }
 
     // Assign all levels up front, in input order, so the value is a pure function of
