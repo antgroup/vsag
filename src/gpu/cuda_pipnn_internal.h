@@ -260,4 +260,30 @@ PartitionLeaves(Workspace& ws,
                 DeviceArray<uint32_t>& d_members,
                 std::vector<uint32_t>& leaf_offsets);
 
+/// One slab of the prune stage: `edges` sorted candidate edges whose sources lie in
+/// [slab_begin, slab_end) are folded into each vertex's final neighbours.
+struct PruneJob {
+    const uint64_t* keys;
+    const uint32_t* vals;
+    uint64_t edges;
+    const int8_t* q;
+    const int32_t* norms;
+    uint32_t dim_words;
+    uint32_t vertex_count;
+    uint32_t slab_begin;
+    uint32_t slab_end;
+    uint32_t max_degree;
+    uint32_t reservoir;
+    float alpha;
+    uint32_t* begin;  // slab_end - slab_begin entries of scratch
+    uint32_t* end;
+    uint32_t* out_neighbors;
+    uint32_t* out_degrees;
+};
+
+/// Stage 4: finds each vertex's edge range, then keeps the closest edge of every hash
+/// bucket and thins them with the alpha occlusion rule.
+bool
+PruneSlab(const PruneJob& job);
+
 }  // namespace vsag::gpu::pipnn
