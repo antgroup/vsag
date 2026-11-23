@@ -302,6 +302,19 @@ of the compatibility check, so an index built with one trainer loads with a read
 configured with another. `partition_strategy_type: "gno_imi"` always trains with
 plain k-means and rejects `balanced_kmeans`.
 
+**FP16 and BF16 input.** With `dtype` `float16` or `bfloat16`, the trainer and the
+balanced `Build` work on FP32 rows, as they do for FP32 input. The training sample is
+decoded to FP32 once, because the auction reads every vector in every iteration:
+`4 · train_sample_count · d` bytes, as for an FP32 sample (128 MiB for 262,144
+vectors of dimension 128). A `Build` into an empty index decodes all of its vectors at
+once, because the bucket sizes bind all of them: the assignment has to see the whole
+batch, where the other trainers classify a `Build` in blocks of 256 rows. That copy
+takes `4 · n · d` bytes, twice the FP16/BF16 input, for the length of the assignment
+and on top of its working memory (below): 512 MiB for 1,000,000 vectors of dimension
+128. Codes kept relative to a bucket centroid are trained on the same residuals as for
+FP32 input. `Add`, search and the other trainers handle FP16/BF16 input as they do
+without `balanced_kmeans`.
+
 ### How it works
 
 Every iteration assigns the vectors under the size constraint and then moves each

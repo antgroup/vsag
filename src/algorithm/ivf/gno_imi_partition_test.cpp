@@ -45,6 +45,8 @@ TEST_CASE("GNO-IMI Partition Basic Test", "[ut][GNOIMIPartition]") {
     auto strategy_param = std::make_shared<vsag::IVFPartitionStrategyParameters>();
     strategy_param->FromJson(param_json);
     auto partition = std::make_unique<GNOIMIPartition>(param, strategy_param);
+    // Every vector is placed on its own, so IVF may classify a Build in blocks (FP16/BF16).
+    REQUIRE_FALSE(partition->ClassifiesBuildJointly());
 
     auto dataset = Dataset::Make();
     int64_t data_count = 10000L;

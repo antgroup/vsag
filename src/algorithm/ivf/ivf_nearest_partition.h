@@ -56,6 +56,10 @@ public:
     Vector<BucketIdType>
     ClassifyDatasForBuild(const void* datas, int64_t count, BucketIdType buckets_per_data) override;
 
+    /// True with ivf_train_type "balanced_kmeans" only.
+    bool
+    ClassifiesBuildJointly() const override;
+
     /// With ivf_train_type "balanced_kmeans", two buckets per training vector: the first
     /// from the balanced assignment to the trained centroids, as in a Build, the second
     /// its nearest bucket, as in Add; otherwise the same as ClassifyDatas.

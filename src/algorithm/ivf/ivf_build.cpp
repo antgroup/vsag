@@ -274,6 +274,15 @@ IVF::add(const DatasetPtr& base, bool try_optimized_build) {
                                     input.Data(), num_element, buckets_per_data_)
                               : partition_strategy_->ClassifyDatas(
                                     input.Data(), num_element, buckets_per_data_, nullptr);
+    } else if (fresh_build and partition_strategy_->ClassifiesBuildJointly()) {
+        // A joint (balanced) placement needs the whole Build in one call, so FP16/BF16
+        // rows are decoded together: 4 * count * dim bytes, twice the half-precision
+        // input, released as soon as the buckets are known.
+        Vector<float> decoded(allocator_);
+        buckets = partition_strategy_->ClassifyDatasForBuild(
+            input.Rows(0, static_cast<uint64_t>(num_element), decoded),
+            num_element,
+            buckets_per_data_);
     } else {
         buckets.resize(num_element * buckets_per_data_);
         for (uint64_t first = 0; first < static_cast<uint64_t>(num_element); first += block_rows) {

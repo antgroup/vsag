@@ -80,6 +80,15 @@ public:
         return ClassifyDatas(datas, count, buckets_per_data, nullptr);
     }
 
+    /// True when ClassifyDatasForBuild places the vectors jointly (under sizes), so a
+    /// caller has to pass the whole Build in one call, and residual codes have to be
+    /// trained on ClassifyDatasForTrain. False when every vector is placed on its own, at
+    /// its nearest buckets, so any split of the batch gives the same buckets.
+    virtual bool
+    ClassifiesBuildJointly() const {
+        return false;
+    }
+
     /// Buckets of training vectors for codes that depend on their bucket (residuals):
     /// the same number per vector, `size() / count`, naming every bucket a Build or Add
     /// can encode it against, so the codes are trained on residuals like the ones they

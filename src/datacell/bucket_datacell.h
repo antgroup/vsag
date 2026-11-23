@@ -127,6 +127,23 @@ public:
         const auto width = static_cast<uint64_t>(rows.Dim());
         if (rows.Count() > static_cast<uint64_t>(PTRDIFF_MAX) / sizeof(float) / width)
             throw std::invalid_argument("residual TrainingRows assignment extent overflow");
+        if (strategy_->ClassifiesBuildJointly()) {
+            // A Build places these vectors jointly (balanced) and Add at their nearest
+            // bucket, so the rows are those Train computes from FP32 input: the residuals
+            // of ResidualsForTrain, written over the decoded rows (plus a row per further
+            // bucket of a vector), and the quantizer is trained as Train trains it.
+            Vector<float> residuals(rows.Count() * width, allocator_);
+            for (uint64_t i = 0; i < rows.Count(); ++i) {
+                float* row = residuals.data() + i * width;
+                rows.Read(i, row);
+                if (metric_ == MetricType::METRIC_TYPE_COSINE)
+                    Normalize(row, row, rows.Dim());
+            }
+            const auto count = strategy_->ResidualsForTrain(
+                residuals.data(), static_cast<int64_t>(rows.Count()), residuals);
+            this->quantizer_->Train(residuals.data(), count);
+            return;
+        }
         // Preserve native classifier assignment shape. This full decoded assignment
         // slab is algorithm workspace, NOT a bounded reader claim; it is freed
         // before scalar training. Residuals themselves are never materialized N*D.

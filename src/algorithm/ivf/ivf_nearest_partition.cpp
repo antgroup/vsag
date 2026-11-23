@@ -165,11 +165,17 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
         BalancedKMeansCluster cls(static_cast<int32_t>(dim), this->allocator_, this->thread_pool_);
         BalancedKMeansOptions options;
         options.iterations = ivf_partition_strategy_param_->GetKMeansIterCount();
+        // FP32 samples are read in place. FP16/BF16 samples are decoded to FP32 once,
+        // because the auction reads every vector in every iteration: the copy is as large
+        // as an FP32 sample of the same size, twice the half-precision one.
+        const IVFInput input(dataset, common_param_.data_type_);
+        Vector<float> decoded(allocator_);
+        const auto sample_count = static_cast<uint64_t>(dataset->GetNumElements());
         // Only the centroids are kept. The trainer's last assignment produced them but
         // is not one to them: a Build assigns afresh, as the residual codes do.
         cls.Run(static_cast<uint32_t>(this->bucket_count_),
-                dataset->GetFloat32Vectors(),
-                static_cast<uint64_t>(dataset->GetNumElements()),
+                input.Rows(0, sample_count, decoded),
+                sample_count,
                 options);
         std::memcpy(data.data(), cls.k_centroids_, dim * this->bucket_count_ * sizeof(float));
     } else if (ivf_partition_strategy_param_->partition_train_type ==
@@ -239,6 +245,12 @@ IVFNearestPartition::ClassifyDatasForSearch(const void* datas,
     // shape, and the device would prepare the whole centroid set per query. The
     // routing statistics also come only from here.
     return classify_datas_on_host(datas, count, param.scan_bucket_size, ctx);
+}
+
+bool
+IVFNearestPartition::ClassifiesBuildJointly() const {
+    return ivf_partition_strategy_param_->partition_train_type ==
+           IVFNearestPartitionTrainerType::BalancedKMeansTrainer;
 }
 
 Vector<BucketIdType>

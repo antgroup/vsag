@@ -844,6 +844,8 @@ TEST_CASE("IVF Nearest Partition balanced_kmeans balances the Build buckets",
     strategy_param->use_route_graph = use_route_graph;
     strategy_param->kmeans_iter_count = 8;
     IVFNearestPartition partition(bucket_count, param, strategy_param);
+    // The sizes are shared by all vectors, so IVF passes a Build in one call.
+    REQUIRE(partition.ClassifiesBuildJointly());
 
     // A third of the vectors are copies of one vector, which plain k-means keeps together.
     auto vec = fixtures::generate_vectors(data_count, dim, false, 47);
@@ -956,8 +958,11 @@ TEST_CASE("IVF Nearest Partition kmeans Build buckets are routed as before",
     param.allocator_ = allocator;
     auto strategy_param = std::make_shared<IVFPartitionStrategyParameters>();
     strategy_param->partition_train_type = GENERATE(IVFNearestPartitionTrainerType::KMeansTrainer,
-                                                    IVFNearestPartitionTrainerType::RandomTrainer);
+                                                    IVFNearestPartitionTrainerType::RandomTrainer,
+                                                    IVFNearestPartitionTrainerType::EMeansTrainer);
     IVFNearestPartition partition(bucket_count, param, strategy_param);
+    // Every vector is placed on its own, so IVF may classify a Build in blocks (FP16/BF16).
+    REQUIRE_FALSE(partition.ClassifiesBuildJointly());
     auto vec = fixtures::generate_vectors(data_count, dim, false, 53);
     auto dataset = Dataset::Make();
     dataset->Float32Vectors(vec.data())->Dim(dim)->NumElements(data_count)->Owner(false);
