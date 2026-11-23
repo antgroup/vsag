@@ -264,6 +264,7 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
     auto pipnn_parameter = this->pipnn_param_;
     if (use_pipnn) {
         pipnn_parameter.alpha = this->alpha_;
+        pipnn_parameter.duplicate_distance_threshold = this->duplicate_distance_threshold_;
         pipnn_parameter.Validate(bottom_graph_->MaximumDegree());
     }
     auto total = data->GetNumElements();
