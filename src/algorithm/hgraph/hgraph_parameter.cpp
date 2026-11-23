@@ -459,6 +459,7 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
     parse_bool("search_no_lock", obj.search_no_lock);
     parse_bool("mci_packed_filter", obj.mci_packed_filter);
     parse_bool("mci_batch_distance", obj.mci_batch_distance);
+    parse_bool("mci_use_memory_quantization", obj.mci_use_memory_quantization);
     parse_uint("mci_activation_cap", obj.mci_activation_cap);
     parse_uint("mci_hops_limit", obj.mci_hops_limit);
     uint32_t idle = 0;

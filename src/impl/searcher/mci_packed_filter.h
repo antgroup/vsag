@@ -64,6 +64,12 @@ public:
                (words_[id / 32] & (uint32_t{1} << (id % 32))) != 0;
     }
 
+    // The caller has already checked the ID against the query's bitmap domain.
+    void
+    MarkSeen(InnerIdType id) {
+        words_[id / 32] &= ~(uint32_t{1} << (id % 32));
+    }
+
     Members
     Filter(const InnerIdType* members, uint64_t count, uint64_t total, bool simd = true) {
         total = std::min(total, total_);
