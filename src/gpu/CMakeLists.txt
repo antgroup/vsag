@@ -19,7 +19,8 @@ if (ENABLE_CUDA)
         cuda_seed.cu
         cuda_accumulate.cu
         cuda_pipnn_quantize.cu
-        cuda_pipnn_score.cu)
+        cuda_pipnn_score.cu
+        cuda_pipnn_partition.cu)
     # The tree's C/C++ flags are language-scoped and do not reach nvcc; the
     # CUDA stays on C++17 independently of CPU C++20; everything else is
     # CMake's per-configuration CUDA default.

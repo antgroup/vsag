@@ -250,4 +250,14 @@ launch_score(const ScoreArgs& args, uint32_t tiles);
 bool
 FlagEdges(const uint64_t* keys, uint64_t n, uint32_t count, uint8_t* flags);
 
+/// Stage 2: partitions the rows into overlapping leaves. `d_members` receives the point
+/// of every leaf row, leaf after leaf, and `leaf_offsets` the CSR offsets of the leaves.
+bool
+PartitionLeaves(Workspace& ws,
+                const BuildPlan& plan,
+                const ScoreArgs& base,
+                uint64_t count,
+                DeviceArray<uint32_t>& d_members,
+                std::vector<uint32_t>& leaf_offsets);
+
 }  // namespace vsag::gpu::pipnn
