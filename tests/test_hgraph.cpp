@@ -1403,6 +1403,19 @@ TEST_CASE("(Daily) HGraph Remove", "[ft][hgraph][daily]") {
     TestHGraphRemove(test_index, resource);
 }
 
+TEST_CASE("(PR) HGraph CalcDistanceById Removed Label", "[ft][hgraph][pr]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    vsag::Options::Instance().set_block_size_limit(1024 * 1024 * 2);
+    const int64_t dim = 64;
+    fixtures::HGraphTestIndex::HGraphBuildParam build_param("l2", dim, "fp32");
+    build_param.support_remove = true;
+    auto param = fixtures::HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = fixtures::TestIndex::TestFactory(fixtures::HGraphTestIndex::name, param, true);
+    auto dataset = fixtures::HGraphTestIndex::pool.GetDatasetAndCreate(dim, 100, "l2");
+    fixtures::TestIndex::TestCalcDistanceByIdRemovedLabel(index, dataset);
+    vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
 static void
 TestHGraphCompressedBuild(const fixtures::HGraphTestIndexPtr& test_index,
                           const fixtures::HGraphResourcePtr& resource) {

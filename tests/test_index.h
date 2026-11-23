@@ -171,6 +171,9 @@ public:
                          bool is_sparse = false);
 
     static void
+    TestCalcDistanceByIdRemovedLabel(const IndexPtr& index, const TestDatasetPtr& dataset);
+
+    static void
     TestBatchCalcDistanceById(const IndexPtr& index,
                               const TestDatasetPtr& dataset,
                               float error = 1e-5,

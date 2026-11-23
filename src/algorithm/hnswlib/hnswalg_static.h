@@ -35,6 +35,7 @@
 #include "impl/allocator/default_allocator.h"
 #include "storage/stream_reader.h"
 #include "visited_list_pool.h"
+#include "vsag_exception.h"
 
 namespace hnswlib {
 using tableint = vsag::InnerIdType;
@@ -295,7 +296,8 @@ public:
         if (count > 0) {
             auto* valids = static_cast<bool*>(allocator_->Allocate(sizeof(bool) * count));
             if (valids == nullptr) {
-                throw std::runtime_error("failed to allocate valids buffer");
+                throw vsag::VsagException(vsag::ErrorType::NO_ENOUGH_MEMORY,
+                                          "failed to allocate valids buffer");
             }
             for (int i = 0; i < count; i++) {
                 valids[i] = validity[i];

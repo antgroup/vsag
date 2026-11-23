@@ -292,9 +292,10 @@ HGraphAnalyzer::calculate_quantization_result(
             }
         }
         total_quantization_error += sample_error / static_cast<float>(kept_count);
+        const auto pair_count =
+            static_cast<float>(kept_count) * static_cast<float>(kept_count - 1) / 2.0F;
         total_quantization_inversion_count_rate +=
-            static_cast<float>(inversion_count) /
-            (static_cast<float>(kept_count) * static_cast<float>(kept_count - 1) / 2.0F);
+            (pair_count > 0 ? static_cast<float>(inversion_count) / pair_count : 0.0F);
     }
     return {total_quantization_error / static_cast<float>(sample_size),
             total_quantization_inversion_count_rate / static_cast<float>(sample_size)};
