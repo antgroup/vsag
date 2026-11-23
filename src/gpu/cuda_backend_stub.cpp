@@ -79,4 +79,15 @@ CudaSuggestedBudget(uint64_t /*cap_bytes*/) {
     return 0;
 }
 
+bool
+CudaBuildPiPNNGraph(const float* /*vectors*/,
+                    uint64_t /*count*/,
+                    int32_t /*dim*/,
+                    const CudaPiPNNConfig& /*config*/,
+                    uint32_t* /*out_neighbors*/,
+                    uint32_t* /*out_degrees*/,
+                    uint64_t /*budget_bytes*/) {
+    return false;
+}
+
 }  // namespace vsag::gpu
