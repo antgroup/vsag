@@ -26,7 +26,12 @@ for (const name of ["calcDistancesById", "calDistanceById"]) {
     const ids = new BigInt64Array([10n, 999n, 20n, 10n]);
     const actual = distance(query, ids);
     assert(actual instanceof Float32Array);
-    assert.deepEqual(Array.from(actual), [0, -1, 20, 0]);
+    const actualValues = Array.from(actual);
+    assert.equal(actualValues.length, 4);
+    assert.equal(actualValues[0], 0);
+    assert(Number.isNaN(actualValues[1]), `missing ID must yield NaN, got ${actualValues[1]}`);
+    assert.equal(actualValues[2], 20);
+    assert.equal(actualValues[3], 0);
     const empty = distance(query, new BigInt64Array());
     assert(empty instanceof Float32Array);
     assert.equal(empty.length, 0);
@@ -53,7 +58,12 @@ for (const name of ["calcDistancesById", "calDistanceById"]) {
     // Nonzero typed-array byte offsets must still address the selected elements.
     const offsetQuery = new Float32Array([99, 1, 2, 3, 4, 99]).subarray(1, 5);
     const offsetIds = new BigInt64Array([888n, 10n, 999n, 20n, 10n, 888n]).subarray(1, 5);
-    assert.deepEqual(Array.from(distance(offsetQuery, offsetIds)), [0, -1, 20, 0]);
+    const offsetValues = Array.from(distance(offsetQuery, offsetIds));
+    assert.equal(offsetValues.length, 4);
+    assert.equal(offsetValues[0], 0);
+    assert(Number.isNaN(offsetValues[1]), `missing ID must yield NaN, got ${offsetValues[1]}`);
+    assert.equal(offsetValues[2], 20);
+    assert.equal(offsetValues[3], 0);
 
     // This dense-only API cannot supply SINDI's required sparse representation.
     const sparse = new addon.Index("sindi", JSON.stringify({

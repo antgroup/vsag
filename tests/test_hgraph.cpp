@@ -1774,6 +1774,58 @@ TEST_CASE("HGraph CalcDistanceById of a removed label", "[ft][hgraph][remove][pr
     TestIndex::TestCalcDistanceByIdRemovedLabel(index, dataset);
 }
 
+TEST_CASE("HGraph UpdateVector tolerates a mark-removed neighbor",
+          "[ft][hgraph][update][remove][pr]") {
+    using namespace fixtures;
+    constexpr int64_t dim = 8;
+    constexpr uint64_t count = 10;
+    HGraphTestIndex::HGraphBuildParam build_param("l2", dim, "fp32");
+    build_param.support_remove = true;
+    build_param.thread_count = 1;
+    const auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim, count, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    const auto* base = dataset->base_->GetFloat32Vectors();
+    const auto* ids = dataset->base_->GetIds();
+    const auto removed_label = ids[count / 2];
+    auto remove_result =
+        index->Remove(std::vector<int64_t>{removed_label}, vsag::RemoveMode::MARK_REMOVE);
+    REQUIRE(remove_result.has_value());
+    REQUIRE(remove_result.value() == 1);
+    REQUIRE_FALSE(index->CheckIdExist(removed_label));
+
+    // MARK_REMOVE keeps the removed node in the adjacency lists, so the UpdateVector
+    // neighborhood check must skip it instead of failing with INVALID_ARGUMENT.
+    uint64_t updated_count = 0;
+    for (uint64_t i = 0; i < count; ++i) {
+        if (ids[i] == removed_label) {
+            continue;
+        }
+        std::vector<float> perturbed(dim);
+        for (int64_t d = 0; d < dim; ++d) {
+            // large enough to pass the "vector unchanged" shortcut, small enough that the
+            // neighborhood check accepts the update
+            perturbed[d] = base[i * dim + d] + 0.05F;
+        }
+        auto new_base = vsag::Dataset::Make()
+                            ->NumElements(1)
+                            ->Dim(dim)
+                            ->Float32Vectors(perturbed.data())
+                            ->Owner(false);
+        auto update_result = index->UpdateVector(ids[i], new_base, false);
+        REQUIRE(update_result.has_value());
+        if (update_result.value()) {
+            ++updated_count;
+            auto self_distance = index->CalcDistanceById(perturbed.data(), ids[i]);
+            REQUIRE(self_distance.has_value());
+            REQUIRE(std::abs(self_distance.value()) < 1e-3F);
+        }
+    }
+    REQUIRE(updated_count > 0);
+}
+
 TEST_CASE("HGraph PiPNN preserves duplicate-vector search quality",
           "[ft][build][hgraph][duplicate][pipnn][pr]") {
     using namespace fixtures;

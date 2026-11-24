@@ -612,6 +612,9 @@ IVF::CalcDistancesById(const float* query,
         return result;
     }
     auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
+    if (distances == nullptr) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate distance buffer");
+    }
     result->Distances(distances);
     Vector<InnerIdType> inner_ids(count, 0, allocator_);
     std::vector<bool> validity(count, false);
