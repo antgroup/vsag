@@ -363,10 +363,12 @@ public:
     void
     rebuild_split_leaves(std::vector<LeafSplit>& splits,
                          const std::vector<Leaf>& additions,
-                         const std::vector<uint64_t>& depths,
                          PiPNNIncrementalState& state);
     void
-    replay(const PiPNNIncrementalState&, uint64_t first_new, std::span<const ReplayRows> rows = {});
+    replay(const PiPNNIncrementalState&,
+           uint64_t first_new,
+           std::span<const size_t> hit_leaves = {},
+           std::span<const ReplayRows> rows = {});
     void
     merge_candidate(uint32_t source, const ReservoirEntry& candidate);
     void
@@ -443,7 +445,7 @@ private:
                      uint64_t neighbor_count,
                      std::vector<PiPNNLocalNeighbor>* cache);
 
-    void
+    std::pair<bool, bool>
     insert_pair(uint32_t source, uint32_t target, float distance);
 
     [[nodiscard]] pipnn_filter::RelativeHashes
@@ -1931,10 +1933,10 @@ PiPNNPipeline::emit(uint32_t u,
     }
 }
 
-void
+std::pair<bool, bool>
 PiPNNPipeline::insert_pair(uint32_t source, uint32_t target, float distance) {
     if (source == target) {
-        return;
+        return {};
     }
     const auto hashes = relative_hashes(source, target);
     const auto key = distance_order_key(distance);
@@ -1947,10 +1949,12 @@ PiPNNPipeline::insert_pair(uint32_t source, uint32_t target, float distance) {
                 clean_graph_rows_[from] = 0;
             }
         }
+        // Only the worker inserting the first candidate reports this endpoint.
+        const bool first = reservoir_states_[from].size == 0;
         merge_candidate(from, {to, hash, key});
+        return first;
     };
-    insert(source, target, hashes.forward);
-    insert(target, source, hashes.reverse);
+    return {insert(source, target, hashes.forward), insert(target, source, hashes.reverse)};
 }
 
 // Caller owns the source row or holds its lock.
@@ -2349,17 +2353,14 @@ PiPNNPipeline::update_existing_edges(uint32_t source,
 void
 PiPNNPipeline::replay(const PiPNNIncrementalState& state,
                       uint64_t first_new,
+                      std::span<const size_t> hit_leaves,
                       std::span<const ReplayRows> rows) {
-    // Only leaves containing a batch member can emit a relevant pair in either direction.
-    std::vector<uint8_t> needed(state.leaves.size(), first_new == 0);
-    if (first_new != 0) {
-        for (uint64_t id = first_new; id < ids_.size(); ++id)
-            for (auto leaf : state.memberships[id]) needed[leaf] = 1;
-    }
-    parallel_for(state.leaves.size(), 4, [&](uint64_t begin, uint64_t end) {
-        for (size_t i = begin; i < end; ++i) {
-            if (!needed[i])
-                continue;
+    const bool initial_build = first_new == 0;
+    const auto leaf_count = initial_build ? state.leaves.size() : hit_leaves.size();
+    std::vector<std::vector<uint32_t>> received(hit_leaves.size());
+    parallel_for(leaf_count, initial_build ? 4 : 1, [&](uint64_t begin, uint64_t end) {
+        for (uint64_t pos = begin; pos < end; ++pos) {
+            const auto i = initial_build ? pos : hit_leaves[pos];
             const auto& leaf = state.leaves[i];
             if (leaf.nearest.empty())
                 continue;
@@ -2370,12 +2371,16 @@ PiPNNPipeline::replay(const PiPNNIncrementalState& state,
                     const auto& e = leaf.nearest[row * k + j];
                     if (u < first_new && e.target < first_new)
                         continue;
-                    insert_pair(u, e.target, e.distance);
+                    const auto [first_source, first_target] = insert_pair(u, e.target, e.distance);
+                    if (u < first_new && first_source)
+                        received[pos].push_back(u);
+                    if (e.target < first_new && first_target)
+                        received[pos].push_back(e.target);
                 }
             };
             uint64_t first = 0;
-            if (i < rows.size()) {
-                const auto& changes = rows[i];
+            if (pos < rows.size()) {
+                const auto& changes = rows[pos];
                 for (uint64_t word = 0; word < changes.changed.size(); ++word) {
                     auto bits = changes.changed[word];
                     while (bits != 0) {
@@ -2388,15 +2393,23 @@ PiPNNPipeline::replay(const PiPNNIncrementalState& state,
             for (uint64_t row = first; row < leaf.points.size(); ++row) submit_row(row);
         }
     });
-    parallel_for(ids_.size(), 64, [&](uint64_t begin, uint64_t end) {
+    // Leaf workers have joined. Each old row appears exactly once across their lists.
+    std::vector<uint32_t> old_points;
+    uint64_t old_point_count = 0;
+    for (const auto& points : received) old_point_count += points.size();
+    old_points.reserve(old_point_count);
+    for (const auto& points : received)
+        old_points.insert(old_points.end(), points.begin(), points.end());
+    const auto work = old_points.size() + (ids_.size() - first_new);
+    parallel_for(work, initial_build ? 64 : 8, [&](uint64_t begin, uint64_t end) {
         PruneScratch scratch(allocator_);
         EdgeUpdateScratch update(allocator_);
-        for (size_t i = begin; i < end; ++i) {
-            if (i < first_new) {
-                if (reservoir_states_[i].size != 0)
-                    update_existing_edges(i, first_new, state, update);
+        for (uint64_t pos = begin; pos < end; ++pos) {
+            if (pos < old_points.size()) {
+                update_existing_edges(old_points[pos], first_new, state, update);
                 continue;
             }
+            const auto i = first_new + (pos - old_points.size());
             robust_prune(
                 i, reservoirs_.data() + i * reservoir_size_, reservoir_states_[i].size, scratch);
             graph_->InsertNeighborsById(ids_[i], scratch.neighbors);
@@ -2598,11 +2611,24 @@ PiPNNPipeline::extend_leaf(PiPNNCachedLeaf& leaf, const Leaf& batch, ReplayRows&
 void
 PiPNNPipeline::rebuild_split_leaves(std::vector<LeafSplit>& splits,
                                     const std::vector<Leaf>& additions,
-                                    const std::vector<uint64_t>& depths,
                                     PiPNNIncrementalState& state) {
     if (splits.empty()) {
         return;
     }
+    // A root that was small at Build can overflow on its first Add. Split it
+    // with the root fanout; discarding that overlap creates disconnected cells.
+    std::vector<uint64_t> depths(state.leaves.size(), UINT64_MAX);
+    const auto visit = [&](const auto& self, const PiPNNRoute& node, uint64_t depth) -> void {
+        if (!node.children.empty()) {
+            for (const auto& child : node.children) self(self, child, depth + 1);
+        } else if (depth < depths.at(node.leaf)) {
+            depths[node.leaf] = depth;
+            const auto& repl = state.leaves[node.leaf].replacement;
+            if (!repl.children.empty() || repl.leaf != UINT32_MAX)
+                self(self, repl, depth);
+        }
+    };
+    visit(visit, state.root, 0);
     // A lone parent can use the pool internally. With multiple parents the outer loop owns it.
     parallel_for(splits.size(), 1, [&](uint64_t begin, uint64_t end) {
         for (uint64_t i = begin; i < end; ++i) {
@@ -2638,21 +2664,7 @@ PiPNNPipeline::Increment(PiPNNIncrementalState& state, size_t old_count) {
     for (size_t i = old_count; i < ids_.size(); ++i) incoming.push_back(i);
     route_batch(state.root, std::move(incoming), additions, state);
     state.memberships.resize(ids_.size());
-    // A root that was small at Build can overflow on its first Add. Split it
-    // with the root fanout; discarding that overlap creates disconnected cells.
-    std::vector<uint64_t> depths(state.leaves.size(), UINT64_MAX);
-    const auto visit = [&](const auto& self, const PiPNNRoute& node, uint64_t depth) -> void {
-        if (!node.children.empty()) {
-            for (const auto& child : node.children) self(self, child, depth + 1);
-        } else if (depth < depths.at(node.leaf)) {
-            depths[node.leaf] = depth;
-            const auto& repl = state.leaves[node.leaf].replacement;
-            if (!repl.children.empty() || repl.leaf != UINT32_MAX)
-                self(self, repl, depth);
-        }
-    };
-    visit(visit, state.root, 0);
-    std::vector<size_t> updated_leaves;
+    std::vector<size_t> hit_leaves;
     std::vector<LeafSplit> splits;
     for (size_t i = 0; i < additions.size(); ++i) {
         auto& batch = additions[i];
@@ -2661,14 +2673,15 @@ PiPNNPipeline::Increment(PiPNNIncrementalState& state, size_t old_count) {
         std::sort(batch.begin(), batch.end());
         batch.erase(std::unique(batch.begin(), batch.end()), batch.end());
         if (state.leaves[i].points.size() + batch.size() <= parameter_.max_leaf_size) {
-            updated_leaves.push_back(i);
+            hit_leaves.push_back(i);
         } else {
             splits.push_back({i, {}, Leaves(allocator_)});
         }
     }
-    rebuild_split_leaves(splits, additions, depths, state);
+    rebuild_split_leaves(splits, additions, state);
 
     // Overlapping leaves share points. Publish memberships in the original traversal order.
+    const auto ordinary_count = hit_leaves.size();
     auto split = splits.begin();
     uint64_t child = additions.size();
     for (uint64_t i = 0; i < additions.size(); ++i) {
@@ -2684,20 +2697,27 @@ PiPNNPipeline::Increment(PiPNNIncrementalState& state, size_t old_count) {
             hits.erase(std::remove(hits.begin(), hits.end(), i), hits.end());
         }
         for (; child < split->end_child; ++child) {
-            for (auto id : state.leaves[child].points) state.memberships[id].push_back(child);
+            bool contains_new = false;
+            for (auto id : state.leaves[child].points) {
+                state.memberships[id].push_back(child);
+                contains_new |= id >= old_count;
+            }
+            if (contains_new)
+                hit_leaves.push_back(child);
         }
         state.leaves[i] = {};
         state.leaves[i].replacement = std::move(split->replacement);
         ++split;
     }
-    std::vector<ReplayRows> changed_rows(additions.size());
-    parallel_for(updated_leaves.size(), 1, [&](uint64_t begin, uint64_t end) {
+    // Ordinary hits come first. A hit split child already has a freshly rebuilt top-k.
+    std::vector<ReplayRows> changed_rows(ordinary_count);
+    parallel_for(ordinary_count, 1, [&](uint64_t begin, uint64_t end) {
         for (size_t j = begin; j < end; ++j) {
-            const auto leaf = updated_leaves[j];
-            extend_leaf(state.leaves[leaf], additions[leaf], changed_rows[leaf]);
+            const auto leaf = hit_leaves[j];
+            extend_leaf(state.leaves[leaf], additions[leaf], changed_rows[j]);
         }
     });
-    replay(state, old_count, changed_rows);
+    replay(state, old_count, hit_leaves, changed_rows);
 }
 
 void

@@ -1494,7 +1494,13 @@ TEST_CASE("PiPNN Add matches brute force on its persisted overlapping leaves", "
         return d;
     };
     vsag::PiPNNIncrementalState state;
-    vsag::PiPNNGraphBuilder builder(p, dim, common.metric_, alloc);
+    // Parallel leaf replay can deliver both ends of the same pair from different leaves.
+    // Compare every graph row with the exhaustive oracle for both schedules.
+    const auto workers = GENERATE(1U, 4U);
+    CAPTURE(workers);
+    auto pool = vsag::SafeThreadPool::FactoryDefaultThreadPool();
+    pool->SetPoolSize(workers);
+    vsag::PiPNNGraphBuilder builder(p, dim, common.metric_, alloc, pool.get(), workers);
     auto hash = [&](uint32_t u, uint32_t v) {
         unsigned bits = 0;
         for (uint64_t j = 0; j < p.hash_plane_count; ++j) {
