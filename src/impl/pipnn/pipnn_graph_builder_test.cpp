@@ -434,6 +434,43 @@ TEST_CASE("PiPNN registers exact duplicate rows instead of building duplicate ve
     REQUIRE(graph->TotalCount() == 4);
 }
 
+TEST_CASE("PiPNN L2 threshold groups against final representatives before building edges",
+          "[ut][pipnn][duplicate]") {
+    constexpr uint64_t dimensions = 2;
+    const bool enabled = GENERATE(false, true);
+    const float threshold = GENERATE(0.0F, 0.25F);
+    const auto metric =
+        GENERATE(vsag::MetricType::METRIC_TYPE_L2SQR, vsag::MetricType::METRIC_TYPE_IP);
+    const bool near =
+        enabled and threshold > 0.0F and metric == vsag::MetricType::METRIC_TYPE_L2SQR;
+    auto common = MakeCommonParam(dimensions);
+    auto* allocator = common.allocator_.get();
+    // Keep the first coordinate constant and large to exercise cancellation in the
+    // norm-dot formula. IDs 2 and 3 are exact copies; 1--2--4 is a threshold chain.
+    std::vector<float> vectors{10000, 8, 10000, 0, 10000, 0.5, 10000, 0.5, 10000, 1};
+    vsag::Vector<vsag::InnerIdType> ids({3, 4, 1, 2, 0}, allocator);
+    auto rows = MakeRows(vectors, ids, dimensions, allocator);
+    auto graph = MakeGraph(common, vectors.size() / dimensions, 4, enabled);
+    vsag::PiPNNGraphBuilderParameter parameter;
+    parameter.duplicate_distance_threshold = threshold;
+    vsag::PiPNNGraphBuilder(parameter, dimensions, metric, allocator).Build(graph, ids, rows);
+
+    // TotalCount is the high-water mark, not the number of populated rows.
+    REQUIRE(graph->GetDuplicateIds(1).size() == (near ? 2 : 0));
+    REQUIRE(graph->GetGroupId(4) == 4);
+    if (enabled) {
+        REQUIRE(graph->GetGroupId(2) == (near ? 1 : 2));
+        REQUIRE(graph->GetGroupId(3) == (near ? 1 : 2));
+    }
+    if (near) {
+        vsag::Vector<vsag::InnerIdType> neighbors(allocator);
+        graph->GetNeighbors(4, neighbors);
+        REQUIRE(std::find(neighbors.begin(), neighbors.end(), 1) != neighbors.end());
+        REQUIRE(std::find(neighbors.begin(), neighbors.end(), 2) == neighbors.end());
+        REQUIRE(std::find(neighbors.begin(), neighbors.end(), 3) == neighbors.end());
+    }
+}
+
 TEST_CASE("PiPNN graph builder validates structural parameters", "[ut][pipnn]") {
     vsag::PiPNNGraphBuilderParameter parameter;
     REQUIRE_NOTHROW(parameter.Validate(32));
@@ -1247,6 +1284,38 @@ TEST_CASE("PiPNN half arithmetic decodes finite subnormal operands in vector and
     // The projection plane stays FP32, including large values outside half range.
     std::vector<float> plane(dim, static_cast<float>(ReferenceHalf(b[0], format)));
     require_close(vsag::pipnn_half::Preparation(a.data(), plane.data(), dim, format));
+}
+
+TEST_CASE("PiPNN L2 threshold groups native FP16 and BF16 rows", "[ut][pipnn][duplicate]") {
+    using Format = vsag::pipnn_half::Format;
+    const auto format = GENERATE(Format::FP16, Format::BF16);
+    CAPTURE(format);
+    constexpr uint64_t dim = 2;
+    auto common = MakeCommonParam(dim);
+    common.data_type_ =
+        format == Format::FP16 ? vsag::DataTypes::DATA_TYPE_FP16 : vsag::DataTypes::DATA_TYPE_BF16;
+    auto* allocator = common.allocator_.get();
+    vsag::Vector<vsag::InnerIdType> ids({2, 0, 1, 3}, allocator);
+    // ID 1 is exactly at the squared threshold from ID 0. ID 2 is only within
+    // the threshold of ID 1, and ID 3 falls outside the first-coordinate window.
+    const std::array<float, 8> values{8, -1, 8, -2, 8, -1.5F, 9, -2};
+    std::array<uint16_t, values.size()> codes{};
+    std::transform(values.begin(), values.end(), codes.begin(), [&](float value) {
+        return EncodeHalf(value, format);
+    });
+    vsag::Vector<const uint16_t*> rows(allocator);
+    for (size_t i = 0; i < ids.size(); ++i) {
+        rows.push_back(codes.data() + i * dim);
+    }
+    auto graph = MakeGraph(common, ids.size(), 3, true);
+    vsag::PiPNNGraphBuilderParameter param;
+    param.duplicate_distance_threshold = 0.25F;
+    vsag::PiPNNGraphBuilder(param, dim, common.metric_, allocator)
+        .Build(graph, ids, rows, common.data_type_);
+    REQUIRE(graph->GetDuplicateIds(0).size() == 1);
+    REQUIRE(graph->GetGroupId(1) == 0);
+    REQUIRE(graph->GetGroupId(2) == 2);
+    REQUIRE(graph->GetGroupId(3) == 3);
 }
 
 TEST_CASE("PiPNN typed Build validation parity", "[ut][pipnn][typed_build]") {
