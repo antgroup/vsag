@@ -138,6 +138,10 @@ FP16 或 BF16 的单向量存储码占 `2 * dim` 字节，FP32 则占 `4 * dim` 
 | `pipnn_reservoir_size` | int | `64` | 最终剪枝前每个点保留的候选槽数；实际容量至少为 `max_degree` |
 | `pipnn_adaptive_pruning` | bool | `false` | 在 L2 批量构图时使用与 HGraph 共享的 PiPNN 动态 alpha 选择器 |
 | `pipnn_adaptive_pruning_adjust_step` | float | `0.06` | PiPNN 选择器的 alpha 调整步长 |
+| `pipnn_enable_gpu_build` | bool | `false` | 库以 `ENABLE_CUDA=ON` 编译时，在 CUDA 设备上构建 PiPNN 图，见 [GPU 加速 PiPNN 构建](hgraph.md#gpu-加速-pipnn-构建) |
+| `pipnn_gpu_device_id` | int | `0` | GPU 构建使用的 CUDA 设备序号 |
+| `pipnn_gpu_memory_budget` | int | `0` | GPU 构建可使用的显存上限（字节）；`0` 表示使用设备可提供的显存 |
+| `pipnn_gpu_min_work_threshold` | int | `0` | 值得下放到 GPU 的最小 `点数 * pipnn_max_leaf_size * dim`；`0` 使用校准后的默认值（`2^30`） |
 | `no_build_levels` | int[] | `[]` | 跳过构图的层级（从根节点开始的 0-based 下标） |
 | `use_reorder` | bool | `false` | 是否保留高精度副本用于精排 |
 | `precise_quantization_type` | string | `"fp32"` | 精排使用的量化类型。与 `rabitq_bits_per_dim_precise` 配合设为 `"rabitq"` 时，可启用从 base storage 重排的 RaBitQ x+y split。 |

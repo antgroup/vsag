@@ -91,6 +91,8 @@ HGraph float32 L2/IP/cosine 的 `base_quantization_type` 和 `precise_quantizati
 
 HGraph 还支持实验性的 L2 参数 `pipnn_adaptive_pruning`（默认 `false`）和 `pipnn_adaptive_pruning_adjust_step`（默认 `0.06`），在首次 `Build` 时逐点调整最终剪枝阈值。详情见 [HGraph 动态 PiPNN 剪枝](../indexes/hgraph.md)。Pyramid 也公开了这两个选项，见其[构建参数表](../indexes/pyramid.md#构建参数)。
 
+设置 `pipnn_enable_gpu_build` 可在 CUDA 设备上构建图（HGraph 和 Pyramid；需要 `ENABLE_CUDA=ON`，否则由 CPU 构建）。配套的 `pipnn_gpu_device_id`、`pipnn_gpu_memory_budget`、`pipnn_gpu_min_work_threshold` 分别用于选择设备、限制显存和设定值得下放的最小规模，见 [GPU 加速 PiPNN 构建](../indexes/hgraph.md#gpu-加速-pipnn-构建)。
+
 搜索时：
 
 ```json

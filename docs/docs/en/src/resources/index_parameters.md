@@ -97,6 +97,8 @@ and has no effect on PiPNN.
 
 HGraph additionally supports the experimental L2-only options `pipnn_adaptive_pruning` (default `false`) and `pipnn_adaptive_pruning_adjust_step` (default `0.06`). They adapt the final per-point pruning threshold during initial `Build`; see [HGraph adaptive PiPNN pruning](../indexes/hgraph.md). Pyramid exposes the same two options; see its [build parameter table](../indexes/pyramid.md#build-parameters).
 
+Set `pipnn_enable_gpu_build` to build the graph on a CUDA device (HGraph and Pyramid; requires `ENABLE_CUDA=ON`, otherwise the CPU builds it). The companions `pipnn_gpu_device_id`, `pipnn_gpu_memory_budget` and `pipnn_gpu_min_work_threshold` select the device, cap its memory and set the smallest worthwhile build; see [GPU-accelerated PiPNN build](../indexes/hgraph.md#gpu-accelerated-pipnn-build).
+
 At search time:
 
 ```json
