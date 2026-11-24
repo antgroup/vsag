@@ -16,6 +16,9 @@
 # Disabled checks and reasons:
 #   -performance-enum-size : preserve public and serialized enum representations
 #   -clang-analyzer-deadcode.DeadStores        : value stored but never read (too noisy)
+#   -clang-analyzer-cplusplus.NewDeleteLeaks   : false positives on libstdc++ std::shared_ptr
+#                                               control blocks (reports a bogus `_M_pi' leak at the
+#                                               end of functions that return/assign shared_ptr members; see issue #2432)
 #   -clang-diagnostic-deprecated-builtins      : deprecated builtins required for toolchain/platform compatibility
 #   -bugprone-easily-swappable-parameters      : too many false positives in current codebase
 #   -modernize-use-trailing-return-type        : conflicts with project style
@@ -39,6 +42,7 @@ Checks: >
   -bugprone-easily-swappable-parameters,
   clang-analyzer-*,
   -clang-analyzer-deadcode.DeadStores,
+  -clang-analyzer-cplusplus.NewDeleteLeaks,
   clang-diagnostic-*,
   -clang-diagnostic-deprecated-builtins,
   modernize-*,
