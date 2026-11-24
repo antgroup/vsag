@@ -108,15 +108,15 @@ PQFS is supported as IVF base bucket encoding, not as flat reorder encoding: fla
 - With `topk == -1`, the raw-pointer batch overload returns one row with `count` distances. The
   `DatasetPtr` overload returns `NumElements()` rows with `count` distances each. Both preserve
   input order and do not return IDs. `GetValids()` has one flag per requested ID, in the same order
-  (row-major for multi-query).
+  (row-major for multi-query), so in this mode its length equals `NumElements() * Dim()`.
 - With `topk > 0`, the batch overload returns the smallest `min(topk, count)` distances per
   query, sorted ascending, and `GetIds()` contains the corresponding IDs. `GetValids()` has one flag
   per returned distance, i.e. `min(topk, count)` per query row. Missing IDs are ordered after valid
   distances regardless of their sign: they only appear when fewer than `topk` valid IDs exist, with a
   `NaN` distance and `Valids` false.
-- In both modes `GetValids()` has one entry per entry of `GetDistances()`. These results do not
-  always populate `NumElements()`/`Dim()`, so derive the length from the requested IDs (or from the
-  returned `GetDistances()` array), not from `NumElements() * Dim()`.
+- In both modes `GetValids()` has one entry per entry of `GetDistances()`, i.e.
+  `NumElements() * Dim()` entries; batch results always populate `NumElements()`/`Dim()`. In top-k
+  mode the per-row flag count is the truncated `min(topk, count)`, not the number of requested IDs.
 - The distance metric (IP / L2 / cosine) follows the `metric_type` chosen at index
   construction; see [Metric Semantics](../resources/metric_semantics.md).
 

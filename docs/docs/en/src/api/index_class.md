@@ -236,8 +236,8 @@ entry means the requested ID did not exist or had been removed at lookup time, a
 `NaN` (`std::numeric_limits<float>::quiet_NaN()`). The mask has one entry per entry of
 `GetDistances()`: one flag per requested ID, in the input ID order (row-major for multi-query), with
 `topk == -1`; and `min(topk, count)` flags per query row, aligned with the output order, with
-`topk > 0`. These results do not always populate `NumElements()`/`Dim()`, so derive the length from
-the requested IDs or the returned `GetDistances()` array. Callers must use the mask rather than the
+`topk > 0`. Batch results always populate `NumElements()`/`Dim()`, so the mask length is always
+`NumElements() * Dim()`. Callers must use the mask rather than the
 distance value to detect missing IDs.
 
 ## Conjugate-graph enhancement

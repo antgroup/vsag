@@ -230,8 +230,8 @@ RangeSearch(const DatasetPtr& query, float radius, const std::string& parameters
 其距离为 `NaN`（`std::numeric_limits<float>::quiet_NaN()`）。标记数量与
 `GetDistances()` 的条目数一致：`topk == -1` 时每个请求的 ID 一个标记，顺序与输入 ID 一致
 （多查询为 row-major）；`topk > 0` 时每个 query 行 `min(topk, count)` 个标记，与输出顺序对齐。
-这些结果不一定会填充 `NumElements()`/`Dim()`，因此标记数量应从请求的 ID 数量或返回的
-`GetDistances()` 数组推导。调用方必须使用该标记而不是距离值来判断 ID 是否缺失。
+批量结果总是填充 `NumElements()`/`Dim()`，因此标记数量始终为 `NumElements() * Dim()`。
+调用方必须使用该标记而不是距离值来判断 ID 是否缺失。
 
 ## 共轭图增强
 
