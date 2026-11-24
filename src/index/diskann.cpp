@@ -17,15 +17,18 @@
 
 #include <local_file_reader.h>
 
+#include <cmath>
 #include <exception>
 #include <functional>
 #include <future>
 #include <iterator>
+#include <limits>
 #include <new>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 #include <utility>
 
+#include "algorithm/inner_index_interface.h"
 #include "datacell/flatten_datacell.h"
 #include "dataset_impl.h"
 #include "impl/odescent/odescent_graph_builder.h"
@@ -1392,9 +1395,11 @@ DiskANN::init_feature_list() {
                                       IndexFeature::SUPPORT_SERIALIZE_BINARY_SET,
                                       IndexFeature::SUPPORT_SERIALIZE_FILE});
     // calculate distance by id
-    this->feature_list_->SetFeatures({
-        SUPPORT_CAL_DISTANCE_BY_ID,
-    });
+    if (this->support_calc_distance_by_id_) {
+        this->feature_list_->SetFeatures({
+            SUPPORT_CAL_DISTANCE_BY_ID,
+        });
+    }
 }
 
 DatasetPtr
@@ -1402,18 +1407,64 @@ DiskANN::cal_distance_by_id(const float* query,
                             const int64_t* ids,
                             int64_t count,
                             bool calculate_precise_distance) const {
-    auto dataset = Dataset::Make();
-    auto* dists = new float[count];
-    dataset->NumElements(count)->Distances(dists)->Owner(true);
-    this->index_->cal_distance_by_ids(query, ids, count, dists, calculate_precise_distance);
-    return dataset;
+    if (not this->support_calc_distance_by_id_) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "diskann does not support calculating distance by id, please set "
+                            "support_calc_distance_by_id=true in the build parameters");
+    }
+    CHECK_ARGUMENT(count >= 0, fmt::format("count({}) must be non-negative", count));
+    if (count > 0) {
+        CHECK_ARGUMENT(query != nullptr, "query cannot be null when count is greater than 0");
+        CHECK_ARGUMENT(ids != nullptr, "ids cannot be null when count is greater than 0");
+    }
+    auto allocator = this->common_param_.allocator_;
+    auto result = Dataset::Make();
+    result->Owner(true, allocator.get());
+    result->NumElements(count)->Dim(1);
+    if (count == 0) {
+        return result;
+    }
+
+    auto* distances = static_cast<float*>(allocator->Allocate(sizeof(float) * count));
+    if (distances == nullptr) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                            "failed to allocate distances for CalDistanceById");
+    }
+    result->Distances(distances);
+    std::vector<bool> validity(count, false);
+    if (not this->index_) {
+        // the index is empty or has not been built yet, every id is missing
+        for (int64_t i = 0; i < count; ++i) {
+            distances[i] = std::numeric_limits<float>::quiet_NaN();
+        }
+        AttachValids(result, validity, allocator.get());
+        return result;
+    }
+    this->index_->cal_distance_by_ids(
+        query, ids, count, distances, calculate_precise_distance, &validity);
+    AttachValids(result, validity, allocator.get());
+    return result;
 }
+
 float
 DiskANN::calc_distance_by_id(const float* vector,
                              int64_t id,
                              bool calculate_precise_distance) const {
-    float dist;
-    this->index_->cal_distance_by_ids(vector, &id, 1, &dist, calculate_precise_distance);
+    if (not this->support_calc_distance_by_id_) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "diskann does not support calculating distance by id, please set "
+                            "support_calc_distance_by_id=true in the build parameters");
+    }
+    CHECK_ARGUMENT(vector != nullptr, "vector cannot be null");
+    if (not this->index_) {
+        ThrowLabelNotFound(id);
+    }
+    float dist = std::numeric_limits<float>::quiet_NaN();
+    std::vector<bool> validity(1, false);
+    this->index_->cal_distance_by_ids(vector, &id, 1, &dist, calculate_precise_distance, &validity);
+    if (not validity[0]) {
+        ThrowLabelNotFound(id);
+    }
     return dist;
 }
 

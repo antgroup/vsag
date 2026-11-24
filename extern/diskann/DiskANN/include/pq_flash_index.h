@@ -103,7 +103,7 @@ template <typename T, typename LabelT = uint32_t> class PQFlashIndex
 
     DISKANN_DLLEXPORT int64_t get_memory_usage();
 
-    DISKANN_DLLEXPORT void cal_distance_by_ids(const float *query, const int64_t *ids, int64_t count, float *distances, bool use_reorder = true);
+    DISKANN_DLLEXPORT void cal_distance_by_ids(const float *query, const int64_t *ids, int64_t count, float *distances, bool use_reorder = true, std::vector<bool> *valids = nullptr);
 
   protected:
     DISKANN_DLLEXPORT void use_medoids_data_as_centroids();
@@ -201,7 +201,7 @@ template <typename T, typename LabelT = uint32_t> class PQFlashIndex
     uint64_t reoreder_data_offset = 0;
 
     bool support_calc_distance_by_ids = false;
-    std::unordered_map<uint32_t, int64_t > tag_to_id_map;
+    std::unordered_map<LabelT, int64_t > tag_to_id_map;
 
     // Graph related data structures
     int64_t graph_size = 0;
