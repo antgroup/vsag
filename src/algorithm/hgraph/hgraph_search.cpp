@@ -66,6 +66,21 @@ struct HGraphVisitedListGuard {
     }
 };
 
+// Reorder decision extracted as a pure function to eliminate 3 copy-paste sites.
+// Returns which flatten to use for reorder. NONE means skip reorder.
+enum class ReorderTarget : uint8_t { NONE = 0, REORDER_FLATTEN = 1, BASIC_FLATTEN = 2 };
+
+[[nodiscard]] ReorderTarget
+choose_reorder_target(bool use_reorder, bool enable_reorder, bool rabitq_one_bit_search) {
+    if (use_reorder and enable_reorder) {
+        return ReorderTarget::REORDER_FLATTEN;
+    }
+    if (enable_reorder and rabitq_one_bit_search) {
+        return ReorderTarget::BASIC_FLATTEN;
+    }
+    return ReorderTarget::NONE;
+}
+
 }  // namespace
 
 static DatasetPtr
@@ -256,23 +271,20 @@ HGraph::KnnSearch(const DatasetPtr& query,
                                                    &ctx,
                                                    rabitq_candidates_ptr);
 
-            if (use_reorder_ and search_param.enable_reorder) {
+            auto reorder_target_itr = choose_reorder_target(
+                use_reorder_, search_param.enable_reorder, params.rabitq_one_bit_search);
+            if (reorder_target_itr != ReorderTarget::NONE) {
                 this->reorder(query_data,
-                              this->get_reorder_codes(),
+                              reorder_target_itr == ReorderTarget::REORDER_FLATTEN
+                                  ? this->get_reorder_codes()
+                                  : this->basic_flatten_codes_,
                               search_result,
                               k,
                               iter_filter_ctx,
                               ctx,
-                              rabitq_candidates_ptr,
-                              threshold);
-            } else if (search_param.enable_reorder and params.rabitq_one_bit_search) {
-                this->reorder(query_data,
-                              this->basic_flatten_codes_,
-                              search_result,
-                              k,
-                              iter_filter_ctx,
-                              ctx,
-                              nullptr,
+                              reorder_target_itr == ReorderTarget::REORDER_FLATTEN
+                                  ? rabitq_candidates_ptr
+                                  : nullptr,
                               threshold);
             }
         }
@@ -334,6 +346,10 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
 }
 
+// Overload for standard (non-iterator) search: supports RaBitQ fused fast path,
+// parallel multi-thread search, and fused_search_finalized tracking.
+// The fused fast path is taken only when find_duplicate is false and
+// (parallel_search_thread_count <= 1 OR support_duplicate_).
 template <InnerSearchMode mode>
 DistHeapPtr
 HGraph::search_one_graph(const void* query,
@@ -409,6 +425,9 @@ HGraph::search_one_graph(const void* query,
     return result;
 }
 
+// Overload for iterator-based search (paged KnnSearch): supports RaBitQ fused
+// fast path on first use only (via IsFirstUsed). Does NOT support parallel search
+// because iterator state (discard heap, pagination) must remain serial.
 template <InnerSearchMode mode>
 DistHeapPtr
 HGraph::search_one_graph(const void* query,
@@ -661,23 +680,21 @@ HGraph::search_range_with_request(const SearchRequest& request,
                                                rabitq_candidates_ptr);
     }
 
-    if (mci_result.route != "mci" && not brute_force_used && use_reorder_ &&
-        search_param.enable_reorder) {
-        this->reorder(raw_query,
-                      this->get_reorder_codes(),
-                      search_result,
-                      request.limited_size_,
-                      nullptr,
-                      ctx,
-                      rabitq_candidates_ptr);
-    } else if (mci_result.route != "mci" && not brute_force_used && search_param.enable_reorder &&
-               params.rabitq_one_bit_search) {
-        this->reorder(raw_query,
-                      this->basic_flatten_codes_,
-                      search_result,
-                      request.limited_size_,
-                      nullptr,
-                      ctx);
+    if (mci_result.route != "mci" && not brute_force_used) {
+        auto reorder_target_range = choose_reorder_target(
+            use_reorder_, search_param.enable_reorder, params.rabitq_one_bit_search);
+        if (reorder_target_range != ReorderTarget::NONE) {
+            this->reorder(
+                raw_query,
+                reorder_target_range == ReorderTarget::REORDER_FLATTEN ? this->get_reorder_codes()
+                                                                       : this->basic_flatten_codes_,
+                search_result,
+                request.limited_size_,
+                nullptr,
+                ctx,
+                reorder_target_range == ReorderTarget::REORDER_FLATTEN ? rabitq_candidates_ptr
+                                                                       : nullptr);
+        }
     }
 
     if (mci_result.route != "mci") {
@@ -1164,6 +1181,11 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         // Hgraph neighbours and the MCI clique members together. It reuses the
         // entry point the route graphs produced for the bottom graph, and needs an
         // MCI companion that is published for the current total count.
+        // After route-graph navigation, the entry point must be valid for any
+        // search strategy that uses it (hybrid traversal or bottom-graph search).
+        // The runtime check below is the release-mode guard; the assert stays
+        // as documentation for debug builds.
+        assert(search_param.ep != INVALID_ENTRY_POINT);
         const bool hybrid_available =
             params.use_hybrid_traversal and not use_custom_distance and
             search_param.executors.empty() and search_param.ep != INVALID_ENTRY_POINT and
@@ -1241,35 +1263,27 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         const bool fused_search_already_reranked =
             fused_search_finalized and
             (not use_reorder_ or not search_param.enable_reorder or reorder_by_base_);
-        if (not fused_search_already_reranked && mci_result.route != "mci" && !brute_force_used &&
-            use_reorder_ && search_param.enable_reorder) {
-            auto reorder_limit = k;
-            if (this->use_conjugate_graph_ and params.use_conjugate_graph_search) {
-                reorder_limit = std::max(reorder_limit, LOOK_AT_K);
+        if (not fused_search_already_reranked && mci_result.route != "mci" && !brute_force_used) {
+            auto reorder_target_swr = choose_reorder_target(
+                use_reorder_, search_param.enable_reorder, params.rabitq_one_bit_search);
+            if (reorder_target_swr != ReorderTarget::NONE) {
+                auto reorder_limit = k;
+                if (this->use_conjugate_graph_ and params.use_conjugate_graph_search) {
+                    reorder_limit = std::max(reorder_limit, LOOK_AT_K);
+                }
+                this->reorder(raw_query,
+                              reorder_target_swr == ReorderTarget::REORDER_FLATTEN
+                                  ? this->get_reorder_codes()
+                                  : this->basic_flatten_codes_,
+                              search_result,
+                              reorder_limit,
+                              nullptr,
+                              ctx,
+                              reorder_target_swr == ReorderTarget::REORDER_FLATTEN
+                                  ? rabitq_candidates_ptr
+                                  : nullptr,
+                              request.threshold_);
             }
-            this->reorder(raw_query,
-                          this->get_reorder_codes(),
-                          search_result,
-                          reorder_limit,
-                          nullptr,
-                          ctx,
-                          rabitq_candidates_ptr,
-                          request.threshold_);
-        } else if (not fused_search_already_reranked && mci_result.route != "mci" &&
-                   !brute_force_used && search_param.enable_reorder &&
-                   params.rabitq_one_bit_search) {
-            auto reorder_limit = k;
-            if (this->use_conjugate_graph_ and params.use_conjugate_graph_search) {
-                reorder_limit = std::max(reorder_limit, LOOK_AT_K);
-            }
-            this->reorder(raw_query,
-                          this->basic_flatten_codes_,
-                          search_result,
-                          reorder_limit,
-                          nullptr,
-                          ctx,
-                          nullptr,
-                          request.threshold_);
         }
 
         if (this->use_conjugate_graph_ and params.use_conjugate_graph_search and
