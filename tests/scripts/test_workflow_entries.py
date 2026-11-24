@@ -388,6 +388,33 @@ class EntryTests(unittest.TestCase):
         self.assertIn(cache_path, build)
         self.assertIn('key: ${{ steps.cache.outputs.cache-primary-key }}', build)
 
+    def test_both_pr_build_routes_gate_on_compiled_nightly_ownership(self):
+        check = 'name: Check Nightly functional test ownership'
+        for workflow, name, build, next_step, binary in (
+            ('pr-ci-team.yml', 'build', 'name: Build ASan with 24 compile jobs',
+             'name: Publish test inventory and shard plan', '"$TEAM_ARTIFACTS/build/tests/functests"'),
+            ('pr-ci-community.yml', 'build-asan-x86', 'name: Make Asan',
+             'name: Upload Nightly functional inventory diagnostics', 'build/tests/functests'),
+        ):
+            with self.subTest(workflow=workflow):
+                body = job(workflow, name)
+                self.assertLess(body.index(build), body.index(check))
+                self.assertLess(body.index(check), body.index(next_step))
+                step = body.split(check, 1)[1].split(next_step, 1)[0]
+                self.assertIn('python3 scripts/testing/check_daily_functional_inventory.py', step)
+                self.assertIn(binary, step)
+                self.assertNotIn('continue-on-error', step)
+                self.assertNotIn('if:', step)
+
+    def test_community_archives_failed_nightly_inventory(self):
+        body = job('pr-ci-community.yml', 'build-asan-x86')
+        _, upload = body.split('name: Upload Nightly functional inventory diagnostics', 1)
+        upload = upload.split('name: Show compiler cache diagnostics', 1)[0]
+        self.assertIn("if: ${{ failure() && steps.nightly-inventory.outcome == 'failure' }}", upload)
+        self.assertIn("path: ${{ runner.temp }}/nightly-functional-inventory/inventory/", upload)
+        self.assertIn("uses: actions/upload-artifact@v6", upload)
+        self.assertIn("id: nightly-inventory", body)
+
     def test_consumers_do_not_start_after_build_failure(self):
         values = self.context()
         for state in ('failure', 'cancelled', 'skipped', ''):

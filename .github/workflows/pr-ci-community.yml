@@ -237,6 +237,22 @@ jobs:
           # on this disposable GitHub-hosted VM; no compiler cache is restored or saved.
           ccache --zero-stats
           /usr/bin/time -p make asan COMPILE_JOBS=3
+      - name: Check Nightly functional test ownership
+        id: nightly-inventory
+        run: |
+          printf 'leak:libomp.so\nleak:libgomp.so\n' > "$RUNNER_TEMP/nightly-inventory-omp.supp"
+          LSAN_OPTIONS="suppressions=$RUNNER_TEMP/nightly-inventory-omp.supp" \
+            python3 scripts/testing/check_daily_functional_inventory.py \
+            build/tests/functests "$RUNNER_TEMP/nightly-functional-inventory"
+      - name: Upload Nightly functional inventory diagnostics
+        if: ${{ failure() && steps.nightly-inventory.outcome == 'failure' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: community-nightly-functional-inventory-${{ github.run_id }}
+          path: ${{ runner.temp }}/nightly-functional-inventory/inventory/
+          if-no-files-found: warn
+          retention-days: 3
+          overwrite: true
       - name: Show compiler cache diagnostics
         if: always()
         run: |

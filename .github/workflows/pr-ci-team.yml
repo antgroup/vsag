@@ -367,6 +367,12 @@ jobs:
         run: |
           printf 'leak:libomp.so\nleak:libgomp.so\n' > "$RUNNER_TEMP/omp.supp"
           echo "LSAN_OPTIONS=suppressions=$RUNNER_TEMP/omp.supp" >> "$GITHUB_ENV"
+      - name: Check Nightly functional test ownership
+        env:
+          LD_LIBRARY_PATH: /__ci/artifacts/build/src:/__ci/artifacts/build/tools/autotune
+        run: |
+          python3 scripts/testing/check_daily_functional_inventory.py \
+            "$TEAM_ARTIFACTS/build/tests/functests" "$PWD/ci-logs/nightly-functional-inventory"
       - name: Publish test inventory and shard plan
         env:
           LD_LIBRARY_PATH: /__ci/artifacts/build/src:/__ci/artifacts/build/tools/autotune

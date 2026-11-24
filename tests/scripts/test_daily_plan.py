@@ -4,10 +4,12 @@ import datetime as dt
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -22,6 +24,77 @@ from tests.scripts.test_team_test_shards import MOCK
 
 
 class DailyPlanTests(unittest.TestCase):
+    def test_pipnn_cache_is_shared_functional_ownership(self):
+        case = {"name": "PiPNN cache version and structural validation",
+                "tags": "[ft][pipnn_cache]"}
+        self.assertEqual(dp.owner(case, "functional"), "other")
+        self.assertEqual(dp.owner({**case, "tags": "[ft][hgraph][pipnn_cache]"},
+                                  "functional"), "hgraph")
+
+    def test_pr_inventory_command_checks_compiled_daily_registrations(self):
+        checker = ROOT / "scripts/testing/check_daily_functional_inventory.py"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "functests"
+            fixture = MOCK.replace(
+                "if args[0] == '~[daily]':",
+                "if args[0] == '~[.]':\n"
+                "    selected = [case for case in cases if '[.]' not in case['tags']]\n"
+                "elif args[0] == '~[daily]':",
+            ).replace("root = ET.Element('Catch2TestRun')",
+                      "raise AssertionError('The checker must only list tests')")
+            binary.write_text("#!" + sys.executable + "\n" + fixture)
+            binary.chmod(0o755)
+            pipnn = {"name": "PiPNN cache version and structural validation",
+                     "tags": "[ft][pipnn_cache]"}
+            for i, (extra, expected) in enumerate((
+                ([], ""),
+                ([{"name": "unclassified daily", "tags": "[ft][daily][new_family]"}],
+                 "Unclassified functional test: unclassified daily"),
+                ([{"name": "ambiguous index", "tags": "[ft][hgraph][pyramid]"}],
+                 "Ambiguous index ownership: ambiguous index"),
+                ([{"name": pipnn["name"].upper(), "tags": "[ft][pyramid]"}],
+                 "A case-insensitive Catch2 group crosses budget owners: "
+                 "'PIPNN CACHE VERSION AND STRUCTURAL VALIDATION' (pyramid), "
+                 "'PiPNN cache version and structural validation' (other)"),
+            )):
+                with self.subTest(expected=expected):
+                    binary.with_suffix(".json").write_text(json.dumps({"cases": [pipnn, *extra]}))
+                    result = subprocess.run([sys.executable, checker, binary, root / str(i)],
+                                            capture_output=True, text=True)
+                    if expected:
+                        self.assertEqual(result.returncode, 1, result.stderr)
+                        self.assertIn(expected, result.stderr)
+                    else:
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertIn("ownership verified for 1 tests", result.stdout)
+
+    def test_pr_inventory_command_preserves_cancellation_signal(self):
+        checker = ROOT / "scripts/testing/check_daily_functional_inventory.py"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary, started = root / "functests", root / "started"
+            binary.write_text("#!" + sys.executable + "\n" + MOCK)
+            binary.chmod(0o755)
+            binary.with_suffix(".json").write_text(json.dumps({
+                "cases": [], "listing_started": str(started), "listing_sleep": 10,
+            }))
+            with subprocess.Popen([sys.executable, checker, binary, root / "logs"],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as process:
+                try:
+                    deadline = time.monotonic() + 5
+                    while not started.exists() and process.poll() is None and time.monotonic() < deadline:
+                        time.sleep(0.025)
+                    self.assertTrue(started.exists(), "Catch2 listing did not start")
+                    process.send_signal(signal.SIGTERM)
+                    _, stderr = process.communicate(timeout=5)
+                    self.assertEqual(process.returncode, 128 + signal.SIGTERM, stderr)
+                    self.assertNotIn("Nightly functional inventory failed", stderr)
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.communicate()
+
     def context(self, date="2026-11-02"):
         return dp.context("a" * 40, "2026-11-01T18:00:00Z", date)
 

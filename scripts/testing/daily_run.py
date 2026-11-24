@@ -80,7 +80,7 @@ def inventory_timeout(deadline, maximum=120):
     return min(maximum, remaining)
 
 
-def inventory_units(binary, root, profile, output, seed, cancelled, deadline=None):
+def discover_inventory(binary, output, seed, cancelled, deadline=None):
     tests = shards.listing(binary, "~[.]", seed, output / "inventory", inventory_timeout(deadline), cancelled)
     for test in tests:
         test["binary"] = binary.name
@@ -88,13 +88,15 @@ def inventory_units(binary, root, profile, output, seed, cancelled, deadline=Non
     named_inventory = [dict(test) for test in tests]
     tests, inventory = capability_inventory(binary, tests)
     inventory["named_cases"] = named_inventory
+    return tests, inventory
+
+
+def inventory_units(binary, root, profile, output, seed, cancelled, deadline=None):
+    tests, inventory = discover_inventory(binary, output, seed, cancelled, deadline)
     core, extension = [], []
     for group in shards.case_groups(tests):
         inventory_timeout(deadline)
-        owners = {dp.owner(t, profile) for t in group}
-        if len(owners) != 1:
-            raise dp.PlanError("A case-insensitive Catch2 group crosses budget owners")
-        base = {"tests": group, "owner": owners.pop(), "binary": str(binary),
+        base = {"tests": group, "owner": dp.group_owner(group, profile), "binary": str(binary),
                 "seed": seed, "env": {}, "contract": "All original assertions and SECTION branches"}
         key = dp.digest([[t["name"], str(test_source(root, t).relative_to(root))]
                          for t in group])
