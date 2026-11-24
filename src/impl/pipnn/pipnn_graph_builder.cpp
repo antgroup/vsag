@@ -1911,9 +1911,7 @@ PiPNNPipeline::build_small_leaf(const Leaf& leaf,
                 // A stale threshold is only looser: prefiltering cannot discard
                 // a valid candidate. Survivors are rechecked in original column order.
                 const float stale_threshold = current_threshold;
-#if defined(__clang__)
-#pragma clang loop vectorize(enable)
-#endif
+                // Let the compiler choose whether to vectorize this loop (#3474).
                 for (uint64_t offset = 0; offset < length; ++offset) {
                     const uint64_t column = block_begin + offset;
                     const float distance = from_dot(row, column, dot_row[column]);
