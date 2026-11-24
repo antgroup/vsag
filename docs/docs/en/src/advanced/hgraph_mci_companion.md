@@ -75,8 +75,9 @@ and exhausted candidates or stalled construction can stop below it.
 Migration warning: `mci_incremental_added_mct` is no longer supported. Remove this old
 clique-count setting from `index_param` and configure `mci_incremental_degree_min`,
 `mci_incremental_degree_n_divisor`, and `mci_incremental_degree_mcs_divisor` instead.
-The old key is ignored, not translated; leaving it in the JSON applies the new defaults
-unless the degree parameters are explicitly set. There is no equivalent one-to-one mapping
+The old key is **not** ignored: the HGraph parameter mapper has no branch for it, so leaving it
+in the JSON fails the build with `invalid config param: mci_incremental_added_mct`. Remove it and
+set the new degree keys instead. There is no equivalent one-to-one mapping
 because overlapping cliques contribute different numbers of unique neighbors. Recheck recall
 and mutation cost, and rebuild old snapshots with the new configuration rather than assuming
 that a removed parameter provides snapshot compatibility.

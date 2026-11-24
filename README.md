@@ -15,7 +15,7 @@ last-reviewed: 2026-05-12
   <h1><img alt="vsag-pages" src="docs/banner.svg" width=500/></h1>
 
 [![Nightly](https://img.shields.io/badge/Nightly-10h%20regression-blue?logo=githubactions)](https://github.com/antgroup/vsag/actions/workflows/daily_test.yml)
-[![codecov](https://codecov.io/gh/antgroup/vsag/graph/badge.svg?token=KDT3SpPMYS)](https://codecov.io/gh/antgroup/vsag)
+[![Nightly C++ line coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fantgroup%2Fvsag%2Fnightly-coverage-badge%2Fbadge.json)](https://github.com/antgroup/vsag/tree/nightly-coverage-badge)
 ![GitHub License](https://img.shields.io/github/license/antgroup/vsag)
 ![GitHub Release](https://img.shields.io/github/v/release/antgroup/vsag?label=last%20release)
 ![GitHub Contributors](https://img.shields.io/github/contributors/antgroup/vsag)
@@ -502,12 +502,21 @@ VSAG draws on the following works for graph construction, vector quantization, f
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/159753a52">
+                    <img src="https://avatars.githubusercontent.com/u/137481623?v=4" width="100" alt="159753a52"/>
+                    <br />
+                    <sub><b>Zelong Fang</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/jingyueob">
                     <img src="https://avatars.githubusercontent.com/u/212298588?v=4" width="100" alt="jingyueob"/>
                     <br />
                     <sub><b>jingyueob</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/Sia-Sheerland">
                     <img src="https://avatars.githubusercontent.com/u/204556736?v=4" width="100" alt="Sia-Sheerland"/>
@@ -515,8 +524,6 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <sub><b>Wen Huanzhi</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/xfmeng17">
                     <img src="https://avatars.githubusercontent.com/u/32661584?v=4" width="100" alt="xfmeng17"/>
@@ -525,10 +532,10 @@ VSAG draws on the following works for graph construction, vector quantization, f
                 </a>
             </td>
             <td align="center">
-                <a href="https://github.com/159753a52">
-                    <img src="https://avatars.githubusercontent.com/u/137481623?v=4" width="100" alt="159753a52"/>
+                <a href="https://github.com/ykindred">
+                    <img src="https://avatars.githubusercontent.com/u/216521501?v=4" width="100" alt="ykindred"/>
                     <br />
-                    <sub><b>Zelong Fang</b></sub>
+                    <sub><b>ykindred</b></sub>
                 </a>
             </td>
             <td align="center">
@@ -552,6 +559,8 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <sub><b>Adheeb Ahmed</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/Danbaiwq">
                     <img src="https://avatars.githubusercontent.com/u/212493818?v=4" width="100" alt="Danbaiwq"/>
@@ -559,8 +568,6 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <sub><b>Danbaiwq</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/Hastyshell">
                     <img src="https://avatars.githubusercontent.com/u/82279870?v=4" width="100" alt="Hastyshell"/>
@@ -596,6 +603,8 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <sub><b>mly</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/Ningsir">
                     <img src="https://avatars.githubusercontent.com/u/34963409?v=4" width="100" alt="Ningsir"/>
@@ -603,8 +612,6 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <sub><b>Xinger</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/nw9663644-eng">
                     <img src="https://avatars.githubusercontent.com/u/238131765?v=4" width="100" alt="nw9663644-eng"/>
@@ -617,13 +624,6 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <img src="https://avatars.githubusercontent.com/u/110705158?v=4" width="100" alt="seuclkzsd"/>
                     <br />
                     <sub><b>seuclkzsd</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/ykindred">
-                    <img src="https://avatars.githubusercontent.com/u/216521501?v=4" width="100" alt="ykindred"/>
-                    <br />
-                    <sub><b>ykindred</b></sub>
                 </a>
             </td>
             <td align="center">
@@ -733,6 +733,15 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <img src="https://avatars.githubusercontent.com/u/150929960?v=4" width="100" alt="wellkilo"/>
                     <br />
                     <sub><b>He Dong</b></sub>
+                </a>
+            </td>
+        </tr>
+        <tr>
+            <td align="center">
+                <a href="https://github.com/XiaoZhijiayou">
+                    <img src="https://avatars.githubusercontent.com/u/132753484?v=4" width="100" alt="XiaoZhijiayou"/>
+                    <br />
+                    <sub><b>MK</b></sub>
                 </a>
             </td>
         </tr>

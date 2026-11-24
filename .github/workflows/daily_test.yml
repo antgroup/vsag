@@ -144,8 +144,8 @@ jobs:
         with:
           job-summary: ${{ env.VSAG_DAILY_AGGREGATE != '1' && 'CCache Statistics' || '' }}
           max-size: "2G"
-          save: false
-          key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+          save: ${{ github.event_name == 'schedule' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main' }}
+          key: build-x86-asan-openblas-source-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Download frozen Nightly plan
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
@@ -1733,7 +1733,9 @@ jobs:
     timeout-minutes: 30
     name: Nightly Summary
     if: ${{ always() && (((github.event_name == 'schedule' && github.event.schedule == '0 14 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) }}
-    needs: [daily-plan, daily_test_asan_x86, daily_test_asan_aarch64, daily_test_asan_simd, daily_test_tsan, full-platform-test-asan-x86, full-platform-test-asan-macos-arm64, full-platform-test-example-x86, full-platform-test-example-aarch64, full-python-test-python-x86, full-python-test-python-aarch64, full-coverage-coverage, full-compatibility-compatibility, full-lint-clang-tidy-check, daily-extra-plan, daily-extra-x86]
+    # The needs context omits indirect dependencies. Include supplemental prerequisites
+    # so their failures are visible even when the dependent test jobs are skipped.
+    needs: [daily-plan, daily_build_asan_x86, daily_build_asan_aarch64, daily_build_simd, daily_build_tsan, full-platform-build-asan-x86, full-platform-build-asan-macos-arm64, full-python-build-python-wheel-x86, full-python-build-python-wheel-aarch64, full-coverage-changes, daily_test_asan_x86, daily_test_asan_aarch64, daily_test_asan_simd, daily_test_tsan, full-platform-test-asan-x86, full-platform-test-asan-macos-arm64, full-platform-test-example-x86, full-platform-test-example-aarch64, full-python-test-python-x86, full-python-test-python-aarch64, full-coverage-coverage, full-compatibility-compatibility, full-lint-clang-tidy-check, daily-extra-plan, daily-extra-x86]
     runs-on: ubuntu-24.04
     permissions:
       contents: read

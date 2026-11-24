@@ -1556,11 +1556,11 @@ TestIVFCalcDistanceByIdMissingId(const fixtures::IVFResourcePtr& resource) {
             const auto missing_id = fixtures::get_missing_id(dataset->base_);
             auto distance = index->CalcDistanceById(query->GetFloat32Vectors(), missing_id);
 
-            REQUIRE(distance.has_value());
-            REQUIRE(distance.value() == -1.0F);
+            REQUIRE_FALSE(distance.has_value());
+            REQUIRE(distance.error().type == vsag::ErrorType::INVALID_ARGUMENT);
         });
 }
-IVF_PR_DAILY_CASE("IVF CalcDistanceById missing id returns -1",
+IVF_PR_DAILY_CASE("IVF CalcDistanceById missing id fails",
                   "[ft][distance][ivf]",
                   TestIVFCalcDistanceByIdMissingId)
 
@@ -4165,7 +4165,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     REQUIRE(batch_distances.has_value());
     REQUIRE(std::abs(batch_distances.value()->GetDistances()[0] - precise_distance.value()) <
             1e-6F);
-    REQUIRE(batch_distances.value()->GetDistances()[1] == -1.0F);
+    REQUIRE(std::isnan(batch_distances.value()->GetDistances()[1]));
+    REQUIRE(batch_distances.value()->GetValids() != nullptr);
+    REQUIRE(batch_distances.value()->GetValids()[0]);
+    REQUIRE_FALSE(batch_distances.value()->GetValids()[1]);
 
     constexpr int64_t topk = 10;
     constexpr auto search_param =
@@ -4421,7 +4424,9 @@ TEST_CASE("IVF dense native distance contract", "[distance_contract]") {
             REQUIRE(batch.value()->GetNumElements() == 2);
             REQUIRE(batch.value()->GetDim() == 3);
             REQUIRE(std::abs(batch.value()->GetDistances()[0] - raw.value()) < 1e-5F);
-            REQUIRE(batch.value()->GetDistances()[1] == -1.0F);
+            REQUIRE(std::isnan(batch.value()->GetDistances()[1]));
+            REQUIRE(batch.value()->GetValids() != nullptr);
+            REQUIRE_FALSE(batch.value()->GetValids()[1]);
             auto top = index->CalcDistancesById(query, candidates, 3, precise, 2);
             REQUIRE(top.has_value());
             REQUIRE(top.value()->GetDim() == 2);

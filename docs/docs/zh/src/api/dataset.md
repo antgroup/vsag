@@ -52,6 +52,7 @@ DatasetPtr DeepCopy(Allocator* allocator = nullptr) const;  // 独立副本
 | `Dim(int64_t)` | `GetDim()` | `int64_t` | 稠密向量维度。 |
 | `Ids(const int64_t*)` | `GetIds()` | `const int64_t*` | 逐元素 id（长度为 `NumElements`）。 |
 | `Distances(const float*)` | `GetDistances()` | `const float*` | 距离（搜索输出；长度取决于 `k`/命中数）。 |
+| `Valids(const bool*)` | `GetValids()` | `const bool*` | 逐距离的有效标记（长度与 `Distances` 相同）。由 `CalcDistancesById` 设置；`false` 表示请求的 ID 不存在或已被删除，对应距离为 NaN。未设置时为 `nullptr`。 |
 
 ## 向量负载
 

@@ -38,6 +38,14 @@ get_residual_original_query_codes(const FlattenInterfacePtr& codes) {
     return *residual_codes;
 }
 
+struct ReorderEntry {
+    BucketIdType bucket_id;
+    InnerIdType offset_id;
+    InnerIdType inner_id;
+    InnerIdType result_offset;
+    uint64_t source_version;
+};
+
 }  // namespace
 
 RaBitQSplitBucketDataCell::RaBitQSplitBucketDataCell(const BucketDataCellParamPtr& param,
@@ -784,13 +792,6 @@ RaBitQSplitBucketDataCell::query_non_residual_by_inner_ids(
     const InnerIdType* source_offset_ids,
     const uint64_t* source_versions) {
     (void)filter_inner_product_mode;
-    struct ReorderEntry {
-        BucketIdType bucket_id;
-        InnerIdType offset_id;
-        InnerIdType inner_id;
-        InnerIdType result_offset;
-        uint64_t source_version;
-    };
 
     const bool has_source_provenance = source_bucket_ids != nullptr;
     Vector<ReorderEntry> entries(this->allocator_);
@@ -981,14 +982,6 @@ RaBitQSplitBucketDataCell::query_residual_by_inner_ids(
     const BucketIdType* source_bucket_ids,
     const InnerIdType* source_offset_ids,
     const uint64_t* source_versions) {
-    struct ReorderEntry {
-        BucketIdType bucket_id;
-        InnerIdType offset_id;
-        InnerIdType inner_id;
-        InnerIdType result_offset;
-        uint64_t source_version;
-    };
-
     const bool has_source_provenance = source_bucket_ids != nullptr;
     Vector<ReorderEntry> entries(this->allocator_);
     entries.reserve(id_count);

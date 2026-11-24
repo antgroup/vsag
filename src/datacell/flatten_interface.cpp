@@ -20,6 +20,44 @@
 
 namespace vsag {
 
+BatchNodeReadGuard::BatchNodeReadGuard(MutexArray& mutexes,
+                                       const InnerIdType* ids,
+                                       InnerIdType count,
+                                       uint64_t total_count)
+    : mutexes_(mutexes) {
+    if (count == 0) {
+        return;
+    }
+    ids_.assign(ids, ids + count);
+    // Order acquisitions and avoid recursively locking a shared_mutex for duplicate IDs.
+    std::sort(ids_.begin(), ids_.end());
+    ids_.erase(std::unique(ids_.begin(), ids_.end()), ids_.end());
+    if (ids_.back() >= total_count) {
+        throw VsagException(ErrorType::READ_ERROR, "invalid internal id for node lock");
+    }
+
+    try {
+        for (const auto id : ids_) {
+            mutexes_.SharedLock(id);
+            ++acquired_;
+        }
+    } catch (...) {
+        unlock_acquired();
+        throw;
+    }
+}
+
+BatchNodeReadGuard::~BatchNodeReadGuard() {
+    unlock_acquired();
+}
+
+void
+BatchNodeReadGuard::unlock_acquired() noexcept {
+    while (acquired_ > 0) {
+        mutexes_.SharedUnlock(ids_[--acquired_]);
+    }
+}
+
 IndexCommonParam
 FlattenInterface::ExportCommonParam() {
     throw VsagException(ErrorType::INTERNAL_ERROR, "ExportCommonParam is not implemented");

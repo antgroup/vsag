@@ -34,7 +34,7 @@ All three can be combined inside a single `SearchRequest`; they are ANDed togeth
 | HGraph           |                Yes                |                   Yes                  |        Yes        |
 | IVF              |                Yes                |                   Yes                  |        Yes        |
 | BruteForce       |                Yes                |                   Yes                  |        Yes        |
-| WARP (sparse)    |                Yes                |                   Yes                  |        Yes        |
+| WARP             |                 No                |  No (multi-vector; id filters only)     |        No         |
 | SINDI / Pyramid | — | id-based filters only (see [Filtered Search](filtered_search.md)) | — |
 
 When `use_attribute_filter` is enabled, BruteForce currently rejects `Remove` calls
@@ -161,8 +161,9 @@ Pick one and stick with it for a given dataset to avoid double-free or leaks.
 
 ## Building an Index with Attribute Support
 
-Set `index_param.use_attribute_filter` to `true` and (optionally) tune the
-attribute-inverted-index parameters under `attr_params`.
+Set `index_param.use_attribute_filter` to `true`. The attribute-inverted index then uses the
+per-index defaults below; there is no public `attr_params` build key, so passing one is
+rejected as `invalid config param`.
 
 ```cpp
 std::string build_params = R"(
@@ -171,10 +172,7 @@ std::string build_params = R"(
     "metric_type": "l2",
     "dim": 128,
     "index_param": {
-        "use_attribute_filter": true,
-        "attr_params": {
-            "has_buckets": false
-        }
+        "use_attribute_filter": true
     }
 }
 )";

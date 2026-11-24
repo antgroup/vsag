@@ -354,6 +354,9 @@ split 配置要求 `x >= 1`、`y >= 1`、`x + y <= 8`、
 | `parallelism` | int | `1` | 单次查询内扫描桶时使用的线程数。需要线程池，无池时回退到单线程。 |
 | `timeout_ms` | int | 不限 | 每桶扫描的毫秒级软截止。设为 `0` 会立即超时；不传该参数则不限制。 |
 
+根级 `threshold` 键（与 `ivf` 平级，不属于它）同样生效：取有限数值时，距离超过该值的 KNN
+候选会被丢弃。它在解析 `ivf` 对象之前读取。
+
 ```cpp
 auto result = index->KnnSearch(
     query, topk,

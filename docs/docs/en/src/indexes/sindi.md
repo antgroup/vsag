@@ -71,11 +71,12 @@ auto result = index->KnnSearch(
 ## Build parameters
 
 Build-time parameters live under `index_param`. `dtype` **must** be `"sparse"`
-and `metric_type` **must** be `"ip"`.
+and `metric_type` **must** be `"ip"`. `dim` is a **top-level** field, not an
+`index_param` member: for sparse data it may be omitted and then defaults to `4096`
+(`MAX_DIM_SPARSE`), so size `term_id_limit` explicitly instead of relying on `dim`.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `dim` | int | — (required) | Maximum number of non-zero elements per sparse vector. *Not* the vocabulary size. |
 | `term_id_limit` | int | `1000000` | Upper bound on term id values (≥ max term id + 1, up to 50 000 000). |
 | `window_size` | int | `50000` | Documents per window (range: 10 000 – 60 000). |
 | `doc_prune_ratio` | float | `0.0` | Fraction of lowest-weight terms dropped per doc at build time (`[0.0, 1.0)`). |
@@ -88,6 +89,8 @@ and `metric_type` **must** be `"ip"`.
 | `remap_term_ids` | bool | `false` | Remap term IDs before indexing; useful when term IDs are sparse or have large gaps. |
 | `avg_doc_term_length` | int | `100` | Hint for memory estimation only. |
 | `immutable` | bool | `false` | Build or load the compact read-only runtime. `Build()` compacts completed windows as it proceeds to reduce peak memory; incremental `Add()` is rejected. |
+| `deserialize_without_footer` | bool | `false` | On load, skip reading the trailing footer. Only needed for legacy snapshots written before footers existed; without the footer, posting-list sortedness and the DMQ rerank format are assumed rather than detected. |
+| `deserialize_without_buffer` | bool | `false` | On load, deserialize straight from the supplied `Reader` instead of first streaming it into an in-memory buffer, trading load-time memory for more IO reads. Ignored when the index was built with `immutable: true`, which always reads from the reader. |
 
 > **`dim` vs `term_id_limit`.** For the sparse vector `{0:0.1, 2:0.5, 177:0.8}`,
 > `dim` is `3` (three non-zero entries) while `term_id_limit` must be ≥ `178`
@@ -263,6 +266,13 @@ Search-time parameters live under the `sindi` sub-object:
 | `query_prune_ratio` | float | `0.0` | Fraction of lowest-weight query terms skipped (`[0.0, 1.0)`). |
 | `term_prune_ratio` | float | `0.0` | Fraction of the lowest-value postings skipped from each term list (`[0.0, 1.0)`). |
 | `term_retain_threshold` | uint64 | `0` | Maximum postings for one term across all windows. A value of `0` disables this limit; positive values allow each non-empty window posting list to scan at most `max(1, floor(threshold / window_count))` postings. |
+
+Of the inherited `IndexSearchParameter` fields, only `timeout_ms` is honoured: it bounds the
+window scan and is applied as a soft timer. `parallelism`, `factor` and `enable_reorder` are
+accepted but have no SINDI effect — worker control is `window_parallelism` and `enable_reorder`
+is taken from the build-time `use_reorder`. The root-level `threshold` key (sibling of `sindi`)
+is also honoured: a finite numeric value discards KNN candidates whose distance exceeds it.
+`worker_n_candidate`, `filter_callback_limit_weight` and `window_scheduler` are rejected.
 
 The partition count is capped by `floor(total_capacity / topk)`, so each local heap can retain at least TopK candidates without exceeding the total budget. A small candidate budget can therefore reduce useful execution slots.
 

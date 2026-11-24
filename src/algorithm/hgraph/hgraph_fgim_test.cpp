@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <memory>
 #include <random>
 #include <set>
@@ -24,7 +25,14 @@
 #include <tuple>
 
 #include "algorithm/hgraph/hgraph.h"
+#include "datacell/compressed_graph_datacell_parameter.h"
+#include "datacell/graph_datacell_parameter.h"
+#include "framework/test_reader.h"
 #include "impl/allocator/safe_allocator.h"
+#include "index/index_impl.h"
+#include "io/reader_io/reader_io_parameter.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "unittest.h"
 #include "vsag/dataset.h"
 
@@ -130,6 +138,10 @@ public:
             graph.label_table_ = nullptr;
         } else if (condition == "incomplete code writes") {
             graph.pending_code_writes_[0] = HGraph::BASE_CODE;
+        } else if (condition == "auxiliary metadata") {
+            graph.persist_source_id_ = true;
+        } else if (condition == "missing merge parameters") {
+            graph.create_param_ptr_ = nullptr;
         }
     }
 
@@ -165,6 +177,100 @@ public:
         REQUIRE(stats.distance_evaluations.load() ==
                 public_stats["distance_evaluations"].GetUint64());
     }
+    std::vector<std::map<InnerIdType, std::vector<InnerIdType>>>
+    CaptureUpper(const HGraph& source) {
+        std::vector<std::map<InnerIdType, std::vector<InnerIdType>>> result;
+        for (const auto& layer : source.route_graphs_) {
+            result.emplace_back();
+            auto ids = layer->GetIds();
+            REQUIRE(ids.size() == layer->TotalCount());
+            for (const auto u : ids) {
+                REQUIRE(u < source.GetNumElements());
+                Vector<InnerIdType> neighbors(source.allocator_);
+                layer->GetNeighbors(u, neighbors);
+                REQUIRE(neighbors.size() <= layer->MaximumDegree());
+                std::set<InnerIdType> seen;
+                for (const auto v : neighbors) {
+                    REQUIRE(v != u);
+                    REQUIRE(layer->CheckIdExists(v));
+                    REQUIRE(seen.insert(v).second);
+                }
+                result.back()[u] = {neighbors.begin(), neighbors.end()};
+                if (result.size() > 1) {
+                    REQUIRE(result[result.size() - 2].count(u) == 1);
+                }
+            }
+        }
+        REQUIRE(source.entry_point_id_ < source.GetNumElements());
+        if (!result.empty()) {
+            REQUIRE(result.back().count(source.entry_point_id_) == 1);
+        }
+        return result;
+    }
+    void
+    SetPublishedCount(HGraph& destination, InnerIdType count) {
+        destination.published_count_.store(count);
+    }
+
+    void
+    UseReaderBottom(HGraph& destination, const IndexCommonParam& common) {
+        const auto size = destination.bottom_graph_->CalcSerializeSize();
+        Binary binary{std::shared_ptr<int8_t[]>(new int8_t[size]), size};
+        BufferStreamWriter writer(reinterpret_cast<char*>(binary.data.get()));
+        destination.bottom_graph_->Serialize(writer);
+        auto data_reader = std::make_shared<fixtures::TestReader>(binary);
+        auto io = std::make_shared<ReaderIOParameter>();
+        io->reader = data_reader;
+        const auto parameters =
+            std::dynamic_pointer_cast<HGraphParameter>(destination.create_param_ptr_);
+        REQUIRE(parameters != nullptr);
+        const auto original =
+            std::dynamic_pointer_cast<GraphDataCellParameter>(parameters->bottom_graph_param);
+        REQUIRE(original != nullptr);
+        auto parameter = std::make_shared<GraphDataCellParameter>(*original);
+        parameter->io_parameter_ = io;
+        auto graph = GraphInterface::MakeInstance(parameter, common);
+        ReadFuncStreamReader reader(
+            [data_reader](uint64_t offset, uint64_t length, void* data) {
+                data_reader->Read(offset, length, data);
+            },
+            0,
+            size);
+        graph->Deserialize(reader);
+        destination.bottom_graph_ = graph;
+        destination.mark_memory_usage_dirty();
+    }
+
+    void
+    UseCompressedBottom(HGraph& destination, const IndexCommonParam& common) {
+        auto parameter = std::make_shared<CompressedGraphDatacellParameter>();
+        parameter->max_degree_ = destination.bottom_graph_->MaximumDegree();
+        auto graph = GraphInterface::MakeInstance(parameter, common);
+        graph->Resize(destination.GetNumElements());
+        graph->SetTotalCount(destination.GetNumElements());
+        destination.bottom_graph_ = graph;
+        destination.mark_memory_usage_dirty();
+    }
+
+    void
+    ClearUpper(HGraph& destination) {
+        destination.route_graphs_.clear();
+        destination.mark_memory_usage_dirty();
+    }
+
+    uint64_t
+    UpperMemory(const HGraph& destination) {
+        uint64_t total = 0;
+        for (const auto& graph : destination.route_graphs_) {
+            total += graph->GetMemoryUsage();
+        }
+        return total;
+    }
+
+    uint64_t
+    BottomMemory(const HGraph& destination) {
+        return destination.bottom_graph_->GetMemoryUsage();
+    }
 };
 
 class HGraphFGIMTest : public HGraphFGIMTestAccessor {
@@ -182,7 +288,8 @@ public:
                bool tied = false,
                const std::string& base_quantization = "fp32",
                bool random = false,
-               bool support_duplicate = false) {
+               bool support_duplicate = false,
+               bool fgim = false) {
         auto parameters = JsonType::Parse(R"({
             "base_quantization_type": "fp32",
             "max_degree": 8,
@@ -193,6 +300,9 @@ public:
         })");
         parameters["base_quantization_type"].SetString(base_quantization);
         parameters["support_duplicate"].SetBool(support_duplicate);
+        if (fgim) {
+            parameters["merge_strategy"].SetString("fgim");
+        }
         auto graph = std::make_unique<HGraph>(
             HGraph::CheckAndMappingExternalParam(parameters, common), common);
         std::vector<float> vectors(count * common.dim_);
@@ -812,6 +922,521 @@ TEST_CASE_METHOD(HGraphFGIMTest,
     REQUIRE(after_indegree[4] == 1);
     REQUIRE(*std::min_element(after_indegree.begin(), after_indegree.end()) > 0);
 }
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM reconstruction prunes redundant edges and preserves a connected chain",
+                 "[ut][hgraph][fgim]") {
+    auto lhs = MakeSource(2, 0);
+    auto rhs = MakeSource(2, 1);
+    Vector<const HGraph*> sources(common.allocator_.get());
+    sources.push_back(lhs.get());
+    sources.push_back(rhs.get());
+    const FGIMKnnGraph input{{{2, 4}, {1, 400}, {3, 484}},
+                             {{3, 4}, {2, 324}, {0, 400}},
+                             {{0, 4}, {1, 324}, {3, 400}},
+                             {{1, 4}, {2, 400}, {0, 484}}};
+    uint64_t distances = 0;
+    const auto result = HGraphFGIM::KnnGraphToPG(sources, input, 3, &distances);
+    REQUIRE(distances > 0);
+    const std::vector<std::vector<InnerIdType>> expected{{2}, {3, 2}, {0, 1}, {1}};
+    for (uint64_t u = 0; u < result.size(); ++u) {
+        REQUIRE(result[u].size() == expected[u].size());
+        REQUIRE(input[u].size() == 3);
+        for (uint64_t i = 0; i < result[u].size(); ++i) {
+            REQUIRE(result[u][i].id == expected[u][i]);
+        }
+    }
+    std::set<InnerIdType> visited{0};
+    std::vector<InnerIdType> stack{0};
+    while (!stack.empty()) {
+        const auto u = stack.back();
+        stack.pop_back();
+        for (const auto& edge : result[u]) {
+            if (visited.insert(edge.id).second) {
+                stack.push_back(edge.id);
+            }
+        }
+    }
+    REQUIRE(visited.size() == result.size());
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM reconstruction protects sole incoming edges and bounds reverse edges",
+                 "[ut][hgraph][fgim]") {
+    auto lhs = MakeSource(2, 0);
+    auto rhs = MakeSource(2, 1);
+    Vector<const HGraph*> sources(common.allocator_.get());
+    sources.push_back(lhs.get());
+    sources.push_back(rhs.get());
+    SECTION("sole incoming edge survives geometric pruning") {
+        const FGIMKnnGraph input{{{2, 4}, {1, 400}}, {}, {{0, 4}}, {}};
+        const auto result = HGraphFGIM::KnnGraphToPG(sources, input, 2);
+        REQUIRE(result[0].size() == 2);
+        REQUIRE(result[0][1].id == 1);
+        REQUIRE(result[1].size() == 1);
+        REQUIRE(result[1][0].id == 0);
+    }
+    SECTION("redundant incoming edge may be pruned") {
+        const FGIMKnnGraph input{{{2, 4}, {1, 400}}, {}, {{0, 4}}, {{1, 4}}};
+        const auto result = HGraphFGIM::KnnGraphToPG(sources, input, 2);
+        REQUIRE(result[0].size() == 1);
+        REQUIRE(result[0][0].id == 2);
+    }
+    SECTION("reverse additions are truncated by distance") {
+        const FGIMKnnGraph input{{}, {{0, 400}}, {{0, 4}}, {{0, 484}}};
+        const auto result = HGraphFGIM::KnnGraphToPG(sources, input, 1);
+        REQUIRE(result[0].size() == 1);
+        REQUIRE(result[0][0].id == 2);
+        REQUIRE(result[0][0].distance == 4);
+        for (const auto& row : result) {
+            REQUIRE(row.size() <= 1);
+        }
+    }
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM stages write valid bottom graph without changing vector or label storage",
+                 "[ut][hgraph][fgim]") {
+    auto lhs = MakeSource(6, 0);
+    auto rhs = MakeSource(5, 1);
+    auto third = MakeSource(4, 2);
+    Vector<const HGraph*> sources(common.allocator_.get());
+    sources.push_back(lhs.get());
+    sources.push_back(rhs.get());
+    sources.push_back(third.get());
+    auto initial = HGraphFGIM::BuildInitialKnnGraph(sources, 4);
+    HGraphFGIM::RefineKnnGraph(sources, initial, 4, 3);
+    const auto pg = HGraphFGIM::KnnGraphToPG(sources, initial, 4);
+    // Only tests the topology writer. Public Merge supplies merged vectors/labels in PR4.
+    auto destination = MakeSource(15, 3);
+    const auto before = Capture(*destination);
+    HGraphFGIM::WriteBottomGraph(*destination, pg, 4);
+    const auto after = Capture(*destination);
+    REQUIRE(after.labels == before.labels);
+    REQUIRE(after.vectors == before.vectors);
+    REQUIRE(after.removed == before.removed);
+    REQUIRE(after.neighbors.size() == pg.size());
+    for (uint64_t u = 0; u < pg.size(); ++u) {
+        REQUIRE(after.neighbors[u].size() == pg[u].size());
+        REQUIRE(pg[u].size() <= 4);
+        std::set<InnerIdType> seen;
+        for (uint64_t i = 0; i < pg[u].size(); ++i) {
+            REQUIRE(after.neighbors[u][i] == pg[u][i].id);
+            REQUIRE(pg[u][i].id != u);
+            REQUIRE(pg[u][i].id < pg.size());
+            REQUIRE(seen.insert(pg[u][i].id).second);
+        }
+    }
+    auto invalid = pg;
+    invalid[0] = {{0, 0}};
+    REQUIRE_THROWS_AS(HGraphFGIM::WriteBottomGraph(*destination, invalid, 4), VsagException);
+    REQUIRE(Capture(*destination).neighbors == after.neighbors);
+    REQUIRE_THROWS_AS(HGraphFGIM::WriteBottomGraph(*destination, pg, 9), VsagException);
+    REQUIRE(Capture(*destination).neighbors == after.neighbors);
+    invalid.pop_back();
+    REQUIRE_THROWS_AS(HGraphFGIM::KnnGraphToPG(sources, invalid, 4), VsagException);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM upper rebuild preserves storage and yields searchable nested layers",
+                 "[ut][hgraph][fgim]") {
+    const uint64_t count = GENERATE(1, 256);
+    auto target = MakeSource(count, 0, false, "fp32", true);
+    const auto before = Capture(*target);
+    HGraphFGIM::RebuildUpperLayers(*target);
+    const auto first = CaptureUpper(*target);
+    const auto after = Capture(*target);
+    REQUIRE(after.neighbors == before.neighbors);
+    REQUIRE(after.labels == before.labels);
+    REQUIRE(after.vectors == before.vectors);
+    REQUIRE(after.removed == before.removed);
+    if (count == 256) {
+        REQUIRE_FALSE(first.empty());
+    }
+    for (uint64_t u = 0; u < count; u += 17) {
+        auto query = Dataset::Make();
+        query->NumElements(1)
+            ->Dim(common.dim_)
+            ->Float32Vectors(before.vectors.data() + u * common.dim_)
+            ->Owner(false);
+        const auto found = target->KnnSearch(query, 1, R"({"hgraph":{"ef_search":128}})", nullptr);
+        REQUIRE(found->GetDim() == 1);
+        REQUIRE(found->GetIds()[0] == before.labels[u]);
+        REQUIRE(found->GetDistances()[0] == 0);
+    }
+    HGraphFGIM::RebuildUpperLayers(*target);
+    REQUIRE(CaptureUpper(*target) == first);
+    REQUIRE(Capture(*target).neighbors == before.neighbors);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM public Merge preserves mapped labels vectors and source indexes",
+                 "[ut][hgraph][fgim]") {
+    const bool nonempty = GENERATE(false, true);
+    auto destination =
+        std::shared_ptr<HGraph>(MakeSource(nonempty ? 5 : 0, 3, false, "fp32", true, false, true));
+    auto public_destination = std::make_shared<IndexImpl<HGraph>>(destination, common);
+    auto expected = Capture(*destination);
+    std::vector<std::shared_ptr<HGraph>> sources;
+    std::vector<Snapshot> before;
+    std::vector<MergeUnit> units;
+    std::vector<uint64_t> callback_counts(3, 0);
+    for (uint64_t i = 0; i < 3; ++i) {
+        sources.emplace_back(MakeSource(24, i, false, "fp32", true));
+        before.push_back(Capture(*sources.back()));
+        expected.vectors.insert(
+            expected.vectors.end(), before.back().vectors.begin(), before.back().vectors.end());
+        for (const auto label : before.back().labels) {
+            expected.labels.push_back(label + 10000 * (i + 1));
+        }
+        units.push_back(
+            {std::make_shared<IndexImpl<HGraph>>(sources.back(), common), [&, i](LabelType label) {
+                 ++callback_counts[i];
+                 return std::make_tuple(true, label + 10000 * (i + 1));
+             }});
+    }
+    const auto merged = public_destination->Merge(units);
+    REQUIRE(merged.has_value());
+    REQUIRE(destination->GetNumElements() == expected.labels.size());
+    REQUIRE(destination->PublishedCount() == expected.labels.size());
+    const auto after = Capture(*destination);
+    REQUIRE(after.labels == expected.labels);
+    REQUIRE(after.vectors == expected.vectors);
+    for (uint64_t u = 0; u < after.neighbors.size(); ++u) {
+        std::set<InnerIdType> seen;
+        REQUIRE(after.neighbors[u].size() <= 8);
+        for (const auto v : after.neighbors[u]) {
+            REQUIRE(v < after.neighbors.size());
+            REQUIRE(v != u);
+            REQUIRE(seen.insert(v).second);
+        }
+    }
+    CaptureUpper(*destination);
+    uint64_t hits = 0, queries = 0;
+    for (uint64_t u = 0; u < after.labels.size(); u += 7) {
+        std::vector<float> query_vector(common.dim_);
+        for (int64_t d = 0; d < common.dim_; ++d) {
+            query_vector[d] = after.vectors[u * common.dim_ + d] + 0.125F;
+        }
+        std::vector<std::pair<float, LabelType>> exact;
+        for (uint64_t v = 0; v < after.labels.size(); ++v) {
+            float distance = 0;
+            for (int64_t d = 0; d < common.dim_; ++d) {
+                const float delta = query_vector[d] - after.vectors[v * common.dim_ + d];
+                distance += delta * delta;
+            }
+            exact.emplace_back(distance, after.labels[v]);
+        }
+        std::sort(exact.begin(), exact.end());
+        auto query = Dataset::Make();
+        query->NumElements(1)->Dim(common.dim_)->Float32Vectors(query_vector.data())->Owner(false);
+        const auto found =
+            public_destination->KnnSearch(query, 10, R"({"hgraph":{"ef_search":256}})");
+        REQUIRE(found.has_value());
+        REQUIRE(found.value()->GetDim() == 10);
+        for (uint64_t i = 0; i < 10; ++i) {
+            const auto label = found.value()->GetIds()[i];
+            hits += std::any_of(exact.begin(), exact.begin() + 10, [label](const auto& item) {
+                return item.second == label;
+            });
+        }
+        ++queries;
+    }
+    REQUIRE(static_cast<double>(hits) / (queries * 10) >= 0.95);
+    for (uint64_t i = 0; i < sources.size(); ++i) {
+        REQUIRE(callback_counts[i] == 24);
+        const auto unchanged = Capture(*sources[i]);
+        REQUIRE(unchanged.labels == before[i].labels);
+        REQUIRE(unchanged.vectors == before[i].vectors);
+        REQUIRE(unchanged.neighbors == before[i].neighbors);
+    }
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM upper rebuilding invalidates graph memory accounting",
+                 "[ut][hgraph][fgim]") {
+    auto destination = MakeSource(128, 0);
+    ClearUpper(*destination);
+    const auto before = destination->GetMemoryUsage();
+    REQUIRE(UpperMemory(*destination) == 0);
+    HGraphFGIM::RebuildUpperLayers(*destination);
+    const auto upper_after = UpperMemory(*destination);
+    REQUIRE(upper_after > 0);
+    REQUIRE(destination->GetMemoryUsage() == before + upper_after);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM public Merge rejects invalid inputs before changing destination",
+                 "[ut][hgraph][fgim]") {
+    auto destination = std::shared_ptr<HGraph>(MakeSource(5, 0, false, "fp32", false, false, true));
+    auto public_destination = std::make_shared<IndexImpl<HGraph>>(destination, common);
+    auto source = std::shared_ptr<HGraph>(MakeSource(5, 1));
+    std::vector<MergeUnit> units{{std::make_shared<IndexImpl<HGraph>>(source, common), nullptr}};
+    SECTION("read-only destination graph") {
+        UseReaderBottom(*destination, common);
+    }
+    SECTION("label collision") {
+        units[0].id_map_func = [](LabelType) { return std::make_tuple(true, 1000); };
+    }
+    SECTION("filtered node") {
+        units[0].id_map_func = [](LabelType label) { return std::make_tuple(false, label); };
+    }
+    SECTION("self merge") {
+        units[0].index = public_destination;
+    }
+    SECTION("null index") {
+        units[0].index.reset();
+    }
+    SECTION("repeated source") {
+        units.push_back(units[0]);
+    }
+    SECTION("unsupported metric") {
+        SetUnsupported(*source, "non-L2");
+    }
+    const auto before = Capture(*destination);
+    const auto merged = public_destination->Merge(units);
+    REQUIRE_FALSE(merged.has_value());
+    const auto after = Capture(*destination);
+    REQUIRE(after.labels == before.labels);
+    REQUIRE(after.vectors == before.vectors);
+    REQUIRE(after.neighbors == before.neighbors);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM merge parameters roundtrip and default strategy is unchanged",
+                 "[ut][hgraph][fgim]") {
+    auto external = JsonType::Parse(R"({"max_degree":8,"ef_construction":32})");
+    auto parameters = std::dynamic_pointer_cast<HGraphParameter>(
+        HGraph::CheckAndMappingExternalParam(external, common));
+    REQUIRE(parameters->merge_strategy == "odescent");
+    external["merge_strategy"].SetString("fgim");
+    external["fgim_refinement_iterations"].SetUint64(0);
+    parameters = std::dynamic_pointer_cast<HGraphParameter>(
+        HGraph::CheckAndMappingExternalParam(external, common));
+    REQUIRE(parameters->merge_strategy == "fgim");
+    REQUIRE(parameters->fgim_refinement_iterations == 0);
+    const HGraphParameter restored(parameters->ToJson());
+    REQUIRE(restored.merge_strategy == "fgim");
+    REQUIRE(restored.fgim_refinement_iterations == 0);
+    external["merge_strategy"].SetString("unknown");
+    REQUIRE_THROWS_AS(HGraph::CheckAndMappingExternalParam(external, common), VsagException);
+    external["merge_strategy"].SetString("fgim");
+    external["fgim_refinement_iterations"].SetInt(-1);
+    REQUIRE_THROWS_AS(HGraph::CheckAndMappingExternalParam(external, common), VsagException);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM Merge supports identity mapping and empty-unit no-op",
+                 "[ut][hgraph][fgim]") {
+    auto destination = std::shared_ptr<HGraph>(MakeSource(5, 0, false, "fp32", false, false, true));
+    auto wrapper = std::make_shared<IndexImpl<HGraph>>(destination, common);
+    const auto before = Capture(*destination);
+    REQUIRE(wrapper->Merge({}).has_value());
+    REQUIRE(Capture(*destination).neighbors == before.neighbors);
+    auto source = std::shared_ptr<HGraph>(MakeSource(5, 1));
+    const auto source_before = Capture(*source);
+    REQUIRE(wrapper->Merge({{std::make_shared<IndexImpl<HGraph>>(source, common), nullptr}})
+                .has_value());
+    auto expected_labels = before.labels;
+    expected_labels.insert(
+        expected_labels.end(), source_before.labels.begin(), source_before.labels.end());
+    REQUIRE(Capture(*destination).labels == expected_labels);
+    REQUIRE(destination->GetNumElements() == 10);
+    REQUIRE(destination->PublishedCount() == 10);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM diagnostics preserve initial and completed graph results",
+                 "[ut][hgraph][fgim]") {
+    auto a = std::shared_ptr<HGraph>(MakeSource(24, 0, false, "fp32", true));
+    auto b = std::shared_ptr<HGraph>(MakeSource(24, 1, false, "fp32", true));
+    Vector<const HGraph*> sources(common.allocator_.get());
+    sources.push_back(a.get());
+    sources.push_back(b.get());
+    const auto initial = HGraphFGIM::BuildInitialKnnGraph(sources, 8);
+    uint64_t distances = 0;
+    const auto counted = HGraphFGIM::BuildInitialKnnGraph(sources, 8, &distances);
+    REQUIRE(distances > 0);
+    REQUIRE(counted.size() == initial.size());
+    for (uint64_t u = 0; u < initial.size(); ++u) {
+        REQUIRE(counted[u].size() == initial[u].size());
+        for (uint64_t i = 0; i < initial[u].size(); ++i) {
+            REQUIRE(counted[u][i].id == initial[u][i].id);
+            REQUIRE(counted[u][i].distance == initial[u][i].distance);
+        }
+    }
+    std::vector<MergeUnit> units{{std::make_shared<IndexImpl<HGraph>>(a, common), nullptr},
+                                 {std::make_shared<IndexImpl<HGraph>>(b, common), nullptr}};
+    auto plain = MakeSource(0, 2, false, "fp32", true, false, true);
+    auto diagnosed = MakeSource(0, 2, false, "fp32", true, false, true);
+    HGraphFGIM::Merge(*plain, units, 4);
+    FGIMMergeStatistics stats;
+    HGraphFGIM::Merge(*diagnosed, units, 4, &stats);
+    REQUIRE(stats.initial_distance_evaluations == distances);
+    REQUIRE(stats.refinement.iterations > 0);
+    REQUIRE(stats.refinement.distance_evaluations > 0);
+    REQUIRE(stats.reconstruction_distance_evaluations > 0);
+    for (const double seconds : {stats.initial_seconds,
+                                 stats.refinement_seconds,
+                                 stats.reconstruction_seconds,
+                                 stats.storage_seconds,
+                                 stats.bottom_write_seconds,
+                                 stats.upper_seconds}) {
+        REQUIRE(std::isfinite(seconds));
+        REQUIRE(seconds >= 0);
+    }
+    const auto expected = Capture(*plain);
+    const auto actual = Capture(*diagnosed);
+    REQUIRE(actual.labels == expected.labels);
+    REQUIRE(actual.vectors == expected.vectors);
+    REQUIRE(actual.neighbors == expected.neighbors);
+    REQUIRE(CaptureUpper(*diagnosed) == CaptureUpper(*plain));
+    HGraphFGIM::Merge(*diagnosed, {}, 4, &stats);
+    REQUIRE(stats.initial_distance_evaluations == 0);
+    REQUIRE(stats.initial_seconds == 0);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM reconstruction prunes redundant ties and protects sole incoming edges",
+                 "[ut][hgraph][fgim]") {
+    auto lhs = MakeSource(2, 0, true);
+    auto rhs = MakeSource(2, 1, true);
+    Vector<const HGraph*> sources({lhs.get(), rhs.get()}, common.allocator_.get());
+    // Node 2 has two incoming edges; 0->2 is redundant with the equally close 0->1.
+    // After pruning 0->2, 3->2 is the sole incoming edge and must remain.
+    const FGIMKnnGraph input{{{1, 0}, {2, 0}}, {{0, 0}}, {{3, 0}}, {{2, 0}}};
+    const auto result = HGraphFGIM::KnnGraphToPG(sources, input, 2);
+    REQUIRE(result[0].size() == 1);
+    REQUIRE(result[0][0].id == 1);
+    REQUIRE(result[3].size() == 1);
+    REQUIRE(result[3][0].id == 2);
+    REQUIRE(input[0].size() == 2);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM bottom writing accepts prepared nodes before publication",
+                 "[ut][hgraph][fgim]") {
+    const InnerIdType published_count = GENERATE(0, 2);
+    auto destination = MakeSource(4, 0, true);
+    const auto before = Capture(*destination);
+    SetPublishedCount(*destination, published_count);
+    REQUIRE(destination->GetNumElements() == published_count);
+    const FGIMKnnGraph graph{{{1, 0}}, {{2, 0}}, {{3, 0}}, {{0, 0}}};
+    REQUIRE_NOTHROW(HGraphFGIM::WriteBottomGraph(*destination, graph, 1));
+    REQUIRE(destination->PublishedCount() == published_count);
+    REQUIRE(destination->GetNumElements() == published_count);
+    destination->PublishThroughTotalCount();
+    REQUIRE(destination->GetNumElements() == 4);
+    const auto after = Capture(*destination);
+    REQUIRE(after.labels == before.labels);
+    REQUIRE(after.vectors == before.vectors);
+    for (uint64_t u = 0; u < graph.size(); ++u) {
+        REQUIRE(after.neighbors[u].size() == 1);
+        REQUIRE(after.neighbors[u][0] == graph[u][0].id);
+    }
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM bottom writing rejects read-only graph storage",
+                 "[ut][hgraph][fgim]") {
+    auto destination = MakeSource(4, 0, true);
+    const auto original = Capture(*destination);
+    UseReaderBottom(*destination, common);
+    REQUIRE(Capture(*destination).neighbors == original.neighbors);
+    const FGIMKnnGraph graph(4);
+    REQUIRE_THROWS_AS(HGraphFGIM::WriteBottomGraph(*destination, graph, 1), VsagException);
+    const auto after = Capture(*destination);
+    REQUIRE(after.neighbors == original.neighbors);
+    REQUIRE(after.labels == original.labels);
+    REQUIRE(after.vectors == original.vectors);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM bottom writing invalidates compressed graph memory accounting",
+                 "[ut][hgraph][fgim]") {
+    auto destination = MakeSource(4, 0, true);
+    UseCompressedBottom(*destination, common);
+    const auto before = destination->GetMemoryUsage();
+    const auto bottom_before = BottomMemory(*destination);
+    const FGIMKnnGraph graph{{{1, 0}}, {{2, 0}}, {{3, 0}}, {{0, 0}}};
+    HGraphFGIM::WriteBottomGraph(*destination, graph, 1);
+    const auto bottom_after = BottomMemory(*destination);
+    REQUIRE(bottom_after > bottom_before);
+    REQUIRE(destination->GetMemoryUsage() == before + bottom_after - bottom_before);
+    HGraphFGIM::WriteBottomGraph(*destination, FGIMKnnGraph(4), 1);
+    REQUIRE(BottomMemory(*destination) == bottom_before);
+    REQUIRE(destination->GetMemoryUsage() == before);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM bottom writing rejects unsupported destination storage",
+                 "[ut][hgraph][fgim]") {
+    const std::string condition = GENERATE("non-float32", "non-L2", "quantized base");
+    auto destination = MakeSource(2, 0, true, condition == "quantized base" ? "sq8" : "fp32");
+    const FGIMKnnGraph graph{{{1, 0}}, {{0, 0}}};
+    if (condition != "quantized base") {
+        SetUnsupported(*destination, condition);
+    }
+    REQUIRE_THROWS_AS(HGraphFGIM::WriteBottomGraph(*destination, graph, 1), VsagException);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM bottom writing rejects a missing destination label table",
+                 "[ut][hgraph][fgim]") {
+    auto destination = MakeSource(2, 0, true);
+    const FGIMKnnGraph graph{{{1, 0}}, {{0, 0}}};
+    SetUnsupported(*destination, "missing label table");
+    REQUIRE_THROWS_AS(HGraphFGIM::WriteBottomGraph(*destination, graph, 1), VsagException);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM validates destination storage and source auxiliary metadata",
+                 "[ut][hgraph][fgim]") {
+    auto destination = std::shared_ptr<HGraph>(MakeSource(0, 3, false, "fp32", false, false, true));
+    auto lhs = std::shared_ptr<HGraph>(MakeSource(3, 0));
+    auto rhs = std::shared_ptr<HGraph>(MakeSource(3, 1));
+    auto wrap = [&](const std::shared_ptr<HGraph>& graph) {
+        return std::make_shared<IndexImpl<HGraph>>(graph, common);
+    };
+    auto output = wrap(destination);
+    const std::vector<MergeUnit> units{{wrap(lhs), nullptr}, {wrap(rhs), nullptr}};
+    SECTION("missing destination base storage") {
+        SetUnsupported(*destination, "base storage");
+    }
+    SECTION("incomplete destination code writes") {
+        SetUnsupported(*destination, "incomplete code writes");
+    }
+    SECTION("source auxiliary metadata") {
+        SetUnsupported(*lhs, "auxiliary metadata");
+    }
+    SECTION("missing merge parameters") {
+        SetUnsupported(*destination, "missing merge parameters");
+    }
+    const auto result = output->Merge(units);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().type == ErrorType::INVALID_ARGUMENT);
+    REQUIRE(destination->GetNumElements() == 0);
+    REQUIRE(lhs->GetNumElements() == 3);
+    REQUIRE(rhs->GetNumElements() == 3);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM iteration settings preserve the selected merge strategy",
+                 "[ut][hgraph][fgim]") {
+    JsonType external;
+    external["base_quantization_type"].SetString("fp32");
+    external["max_degree"].SetUint64(8);
+    external["ef_construction"].SetUint64(40);
+    external["fgim_refinement_iterations"].SetUint64(3);
+    const auto parameters = std::dynamic_pointer_cast<HGraphParameter>(
+        HGraph::CheckAndMappingExternalParam(external, common));
+    REQUIRE(parameters->merge_strategy == "odescent");
+    REQUIRE(parameters->fgim_refinement_iterations == 3);
+    const HGraphParameter restored(parameters->ToJson());
+    REQUIRE(restored.merge_strategy == "odescent");
+    REQUIRE(restored.fgim_refinement_iterations == 3);
+}
+
 TEST_CASE_METHOD(HGraphFGIMTest,
                  "FGIM refinement rejects duplicate IDs independently of stored distances",
                  "[ut][hgraph][fgim]") {

@@ -571,11 +571,43 @@ class DailyPlanTests(unittest.TestCase):
                     "env": {"VSAG_DAILY_HGRAPH": "{}"}}
             result = run.run_unit(unit, 0, root, 0.5, threading.Event())
             self.assertEqual(result["status"], "timeout", result)
+            self.assertEqual(result["timeout_scope"], "case")
             self.assertGreaterEqual(result["seconds"], 0.5)
             self.assertEqual(result["phase_events"], 1)
             self.assertEqual(result["active_phases"], [{"phase": "Build", "event": "start",
                                                       "details": {"quantizer": "fp32"}}])
             self.assertTrue((root / result["directory"] / result["phase_trace"]).is_file())
+
+    def test_timeout_distinguishes_execution_window_and_per_case_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            test = {"name": "case", "tags": "[hgraph]", "source_file": "test.cpp",
+                    "source_line": 1, "binary": "functests", "id": "test"}
+            unit = {**self.unit(), "binary": str(root / "functests"), "tests": [test],
+                    "seed": 42, "env": {}, "mode": "rotation"}
+            deadline = dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=2)
+            with (patch.object(run.shards, "listing", return_value=[test]),
+                  patch.object(run.shards, "execute", return_value={
+                      "status": "timeout", "seconds": 1, "exit_code": -15}) as execute):
+                result = run.run_unit(unit, 0, root, 1800, threading.Event(), deadline)
+            self.assertEqual(result["timeout_scope"], "window")
+            self.assertEqual(execute.call_args.args[4], 1)
+
+    def test_timeout_preserves_recorded_assertions_and_sanitizer_errors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            log, xml = root / "output.log", root / "report.xml"
+            log.write_text("terminated\n")
+            termination = ('<Expression success="false"><FatalErrorCondition>'
+                           'SIGTERM - Termination request signal</FatalErrorCondition></Expression>')
+            xml.write_text('<Catch2TestRun><TestCase>' + termination)
+            self.assertFalse(run.timeout_has_test_failure(xml, log))
+            for expression in ('<Expression success="false"/>', '<Expression success="false">'):
+                xml.write_text('<Catch2TestRun><TestCase>' + expression)
+                self.assertTrue(run.timeout_has_test_failure(xml, log))
+            xml.write_text('<Catch2TestRun>')
+            log.write_text("test.cpp:42:3: runtime error: division by zero\n")
+            self.assertTrue(run.timeout_has_test_failure(xml, log))
 
     def test_phase_trace_preserves_nested_progress_with_truncated_tail(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -782,6 +814,7 @@ class DailyNamedCountTests(unittest.TestCase):
                         self.assertTrue(summary["incomplete"])
                         self.assertEqual(len(summary["coverage_gaps"]), 1)
                         self.assertIn("Supplemental stage:", summary["coverage_gaps"][0])
+                        self.assertNotIn("extra_coverage_blocked", summary)
                         self.assertIn("missing-proposal.json", summary["coverage_gaps"][0])
 
     def test_summary_reconciles_extra_lanes_when_required(self):
@@ -792,19 +825,26 @@ class DailyNamedCountTests(unittest.TestCase):
             command = [sys.executable, str(ROOT / "scripts/testing/daily_report.py"),
                        str(root / "result.json"), "--expected-file", str(root / "expected.json"),
                        "--summary", str(root / "summary.md"), "--json", str(root / "summary.json")]
-            for upstream, planner, supplemental, missing_base in (
-                    ("failure", "skipped", "skipped", False),
-                    ("cancelled", "skipped", "skipped", True),
-                    ("success", "success", "failure", False),
-                    ("success", "skipped", "skipped", False)):
-                with self.subTest(upstream=upstream, planner=planner, supplemental=supplemental):
-                    mandatory = ["x86", "required-lane"] if missing_base else ["x86"]
+            for prerequisite, upstream, planner, supplemental, missing_base in (
+                    ("daily_test_asan_x86", "failure", "skipped", "skipped", None),
+                    ("daily_test_asan_x86", "cancelled", "skipped", "skipped", "required-lane"),
+                    ("full-platform-build-asan-macos-arm64", "failure", "skipped", "skipped",
+                     "full-platform-test-asan-macos-arm64-unittests"),
+                    ("daily_test_asan_x86", "success", "success", "success", None),
+                    ("daily_test_asan_x86", "success", "success", "failure", None),
+                    ("daily_test_asan_x86", "success", "skipped", "skipped", None)):
+                with self.subTest(prerequisite=prerequisite, upstream=upstream,
+                                  planner=planner, supplemental=supplemental):
+                    mandatory = ["x86", missing_base] if missing_base else ["x86"]
                     dp.write(root / "expected.json", mandatory + extra_lanes)
-                    env = {**os.environ, "NEEDS_JSON": json.dumps({
-                        "daily_test_asan_x86": {"result": upstream},
+                    needs = {
+                        prerequisite: {"result": upstream},
                         "daily-extra-plan": {"result": planner},
                         "daily-extra-x86": {"result": supplemental},
-                    })}
+                    }
+                    if prerequisite == "full-platform-build-asan-macos-arm64":
+                        needs["full-platform-test-asan-macos-arm64"] = {"result": "skipped"}
+                    env = {**os.environ, "NEEDS_JSON": json.dumps(needs)}
                     process = subprocess.run(command, env=env, capture_output=True)
                     self.assertEqual(process.returncode, 1, process.stderr)
                     result = dp.load(root / "summary.json")
@@ -813,17 +853,23 @@ class DailyNamedCountTests(unittest.TestCase):
                     gaps = " ".join(result["coverage_gaps"])
                     blocked = upstream != "success"
                     self.assertEqual(result.get("extra_coverage_blocked", False), blocked)
-                    self.assertEqual(result["incomplete"], missing_base or not blocked)
-                    self.assertEqual("required-lane" in gaps, missing_base)
+                    self.assertEqual(result["incomplete"], bool(missing_base) or not blocked)
+                    if missing_base:
+                        self.assertIn(missing_base, gaps)
                     for lane in extra_lanes:
                         self.assertEqual(lane in gaps, not blocked)
+                    markdown = (root / "summary.md").read_text()
                     if blocked:
-                        self.assertEqual(result["failures"], [
-                            "Workflow dependency daily_test_asan_x86: " + upstream])
-                        self.assertIn("Skipped after a required job", (root / "summary.md").read_text())
+                        failures = [f"Workflow dependency {prerequisite}: {upstream}"]
+                        if prerequisite == "full-platform-build-asan-macos-arm64":
+                            failures.append("Workflow dependency full-platform-test-asan-macos-arm64: skipped")
+                        self.assertEqual(result["failures"], failures)
+                        self.assertIn("Skipped after a required job", markdown)
                     else:
-                        self.assertIn("Workflow dependency daily-extra-x86: " + supplemental,
-                                      result["failures"])
+                        self.assertNotIn("Skipped after a required job", markdown)
+                        if supplemental != "success":
+                            self.assertIn("Workflow dependency daily-extra-x86: " + supplemental,
+                                          result["failures"])
 
     def test_missing_lane_preserves_counts_and_fails(self):
         with tempfile.TemporaryDirectory() as directory:

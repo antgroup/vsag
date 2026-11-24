@@ -31,7 +31,7 @@ category = "electronics" AND price <= 1000 AND multi_in(tag, "promo|new", "|")
 | HGraph           |                支持               |               支持               |        支持       |
 | IVF              |                支持               |               支持               |        支持       |
 | BruteForce       |                支持               |               支持               |        支持       |
-| WARP（稀疏）     |                支持               |               支持               |        支持       |
+| WARP             |                不支持             |  不支持（多向量，仅支持基于 id 的过滤） |        不支持     |
 | SINDI / Pyramid | — | 仅支持基于 id 的过滤，详见 [带过滤的搜索](filtered_search.md) | — |
 
 启用 `use_attribute_filter` 后，BruteForce 暂不支持 `Remove`（如需删除请重建索引）。
@@ -137,8 +137,8 @@ set.attrs_ = { category, tags, price };
 
 ## 构建支持属性过滤的索引
 
-把 `index_param.use_attribute_filter` 设为 `true`，可选地在 `attr_params` 下调整属性
-倒排索引参数。
+把 `index_param.use_attribute_filter` 设为 `true` 即可，属性倒排索引会使用下表中的各索引默认值；
+`attr_params` 不是公开构建键，传入会被当作 `invalid config param` 拒绝。
 
 ```cpp
 std::string build_params = R"(
@@ -147,10 +147,7 @@ std::string build_params = R"(
     "metric_type": "l2",
     "dim": 128,
     "index_param": {
-        "use_attribute_filter": true,
-        "attr_params": {
-            "has_buckets": false
-        }
+        "use_attribute_filter": true
     }
 }
 )";

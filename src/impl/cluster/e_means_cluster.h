@@ -18,6 +18,7 @@
 
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "typing.h"
+#include "utils/training_rows.h"
 
 namespace vsag {
 class Allocator;
@@ -60,6 +61,16 @@ public:
     Run(uint32_t k,
         const float* datas,
         uint64_t count,
+        int epochs = 3,
+        double* err = nullptr,
+        std::optional<uint32_t> random_seed = std::nullopt,
+        uint64_t batch_size = 0,
+        double peak_step = 0.0);
+
+    // Typed compatibility path: one full FP32 expansion, then the unchanged algorithm.
+    Vector<int>
+    Run(uint32_t k,
+        const TrainingRows& rows,
         int epochs = 3,
         double* err = nullptr,
         std::optional<uint32_t> random_seed = std::nullopt,

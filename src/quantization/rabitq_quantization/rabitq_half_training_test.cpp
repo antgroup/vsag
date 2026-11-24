@@ -322,7 +322,9 @@ TEST_CASE("RaBitQ bounded half training", "[ut][RaBitQuantizer][half_train]") {
         std::vector<uint16_t> input(8193 * D, 0x3c00);
         alloc->Reset();
         split.Train(input.data(), 8193);
-        check(alloc->max_request >= 8193 * D * sizeof(float), "TQ preserves dense fallback");
+        // The row provider applies MRLE before passing rows to RaBitQ. It must
+        // not materialize the original FP32 matrix for this supported chain.
+        check(alloc->max_request < 8193 * D * sizeof(float), "TQ avoids dense input conversion");
     }
     std::cout << "ALL_TYPED_TESTS_PASS\n";
 }

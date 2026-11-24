@@ -124,7 +124,11 @@ CheckSplitHalfInput(MetricType metric, bool mrle) {
     }
     REQUIRE(decoded[2] > 0.0F);
     REQUIRE(decoded[3] < 0.0F);
-    REQUIRE(std::signbit(decoded[1]));
+    // -ffast-math permits std::signbit(-0.0F) to fold to false. Check the
+    // representation instead, preserving the exact signed-zero contract.
+    uint32_t negative_zero_bits;
+    std::memcpy(&negative_zero_bits, &decoded[1], sizeof(negative_zero_bits));
+    REQUIRE(negative_zero_bits == 0x80000000U);
 
     auto actual = FlattenInterface::MakeInstance(param, common);
     auto expected = FlattenInterface::MakeInstance(param, float_common);
