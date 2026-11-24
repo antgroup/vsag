@@ -589,15 +589,17 @@ SINDI::CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t coun
     // prepare result
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
+    if (count <= 0) {
+        result->NumElements(1)->Dim(0);
+        return result;
+    }
+    result->NumElements(1)->Dim(count);
     auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
-    if (distances == nullptr and count > 0) {
+    if (distances == nullptr) {
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate distance buffer");
     }
     std::fill_n(distances, count, std::numeric_limits<float>::quiet_NaN());
     result->Distances(distances);
-    if (count <= 0) {
-        return result;
-    }
 
     // a label is valid iff it currently exists in the label table (and is not removed)
     std::vector<bool> validity(count, false);

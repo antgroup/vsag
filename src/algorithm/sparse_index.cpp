@@ -262,8 +262,13 @@ SparseIndex::CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_
     // prepare result
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
+    if (count <= 0) {
+        result->NumElements(1)->Dim(0);
+        return result;
+    }
+    result->NumElements(1)->Dim(count);
     auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
-    if (distances == nullptr and count > 0) {
+    if (distances == nullptr) {
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate distance buffer");
     }
     result->Distances(distances);

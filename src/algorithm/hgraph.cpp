@@ -2505,14 +2505,19 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
                 continue;
             }
 
+            auto neighbor_label = this->label_table_->GetLabelById(neighbor_inner_id);
             float neighbor_dist = 0;
             try {
                 neighbor_dist =
-                    this->CalcDistanceById(static_cast<float*>(new_base_vec),
-                                           this->label_table_->GetLabelById(neighbor_inner_id));
-            } catch (const std::runtime_error& e) {
-                // incase that neighbor has been deleted
-                continue;
+                    this->CalcDistanceById(static_cast<float*>(new_base_vec), neighbor_label);
+            } catch (const VsagException& e) {
+                // A neighbor whose label has been removed is still present in the graph, so skip
+                // it. Any other failure (the label still exists) is a real error and is propagated.
+                if (e.error_.type == ErrorType::INVALID_ARGUMENT and
+                    not this->label_table_->CheckLabel(neighbor_label)) {
+                    continue;
+                }
+                throw;
             }
             if (neighbor_dist < self_dist) {
                 return false;

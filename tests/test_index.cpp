@@ -867,6 +867,7 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
         if (not expected_success) {
             return;
         }
+        REQUIRE(result.value()->GetNumElements() * result.value()->GetDim() == gt_topK);
         for (auto j = 0; j < gt_topK; ++j) {
             REQUIRE(std::abs(gts->GetDistances()[i * gt_topK + j] -
                              result.value()->GetDistances()[j]) < error);
@@ -887,6 +888,7 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
                 index->CalDistanceById(queries->GetFloat32Vectors(), no_exist_ids.data(), test_num);
         }
         REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetNumElements() * result.value()->GetDim() == test_num);
         const auto* valids = result.value()->GetValids();
         REQUIRE(valids != nullptr);
         for (int i = 0; i < test_num; ++i) {
@@ -912,6 +914,7 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
             result = index->CalDistanceById(query->GetFloat32Vectors(), mixed_ids.data(), count);
         }
         REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetNumElements() * result.value()->GetDim() == count);
         const auto* valids = result.value()->GetValids();
         const auto* dists = result.value()->GetDistances();
         REQUIRE(valids != nullptr);
@@ -931,6 +934,7 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
             result = index->CalDistanceById(query->GetFloat32Vectors(), nullptr, 0);
         }
         REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetNumElements() * result.value()->GetDim() == 0);
         REQUIRE(result.value()->GetValids() == nullptr);
     }
 }
@@ -962,6 +966,7 @@ TestIndex::TestCalcDistanceByIdRemovedLabel(const IndexPtr& index, const TestDat
     const std::vector<int64_t> batch_ids = {removed_id, existing_id};
     auto batch_result = index->CalDistanceById(base_vectors, batch_ids.data(), 2);
     REQUIRE(batch_result.has_value());
+    REQUIRE(batch_result.value()->GetNumElements() * batch_result.value()->GetDim() == 2);
     const auto* valids = batch_result.value()->GetValids();
     const auto* distances = batch_result.value()->GetDistances();
     REQUIRE(valids != nullptr);

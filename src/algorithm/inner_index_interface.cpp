@@ -328,8 +328,13 @@ DatasetPtr
 cal_distance_one_by_one(const int64_t* ids, int64_t count, Allocator* allocator, CalcFunc&& calc) {
     auto result = Dataset::Make();
     result->Owner(true, allocator);
+    if (count <= 0) {
+        result->NumElements(1)->Dim(0);
+        return result;
+    }
+    result->NumElements(1)->Dim(count);
     auto* distances = static_cast<float*>(allocator->Allocate(sizeof(float) * count));
-    if (distances == nullptr and count > 0) {
+    if (distances == nullptr) {
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate distance buffer");
     }
     result->Distances(distances);
@@ -787,8 +792,10 @@ InnerIndexInterface::cal_distance_by_id(const float* query,
         validity->clear();
     }
     if (count <= 0) {
+        result->NumElements(1)->Dim(0);
         return result;
     }
+    result->NumElements(1)->Dim(count);
     std::vector<bool> local_validity(count, false);
     auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
     if (distances == nullptr) {
