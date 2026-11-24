@@ -17,7 +17,7 @@ is computed via **MaxSim** (sum of maximum per-query-token similarities).
 
 The nested HGraph uses `graph_type="pipnn"` for one-shot batch construction. This offers faster build times than the default NSW but requires dense floating-point inputs.
 
-Each document enters the coarse candidate set once per query, including when its accumulated coarse score is zero or contributions from query tokens cancel out.
+Each document reachable through the representative graph enters the coarse candidate set once per query, including when its accumulated coarse score is zero or contributions from query tokens cancel out. On very small datasets or with certain quantizations, PiPNN may form fewer clusters than the document count — undivided documents are still guaranteed unique and valid, but the per-query candidate count may be lower.
 
 The two-stage pipeline trades candidate recall, quantization error, memory, and latency.
 
