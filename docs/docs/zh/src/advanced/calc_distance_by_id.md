@@ -227,6 +227,7 @@ auto d = index->CalcDistanceById(query, /*id=*/42);
 
 - 稠密重载中，查询向量的维度必须与索引维度一致。
 - 批量重载存在默认实现：循环调用单 ID 接口；部分索引会重写以做批量优化。
-- 绑定层（Python、Node.js、C API）的接口签名保持不变：批量调用中缺失 ID 的距离为 `NaN`，
-  单 ID 调用遇到缺失 ID 时返回错误。
+- Python、Node.js 绑定只暴露批量接口（`calc_distances_by_id` / `calcDistancesById`），返回结果
+  只有距离、没有有效性标记，因此缺失或已删除的 ID 表现为 `NaN` 距离（可用 `numpy.isnan` /
+  `Number.isNaN` 判断），而不是抛出错误；错误只在参数非法（如 query 长度不匹配）或索引不支持时出现。
 - 与 VSAG 其他只读接口一样，这些方法可以与 `KnnSearch` 等只读操作并发调用。

@@ -3176,6 +3176,59 @@ TEST_CASE("(PR) HGraph CalcDistanceById reports removed labels", "[ft][hgraph][r
     TestIndex::TestCalcDistanceByIdAfterRemove(index, dataset);
 }
 
+TEST_CASE("HGraph UpdateVector skips mark-removed neighbors",
+          "[ft][hgraph][remove][update_vector][pr]") {
+    // Regression: a MARK_REMOVE'd node stays linked in the graph while its label can no longer
+    // be addressed. UpdateVector's neighbor-distance loop only caught std::runtime_error, so the
+    // VsagException(INVALID_ARGUMENT) raised for such a neighbor escaped and failed the update.
+    using namespace fixtures;
+
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+    build_param.support_remove = true;
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    // The generated parameters use a large max_degree, so a 32-point graph links every node to
+    // nearly every other one and the removed label is certainly some node's neighbor.
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 32, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    const int64_t dim = dataset->base_->GetDim();
+    const int64_t count = static_cast<int64_t>(dataset->base_->GetNumElements());
+    const auto* base_vectors = dataset->base_->GetFloat32Vectors();
+    const auto* base_ids = dataset->base_->GetIds();
+    REQUIRE(count > 1);
+
+    const int64_t removed_id = base_ids[0];
+    auto remove_result = index->Remove(removed_id, vsag::RemoveMode::MARK_REMOVE);
+    REQUIRE(remove_result.has_value());
+    REQUIRE(remove_result.value() == 1);
+    REQUIRE_FALSE(index->CheckIdExist(removed_id));
+    // MARK_REMOVE only drops the logical count and the label lookup; the node stays in the graph.
+    REQUIRE(index->GetNumElements() == static_cast<uint64_t>(count - 1));
+
+    // Perturb every surviving vector enough that the self-distance shortcut does not return
+    // early, so the neighbor-distance loop really runs for each update.
+    std::vector<float> updated(dim);
+    int64_t accepted_id = -1;
+    for (int64_t i = 1; i < count; ++i) {
+        for (int64_t d = 0; d < dim; ++d) {
+            updated[d] = base_vectors[i * dim + d] * 1.125F;
+        }
+        auto update = vsag::Dataset::Make();
+        update->NumElements(1)->Dim(dim)->Float32Vectors(updated.data())->Owner(false);
+        auto result = index->UpdateVector(base_ids[i], update);
+        REQUIRE(result.has_value());
+        if (result.value() and accepted_id == -1) {
+            accepted_id = base_ids[i];
+            // The stored vector must actually be replaced by the new one.
+            auto after = index->CalcDistanceById(update, accepted_id);
+            REQUIRE(after.has_value());
+            REQUIRE(after.value() < 1e-4F);
+        }
+    }
+    REQUIRE(accepted_id != -1);
+}
+
 TEST_CASE("(PR) HGraph SearchWithRequest Reasoning", "[ft][hgraph][pr]") {
     using namespace fixtures;
 
