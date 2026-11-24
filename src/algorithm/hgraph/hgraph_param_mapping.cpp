@@ -19,6 +19,7 @@
 #include "common.h"
 #include "datacell/graph_datacell_parameter.h"
 #include "hgraph.h"  // IWYU pragma: keep
+#include "hgraph_mci_parameter_table.h"
 #include "hgraph_parameter.h"
 #include "impl/logger/logger.h"
 #include "io/common/io_parameter.h"
@@ -351,16 +352,9 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
                    key == "adaptive_pruning_apply_to_reverse" ||
                    key == "adaptive_pruning_apply_to_upper" ||
                    key == "adaptive_pruning_fill_rejected" || key == "fill_rejected" ||
-                   key == HGRAPH_USE_MCI || key == "mci_clique_activation_order" ||
-                   key == HGRAPH_MCI_MCS || key == HGRAPH_MCI_CLIQUE_MAX ||
-                   key == HGRAPH_MCI_ALPHA || key == HGRAPH_MCI_KNNG_SOURCE ||
-                   key == HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY ||
-                   key == HGRAPH_MCI_INCREMENTAL_DEGREE_MIN_KEY ||
-                   key == HGRAPH_MCI_INCREMENTAL_DEGREE_N_DIVISOR_KEY ||
-                   key == HGRAPH_MCI_INCREMENTAL_DEGREE_MCS_DIVISOR_KEY ||
-                   key == HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY ||
-                   key == HGRAPH_MCI_DELETE_CLIQUE_SIZE_THRESHOLD_KEY ||
-                   key == HGRAPH_MCI_DELETE_NODE_MCT_THRESHOLD_KEY) {
+                   key == HGRAPH_USE_MCI || IsUserFacingHGraphMCIKey(key)) {
+            // The MCI key set is defined once in kHGraphMCIFields; iterate it instead of listing
+            // every key here so this branch cannot drift from HGraphParameter::FromJson.
             inner_json[key].SetJson(value);
         } else if (key == HGRAPH_BASE_ENABLE_READ_CACHE) {
             inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][READ_CACHE_ENABLED_KEY].SetJson(value);
