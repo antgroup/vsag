@@ -227,6 +227,11 @@ public:
                               bool is_sparse = false);
 
     static void
+    TestCalcDistanceByIdRemovedLabel(const IndexPtr& index,
+                                     const TestDatasetPtr& dataset,
+                                     bool is_sparse = false);
+
+    static void
     TestMultiQueryBatchCalcDistanceById(const IndexPtr& index,
                                         const TestDatasetPtr& dataset,
                                         float error = 1e-5,

@@ -550,6 +550,8 @@ public:
      *        loading data from disk, which may incur I/O overhead. If false, the implementation may
      *        use quantized or approximate representations for faster computation.
      * @return result is the distance between the query and the vector of the given ID.
+     *         An Error with ErrorType::INVALID_ARGUMENT is returned if the label does not exist
+     *         or has been removed.
      */
     [[nodiscard]] virtual tl::expected<float, Error>
     CalcDistanceById(const float* vector,
@@ -574,6 +576,8 @@ public:
      *        loading data from disk, which may incur I/O overhead. If false, the implementation may
      *        use quantized or approximate representations for faster computation.
      * @return result is the distance between the query and the vector of the given ID.
+     *         An Error with ErrorType::INVALID_ARGUMENT is returned if the label does not exist
+     *         or has been removed.
      */
     [[nodiscard]] virtual tl::expected<float, Error>
     CalcDistanceById(const DatasetPtr& vector,
@@ -606,7 +610,11 @@ public:
      * @return result is valid distance of input ids. If topk == -1, Dim() is count and the
     *         distance buffer contains count entries. If topk is positive, Dim() is
      *         min(topk, count), IDs are returned, and the distance/ID buffers contain Dim()
-     *         entries. '-1' indicates an invalid distance.
+     *         entries. Entries for missing or removed IDs have a quiet-NaN distance, and the
+     *         result's GetValids() flags every entry: with topk == -1 it has count entries
+     *         aligned with the input IDs; with a positive topk it has Dim() entries aligned
+     *         with the output order. Validity means the label existed at lookup time. GetValids()
+     *         is nullptr when count is 0.
      */
     [[deprecated("use CalcDistancesById instead")]] [[nodiscard]] tl::expected<DatasetPtr, Error>
     CalDistanceById(const float* query,
@@ -631,7 +639,8 @@ public:
      * multi-query behavior; unsupported indexes return an error. Both the input
      * IDs and result distances use row-major layout with count IDs per query:
      * ids[i * count + j] is the j-th ID for query i, and distances[i * count + j]
-     * is the distance from query i to that ID. '-1' indicates an invalid ID.
+     * is the distance from query i to that ID. Missing or removed IDs yield a quiet-NaN
+     * distance and a false flag in GetValids().
      *
      * @param query is the embedding of query(queries) (sparse or dense via DatasetPtr).
      *        When NumElements() > 1, each element is a separate query.
@@ -652,8 +661,11 @@ public:
      *         Dim() is count and the distance buffer contains NumElements() * count entries.
      *         When topk is positive, Dim() is min(topk, count), IDs are returned, and the
      *         distance/ID buffers contain NumElements() * Dim() entries in row-major layout.
-    *         '-1' indicates an invalid distance.
-    */
+     *         Entries for missing or removed IDs have a quiet-NaN distance. GetValids() flags
+     *         every distance entry (NumElements() * Dim() flags, aligned with the distance
+     *         buffer, so with topk it follows the output order). Validity means the label
+     *         existed at lookup time. GetValids() is nullptr when count is 0.
+     */
     [[deprecated("use CalcDistancesById instead")]] [[nodiscard]] tl::expected<DatasetPtr, Error>
     CalDistanceById(const DatasetPtr& query,
                     const int64_t* ids,

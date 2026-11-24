@@ -47,6 +47,7 @@ class DatasetImpl : public Dataset, public SearchMetricsDatasetAccessor {
                              const AttributeSet*,
                              const uint32_t*,
                              const MultiVector*,
+                             const bool*,
                              MultiPaths>;
 
 public:
@@ -291,6 +292,20 @@ public:
     }
 
     DatasetPtr
+    Valids(const bool* valids) {
+        this->data_[VALIDS_KEY] = valids;
+        return shared_from_this();
+    }
+
+    const bool*
+    GetValids() const {
+        if (auto iter = this->data_.find(VALIDS_KEY); iter != this->data_.end()) {
+            return std::get<const bool*>(iter->second);
+        }
+        return nullptr;
+    }
+
+    DatasetPtr
     StringMetadata(const std::string& name, const std::string* values) override {
         this->data_[StringMetadataKey(name)] = values;
         return shared_from_this();
@@ -444,6 +459,8 @@ public:
     MakeEmptyDataset();
 
 private:
+    static constexpr const char* VALIDS_KEY = "valids";
+
     static const std::string&
     HierarchyPathsPrefix() {
         static const std::string prefix = std::string(DATASET_PATHS) + ":";

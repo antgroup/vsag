@@ -3919,6 +3919,18 @@ TEST_CASE("Pyramid duplicate cache preserves multipath memberships",
     fixture.Check(roundtrip);
 }
 
+TEST_CASE("Pyramid CalcDistanceById of a removed label", "[ft][pyramid][distance][remove][pr]") {
+    using namespace fixtures;
+    constexpr int64_t dim = 128;
+    constexpr uint64_t count = 100;
+    PyramidParam pyramid_param;
+    auto param = PyramidTestIndex::GeneratePyramidBuildParametersString("l2", dim, pyramid_param);
+    auto index = TestIndex::TestFactory("pyramid", param, true);
+    auto dataset = PyramidTestIndex::pool.GetDatasetAndCreate(dim, count, "l2", /*with_path=*/true);
+    TestIndex::TestBuildIndex(index, dataset, true);
+    TestIndex::TestCalcDistanceByIdRemovedLabel(index, dataset);
+}
+
 TEST_CASE("Pyramid dense native distance contract", "[distance_contract]") {
     using namespace fixtures;
     for (const auto* quantizer : {"fp32", "sq8"}) {
@@ -3965,7 +3977,10 @@ TEST_CASE("Pyramid dense native distance contract", "[distance_contract]") {
             REQUIRE(batch.value()->GetNumElements() == 2);
             REQUIRE(batch.value()->GetDim() == 3);
             REQUIRE(std::abs(batch.value()->GetDistances()[0] - raw.value()) < 1e-5F);
-            REQUIRE(batch.value()->GetDistances()[1] == -1.0F);
+            REQUIRE(std::isnan(batch.value()->GetDistances()[1]));
+            REQUIRE(batch.value()->GetValids() != nullptr);
+            REQUIRE_FALSE(batch.value()->GetValids()[1]);
+            REQUIRE(batch.value()->GetValids()[0]);
             auto top = index->CalcDistancesById(query, candidates, 3, precise, 2);
             REQUIRE(top.has_value());
             REQUIRE(top.value()->GetDim() == 2);

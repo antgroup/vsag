@@ -1761,6 +1761,19 @@ TEST_CASE("HGraph PiPNN supports remove after build", "[ft][hgraph][remove][pipn
     REQUIRE_FALSE(index->CheckIdExist(removed_label));
 }
 
+TEST_CASE("HGraph CalcDistanceById of a removed label", "[ft][hgraph][remove][pr]") {
+    using namespace fixtures;
+    constexpr int64_t dim = 128;
+    constexpr uint64_t count = 100;
+    HGraphTestIndex::HGraphBuildParam build_param("l2", dim, "fp32");
+    build_param.support_remove = true;
+    const auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim, count, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+    TestIndex::TestCalcDistanceByIdRemovedLabel(index, dataset);
+}
+
 TEST_CASE("HGraph PiPNN preserves duplicate-vector search quality",
           "[ft][build][hgraph][duplicate][pipnn][pr]") {
     using namespace fixtures;
@@ -5623,13 +5636,15 @@ TEST_CASE("HGraph empty index distance validation", "[hgraph][distance_contract]
     float query[16] = {};
     int64_t ids[] = {100, 200};
     auto single = index->CalcDistanceById(query, ids[0]);
-    REQUIRE(single.has_value());
-    REQUIRE(single.value() == -1.0F);
+    REQUIRE_FALSE(single.has_value());
+    REQUIRE(single.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     auto batch = index->CalcDistancesById(query, ids, 2);
     REQUIRE(batch.has_value());
     REQUIRE(batch.value()->GetDim() == 2);
-    REQUIRE(batch.value()->GetDistances()[0] == -1.0F);
-    REQUIRE(batch.value()->GetDistances()[1] == -1.0F);
+    REQUIRE(std::isnan(batch.value()->GetDistances()[0]));
+    REQUIRE(std::isnan(batch.value()->GetDistances()[1]));
+    REQUIRE_FALSE(batch.value()->GetValids()[0]);
+    REQUIRE_FALSE(batch.value()->GetValids()[1]);
     auto empty = index->CalcDistancesById(static_cast<const float*>(nullptr), nullptr, 0);
     REQUIRE(empty.has_value());
     REQUIRE(empty.value()->GetDim() == 0);

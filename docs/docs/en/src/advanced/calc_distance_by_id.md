@@ -85,7 +85,11 @@ SINDI immutable storage supports single-ID and batch distances, including after 
 
 For N query rows and `count` candidates per row, provide N × count candidate IDs in row-major order (`ids[q * count + j]`); a single candidate list is **not** implicitly broadcast. `CalcDistancesById` is the preferred batch name; `CalDistanceById` remains the compatibility alias.
 
-Missing labels produce `-1`, but a valid inner-product distance can also be negative (including `-1`). Top-k uses label validity, not the sign or value of the distance, to place missing labels last.
+A missing label is an ID that does not exist in the index or has been mark-removed; it is detected at
+lookup time. Batch results report such entries through the per-entry validity mask returned by
+`Dataset::GetValids()`; their distance is `NaN`. The distance value is no longer `-1` and must not be
+used to detect missing IDs. Top-k uses label validity, not the sign or value of the distance, to
+place missing labels last.
 
 IVF PQFS supports point and batch distances using the same packed-code lookup as bucket scanning. A point lookup reads its 32-vector package and selects one lane; this may perform more work than a scalar quantizer lookup, particularly for disk-backed storage.
 
@@ -93,15 +97,38 @@ PQFS is supported as IVF base bucket encoding, not as flat reorder encoding: fla
 
 ### Return Semantics
 
-- The single-ID overload returns the distance as a `float`.
+- The single-ID overload returns the distance as a `float`. If the ID does not exist or has been
+  removed, it returns an error (`tl::unexpected` with `ErrorType::INVALID_ARGUMENT`) on every index
+  type; it no longer returns `-1`.
+- Batch results carry a per-entry validity mask, filled by `Dataset::Valids(const bool*)` and read
+  through the public `const bool* Dataset::GetValids() const` accessor. `GetValids()[i] == false`
+  means the requested ID was missing at lookup time, and the corresponding distance is `NaN`
+  (`std::numeric_limits<float>::quiet_NaN()`). Always use `GetValids()`, never the distance value, to
+  detect missing IDs.
 - With `topk == -1`, the raw-pointer batch overload returns one row with `count` distances. The
   `DatasetPtr` overload returns `NumElements()` rows with `count` distances each. Both preserve
-  input order and do not return IDs.
+  input order and do not return IDs. `GetValids()` has `NumElements() * count` entries, aligned with
+  the input ID order (row-major for multi-query).
 - With `topk > 0`, the batch overload returns the smallest `min(topk, count)` distances per
-  query, sorted ascending, and `GetIds()` contains the corresponding IDs. Missing IDs (represented by `-1`
-  distances) are ordered after valid distances regardless of their sign and only appear if there are not enough valid IDs.
+  query, sorted ascending, and `GetIds()` contains the corresponding IDs. `GetValids()` has
+  `NumElements() * Dim()` entries aligned with the output order. Missing IDs are ordered after valid
+  distances regardless of their sign: they only appear when fewer than `topk` valid IDs exist, with a
+  `NaN` distance and `Valids` false.
 - The distance metric (IP / L2 / cosine) follows the `metric_type` chosen at index
   construction; see [Metric Semantics](../resources/metric_semantics.md).
+
+## Missing IDs
+
+```cpp
+auto result = index->CalcDistancesById(query, ids, count).value();
+const float* dists = result->GetDistances();
+const bool* valids = result->GetValids();
+for (int64_t i = 0; i < count; ++i) {
+    if (!valids[i]) { /* id not found or removed; dists[i] is NaN */ }
+}
+auto single = index->CalcDistanceById(query, missing_id);
+if (!single.has_value()) { /* single.error().type == vsag::ErrorType::INVALID_ARGUMENT */ }
+```
 
 ## Basic Usage
 
@@ -123,9 +150,10 @@ std::vector<int64_t> ids = { 1, 2, 3, 4, 5 };
 auto result = index->CalcDistancesById(query_vector.data(), ids.data(), ids.size());
 if (result.has_value()) {
     const float* dists = result.value()->GetDistances();
-    for (size_t i = 0; i < ids.size(); ++i) {
-        if (dists[i] == -1.0f) {
-            std::cout << ids[i] << " -> invalid ID" << std::endl;
+    const bool* valids = result.value()->GetValids();
+    for (int64_t i = 0; i < ids.size(); ++i) {
+        if (!valids[i]) {
+            std::cout << ids[i] << " -> invalid ID (NaN distance)" << std::endl;
         } else {
             std::cout << ids[i] << " -> " << dists[i] << std::endl;
         }
@@ -171,6 +199,8 @@ if (index->CheckFeature(vsag::SUPPORT_BATCH_CALC_DISTANCE_BY_ID)) {
 With `topk == -1`, `GetDim()` is `count` and position `q * count + j` corresponds to input ID
 `ids[q * count + j]`. With positive `topk`, the row stride is `GetDim()`, and each row contains
 the closest valid candidates followed by invalid IDs only when fewer than `topk` valid IDs exist.
+`GetValids()` follows the same layout as `GetDistances()` in both modes; check it per entry rather
+than comparing distances, because invalid entries hold `NaN`.
 
 A runnable example is provided in
 [`examples/cpp/306_feature_calculate_distance_by_id.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/306_feature_calculate_distance_by_id.cpp).
@@ -207,5 +237,7 @@ Indexes that do not implement the API surface for a given overload return an
 - The query dimension (for dense overloads) must match the index dimension.
 - The batch overload has a default implementation that loops over single-ID calls;
   some indexes override it for batch-level optimization.
+- Binding surfaces (Python, Node.js, C API) keep their existing signatures: batch calls report
+  missing IDs as `NaN` distances, and single-ID calls on a missing ID return an error.
 - Like all VSAG read-only APIs, these methods are safe to call concurrently with other
   read-only operations (e.g. `KnnSearch`).

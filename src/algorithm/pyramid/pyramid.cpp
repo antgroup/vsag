@@ -3499,10 +3499,14 @@ Pyramid::calc_native_distance_by_id(const void* query,
     if (raw_vector_ != nullptr && calculate_precise_distance) {
         flat = this->raw_vector_;
     }
-    InnerIdType inner_id;
+    InnerIdType inner_id = 0;
     {
         std::shared_lock<std::shared_mutex> label_lock(label_lookup_mutex_);
-        inner_id = label_table_->GetIdByLabel(id);
+        auto [found, found_id] = label_table_->TryGetIdByLabel(id);
+        if (not found) {
+            ThrowLabelNotFound(id);
+        }
+        inner_id = found_id;
     }
     auto computer = flat->FactoryComputer(query);
     float distance = 0.0F;

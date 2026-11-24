@@ -322,15 +322,21 @@ TEST_CASE("Pyramid immutable preserves reverse label lookup", "[ut][pyramid][imm
         int64_t candidates[] = {999, 42};
         const auto result = index->CalcDistancesById(vectors.data(), candidates, 2);
         CHECK(result->GetDistances()[0] == 0.0F);
-        CHECK(result->GetDistances()[1] == -1.0F);
+        CHECK(std::isnan(result->GetDistances()[1]));
+        CHECK(result->GetValids()[0]);
+        CHECK_FALSE(result->GetValids()[1]);
+        CHECK_THROWS_AS(index->CalcDistanceById(vectors.data(), 42), vsag::VsagException);
     };
     source.index->SetImmutable();
     source.index->SetImmutable();
     check(source.index);
     CHECK_FALSE(source.index->CheckIdExist(118));
     int64_t removed_id = 118;
-    CHECK(source.index->CalcDistancesById(vectors.data(), &removed_id, 1)->GetDistances()[0] ==
-          -1.0F);
+    auto removed_result = source.index->CalcDistancesById(vectors.data(), &removed_id, 1);
+    CHECK(std::isnan(removed_result->GetDistances()[0]));
+    CHECK_FALSE(removed_result->GetValids()[0]);
+    CHECK_THROWS_AS(source.index->CalcDistanceById(vectors.data(), removed_id),
+                    vsag::VsagException);
     std::stringstream stream;
     if (streaming) {
         source.index->SerializeStreaming(stream);
@@ -2365,8 +2371,8 @@ TEST_CASE("Pyramid parallelism degrades to serial search without a thread pool",
         nullptr);
     REQUIRE(serial->GetDim() == 5);
 
-    // With a thread pool the same request must take the parallel branch and still return the
-    // same ranked result as the serial path.
+    // Compare each index against its own serial baseline: a supplied pool can also change
+    // graph construction, even when build_thread_count is one.
     auto pooled_index = MakePyramidIndex(1,
                                          1,
                                          false,
@@ -2378,18 +2384,34 @@ TEST_CASE("Pyramid parallelism degrades to serial search without a thread pool",
                                          false,
                                          vsag::SafeThreadPool::FactoryDefaultThreadPool());
     REQUIRE(pooled_index.index->Build(base).empty());
+    const auto pooled_serial = pooled_index.index->KnnSearch(
+        query,
+        5,
+        R"({"pyramid":{"ef_search":50,"subindex_ef_search":50,"parallelism":1}})",
+        nullptr);
+    REQUIRE(pooled_serial->GetDim() == 5);
 
     for (const int64_t parallelism : {2, 4, 16}) {
+        CAPTURE(parallelism);
         const std::string params =
             R"({"pyramid":{"ef_search":50,"subindex_ef_search":50,"parallelism":)" +
             std::to_string(parallelism) + "}}";
         const auto result = test_index.index->KnnSearch(query, 5, params, nullptr);
         const auto pooled = pooled_index.index->KnnSearch(query, 5, params, nullptr);
         REQUIRE(result->GetDim() == serial->GetDim());
-        REQUIRE(pooled->GetDim() == serial->GetDim());
+        REQUIRE(pooled->GetDim() == pooled_serial->GetDim());
         for (int64_t i = 0; i < serial->GetDim(); ++i) {
+            CAPTURE(i,
+                    result->GetIds()[i],
+                    serial->GetIds()[i],
+                    result->GetDistances()[i],
+                    serial->GetDistances()[i],
+                    pooled->GetIds()[i],
+                    pooled_serial->GetIds()[i],
+                    pooled->GetDistances()[i],
+                    pooled_serial->GetDistances()[i]);
             REQUIRE(result->GetIds()[i] == serial->GetIds()[i]);
-            REQUIRE(pooled->GetIds()[i] == serial->GetIds()[i]);
+            REQUIRE(pooled->GetIds()[i] == pooled_serial->GetIds()[i]);
         }
     }
 }
