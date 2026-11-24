@@ -20,7 +20,14 @@ endif ()
 
 # pyvsag loads this library through cffi, so it only needs the C ABI: no Python headers and no
 # dependency on the Python version. Only the vsag_* C symbols are exported.
-add_library (vsag_c SHARED $<TARGET_OBJECTS:vsag_objects>)
+#
+# The dependency-free evaluation core (tools/eval) is compiled in as well, so pyvsag.eval measures
+# with exactly the code of the eval_performance tool.
+include (${PROJECT_SOURCE_DIR}/tools/eval/eval_core_sources.cmake)
+add_library (vsag_c SHARED
+    $<TARGET_OBJECTS:vsag_objects>
+    ${VSAG_EVAL_CORE_SRCS}
+    ${VSAG_EVAL_CORE_DIR}/vsag_eval_c_api.cpp)
 add_dependencies (vsag_c version)
 target_link_libraries (vsag_c PRIVATE vsag_src_common ${VSAG_DEP_LIBS} coverage_config)
 vsag_link_openmp_private (vsag_c)

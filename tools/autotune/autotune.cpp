@@ -14,6 +14,8 @@
 
 #include "autotune.h"
 
+#include <H5Cpp.h>
+
 #include <algorithm>
 #include <atomic>
 #include <cctype>
