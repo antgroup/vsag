@@ -18,11 +18,14 @@
 #include <optional>
 #include <random>
 
+#include "data_type.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "typing.h"
 
 namespace vsag {
 class Allocator;
+class TrainingRows;
+using TypedKMeansInput = TrainingRows;
 
 enum class KMeansInitMethod {
     RANDOM,
@@ -69,15 +72,50 @@ public:
         std::optional<uint32_t> random_seed = std::nullopt,
         bool deterministic_reduction = false);
 
+    // Typed training retains FP32 centroids and bounded decoded query blocks only.
+    Vector<int>
+    Run(uint32_t k,
+        const void* datas,
+        uint64_t count,
+        DataTypes data_type,
+        uint64_t stride_bytes,
+        uint64_t extent_bytes,
+        int iter = 25,
+        double* err = nullptr,
+        bool use_mse_for_convergence = false,
+        float threshold = 1e-6F,
+        KMeansInitMethod init_method = KMeansInitMethod::KMEANS_PLUS_PLUS,
+        std::optional<uint32_t> random_seed = std::nullopt,
+        bool deterministic_reduction = false);
+
+    // CPU-only borrowed row provider. No additional normalization is performed.
+    Vector<int>
+    Run(uint32_t k,
+        const TypedKMeansInput& input,
+        int iter = 25,
+        double* err = nullptr,
+        bool use_mse_for_convergence = false,
+        float threshold = 1e-6F,
+        KMeansInitMethod init_method = KMeansInitMethod::KMEANS_PLUS_PLUS,
+        std::optional<uint32_t> random_seed = std::nullopt,
+        bool deterministic_reduction = false);
+
 public:
     float* k_centroids_{nullptr};
 
 private:
     double
     find_nearest_one_with_hgraph(const float* query,
-                                 const uint64_t query_count,
-                                 const uint64_t k,
+                                 uint64_t query_count,
+                                 uint64_t k,
                                  Vector<int32_t>& labels);
+
+    double
+    find_nearest_one_with_hgraph_typed(const float* query,
+                                       uint64_t query_count,
+                                       uint64_t k,
+                                       Vector<int32_t>& labels,
+                                       const TypedKMeansInput* typed_input);
 
     void
     select_initial_centroids_random(const float* datas,

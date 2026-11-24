@@ -3,6 +3,8 @@ import copy
 import datetime as dt
 import json
 import os
+import signal
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -14,16 +16,19 @@ sys.path.insert(0, str(ROOT / "scripts/testing"))
 import daily_plan as dp
 import daily_extra as extra
 import daily_report as report
+import daily_run as run
 import daily_job_report as jobs
 
 
 class ExtraTests(unittest.TestCase):
-    def source_results(self):
+    def source_results(self, group_rotation_cases=False):
         now = dt.datetime.now(dt.timezone.utc)
         ctx = dp.context("a" * 40, now.isoformat(), "2026-11-06")
         def unit(i, mode):
-            return {"key": str(i), "owner": "hgraph", "mode": mode,
-                    "tests": [{"name": "case" + str(i), "source_file": "tests/fake.cpp"}]}
+            cases = [{"name": "case" + str(i), "source_file": "tests/fake.cpp"}]
+            if group_rotation_cases and mode == "rotation":
+                cases.append({**cases[0], "name": cases[0]["name"].upper()})
+            return {"key": str(i), "owner": "hgraph", "mode": mode, "tests": cases}
         parent = dp.build_plan(ctx, "daily_test_asan_x86/Linux/x86_64",
                                [unit(i, "core") for i in range(4)],
                                [unit(i, "rotation") for i in range(4, 32)],
@@ -65,6 +70,132 @@ class ExtraTests(unittest.TestCase):
         results[0] = dp.sealed({k:v for k,v in results[0].items() if k != "digest"})
         with self.assertRaises(dp.PlanError):
             extra.propose(results, now.isoformat(), now, 1, "123")
+
+    def update_record(self, results, mode, **fields):
+        for index, result in enumerate(results):
+            units = {u["key"]: u for u in result["plan"]["selected"]}
+            for record in result["records"]:
+                if units[record["key"]]["mode"] == mode:
+                    record.update(fields)
+                    results[index] = dp.sealed({k: v for k, v in result.items() if k != "digest"})
+                    return index, record["key"]
+        self.fail("No selected configuration for " + mode)
+
+    def test_rotation_timeout_allows_disjoint_supplemental_plan_and_warns_in_summary(self):
+        results = self.source_results()
+        _, key = self.update_record(results, "rotation", status="timeout",
+                                    timeout_scope="case", exit_code=-signal.SIGTERM, seconds=1800)
+        now = dt.datetime.now(dt.timezone.utc)
+        proposal = extra.propose(results, now.isoformat(), now, 1, "123")
+        self.assertIn(key, proposal["mandatory_keys"])
+        self.assertNotIn(key, {u["key"] for shard in proposal["shards"] for u in shard})
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            paths = [root / f"{i}.json" for i in range(len(results))]
+            for path, result in zip(paths, results):
+                dp.write(path, result)
+            summary, artifact = root / "summary.md", root / "summary.json"
+            proc = subprocess.run([sys.executable, str(ROOT / "scripts/testing/daily_report.py"),
+                                   *map(str, paths), "--summary", str(summary), "--json", str(artifact)],
+                                  env={**os.environ, "NEEDS_JSON": "{}"}, capture_output=True)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            actual = dp.load(artifact)
+            self.assertEqual(actual["status"], "passed_with_warnings")
+            self.assertEqual(actual["failures"], [])
+            self.assertEqual(actual["case_counts"]["failed"], 1)
+            self.assertEqual(actual["case_counts"]["configurations"]["failed"], 1)
+            self.assertEqual([(r["key"], r["status"]) for r in actual["rotation_timeouts"]],
+                             [(key, "timeout")])
+            self.assertIn("Rotation timeouts (warning)", summary.read_text())
+
+            missing = subprocess.run([sys.executable, str(ROOT / "scripts/testing/daily_report.py"),
+                                      *map(str, paths[:-1]), "--summary", str(summary), "--json", str(artifact)],
+                                     env={**os.environ, "NEEDS_JSON": "{}"}, capture_output=True)
+            self.assertEqual(missing.returncode, 1, missing.stderr)
+            self.assertTrue(dp.load(artifact)["incomplete"])
+
+        self.update_record(results, "core", status="failed")
+        self.assertEqual(report.summarize(results)["status"], "failed")
+        with self.assertRaises(dp.PlanError):
+            extra.propose(results, now.isoformat(), now, 1, "123")
+
+    def test_grouped_rotation_timeout_counts_configuration_failed_and_cases_pending(self):
+        results = self.source_results(group_rotation_cases=True)
+        self.update_record(results, "rotation", status="timeout", timeout_scope="case",
+                           exit_code=-signal.SIGTERM, seconds=1800)
+        summary = report.summarize(results)
+        self.assertEqual(summary["status"], "passed_with_warnings")
+        counts = summary["case_counts"]
+        self.assertEqual(counts["configurations"]["failed"], 1)
+        self.assertEqual(counts["failed"], 0)
+        self.assertEqual(counts["pending"], 2)
+
+    def test_timeout_policy_rejects_core_window_and_recorded_failure(self):
+        now = dt.datetime.now(dt.timezone.utc)
+        for mode, fields in (
+                ("core", {}),
+                ("rotation", {"timeout_scope": "window"}),
+                ("rotation", {"timeout_scope": None}),
+                ("rotation", {"exit_code": -signal.SIGSEGV}),
+                ("rotation", {"error": "Test failure recorded before timeout"})):
+            with self.subTest(mode=mode, fields=fields):
+                results = self.source_results()
+                timeout = {"status": "timeout", "timeout_scope": "case",
+                           "exit_code": -signal.SIGTERM, "seconds": 1800}
+                self.update_record(results, mode, **{**timeout, **fields})
+                summary = report.summarize(results)
+                self.assertEqual(summary["status"], "failed")
+                self.assertEqual(summary["rotation_timeouts"], [])
+                with self.assertRaises(dp.PlanError):
+                    extra.propose(results, now.isoformat(), now, 1, "123")
+
+    def test_other_lanes_keep_per_case_rotation_timeouts_blocking(self):
+        results = self.source_results()
+        index, key = self.update_record(results, "rotation", status="timeout",
+                                        timeout_scope="case", exit_code=-signal.SIGTERM, seconds=1800)
+        for lane in ("daily_test_asan_x86-unittests-shard0", "daily-extra-x86-functests-shard0",
+                     "daily_test_asan_aarch64-functests"):
+            result = {**results[index], "lane": lane}
+            result = dp.sealed({k: v for k, v in result.items() if k != "digest"})
+            changed = [result if i == index else value for i, value in enumerate(results)]
+            with self.subTest(lane=lane):
+                summary = report.summarize(changed)
+                self.assertEqual(summary["failures"], [key + ": timeout"])
+                self.assertEqual(summary["rotation_timeouts"], [])
+
+    def test_runner_reports_timeout_only_as_warning_and_preserves_mixed_failure(self):
+        results = self.source_results()
+        index, _ = self.update_record(results, "rotation", status="timeout",
+                                      timeout_scope="case", exit_code=-signal.SIGTERM, seconds=1800)
+        plan = results[index]["plan"]
+        parent = {k: v for k, v in plan.items() if k not in ("digest", "sharding")}
+        parent.update(selected=plan["sharding"]["full_selected"], digest=plan["sharding"]["parent_digest"])
+        records = {r["key"]: r for r in results[index]["records"]}
+        self.assertGreater(len(records), 1)
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            context, binary = root / "context.json", root / "functests"
+            dp.write(context, plan["context"])
+            binary.touch()
+            for mixed in (False, True):
+                with self.subTest(mixed=mixed):
+                    if mixed:
+                        next(r for r in records.values() if r["status"] == "passed")["status"] = "failed"
+                    out = root / str(mixed)
+                    argv = ["daily_run.py", "--binary", str(binary), "--context", str(context),
+                            "--lane", results[index]["lane"], "--environment", plan["environment"],
+                            "--profile", "functional", "--output", str(out),
+                            "--shard-index", str(index), "--shard-count", "4"]
+                    with (patch.object(sys, "argv", argv),
+                          patch.object(run, "inventory_units", return_value=([], [], {})),
+                          patch.object(dp, "build_plan", return_value=parent),
+                          patch.object(dp, "execution_deadline", return_value=None),
+                          patch.object(signal, "signal"),
+                          patch.object(run, "run_unit", side_effect=lambda unit, *args: records[unit["key"]])):
+                        self.assertEqual(run.main(), int(mixed))
+                    recorded = dp.load(out / "daily-result.json")
+                    self.assertIn("timeout", [r["status"] for r in recorded["records"]])
 
     def test_adaptive_execution_reports_used_and_budget_deferred_separately(self):
         p = self.proposal()

@@ -401,6 +401,38 @@ RaBitQuantizer<metric>::ReTrainHalf(const void* data, uint64_t count, DataTypes 
 }
 
 template <MetricType metric>
+bool
+RaBitQuantizer<metric>::TrainRowsImpl(const TrainingRows& rows) {
+    CHECK_ARGUMENT(rom_->IsTrainingDataIndependent(),
+                   "RaBitQ TrainingRows requires data-independent rotation training");
+    // Preserve pointer Train's transformer order and serial i/d accumulation.
+    // Provider values remain FP32 and are never normalized or half-rounded here.
+    if (pca_dim_ != this->original_dim_) {
+        pca_->TrainRows(rows);
+    }
+    Vector<float> row(this->original_dim_, 0, this->allocator_);
+    Vector<float> projected(this->original_dim_, 0, this->allocator_);
+    for (int d = 0; d < this->dim_; d++) {
+        centroid_[d] = 0;
+    }
+    for (uint64_t i = 0; i < rows.Count(); ++i) {
+        rows.Read(i, row.data());
+        const float* values = row.data();
+        if (pca_dim_ != this->original_dim_) {
+            pca_->Transform(row.data(), projected.data());
+            values = projected.data();
+        }
+        for (uint64_t d = 0; d < this->dim_; d++) {
+            centroid_[d] += values[d];
+        }
+    }
+    for (uint64_t d = 0; d < this->dim_; d++) {
+        centroid_[d] = centroid_[d] / (float)rows.Count();
+    }
+    return this->finish_training(row.data(), rows.Count());
+}
+
+template <MetricType metric>
 void
 RaBitQuantizer<metric>::SetCentroid(const float* centroid) {
     CHECK_ARGUMENT(centroid != nullptr, "RaBitQ centroid must not be null");

@@ -75,6 +75,43 @@ ScalarQuantizer<metric, bit>::TrainImpl(const float* data, uint64_t count) {
     return true;
 }
 
+template <MetricType metric, int bit>
+bool
+ScalarQuantizer<metric, bit>::ReTrainHalf(const uint16_t* data, uint64_t count, bool bf16) {
+    if (data == nullptr || count == 0) {
+        return false;
+    }
+    this->is_trained_ = false;
+    ScalarQuantizationTrainer trainer(this->dim_, BIT_PER_DIM);
+    trainer.TrainHalf(data,
+                      count,
+                      bf16,
+                      this->diff_.data(),
+                      this->lower_bound_.data(),
+                      metric == MetricType::METRIC_TYPE_COSINE);
+    for (uint64_t i = 0; i < static_cast<uint64_t>(this->dim_); ++i) {
+        this->diff_[i] -= this->lower_bound_[i];
+    }
+    this->is_trained_ = true;
+    return true;
+}
+
+template <MetricType metric, int bit>
+bool
+ScalarQuantizer<metric, bit>::ReTrainRows(const TrainingRows& input) {
+    this->is_trained_ = false;
+    ScalarQuantizationTrainer trainer(this->dim_, BIT_PER_DIM);
+    trainer.TrainRows(input,
+                      this->diff_.data(),
+                      this->lower_bound_.data(),
+                      metric == MetricType::METRIC_TYPE_COSINE);
+    for (uint64_t i = 0; i < static_cast<uint64_t>(this->dim_); ++i) {
+        this->diff_[i] -= this->lower_bound_[i];
+    }
+    this->is_trained_ = true;
+    return true;
+}
+
 static inline void
 fill_codes(uint8_t* codes, uint8_t value, uint8_t value_bit_size, uint64_t index) {
     // fill one value to codes, in index * value_bit_size, value is in [0, 2^value_bit_size)

@@ -22,6 +22,7 @@
 
 #include "index_common_param.h"
 #include "metric_type.h"
+#include "quantization/fp32_quantizer.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "quantization/int8_quantizer_parameter.h"
 #include "quantization/product_quantization/pq_fastscan_quantizer_parameter.h"
@@ -442,5 +443,21 @@ TEST_CASE("QuantizerAdapter FP16/BF16 Serialize AND Deserialize",
                 }
             }
         }
+    }
+}
+
+TEST_CASE("Half adapter rejects missing nonempty training input", "[ut][half_adapter_null_train]") {
+    constexpr auto metric = MetricType::METRIC_TYPE_L2SQR;
+    constexpr uint64_t dim = 2;
+    vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), nullptr);
+    for (const std::string dtype : {DATATYPE_FLOAT16, DATATYPE_BFLOAT16}) {
+        const auto param = CreateQuantizerParam(QuantizerType::QUANTIZER_TYPE_FP32, dim);
+        const auto common =
+            CreateIndexCommonParam(dim, std::make_shared<Resource>(resource), metric, dtype);
+        QuantizerAdapter<FP32Quantizer<metric>, uint16_t> adapter(param, common);
+        REQUIRE_FALSE(adapter.Train(nullptr, 1));
+        const uint16_t row[dim] = {};
+        REQUIRE(adapter.Train(reinterpret_cast<const float*>(row), 1));
+        REQUIRE_FALSE(adapter.ReTrain(nullptr, 1));
     }
 }

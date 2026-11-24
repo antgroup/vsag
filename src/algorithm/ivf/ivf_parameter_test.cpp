@@ -287,44 +287,39 @@ TEST_CASE("IVF rejects reader IO for base codes", "[ut][IVFParameter]") {
     }
 }
 
-TEST_CASE("IVF rejects non-float32 external datatypes", "[ut][IVFParameter]") {
+TEST_CASE("IVF rejects unsupported external datatypes", "[ut][IVFParameter]") {
     auto external_param = vsag::JsonType::Parse(R"({"use_route_graph": false})");
     vsag::IndexCommonParam common_param;
     common_param.dim_ = 64;
     REQUIRE_NOTHROW(vsag::IVF::CheckAndMappingExternalParam(external_param, common_param));
 
-    common_param.data_type_ = GENERATE(vsag::DataTypes::DATA_TYPE_FP16,
-                                       vsag::DataTypes::DATA_TYPE_BF16,
-                                       vsag::DataTypes::DATA_TYPE_INT8,
-                                       vsag::DataTypes::DATA_TYPE_SPARSE);
-    const auto expected_message = common_param.data_type_ == vsag::DataTypes::DATA_TYPE_INT8
-                                      ? std::string("IVF not support int8 datatype")
-                                      : fmt::format("IVF only supports float32 datatype, got {}",
-                                                    vsag::ToString(common_param.data_type_));
+    common_param.data_type_ =
+        GENERATE(vsag::DataTypes::DATA_TYPE_INT8, vsag::DataTypes::DATA_TYPE_SPARSE);
+    const auto expected_message =
+        common_param.data_type_ == vsag::DataTypes::DATA_TYPE_INT8
+            ? std::string("IVF not support int8 datatype")
+            : fmt::format("IVF requires float32, float16 or bfloat16 datatype, got {}",
+                          vsag::ToString(common_param.data_type_));
     try {
         vsag::IVF::CheckAndMappingExternalParam(external_param, common_param);
-        FAIL("IVF should reject non-float32 input");
+        FAIL("IVF should reject unsupported input");
     } catch (const vsag::VsagException& error) {
         REQUIRE(error.error_.type == vsag::ErrorType::INVALID_ARGUMENT);
         REQUIRE(error.error_.message == expected_message);
     }
 }
 
-TEST_CASE("IVF public creation rejects half input", "[ut][IVFParameter]") {
+TEST_CASE("IVF public creation accepts half input", "[ut][IVFParameter]") {
     const auto data_type =
         GENERATE(vsag::DataTypes::DATA_TYPE_FP16, vsag::DataTypes::DATA_TYPE_BF16);
     auto result = vsag::Factory::CreateIndex(
         "ivf",
         fmt::format(R"({{"dtype":"{}","metric_type":"l2","dim":64,"ivf":{{}}}})",
                     vsag::ToString(data_type)));
-    REQUIRE_FALSE(result.has_value());
-    REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
-    REQUIRE(result.error().message ==
-            fmt::format("failed to create index: IVF only supports float32 datatype, got {}",
-                        vsag::ToString(data_type)));
+    REQUIRE(result.has_value());
 }
 
-TEST_CASE("IVF constructor rejects non-float32 input", "[ut][IVFParameter]") {
+TEST_CASE("IVF constructor rejects unsupported input", "[ut][IVFParameter]") {
     auto external_param = vsag::JsonType::Parse(R"({"use_route_graph": false})");
     vsag::IndexCommonParam common_param;
     common_param.dim_ = 64;
@@ -334,17 +329,16 @@ TEST_CASE("IVF constructor rejects non-float32 input", "[ut][IVFParameter]") {
     REQUIRE(param != nullptr);
     REQUIRE_NOTHROW(vsag::IVF(param, common_param));
 
-    common_param.data_type_ = GENERATE(vsag::DataTypes::DATA_TYPE_FP16,
-                                       vsag::DataTypes::DATA_TYPE_BF16,
-                                       vsag::DataTypes::DATA_TYPE_INT8,
-                                       vsag::DataTypes::DATA_TYPE_SPARSE);
-    const auto expected_message = common_param.data_type_ == vsag::DataTypes::DATA_TYPE_INT8
-                                      ? std::string("IVF not support int8 datatype")
-                                      : fmt::format("IVF only supports float32 datatype, got {}",
-                                                    vsag::ToString(common_param.data_type_));
+    common_param.data_type_ =
+        GENERATE(vsag::DataTypes::DATA_TYPE_INT8, vsag::DataTypes::DATA_TYPE_SPARSE);
+    const auto expected_message =
+        common_param.data_type_ == vsag::DataTypes::DATA_TYPE_INT8
+            ? std::string("IVF not support int8 datatype")
+            : fmt::format("IVF requires float32, float16 or bfloat16 datatype, got {}",
+                          vsag::ToString(common_param.data_type_));
     try {
         vsag::IVF index(param, common_param);
-        FAIL("IVF constructor should reject non-float32 input");
+        FAIL("IVF constructor should reject unsupported input");
     } catch (const vsag::VsagException& error) {
         REQUIRE(error.error_.type == vsag::ErrorType::INVALID_ARGUMENT);
         REQUIRE(error.error_.message == expected_message);

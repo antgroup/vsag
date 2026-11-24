@@ -39,6 +39,7 @@
 #include "impl/reorder/flatten_reorder.h"
 #include "index/index_impl.h"
 #include "inner_string_params.h"
+#include "ivf_input.h"
 #include "ivf_nearest_partition.h"
 #include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
 #include "query_context.h"
@@ -58,10 +59,12 @@ check_ivf_data_type(DataTypes data_type) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             fmt::format("IVF not support {} datatype", DATATYPE_INT8));
     }
-    if (data_type != DataTypes::DATA_TYPE_FLOAT) {
+    if (data_type != DataTypes::DATA_TYPE_FLOAT && data_type != DataTypes::DATA_TYPE_FP16 &&
+        data_type != DataTypes::DATA_TYPE_BF16) {
         throw VsagException(
             ErrorType::INVALID_ARGUMENT,
-            fmt::format("IVF only supports float32 datatype, got {}", ToString(data_type)));
+            fmt::format("IVF requires float32, float16 or bfloat16 datatype, got {}",
+                        ToString(data_type)));
     }
 }
 
@@ -427,12 +430,23 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
 }
 
 IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
+    : IVF(
+          param,
+          [&] {
+              check_ivf_data_type(common_param.data_type_);
+              return common_param;
+          }(),
+          PrivateTrainingRowsPilot{}) {
+}
+
+IVF::IVF(const IVFParameterPtr& param,
+         const IndexCommonParam& common_param,
+         PrivateTrainingRowsPilot /*pilot*/)
     : InnerIndexInterface(param, common_param),
       buckets_per_data_(param->buckets_per_data),
       location_map_(common_param.allocator_.get()),
       bucket_graphs_(common_param.allocator_.get()),
       common_param_(common_param) {
-    check_ivf_data_type(common_param.data_type_);
     this->bucket_ = BucketInterface::MakeInstance(param->bucket_param, common_param);
     if (this->bucket_ == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "bucket init error");
@@ -476,8 +490,11 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
                 [this](InnerIdType inner_id) { return this->get_location(inner_id); },
                 allocator_);
         } else {
+            // IVF widens native half rows before passing them to precise flat codes.
+            auto reorder_common_param = modified_common_param;
+            reorder_common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
             this->reorder_codes_ =
-                FlattenInterface::MakeInstance(param->precise_codes_param, modified_common_param);
+                FlattenInterface::MakeInstance(param->precise_codes_param, reorder_common_param);
             this->reorder_ = std::make_shared<FlattenReorder>(this->reorder_codes_, allocator_);
         }
     }
@@ -735,6 +752,16 @@ IVF::CalcDistancesById(const float* query,
         return result;
     }
     return ApplyTopkWithValidity(distances, ids, count, 1, topk, validity, allocator_);
+}
+
+float
+IVF::CalcDistanceById(const DatasetPtr& query, int64_t id, bool calculate_precise_distance) const {
+    CHECK_ARGUMENT(query != nullptr, "distance query must not be null");
+    CHECK_ARGUMENT(query->GetNumElements() == 1, "single-ID distance requires one query");
+    CHECK_ARGUMENT(query->GetDim() == dim_, "distance query dimension mismatch");
+    const IVFInput input(query, common_param_.data_type_);
+    Vector<float> scratch(allocator_);
+    return this->CalcDistanceById(input.Rows(0, 1, scratch), id, calculate_precise_distance);
 }
 
 float

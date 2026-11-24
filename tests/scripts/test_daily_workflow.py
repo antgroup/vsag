@@ -1,12 +1,16 @@
 """Daily wiring and default-scope regressions without depending on PyYAML."""
 import ast
 import json
+import os
 from pathlib import Path
 import re
+import signal
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
+from scripts.testing import daily_entry, daily_plan
 from tests.scripts.test_dependency_workflows import job_text
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -111,6 +115,31 @@ class DailyWorkflowTests(unittest.TestCase):
         self.assertIn("-shard${{ matrix.shard }}-${{ github.run_id }}", x86)
         self.assertIn("VSAG_ENABLE_INTEL_MKL=ON", (ROOT / ".github/actions/asan-build-and-test-build-asan-x86/action.yml").read_text())
         self.assertIn("-DVSAG_USE_SYSTEM_OPENBLAS=OFF", job_text(WORKFLOW, "daily_build_asan_x86"))
+
+    def test_x86_functional_workflow_enables_rotation_timeout_warnings(self):
+        x86 = job_text(WORKFLOW, "daily_test_asan_x86")
+        env = dict(re.findall(r"(?m)^      (VSAG_DAILY_(?:LANE|ENVIRONMENT)): ([^\s]+)$", x86))
+        shard_count = daily_plan.policy()["x86_shards"]
+        # daily_run omits sharding metadata for an unsharded plan.
+        self.assertGreater(shard_count, 1)
+        self.assertIn("VSAG_DAILY_SHARD_INDEX: ${{ matrix.shard }}", x86)
+        self.assertIn("VSAG_DAILY_SHARD_COUNT: ${{ needs.daily-plan.outputs.x86_shard_count }}", x86)
+        env.update(VSAG_DAILY_CONTEXT="context.json", VSAG_DAILY_SHARD_INDEX="0",
+                   VSAG_DAILY_SHARD_COUNT=str(shard_count))
+        timeout = {"status": "timeout", "timeout_scope": "case", "exit_code": -signal.SIGTERM}
+        with (patch.dict(os.environ, env, clear=True),
+              patch.object(daily_entry.platform, "system", return_value="Linux"),
+              patch.object(daily_entry.platform, "machine", return_value="x86_64")):
+            for binary, advisory in (("functests", True), ("unittests", False)):
+                with self.subTest(binary=binary):
+                    argv = daily_entry.command(binary)
+                    plan = {"environment": argv[argv.index("--environment") + 1],
+                            "sharding": {"index": int(argv[argv.index("--shard-index") + 1])}}
+                    lane = argv[argv.index("--lane") + 1]
+                    self.assertEqual(
+                        daily_plan.advisory_rotation_timeout(plan, lane, {"mode": "rotation"}, timeout),
+                        advisory,
+                    )
 
     def test_long_build_and_lint_stages_use_remaining_window(self):
         text = WORKFLOW.read_text()

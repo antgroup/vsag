@@ -24,6 +24,7 @@
 
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_datacell_parameter.h"
+#include "gno_imi_partition.h"
 #include "impl/graph_build_helper.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/inner_search_param.h"
@@ -31,7 +32,10 @@
 #include "impl/searcher/basic_searcher.h"
 #include "index_feature_list.h"
 #include "ivf.h"  // IWYU pragma: keep
+#include "ivf_input.h"
+#include "ivf_nearest_partition.h"
 #include "query_context.h"
+#include "utils/training_rows.h"
 #include "utils/util_functions.h"
 #include "utils/visited_list.h"
 #include "vsag_exception.h"
@@ -154,6 +158,59 @@ IVF::Train(const DatasetPtr& data) {
         return;
     }
 
+    if (common_param_.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
+        const IVFInput original(data, common_param_.data_type_);
+        auto* nearest = dynamic_cast<IVFNearestPartition*>(partition_strategy_.get());
+        auto* gno = dynamic_cast<GNOIMIPartition*>(partition_strategy_.get());
+        const bool supported_partition = nearest != nullptr || gno != nullptr;
+        CHECK_ARGUMENT(supported_partition, "TrainingRows pilot requires nearest or GNO partition");
+        CHECK_ARGUMENT(!(nearest ? nearest->ivf_partition_strategy_param_->enable_gpu_build
+                                 : gno->ivf_partition_strategy_param_->enable_gpu_build),
+                       "TrainingRows pilot does not support GPU partition training");
+        CHECK_ARGUMENT(bucket_->SupportsTrainingRows(), "base bucket rejects TrainingRows");
+        CHECK_ARGUMENT(precise_bucket_ == nullptr || precise_bucket_->SupportsTrainingRows(),
+                       "precise bucket rejects TrainingRows");
+        CHECK_ARGUMENT(reorder_codes_ == nullptr || reorder_codes_->SupportsTrainingRows(),
+                       "reorder storage rejects TrainingRows");
+        const bool valid_shape =
+            data->GetNumElements() > 0 && data->GetDim() == dim_ && dim_ <= INT32_MAX;
+        CHECK_ARGUMENT(valid_shape, "invalid IVF TrainingRows shape");
+        auto sampled = sample_train_data(data,
+                                         data->GetNumElements(),
+                                         data->GetDim(),
+                                         train_sample_count_,
+                                         allocator_,
+                                         std::nullopt,
+                                         common_param_.data_type_);
+        const auto required_samples = gno != nullptr
+                                          ? std::max(gno->bucket_count_s_, gno->bucket_count_t_)
+                                          : bucket_->bucket_count_;
+        CHECK_ARGUMENT(sampled->GetNumElements() >= required_samples,
+                       "TrainingRows pilot requires at least one sample per centroid");
+        const IVFInput sampled_input(sampled, common_param_.data_type_);
+        auto rows_of = [&](const DatasetPtr& owner, const IVFInput& input) {
+            const auto stride = static_cast<uint64_t>(owner->GetDim()) * sizeof(uint16_t);
+            return TrainingRows(input.Data(),
+                                owner->GetNumElements(),
+                                static_cast<int32_t>(owner->GetDim()),
+                                common_param_.data_type_,
+                                stride,
+                                stride * owner->GetNumElements());
+        };
+        const auto sample_rows = rows_of(sampled, sampled_input);
+        const auto all_rows = rows_of(data, original);
+        // All capabilities, shapes and descriptors are validated before model mutation.
+        partition_strategy_->Train(sampled);
+        bucket_->TrainRows(sample_rows);
+        if (precise_bucket_) {
+            precise_bucket_->TrainRows(all_rows);
+        } else if (reorder_codes_) {
+            reorder_codes_->TrainRows(all_rows);
+        }
+        this->is_trained_ = true;
+        return;
+    }
+
     int64_t total_elements = data->GetNumElements();
     if (total_elements > 0 and data->GetFloat32Vectors() == nullptr) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
@@ -187,22 +244,34 @@ IVF::add(const DatasetPtr& base, bool try_optimized_build) {
     if (not partition_strategy_->is_trained_) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "ivf index add without train error");
     }
-    if (base->GetNumElements() > 0 and base->GetFloat32Vectors() == nullptr) {
-        throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            "IVF requires float32 vectors for non-empty datasets");
-    }
+    const IVFInput input(base, common_param_.data_type_);
     this->bucket_->Unpack();
     if (precise_bucket_ != nullptr) {
         this->precise_bucket_->Unpack();
     }
     auto num_element = base->GetNumElements();
     const auto* ids = base->GetIds();
-    const auto* vectors = base->GetFloat32Vectors();
     const auto* attr_sets = base->GetAttributeSets();
     const auto* extra_info = base->GetExtraInfos();
     const auto extra_info_size = base->GetExtraInfoSize();
-    auto buckets =
-        partition_strategy_->ClassifyDatas(vectors, num_element, buckets_per_data_, nullptr);
+    Vector<BucketIdType> buckets(allocator_);
+    constexpr uint64_t block_rows = 256;
+    Vector<float> classify_buffer(allocator_);
+    if (common_param_.data_type_ == DataTypes::DATA_TYPE_FLOAT) {
+        buckets = partition_strategy_->ClassifyDatas(
+            input.Data(), num_element, buckets_per_data_, nullptr);
+    } else {
+        buckets.resize(num_element * buckets_per_data_);
+        for (uint64_t first = 0; first < static_cast<uint64_t>(num_element); first += block_rows) {
+            const auto count = std::min(block_rows, static_cast<uint64_t>(num_element) - first);
+            auto assigned =
+                partition_strategy_->ClassifyDatas(input.Rows(first, count, classify_buffer),
+                                                   static_cast<int64_t>(count),
+                                                   buckets_per_data_,
+                                                   nullptr);
+            std::copy(assigned.begin(), assigned.end(), buckets.data() + first * buckets_per_data_);
+        }
+    }
 
     int64_t current_num;
     bool need_cal_memory_usage = false;
@@ -224,8 +293,15 @@ IVF::add(const DatasetPtr& base, bool try_optimized_build) {
             }
         }
         if (reorder_codes_ != nullptr) {
-            this->reorder_codes_->BatchInsertVector(base->GetFloat32Vectors(),
-                                                    base->GetNumElements());
+            Vector<float> reorder_buffer(allocator_);
+            const auto step = common_param_.data_type_ == DataTypes::DATA_TYPE_FLOAT
+                                  ? std::max(uint64_t{1}, static_cast<uint64_t>(num_element))
+                                  : block_rows;
+            for (uint64_t first = 0; first < static_cast<uint64_t>(num_element); first += step) {
+                const auto count = std::min(step, static_cast<uint64_t>(num_element) - first);
+                this->reorder_codes_->BatchInsertVector(input.Rows(first, count, reorder_buffer),
+                                                        count);
+            }
         }
         for (int64_t i = 0; i < num_element; ++i) {
             this->label_table_->Insert(i + total_elements_, ids[i]);
@@ -261,16 +337,24 @@ IVF::add(const DatasetPtr& base, bool try_optimized_build) {
         for (uint64_t i = 0; i < posting_count; ++i) {
             posting_ids[i] = static_cast<InnerIdType>(i + static_cast<uint64_t>(current_num));
         }
-        precise_bucket_->BatchInsertVector(vectors,
-                                           buckets.data(),
-                                           posting_ids.data(),
-                                           static_cast<InnerIdType>(posting_count),
-                                           precise_offsets.data());
+        Vector<float> precise_buffer(allocator_);
+        const auto step = common_param_.data_type_ == DataTypes::DATA_TYPE_FLOAT
+                              ? std::max(uint64_t{1}, posting_count)
+                              : block_rows;
+        for (uint64_t first = 0; first < posting_count; first += step) {
+            const auto count = std::min(step, posting_count - first);
+            precise_bucket_->BatchInsertVector(input.Rows(first, count, precise_buffer),
+                                               buckets.data() + first,
+                                               posting_ids.data() + first,
+                                               static_cast<InnerIdType>(count),
+                                               precise_offsets.data() + first);
+        }
     }
 
     auto add_func = [&](int64_t i) -> void {
+        Vector<float> row_buffer(allocator_);
+        const auto* data_ptr = input.Rows(i, 1, row_buffer);
         for (int64_t j = 0; j < buckets_per_data_; ++j) {
-            const auto* data_ptr = vectors + i * dim_;
             auto idx = i * buckets_per_data_ + j;
             auto posting_id = static_cast<InnerIdType>(idx + current_num * buckets_per_data_);
             InnerIdType offset_id;

@@ -27,6 +27,7 @@
 #include "index_common_param.h"
 #include "index_feature_list.h"
 #include "inner_string_params.h"
+#include "quantization/fp32_quantizer_parameter.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "vsag/constants.h"
@@ -109,8 +110,11 @@ make_wrapper_common_param(IndexCommonParam common_param) {
 ParamPtr
 LazyHGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                          const IndexCommonParam& common_param) {
-    CHECK_ARGUMENT(common_param.data_type_ == DataTypes::DATA_TYPE_FLOAT,
-                   "lazy_hgraph only supports float32 vectors");
+    const bool supported_dtype = common_param.data_type_ == DataTypes::DATA_TYPE_FLOAT or
+                                 common_param.data_type_ == DataTypes::DATA_TYPE_FP16 or
+                                 common_param.data_type_ == DataTypes::DATA_TYPE_BF16;
+    CHECK_ARGUMENT(supported_dtype,
+                   "lazy_hgraph only supports float32, float16 or bfloat16 vectors");
     reject_flat_param(external_param, INDEX_BRUTE_FORCE);
     reject_flat_param(external_param, "bruteforce");
     reject_flat_param(external_param, "flat");
@@ -161,6 +165,12 @@ LazyHGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     }
 
     JsonType flat_json;
+    if ((common_param.data_type_ == DataTypes::DATA_TYPE_FP16 or
+         common_param.data_type_ == DataTypes::DATA_TYPE_BF16) and
+        common_param.metric_ == MetricType::METRIC_TYPE_COSINE) {
+        // Replay the original half values, not half-rounded normalized codes.
+        flat_json[STORE_RAW_VECTOR].SetBool(true);
+    }
     auto flat_param = BruteForce::CheckAndMappingExternalParam(flat_json, common_param);
     auto graph_param = HGraph::CheckAndMappingExternalParam(hgraph_json, common_param);
 
@@ -180,6 +190,17 @@ LazyHGraph::LazyHGraph(const LazyHGraphParameterPtr& param, const IndexCommonPar
       flat_param_(param->flat_param),
       graph_param_(param->graph_param),
       common_param_(common_param) {
+    if ((common_param.data_type_ == DataTypes::DATA_TYPE_FP16 or
+         common_param.data_type_ == DataTypes::DATA_TYPE_BF16) and
+        common_param.metric_ == MetricType::METRIC_TYPE_COSINE) {
+        auto flat = std::dynamic_pointer_cast<BruteForceParameter>(flat_param_);
+        CHECK_ARGUMENT(flat != nullptr and flat->base_codes_param != nullptr,
+                       "half cosine lazy_hgraph requires fp32 flat raw storage");
+        auto quantizer = std::dynamic_pointer_cast<FP32QuantizerParameter>(
+            flat->base_codes_param->quantizer_parameter);
+        CHECK_ARGUMENT(quantizer != nullptr and quantizer->hold_molds,
+                       "half cosine lazy_hgraph requires fp32 flat raw storage");
+    }
     this->flat_index_ = std::make_shared<BruteForce>(flat_param_, common_param);
     this->flat_index_->InitFeatures();
     this->has_raw_vector_ = true;
@@ -260,7 +281,7 @@ LazyHGraph::TransitionToGraph() {
                    "lazy_hgraph transition id count is too large");
     const auto valid_count = static_cast<int64_t>(valid_ids.size());
 
-    auto build_data = flat_index_->GetDataByIds(valid_ids.data(), valid_count);
+    auto build_data = flat_index_->GetNativeDataByIds(valid_ids.data(), valid_count);
     if (build_data == nullptr) {
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to get lazy_hgraph vectors");
     }

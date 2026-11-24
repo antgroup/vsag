@@ -511,6 +511,13 @@ FGIM 的迭代次数是工作预算，不保证达到收敛。Refinement 和 rec
 只读的 `reader_io` 图存储会在修改目的数据前被拒绝。合并持有目的图结构锁期间，
 目的图查询通常会等待；扩容前后释放锁的间隙中，读者仍可访问原来已发布的有效索引。
 
+### PiPNN reservoir 缓存
+
+`graph_type: "pipnn"` 可通过同一缓存 API 导出和导入带版本的 reservoir。
+通过 Source ID 和原始 FP32 内容指纹识别可复用行；不兼容、旧版快照以及重复组图走冷构建。
+Pyramid 按层级名称和节点路径隔离缓存。生命周期、兼容性、内存开销、近似质量和诊断字段见
+[PiPNN reservoir 缓存](../advanced/build_cache.md#pipnn-reservoir-缓存)。
+
 ## 相关文档
 
 - [创建索引](../guide/create_index.md)

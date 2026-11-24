@@ -159,7 +159,7 @@ workload sizes or relax assertions. Errors identify the source file, case name a
 location. Heavy regression jobs depend on this preflight through the plan job.
 
 For adapter/helper changes, also run
-`python3 -m unittest tests.scripts.test_daily_parameters tests.scripts.test_daily_plan tests.scripts.test_daily_workflow`.
+`python3 -m unittest tests.scripts.test_daily_parameters tests.scripts.test_daily_plan tests.scripts.test_daily_extra tests.scripts.test_daily_workflow`.
 
 The source preflight is deliberately conservative and does not certify platform
 execution. Each compiled binary still supplies its authoritative test inventory,
@@ -236,6 +236,18 @@ skipped, Nightly Summary reports the supplemental stage as skipped. It retains
 the required job failure. Missing required results, missing evidence from an
 attempted supplemental stage, and unexplained supplemental skips still fail
 reconciliation.
+
+A per-case timeout in the base x86 OpenBLAS functional rotation is advisory
+when captured evidence contains no assertion or sanitizer failure. The
+configuration still stops at its existing deadline and counts as failed. A
+single-case timeout counts as a case failure. For grouped cases, the timed-out
+execution leaves each case without an attributable result pending. Summary
+lists these timeouts separately and reports
+`passed_with_warnings` when there are no blocking errors. Supplemental planning
+may continue from complete base artifacts and still excludes every selection
+from the base plan, including timed-out configurations. Core timeouts,
+execution-window deadlines, failures in other lanes, and missing artifacts
+remain blocking.
 
 macOS full examples execute in an independent step after successful artifact download,
 even when unit tests fail. Cancellation still stops further work. Their outcome remains

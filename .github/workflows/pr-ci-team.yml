@@ -144,13 +144,13 @@ jobs:
             }
 
             // BEGIN SLOT RECEIPT
-            function readAllocation(checks, expected, nowMs) {
+            function readReceipt(checks, expected, prefix) {
               const name = "Team CI slot allocation";
-              const id = `pr/${expected.repositoryId}/${expected.runId}/${expected.attempt}`;
+              const id = `${prefix}pr/${expected.repositoryId}/${expected.runId}/${expected.attempt}`;
               const selected = checks.filter(check =>
                 check.name === name && String(check.app?.id) === expected.appId && check.external_id === id
               );
-              if (selected.length > 1) throw new Error("Duplicate Team CI allocation receipts");
+              if (selected.length > 1) throw new Error("Duplicate Team CI receipts");
               if (selected.length === 0) return null;
               const check = selected[0];
               if (check.head_sha !== expected.testSha || check.status !== "completed" || check.conclusion !== "neutral") {
@@ -161,8 +161,23 @@ jobs:
               const value = JSON.parse(text);
               const keys = ["repository", "repositoryId", "pullRequest", "runId", "attempt", "headSha", "testSha"];
               if (value?.schemaVersion !== 1 || keys.some(key => value[key] !== expected[key])) {
-                throw new Error("Team CI assignment does not match this PR attempt");
+                throw new Error("Team CI receipt does not match this PR attempt");
               }
+              return value;
+            }
+
+            function readReviewRejection(checks, expected) {
+              const value = readReceipt(checks, expected, "review/");
+              if (!value) return false;
+              if (value.reason !== "workflow-review-required") {
+                throw new Error("Unknown Team CI review rejection");
+              }
+              return true;
+            }
+
+            function readAllocation(checks, expected, nowMs) {
+              const value = readReceipt(checks, expected, "");
+              if (!value) return null;
               if (!Number.isSafeInteger(value.observedAtMs) || !Number.isSafeInteger(value.expiresAtMs) ||
                   value.observedAtMs <= 0 || value.observedAtMs > nowMs || value.expiresAtMs <= value.observedAtMs ||
                   typeof value.runner !== "string" || value.runner.length > 63 ||
@@ -178,6 +193,7 @@ jobs:
 
             const deadline = Date.now() + 55 * 60 * 1000;
             const retryable = new Set([404, 408, 429, 500, 502, 503, 504]);
+            let lastApiStatus = null;
             core.info("Waiting for the trusted Team CI dispatcher to allocate a slot.");
             while (Date.now() < deadline) {
               let checks;
@@ -190,10 +206,16 @@ jobs:
                   filter: "all",
                   per_page: 100,
                 });
+                lastApiStatus = null;
               } catch (error) {
                 if (!retryable.has(error.status)) throw error;
+                lastApiStatus = error.status;
               }
               if (checks) {
+                if (readReviewRejection(checks, expected)) {
+                  core.setFailed("Team CI blocked because the workflow digest has not been approved. @wxyucs must review the workflow changes and append the trusted digest for this PR, then select Re-run all jobs.");
+                  return;
+                }
                 const receipt = readAllocation(checks, expected, Date.now());
                 if (receipt) {
                   core.setOutput("runner", receipt.runner);
@@ -202,6 +224,9 @@ jobs:
                 }
               }
               await new Promise(resolve => setTimeout(resolve, 30000));
+            }
+            if (lastApiStatus !== null) {
+              throw new Error(`Team CI slot wait expired while the GitHub Checks API was unavailable (HTTP ${lastApiStatus}). Verify GitHub API access and rerun all jobs.`);
             }
             throw new Error("Team CI slot wait expired. Verify the dispatcher and rerun all jobs.");
 

@@ -47,6 +47,12 @@ public:
 
     bool
     TrainImpl(const float* data, uint64_t count);
+    static constexpr bool TRAINING_ROWS_SUPPORTED = true;
+    bool
+    TrainRowsImpl(const TrainingRows&) {
+        this->is_trained_ = true;
+        return true;
+    }
 
     bool
     EncodeOneImpl(const float* data, uint8_t* codes);

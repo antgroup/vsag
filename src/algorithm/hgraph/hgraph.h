@@ -289,6 +289,9 @@ public:
     void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
 
+    void
+    GetFloat32VectorByInnerId(InnerIdType inner_id, float* data) const override;
+
     IndexType
     GetIndexType() const override {
         return IndexType::HGRAPH;
@@ -552,6 +555,20 @@ private:
     calc_native_distance_by_id(const void* native_query,
                                int64_t id,
                                bool calculate_precise_distance) const;
+
+    /**
+     * @brief Decodes the stored row selected for distance evaluation into a scratch.
+     *
+     * The scratch must hold at least dim float32 words: Decode() writes through a shared
+     * float* ABI whose payload width is per-cell (packed 16-bit words for half-input
+     * adapters, full floats for FP32 writers).
+     *
+     * @param inner_id inner id of the row to decode.
+     * @param data scratch for the decoded row.
+     * @return true when the row was decoded; false when the cell cannot decode it.
+     */
+    bool
+    TryDecodeStoredRow(InnerIdType inner_id, float* data) const;
 
     void
     check_fused_mutation_supported(std::string_view operation) const;
@@ -1372,6 +1389,7 @@ private:
     bool persist_source_id_{false};  // whether to persist source_id in serialization
 
     std::unique_ptr<BuildCache> cache_{nullptr};  // neighbor cache for warm-start build
+    std::atomic<uint64_t> pipnn_cache_memory_{0};
 
     float build_cache_hit_rate_{-1.0F};     // cache hit rate from last cache-based build
     uint64_t build_cache_hit_nodes_{0};     // number of nodes with cache hit

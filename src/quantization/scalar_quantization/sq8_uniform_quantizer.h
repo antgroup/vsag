@@ -14,11 +14,11 @@
 // limitations under the License.
 
 #pragma once
-
 #include "index_common_param.h"
 #include "inner_string_params.h"
 #include "quantization/quantizer.h"
 #include "sq8_uniform_quantizer_parameter.h"
+#include "utils/training_rows.h"
 
 namespace vsag {
 template <MetricType metric = MetricType::METRIC_TYPE_L2SQR>
@@ -38,6 +38,16 @@ public:
 
     bool
     TrainImpl(const float* data, uint64_t count);
+
+    bool
+    ReTrainHalf(const uint16_t* data, uint64_t count, bool bf16);
+    bool
+    ReTrainRows(const TrainingRows& input);
+    static constexpr bool TRAINING_ROWS_SUPPORTED = true;
+    bool
+    TrainRowsImpl(const TrainingRows& input) {
+        return ReTrainRows(input);
+    }
 
     bool
     EncodeOneImpl(const float* data, uint8_t* codes) const;

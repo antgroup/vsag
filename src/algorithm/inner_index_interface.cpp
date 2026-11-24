@@ -40,6 +40,7 @@
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
 #include "storage/tlv_section.h"
+#include "utils/half_input.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
@@ -863,7 +864,11 @@ InnerIndexInterface::GetVectorByIds(const int64_t* ids,
         ->Owner(/*auto release=*/not has_specified_allocator, allocator);
     for (int64_t i = 0; i < count; ++i) {
         InnerIdType inner_id = this->label_table_->GetIdByLabel(ids[i]);
-        this->GetVectorByInnerId(inner_id, float_vectors + i * dim_);
+        if (data_type_ == DataTypes::DATA_TYPE_FP16 or data_type_ == DataTypes::DATA_TYPE_BF16) {
+            this->GetFloat32VectorByInnerId(inner_id, float_vectors + i * dim_);
+        } else {
+            this->GetVectorByInnerId(inner_id, float_vectors + i * dim_);
+        }
     }
     return vectors;
 }
@@ -908,6 +913,37 @@ InnerIndexInterface::GetDataByIdsWithFlag(const int64_t* ids,
                                           uint64_t selected_data_flag) const {
     Vector<InnerIdType> inner_ids(allocator_);
     return this->get_data_by_ids_with_flag(ids, count, selected_data_flag, inner_ids);
+}
+
+void
+InnerIndexInterface::GetFloat32VectorByInnerId(InnerIdType inner_id, float* data) const {
+    if (data_type_ != DataTypes::DATA_TYPE_FP16 and data_type_ != DataTypes::DATA_TYPE_BF16) {
+        this->GetVectorByInnerId(inner_id, data);
+        return;
+    }
+    // Native Decode writes packed half values through its float* ABI. Keep that
+    // internal contract unchanged and expand only at the public FP32 boundary.
+    Vector<float> native_row(dim_, allocator_);
+    this->GetVectorByInnerId(inner_id, native_row.data());
+    this->expand_native_half_row(native_row.data(), data);
+}
+
+void
+InnerIndexInterface::expand_native_half_row(const void* native_data, float* data) const {
+    const bool supported_dtype =
+        data_type_ == DataTypes::DATA_TYPE_FP16 or data_type_ == DataTypes::DATA_TYPE_BF16;
+    CHECK_ARGUMENT(supported_dtype, "native half expansion requires float16 or bfloat16");
+    const auto* bytes = static_cast<const uint8_t*>(native_data);
+    for (int64_t j = 0; j < dim_; ++j) {
+        uint16_t value;
+        std::memcpy(&value, bytes + j * sizeof(value), sizeof(value));
+        if (data_type_ == DataTypes::DATA_TYPE_FP16) {
+            data[j] = half_input::FP16ToFloat(value);
+        } else {
+            const uint32_t bits = static_cast<uint32_t>(value) << 16;
+            std::memcpy(data + j, &bits, sizeof(bits));
+        }
+    }
 }
 
 DatasetPtr
@@ -956,8 +992,12 @@ InnerIndexInterface::get_data_by_ids_with_flag(const int64_t* ids,
         }
         auto get_vec_func = [&](int64_t begin, int64_t end) {
             for (int64_t i = begin; i < end; ++i) {
-                this->GetVectorByInnerId(
-                    inner_ids[i], reinterpret_cast<float*>(vector_data + i * bytes_per_vector));
+                auto* output = reinterpret_cast<float*>(vector_data + i * bytes_per_vector);
+                if (is_binary) {
+                    this->GetVectorByInnerId(inner_ids[i], output);
+                } else {
+                    this->GetFloat32VectorByInnerId(inner_ids[i], output);
+                }
             }
         };
         if (this->thread_pool_ != nullptr and thread_count > 1) {

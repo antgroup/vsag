@@ -22,15 +22,15 @@ def timestamp(value):
 
 
 def propose(results, started_at, now, attempt, run_id):
-    # Require all four original functional shards; never spend extra budget to
-    # bypass a failing or incomplete mandatory selection.
+    # Require complete base evidence. Only the shared rotation-timeout policy
+    # can allow an unvalidated configuration without blocking supplemental work.
     checked = daily_report.summarize(results)
-    if checked["status"] != "passed":
+    if checked["status"] not in ("passed", "passed_with_warnings"):
         raise dp.PlanError("Mandatory functional shards did not pass")
     first = results[0]["plan"]
     shard = first["sharding"]
     if (len(results) != dp.policy()["x86_shards"]
-            or any(r["plan"]["environment"] != "daily_test_asan_x86/Linux/x86_64" for r in results)
+            or any(r["plan"]["environment"] != dp.X86_ASAN_ENVIRONMENT for r in results)
             or any(r["plan"]["sharding"]["parent_digest"] != shard["parent_digest"] for r in results)):
         raise dp.PlanError("Expected one complete x86 functional plan")
     parent = {k: v for k, v in first.items() if k not in ("digest", "sharding")}
@@ -84,7 +84,7 @@ def validate(proposal):
         raise dp.PlanError("Wrong extra proposal kind")
     if len(proposal["shards"]) != dp.policy()["x86_shards"]:
         raise dp.PlanError("Wrong extra shard count")
-    if proposal.get("workers_per_shard") != 2 or proposal.get("environment") != "daily_test_asan_x86/Linux/x86_64":
+    if proposal.get("workers_per_shard") != 2 or proposal.get("environment") != dp.X86_ASAN_ENVIRONMENT:
         raise dp.PlanError("Unexpected supplemental execution resources")
     if not 0 <= proposal["budget_seconds"] <= 240 * 60:
         raise dp.PlanError("Extra budget exceeds phase limit")
