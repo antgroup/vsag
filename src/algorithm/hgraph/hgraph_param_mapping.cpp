@@ -20,6 +20,7 @@
 #include "datacell/graph_datacell_parameter.h"
 #include "hgraph.h"  // IWYU pragma: keep
 #include "hgraph_parameter.h"
+#include "impl/logger/logger.h"
 #include "io/common/io_parameter.h"
 #include "quantization/transform_quantization/transform_quantizer_parameter.h"
 
@@ -318,6 +319,14 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
                 .SetJson(value);
             inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][FAST_ENCODE_RABITQ_ROUNDS_KEY]
                 .SetJson(value);
+        } else if (key == SAQ_AVG_BITS) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][SAQ_AVG_BITS_KEY].SetJson(value);
+        } else if (key == SAQ_SEGMENT_COUNT) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][SAQ_SEGMENT_COUNT_KEY].SetJson(
+                value);
+        } else if (key == SAQ_RANDOM_ROTATION) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][SAQ_RANDOM_ROTATION_KEY].SetJson(
+                value);
         } else if (key == HGRAPH_SUPPORT_REMOVE) {
             inner_json[GRAPH_KEY][GRAPH_SUPPORT_REMOVE].SetJson(value);
         } else if (key == HGRAPH_SUPPORT_FORCE_REMOVE) {
@@ -337,7 +346,8 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             inner_json[PARAMETER_USE_CONJUGATE_GRAPH].SetJson(value);
         } else if (key == HGRAPH_LABEL_REMAP_TYPE) {
             inner_json[LABEL_REMAP_TYPE_KEY].SetJson(value);
-        } else if (key == HGRAPH_ADAPTIVE_PRUNING || key == "adaptive_pruning_adjust_step" ||
+        } else if (key == "merge_strategy" || key == "fgim_refinement_iterations" ||
+                   key == HGRAPH_ADAPTIVE_PRUNING || key == "adaptive_pruning_adjust_step" ||
                    key == "adaptive_pruning_apply_to_reverse" ||
                    key == "adaptive_pruning_apply_to_upper" ||
                    key == "adaptive_pruning_fill_rejected" || key == "fill_rejected" ||
@@ -418,6 +428,11 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                max_degree,
                                construction_threshold));
 
+    // Warn only for explicit external settings, not internal ToJson/FromJson roundtrips.
+    if (external_param.Contains("fgim_refinement_iterations") &&
+        hgraph_parameter->merge_strategy != "fgim") {
+        logger::warn("fgim_refinement_iterations takes effect only with merge_strategy=fgim");
+    }
     return hgraph_parameter;
 }
 

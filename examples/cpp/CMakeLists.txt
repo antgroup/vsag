@@ -131,6 +131,9 @@ target_link_libraries (405_persistent_streaming_transfer vsag)
 add_executable (501_quantization_transform 501_quantization_transform.cpp)
 target_link_libraries (501_quantization_transform vsag)
 
+add_executable (502_quantization_saq 502_quantization_saq.cpp)
+target_link_libraries (502_quantization_saq vsag)
+
 add_executable (321_index_fp16_hgraph 321_index_fp16_hgraph.cpp)
 target_link_libraries (321_index_fp16_hgraph vsag)
 
@@ -191,6 +194,9 @@ target_link_libraries(327_feature_search_reasoning vsag)
 
 add_executable(200_user_defined_io 200_user_defined_io.cpp)
 target_link_libraries(200_user_defined_io vsag)
+
+add_executable(601_utils_rpt_partition 601_utils_rpt_partition.cpp)
+target_link_libraries(601_utils_rpt_partition vsag)
 
 # Independent expected inventory: consumers must not infer coverage from whichever
 # binaries survived artifact transfer. Includes only configured numbered examples.

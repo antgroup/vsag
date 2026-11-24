@@ -111,6 +111,39 @@ SQ4UniformQuantizer<metric>::TrainImpl(const float* data, uint64_t count) {
 
 template <MetricType metric>
 bool
+SQ4UniformQuantizer<metric>::ReTrainRows(const TrainingRows& input) {
+    this->is_trained_ = false;
+    constexpr bool need_normalize = metric == MetricType::METRIC_TYPE_COSINE;
+    ScalarQuantizationTrainer trainer(this->dim_, 4);
+    trainer.SetSQ4UniformTruncRate(this->trunc_rate_);
+    trainer.TrainUniformRows(input, this->diff_, this->lower_bound_, need_normalize);
+
+    this->diff_ -= this->lower_bound_;
+    this->scalar_rate_ = (diff_ / 15.0) * (diff_ / 15.0);
+
+    this->is_trained_ = true;
+    return true;
+}
+
+template <MetricType metric>
+bool
+SQ4UniformQuantizer<metric>::ReTrainHalf(const uint16_t* data, uint64_t count, bool bf16) {
+    if (data == nullptr || count == 0 || this->dim_ <= 0 ||
+        count > static_cast<uint64_t>(PTRDIFF_MAX) / sizeof(uint16_t) / this->dim_) {
+        return false;
+    }
+    const auto bytes = static_cast<uint64_t>(this->dim_) * sizeof(uint16_t);
+    const TrainingRows input(data,
+                             count,
+                             this->dim_,
+                             bf16 ? DataTypes::DATA_TYPE_BF16 : DataTypes::DATA_TYPE_FP16,
+                             bytes,
+                             count * bytes);
+    return ReTrainRows(input);
+}
+
+template <MetricType metric>
+bool
 SQ4UniformQuantizer<metric>::EncodeOneImpl(const float* data, uint8_t* codes) const {
     float delta = 0;
     uint8_t scaled = 0;

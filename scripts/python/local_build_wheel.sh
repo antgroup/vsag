@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # Exit immediately if a command exits with a non-zero status.
-set -e
+set -eo pipefail
 
 # --- Configuration ---
 VENV_DIR=".venv"
-SUPPORTED_VERSIONS=("3.6" "3.7" "3.8" "3.9" "3.10" "3.11" "3.12" "3.13" "3.14")
 HAVE_DOCKER=true
+WHEEL_BUILD_DIR=""
 
 # --- Prerequisite Checks ---
 echo "🔎 Checking prerequisites..."
@@ -18,7 +18,10 @@ if [ ! -f "scripts/python/prepare_python_build.sh" ]; then
     echo "❌ Preparation script not found at 'scripts/python/prepare_python_build.sh'."
     exit 1
 fi
-if ! docker info > /dev/null 2>&1; then
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  echo "🍎 Building a native macOS wheel."
+  HAVE_DOCKER=false
+elif ! docker info > /dev/null 2>&1; then
   echo "⚠️ Docker daemon is not running. Build without Docker."
   HAVE_DOCKER=false
 fi
@@ -28,9 +31,18 @@ echo "✅ Prerequisites met."
 echo "🔎 Setting up Python virtual environment..."
 if [ -z "$VIRTUAL_ENV" ] && [ -z "$CONDA_PREFIX" ]; then
   # Not in any virtual environment, create and activate .venv
-  if [ ! -d "$VENV_DIR" ]; then
-    echo "   - Virtual environment not found, creating at './${VENV_DIR}'..."
-    python3 -m venv "$VENV_DIR"
+  if [ ! -f "${VENV_DIR}/bin/activate" ]; then
+    if [ -e "$VENV_DIR" ] && [ ! -f "${VENV_DIR}/pyvenv.cfg" ] && [ -n "$(ls -A "$VENV_DIR" 2>/dev/null)" ]; then
+      echo "❌ './${VENV_DIR}' exists but is not a Python virtual environment."
+      echo "   Remove it, or activate your own virtual environment and run the build again."
+      exit 1
+    fi
+    echo "   - Virtual environment not found or incomplete, creating at './${VENV_DIR}'..."
+    python3 -m venv --clear "$VENV_DIR" || {
+      echo "❌ Could not create a virtual environment. Install the venv module (for example"
+      echo "   'apt install python3-venv') or activate your own virtual environment first."
+      exit 1
+    }
   fi
   source "${VENV_DIR}/bin/activate"
   echo "✅ Virtual environment activated."
@@ -53,108 +65,84 @@ echo "✅ Detected local architecture: $ARCH"
 cleanup() {
   echo "🧹 Cleaning up..."
   rm -f python/pyvsag/_version.py
-  rm -rf python/build python/*.so python/pyvsag/*.so
+  rm -rf python/build python/*.so python/pyvsag/*.so python/pyvsag/*.dylib
+  if [ -n "$WHEEL_BUILD_DIR" ]; then
+    rm -rf "$WHEEL_BUILD_DIR"
+  fi
   echo "✅ Cleanup complete."
 }
 
 # --- Main Build Function ---
 run_build() {
-  local py_version=$1
-  local cibw_build_pattern="cp$(echo "$py_version" | tr -d '.')-*"
-  local cibw_version="3.3.1" # Default for modern python 3.8+ (supports 3.13/3.14)
-  local use_uvx=true          # cibuildwheel 3.x requires Python >= 3.11 on the host
-
-  if [[ "$py_version" == "3.6" ]]; then
-    cibw_version="2.11.4"
-    use_uvx=false
-  elif [[ "$py_version" == "3.7" ]]; then
-    cibw_version="2.23.3"     # cibuildwheel 3.x dropped Python < 3.8
-    use_uvx=false
-  elif python3 -c "import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)" 2>/dev/null; then
-    # Host Python >= 3.11, can pip-install cibuildwheel 3.x directly
-    use_uvx=false
-  fi
-
   echo "========================================================================"
-  echo "🚀 Starting wheel build for Python ${py_version}"
+  echo "🚀 Starting pyvsag wheel build"
   echo "========================================================================"
 
   if $HAVE_DOCKER; then
-    if $use_uvx; then
-      pip install -q uv 2>/dev/null || true
-    else
-      pip install -q "cibuildwheel==${cibw_version}"
-    fi
+    pip install -q cibuildwheel
   else
     pip install build
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+      pip install delocate
+    fi
   fi
 
-  # Set trap to call cleanup on exit/error
   trap cleanup EXIT INT TERM
 
-  # Call the reusable script
-  rm -rf python/build python/*.so python/pyvsag/*.so
-  bash ./scripts/python/prepare_python_build.sh "$py_version"
+  rm -rf python/build python/*.so python/pyvsag/*.so python/pyvsag/*.dylib
+  bash ./scripts/python/prepare_python_build.sh
 
-  PIP_DEFAULT_TIMEOUT="100" \
-  PIP_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
+  PIP_DEFAULT_TIMEOUT="100"
   if $HAVE_DOCKER; then
     echo "🛠️  Starting cibuildwheel... "
-    if $use_uvx; then
-      CIBW_BUILD="${cibw_build_pattern}" \
-      CIBW_ARCHS="${ARCH}" \
-      CIBW_TEST_COMMAND="pip install numpy pytest && ls -alF /project/ && python /project/tests/python/run_test.py" \
-      uvx --python 3.12 --from "cibuildwheel==${cibw_version}" cibuildwheel --platform linux --output-dir wheelhouse python
+    rm -rf wheelhouse
+    CIBW_ARCHS="${ARCH}" \
+    CIBW_ENVIRONMENT_PASS_LINUX="CMAKE_BUILD_PARALLEL_LEVEL" \
+    CIBW_TEST_COMMAND="pip install numpy pytest && python /project/tests/python/run_test.py" \
+    cibuildwheel --platform linux --output-dir wheelhouse python
+    # Wheels built against system dependencies (e.g. PR CI) legitimately bundle libgfortran.
+    SYSTEM_DEPS="$(echo "${VSAG_USE_SYSTEM_DEPS:-OFF}" | tr '[:lower:]' '[:upper:]')"
+    if [ "${SYSTEM_DEPS}" = "OFF" ]; then
+      echo "🔎 Checking wheel libraries..."
+      python3 ./scripts/python/check_wheel_libs.py "wheelhouse/pyvsag-*.whl"
     else
-      CIBW_BUILD="${cibw_build_pattern}" \
-      CIBW_ARCHS="${ARCH}" \
-      CIBW_TEST_COMMAND="pip install numpy pytest && ls -alF /project/ && python /project/tests/python/run_test.py" \
-      cibuildwheel --platform linux --output-dir wheelhouse python
+      echo "ℹ️  Skipping wheel library check (VSAG_USE_SYSTEM_DEPS=${SYSTEM_DEPS})."
     fi
-  else 
+  else
     echo "🛠️  Starting build..."
-    python -m build --wheel --outdir wheelhouse python
-    echo "✅ Build complete. Starting test..."
-    # Find the most recently created wheel
-    LATEST_WHEEL=$(ls -t wheelhouse/pyvsag-*.whl | head -n 1)
-    if [ -z "$LATEST_WHEEL" ]; then
-        echo "❌ Failed to find the built wheel."
+    mkdir -p wheelhouse
+    WHEEL_BUILD_DIR=$(mktemp -d "$PWD/wheelhouse/.native-build.XXXXXX")
+    python -m build --wheel --outdir "$WHEEL_BUILD_DIR" python
+    wheels=("$WHEEL_BUILD_DIR"/pyvsag-*.whl)
+    if [ "${#wheels[@]}" -ne 1 ] || [ ! -f "${wheels[0]}" ]; then
+        echo "❌ Expected exactly one newly built wheel."
         exit 1
     fi
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+      # Repair any remaining dynamic dependencies and validate the shipped architecture.
+      delocate-wheel --require-archs "$(uname -m)" \
+        --wheel-dir "$WHEEL_BUILD_DIR/repaired" "${wheels[0]}"
+      wheels=("$WHEEL_BUILD_DIR"/repaired/pyvsag-*.whl)
+      python scripts/python/check_macos_wheel.py "${wheels[0]}"
+    fi
+    LATEST_WHEEL="wheelhouse/$(basename "${wheels[0]}")"
+    cp "${wheels[0]}" "$LATEST_WHEEL"
+    echo "✅ Build complete. Starting test..."
     echo "   - Installing wheel: ${LATEST_WHEEL}"
     pip install "${LATEST_WHEEL}" --force-reinstall
     echo "   - Running tests..."
-    pip install numpy pytest
-    cd tests/python && python -m pytest . -v --tb=short 2>&1 | tee test-output.log || (cat test-output.log && exit 1)
-    cd ../..
+    pip install pytest
+    (cd tests/python && python -m pytest . -v --tb=short 2>&1 | tee test-output.log)
   fi
 
   cleanup
-  trap - EXIT INT TERM # Clear the trap
-
-  echo "🎉 Successfully built wheel for Python ${py_version}!"
+  trap - EXIT INT TERM
+  echo "🎉 Successfully built the pyvsag wheel!"
 }
 
-# --- Main Logic ---
 mkdir -p wheelhouse
-TARGET_VERSION=$1
-
-if [ -z "$TARGET_VERSION" ]; then
-  echo "ℹ️  No specific version provided. Building all supported versions: ${SUPPORTED_VERSIONS[*]}"
-  for version in "${SUPPORTED_VERSIONS[@]}"; do
-    run_build "$version"
-  done
-else
-  if [[ " ${SUPPORTED_VERSIONS[*]} " =~ " ${TARGET_VERSION} " ]]; then
-    run_build "$TARGET_VERSION"
-  else
-    echo "❌ Invalid argument: '$TARGET_VERSION'"
-    exit 1
-  fi
-fi
+run_build
 
 echo ""
-echo "✅ All tasks completed."
 echo "📦 Wheels have been generated in the 'wheelhouse' directory:"
 ls -l wheelhouse
-

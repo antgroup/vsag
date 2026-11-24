@@ -23,7 +23,8 @@
 
 using namespace vsag;
 
-TEST_CASE("ParallelSearcher matches BasicSearcher on a generic graph", "[ut][ParallelSearcher]") {
+TEST_CASE("ParallelSearcher matches BasicSearcher on a generic graph",
+          "[ut][ParallelSearcher][regression]") {
     constexpr uint32_t base_size = 200;
     constexpr uint64_t dim = 32;
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
@@ -49,8 +50,9 @@ TEST_CASE("ParallelSearcher matches BasicSearcher on a generic graph", "[ut][Par
 
     auto pool = std::make_shared<VisitedListPool>(
         2, allocator.get(), flatten->TotalCount(), allocator.get());
-    auto parallel =
-        std::make_shared<ParallelSearcher>(common, SafeThreadPool::FactoryDefaultThreadPool());
+    // Reserve enough workers for every requested parallelism in this regression.
+    auto executor = std::make_shared<SafeThreadPool>(std::make_shared<DefaultThreadPool>(8));
+    auto parallel = std::make_shared<ParallelSearcher>(common, executor);
     auto basic = std::make_shared<BasicSearcher>(common);
 
     InnerSearchParam search_param;
@@ -78,9 +80,27 @@ TEST_CASE("ParallelSearcher matches BasicSearcher on a generic graph", "[ut][Par
         return values;
     };
 
+    // Repeated batches exercise reuse of the worker completion counter (#3225).
+    // Compare each component explicitly so ARM failures retain the differing ID/distance.
     for (const auto& graph : {MakeRingGraph(base_size, 8), MakeIrregularGraph(base_size)}) {
-        REQUIRE(run_search(parallel, graph) == run_search(basic, graph));
+        const auto expected = run_search(basic, graph);
+        for (const int64_t threads : {1, 2, 4, 8}) {
+            search_param.parallel_search_thread_count = threads;
+            for (uint64_t repeat = 0; repeat < 16; ++repeat) {
+                CAPTURE(threads, repeat, graph->MaximumDegree());
+                const auto actual = run_search(parallel, graph);
+                REQUIRE(actual.size() == expected.size());
+                auto found = actual.begin();
+                for (const auto& value : expected) {
+                    CAPTURE(found->second, value.second, found->first, value.first);
+                    REQUIRE(found->second == value.second);
+                    REQUIRE(found->first == value.first);
+                    ++found;
+                }
+            }
+        }
     }
+    search_param.parallel_search_thread_count = 4;
 
     SECTION("a missing executor is valid only for serial search") {
         const auto graph = MakeRingGraph(base_size, 8);
@@ -178,4 +198,46 @@ TEST_CASE("ParallelSearcher traverses through a non-finite-distance bridge",
         result->Pop();
     }
     REQUIRE(found_target);
+}
+
+TEST_CASE("ParallelSearcher publishes legacy statistics", "[ut][ParallelSearcher][statistics]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.dim_ = 1;
+    common.allocator_ = allocator;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto quantizer_param =
+        QuantizerParameter::GetQuantizerParameterByJson(JsonType::Parse(R"({"type":"fp32"})"));
+    auto io_param = IOParameter::GetIOParameterByJson(JsonType::Parse(R"({"type":"memory_io"})"));
+    auto flatten = std::make_shared<
+        FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, FixedLayout<MemoryIO>>>(
+        quantizer_param, io_param, common);
+    const std::vector<float> vectors{1.0F, 2.0F};
+    std::vector<InnerIdType> ids{0, 1};
+    flatten->Train(vectors.data(), ids.size());
+    flatten->BatchInsertVector(vectors.data(), ids.size(), ids.data());
+    auto graph =
+        std::make_shared<MockGraphDataCell>(std::vector<std::vector<InnerIdType>>{{1}, {0}});
+    auto pool = std::make_shared<VisitedListPool>(1, allocator.get(), ids.size(), allocator.get());
+    InnerSearchParam param;
+    param.ep = 0;
+    param.ef = 2;
+    param.topk = 2;
+    param.parallel_search_thread_count = GENERATE(1, 2);
+    SearchStatistics stats;
+    QueryContext context;
+    context.stats = &stats;
+    float query = 0.0F;
+    auto visited = pool->TakeOne();
+    auto result = ParallelSearcher(common, SafeThreadPool::FactoryDefaultThreadPool())
+                      .Search(graph, flatten, visited, &query, param, LabelTablePtr{}, &context);
+    pool->ReturnOne(visited);
+    REQUIRE(result->Size() == 2);
+    CHECK(stats.dist_cmp.load() == 1);
+    CHECK(stats.hops.load() == 2);
+    CHECK(stats.distance_evaluations.load() == 2);
+    CHECK(stats
+              .distance_evaluations_by_phase[static_cast<uint64_t>(
+                  DistanceEvaluationPhase::APPROXIMATE)]
+              .load() == 2);
 }

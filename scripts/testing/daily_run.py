@@ -2,6 +2,8 @@
 """Execute a frozen Daily plan, with exact Catch2 result reconciliation."""
 from __future__ import annotations
 import argparse
+import datetime as dt
+import math
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
@@ -69,14 +71,26 @@ def capability_inventory(binary, tests):
     return selected, {"build_capabilities": evidence, "exclusions": excluded}
 
 
-def inventory_units(binary, root, profile, output, seed, cancelled):
-    tests = shards.listing(binary, "~[.]", seed, output / "inventory", 120, cancelled)
+def inventory_timeout(deadline, maximum=120):
+    if deadline is None:
+        return maximum
+    remaining = (deadline - dt.datetime.now(dt.timezone.utc)).total_seconds()
+    if remaining <= 0:
+        raise dp.PlanError("Job/attempt execution window exhausted during inventory")
+    return min(maximum, remaining)
+
+
+def inventory_units(binary, root, profile, output, seed, cancelled, deadline=None):
+    tests = shards.listing(binary, "~[.]", seed, output / "inventory", inventory_timeout(deadline), cancelled)
     for test in tests:
         test["binary"] = binary.name
         test["id"] = shards.stable_id(binary.name, test)
+    named_inventory = [dict(test) for test in tests]
     tests, inventory = capability_inventory(binary, tests)
+    inventory["named_cases"] = named_inventory
     core, extension = [], []
     for group in shards.case_groups(tests):
+        inventory_timeout(deadline)
         owners = {dp.owner(t, profile) for t in group}
         if len(owners) != 1:
             raise dp.PlanError("A case-insensitive Catch2 group crosses budget owners")
@@ -89,13 +103,16 @@ def inventory_units(binary, root, profile, output, seed, cancelled):
             if any("[daily]" in t["tags"].lower() for t in group):
                 continue
             core.append({**base, "key": key, "mode": "core"})
-        elif len(group) == 1 and test_source(root, group[0]).name in ("test_pyramid.cpp", "test_sindi.cpp"):
+        elif len(group) == 1 and test_source(root, group[0]).relative_to(root).as_posix() in params.PARAMETER_SOURCES:
             test = group[0]
-            axes, choices = params.configurations(test_source(root, test).read_text(), test["source_line"])
+            source = test_source(root, test)
+            axes, choices = params.configurations(
+                source.read_text(), test["source_line"],
+                source_file=str(source.relative_to(root)), case_name=test["name"])
             for i, choice in enumerate(choices):
                 unit = {**base, "key": dp.digest([key, axes, choice]), "axes": axes,
                         "configuration": choice, "mode": "core" if i == 0 else "rotation",
-                        "env": {"VSAG_DAILY_CHOICES": json.dumps(choice)}}
+                        "env": {"VSAG_DAILY_CHOICES": json.dumps(params.runtime_choices(axes, choice))}}
                 (core if i == 0 else extension).append(unit)
         elif len(group) == 1 and group[0]["name"].startswith("(Daily) HGraph "):
             directory = output / ("enumerate-" + key[:16])
@@ -105,16 +122,25 @@ def inventory_units(binary, root, profile, output, seed, cancelled):
             command = ["env", "VSAG_DAILY_ENUMERATE=" + str(manifest), str(binary),
                        shards.exact_filter([group[0]["name"]]), "--rng-seed", str(seed)]
             state = shards.execute(command, directory, directory / "tmp",
-                                   directory / "enumeration.log", 120, cancelled)
+                                   directory / "enumeration.log", inventory_timeout(deadline), cancelled)
             if state["exit_code"] != 4 or not manifest.is_file():
                 raise dp.PlanError("HGraph inventory failed: " + group[0]["name"])
             configurations = dp.load(manifest)
             if not configurations or len({dp.digest(c) for c in configurations}) != len(configurations):
                 raise dp.PlanError("Empty/duplicate HGraph configuration inventory")
+            def hgraph_unit(configuration):
+                return {**base, "key": dp.digest([key, configuration]),
+                        "mode": "rotation", "configuration": configuration,
+                        "env": {"VSAG_DAILY_HGRAPH": json.dumps(configuration)}}
+
             for configuration in configurations:
-                extension.append({**base, "key": dp.digest([key, configuration]),
-                                  "mode": "rotation", "configuration": configuration,
-                                  "env": {"VSAG_DAILY_HGRAPH": json.dumps(configuration)}})
+                parts = configuration.pop("execution_parts", None)
+                unit = hgraph_unit(configuration)
+                if parts is not None:
+                    if not parts:
+                        raise dp.PlanError("Empty HGraph execution parts")
+                    unit["execution_parts"] = [hgraph_unit(part) for part in parts]
+                extension.append(unit)
         else:
             # Non-adapted tests are indivisible exhaustive groups; never silently sample them.
             target = extension if all("[daily]" in t["tags"].lower() for t in group) else core
@@ -134,7 +160,67 @@ def execution_events(logfile, report):
     return events
 
 
-def run_unit(unit, number, output, timeout, cancelled):
+def phase_diagnostics(path):
+    """Keep completed events and the active phase even after an interrupted XML report."""
+    if not path.is_file():
+        return {}
+    try:
+        lines = path.read_text(errors="replace").splitlines()
+    except OSError as exc:
+        return {"phase_trace": path.name, "phase_trace_error": "Cannot read phase trace: " + str(exc)}
+    events, active, error = [], [], None
+    for line in lines:
+        try:
+            event = json.loads(line)
+            if not isinstance(event, dict) or event.get("event") not in ("start", "end") or not isinstance(event.get("phase"), str):
+                raise ValueError("invalid phase event")
+            events.append(event)
+            if event["event"] == "start":
+                active.append(event)
+            elif active and active[-1]["phase"] == event["phase"]:
+                active.pop()
+        except (ValueError, TypeError) as exc:
+            error = "Incomplete or malformed phase trace: " + str(exc)
+            break
+    result = {"phase_trace": path.name, "phase_events": len(events),
+              "active_phases": active, "last_phase_event": events[-1] if events else None}
+    if error:
+        result["phase_trace_error"] = error
+    return result
+
+
+def timeout_has_test_failure(report, log):
+    # A terminated Catch2 process may leave a partial XML report. Keep failures
+    # written before termination and ignore Catch2's synthetic SIGTERM assertion.
+    xml = report.read_text(errors="replace") if report.is_file() else ""
+    sanitizer = r"(?:ERROR: (?:Address|Leak|Thread|Memory)Sanitizer|AddressSanitizer:DEADLYSIGNAL|:\d+:\d+: runtime error:)"
+    if re.search(sanitizer, log.read_text(errors="replace")) or re.search(sanitizer, xml):
+        return True
+    termination = "SIGTERM - Termination request signal"
+    parser = ET.XMLPullParser(events=("start", "end"))
+    parser.feed(xml)
+    incomplete_failure = False
+    try:
+        for event, element in parser.read_events():
+            if element.tag in ("Failure", "Exception"):
+                return True
+            if element.tag == "Expression" and element.get("success") == "false":
+                if event == "start":
+                    incomplete_failure = True
+                else:
+                    fatal = element.find("FatalErrorCondition")
+                    if fatal is None or (fatal.text or "").strip() != termination:
+                        return True
+                    incomplete_failure = False
+            if (event == "end" and element.tag == "FatalErrorCondition"
+                    and (element.text or "").strip() != termination):
+                return True
+    except ET.ParseError:
+        pass  # The last element can be incomplete after a process-group kill.
+    return incomplete_failure
+
+
+def run_unit(unit, number, output, timeout, cancelled, deadline=None):
     directory = output / ("case-%05d" % number)
     directory.mkdir()
     cwd, temporary = directory / "cwd", directory / "tmp"
@@ -143,17 +229,39 @@ def run_unit(unit, number, output, timeout, cancelled):
     binary = Path(unit["binary"])
     record = {"key": unit["key"], "status": "failed", "seconds": 0, "directory": directory.name}
     try:
+        listing_timeout = 120
+        timeout_scope = "case"
+        if deadline is not None:
+            remaining = (deadline - dt.datetime.now(dt.timezone.utc)).total_seconds()
+            if remaining <= 0:
+                record.update(status="budget_exhausted", error="Execution window exhausted")
+                dp.write(directory / "result.json", record)
+                return record
+            listing_timeout = min(120, max(1, math.floor(remaining)))
         selected = shards.listing(binary, shards.exact_filter([t["name"] for t in unit["tests"]]),
-                                  unit["seed"], directory / "selection", 120, cancelled)
+                                  unit["seed"], directory / "selection", listing_timeout, cancelled)
         if Counter(map(shards.case_identity, selected)) != Counter(map(shards.case_identity, unit["tests"])):
             raise dp.PlanError("Exact filter did not select the expected tests")
+        if deadline is not None:
+            remaining = (deadline - dt.datetime.now(dt.timezone.utc)).total_seconds()
+            if remaining <= 0:
+                raise dp.PlanError("Execution window exhausted during test listing")
+            if remaining <= timeout:
+                timeout_scope = "window"
+                timeout = max(1, math.floor(remaining))
         report = directory / "report.xml"
-        command = ["env", "VSAG_DAILY_EVENTS=1", "VSAG_TEST_SEED=" + str(unit["seed"])]
+        command = ["env", "VSAG_DAILY_EVENTS=1", "VSAG_TEST_SEED=" + str(unit["seed"]),
+                   "VSAG_DAILY_PHASE_FILE=" + str(directory / "phases.jsonl")]
         command += [k + "=" + v for k, v in sorted(unit["env"].items())]
         command += [str(binary), shards.exact_filter([t["name"] for t in unit["tests"]]),
                     "--reporter", "xml", "--out", str(report), "--durations", "yes",
                     "--order", "lex", "--rng-seed", str(unit["seed"])]
-        record.update(shards.execute(command, cwd, temporary, directory / "output.log", timeout, cancelled))
+        log = directory / "output.log"
+        record.update(shards.execute(command, cwd, temporary, log, timeout, cancelled))
+        if record["status"] == "timeout":
+            record["timeout_scope"] = timeout_scope
+            if unit.get("mode") == "rotation" and timeout_scope == "case" and timeout_has_test_failure(report, log):
+                record["error"] = "Test failure recorded before timeout"
         if record["status"] not in ("timeout", "cancelled", "launch_error"):
             executed, passed, _ = shards.parse_execution_xml(report, unit["tests"])
             record["tests"] = executed
@@ -184,6 +292,7 @@ def run_unit(unit, number, output, timeout, cancelled):
     except (dp.PlanError, shards.ShardError, OSError, ValueError, ET.ParseError) as error:
         record["error"] = str(error)
         record["status"] = "failed"
+    record.update(phase_diagnostics(directory / "phases.jsonl"))
     dp.write(directory / "result.json", record)
     print(json.dumps({"case": unit["tests"][0]["name"], "key": unit["key"],
                       "status": record["status"], "seconds": record["seconds"]}), flush=True)
@@ -202,6 +311,8 @@ def main():
     p.add_argument("--workers", type=int, default=2)
     p.add_argument("--timeout", type=int, default=dp.policy()["case_timeout_seconds"])
     p.add_argument("--plan-only", action="store_true")
+    p.add_argument("--shard-index", type=int, default=0)
+    p.add_argument("--shard-count", type=int, default=1)
     p.add_argument("--core-only", action="store_true")
     args = p.parse_args()
     if args.workers < 1 or args.timeout < 1:
@@ -220,24 +331,40 @@ def main():
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: cancel.set())
     seed = int(dp.digest([ctx["week"], "daily-seed-v1"])[:8], 16) or 1
-    core, extension, inventory = inventory_units(binary, root, args.profile, output, seed, cancel)
+    window_path = Path(args.context).with_name("window.json")
+    deadline = dp.execution_deadline(ctx, dp.load(window_path) if window_path.exists() else None)
+    try:
+        core, extension, inventory = inventory_units(binary, root, args.profile, output, seed, cancel, deadline)
+    except (dp.PlanError, shards.ShardError) as error:
+        dp.write(output / "inventory-error.json", {"status": "failed", "error": str(error)})
+        raise
     if args.profile == "concurrent":
         core = [u for u in core if any("[concurrent]" in t["tags"].lower() for t in u["tests"])]
         extension = [u for u in extension if any("[concurrent]" in t["tags"].lower() for t in u["tests"])]
-    plan = dp.build_plan(ctx, args.environment, core, [] if args.core_only else extension, inventory=inventory)
+    plan = dp.build_plan(ctx, args.environment, core, extension, inventory=inventory, core_only=args.core_only,
+                         full_coverage=args.profile == "unit-coverage", profile=args.profile)
+    if args.shard_count != 1 or args.shard_index != 0:
+        plan = dp.shard_plan(plan, args.shard_index, args.shard_count)
     dp.write(output / "plan.json", plan)
     if args.plan_only:
         return 0
     records = []
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        pending = [pool.submit(run_unit, u, i, output, args.timeout, cancel)
+        pending = [pool.submit(run_unit, u, i, output, args.timeout, cancel, deadline)
                    for i, u in enumerate(plan["selected"])]
         for future in as_completed(pending):
             records.append(future.result())
     result = dp.sealed({"schema_version": 1, "kind": "daily-result", "plan": plan,
                         "lane": args.lane, "records": records})
     dp.write(output / "daily-result.json", result)
-    return 0 if all(r["status"] == "passed" for r in records) else 1
+    units = {u["key"]: u for u in plan["selected"]}
+    blocking = False
+    for record in records:
+        if dp.advisory_rotation_timeout(plan, args.lane, units[record["key"]], record):
+            print(f"::warning::Nightly rotation timed out in {args.lane}: {record['key']}")
+        elif record["status"] != "passed":
+            blocking = True
+    return int(blocking)
 
 
 if __name__ == "__main__":

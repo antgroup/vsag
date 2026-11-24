@@ -25,6 +25,7 @@
 #include "index_registry.h"
 #include "resource_owner_wrapper.h"
 #include "typing.h"
+#include "vsag/search_resource.h"
 
 // NOLINTBEGIN(readability-else-after-return )
 
@@ -59,6 +60,10 @@ Engine::CreateIndex(const std::string& origin_name,
         register_all_index_creators();
         auto parsed_params = JsonType::Parse(parameters);
         auto index_common_params = IndexCommonParam::CheckAndCreate(parsed_params, this->resource_);
+        const auto* original = static_cast<ResourceOwnerWrapper*>(resource_.get())->GetResource();
+        if (const auto* search = dynamic_cast<const SearchResource*>(original)) {
+            index_common_params.search_resources_ = search->search_context_;
+        }
         index_common_params.user_defined_ios_ =
             std::make_shared<UserDefinedIOSet>(user_defined_ios);
         return create_registered_index(origin_name, parsed_params, index_common_params);

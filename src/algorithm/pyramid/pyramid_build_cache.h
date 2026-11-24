@@ -51,6 +51,12 @@ public:
                    const std::string& node_path,
                    GroupOwners owners);
 
+    JsonType
+    GetPiPNNBuildStats() const;
+
+    uint64_t
+    GetPiPNNMemoryUsage() const;
+
     uint64_t
     CountMatchedSourceIds(const std::string* source_ids, uint64_t count) const;
 

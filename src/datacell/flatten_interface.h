@@ -14,7 +14,6 @@
 // limitations under the License.
 
 #pragma once
-
 #include <algorithm>
 #include <atomic>
 #include <cstring>
@@ -35,7 +34,9 @@
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "type_helpers.h"
+#include "utils/lock_strategy.h"
 #include "utils/pointer_define.h"
+#include "utils/training_rows.h"
 #include "vsag/allocator.h"
 #include "vsag/constants.h"
 #include "vsag/dataset.h"
@@ -43,6 +44,27 @@
 namespace vsag {
 
 DEFINE_POINTER(FlattenInterface);
+
+class BatchNodeReadGuard {
+public:
+    BatchNodeReadGuard(MutexArray& mutexes,
+                       const InnerIdType* ids,
+                       InnerIdType count,
+                       uint64_t total_count);
+    ~BatchNodeReadGuard();
+
+    BatchNodeReadGuard(const BatchNodeReadGuard&) = delete;
+    BatchNodeReadGuard&
+    operator=(const BatchNodeReadGuard&) = delete;
+
+private:
+    void
+    unlock_acquired() noexcept;
+
+    MutexArray& mutexes_;
+    std::vector<InnerIdType> ids_;
+    uint64_t acquired_{0};
+};
 
 class FlattenCodesLease {
 public:
@@ -191,6 +213,14 @@ public:
 
     virtual void
     Train(const void* data, uint64_t count) = 0;
+    virtual bool
+    SupportsTrainingRows() const {
+        return false;
+    }
+    virtual void
+    TrainRows(const TrainingRows&) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "datacell does not support TrainingRows");
+    }
 
     virtual void
     InsertVector(const void* vector, InnerIdType idx = std::numeric_limits<InnerIdType>::max()) = 0;
@@ -620,6 +650,14 @@ public:
     uint32_t prefetch_stride_code_{1};
     uint32_t prefetch_depth_code_{1};
     DistanceEvaluationBackend backend_{DistanceEvaluationBackend::UNKNOWN};
+
+    // Internal build-only protocol. Updates hold the same node lock exclusively;
+    // the owner excludes graph structure changes while vector readers run.
+    virtual void
+    SetExternalReadMutexArray(MutexArrayPtr /*mutexes*/) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "external vector read locks are not supported by this datacell");
+    }
 };
 
 inline FlattenCodesLease::~FlattenCodesLease() {

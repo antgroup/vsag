@@ -15,8 +15,11 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
+#include <string>
 #include <vector>
 
+#include "data_type.h"
 #include "json_wrapper.h"
 #include "metric_type.h"
 #include "typing.h"
@@ -26,6 +29,7 @@ namespace vsag {
 
 class Allocator;
 class SafeThreadPool;
+struct PiPNNBuildCache;
 DEFINE_POINTER(GraphInterface);
 
 /** Internal PiPNN policy shared by indexes that use the batch graph builder. */
@@ -57,7 +61,7 @@ struct PiPNNGraphBuilderParameter {
  * Implements the construction approach described in "PiPNN: Ultra-Scalable Graph-Based Nearest
  * Neighbor Indexing" (arXiv:2602.21247).
  *
- * The builder consumes normalized internal IDs and dense, in-memory FP32 codes. It owns only
+ * The builder consumes normalized internal IDs and dense, in-memory FP32, FP16, or BF16 codes. It owns only
  * graph construction; labels, source IDs, metadata, route layers, and serialization stay in the
  * index layer.
  */
@@ -73,9 +77,29 @@ public:
     void
     Build(const GraphInterfacePtr& graph,
           const Vector<InnerIdType>& ids_sequence,
-          const Vector<const float*>& rows) const;
+          const Vector<const float*>& rows,
+          const std::vector<std::string>* source_ids = nullptr,
+          const PiPNNBuildCache* imported_cache = nullptr,
+          std::shared_ptr<PiPNNBuildCache>* exported_cache = nullptr) const;
+
+    /** Native half rows are borrowed, subset-aligned with ids_sequence, and never indexed by ID. */
+    void
+    Build(const GraphInterfacePtr& graph,
+          const Vector<InnerIdType>& ids_sequence,
+          const Vector<const uint16_t*>& rows,
+          DataTypes data_type) const;
 
 private:
+    template <typename ElementType>
+    void
+    build_typed(const GraphInterfacePtr& graph,
+                const Vector<InnerIdType>& ids_sequence,
+                const Vector<const ElementType*>& rows,
+                DataTypes data_type,
+                const std::vector<std::string>* source_ids,
+                const PiPNNBuildCache* imported_cache,
+                std::shared_ptr<PiPNNBuildCache>* exported_cache) const;
+
     PiPNNGraphBuilderParameter parameter_;
     uint64_t dimensions_;
     MetricType metric_;

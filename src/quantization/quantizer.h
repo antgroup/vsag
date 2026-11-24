@@ -24,6 +24,7 @@
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "utils/function_exists_check.h"
+#include "utils/training_rows.h"
 
 namespace vsag {
 
@@ -34,8 +35,8 @@ namespace vsag {
 template <typename QuantT>
 class Quantizer {
 public:
-    explicit Quantizer<QuantT>(int dim, Allocator* allocator)
-        : dim_(dim), code_size_(dim * sizeof(float)), allocator_(allocator){};
+    explicit Quantizer(int dim, Allocator* allocator)
+        : dim_(dim), code_size_(dim * sizeof(float)), allocator_(allocator) {};
 
     virtual ~Quantizer() = default;
 
@@ -46,6 +47,52 @@ public:
      * @param count The number of elements in the data array.
      * @return True if training was successful; False otherwise.
      */
+    // Explicit opt-in: an inherited TrainRows method does not advertise support.
+    static constexpr bool
+    SupportsTrainingRows() {
+        if constexpr (requires { QuantT::TRAINING_ROWS_SUPPORTED; })
+            return QuantT::TRAINING_ROWS_SUPPORTED;
+        return false;
+    }
+
+    bool
+    CanTrainRows() const {
+        if constexpr (!SupportsTrainingRows())
+            return false;
+        else if constexpr (requires(const QuantT& q) { q.CanTrainRowsImpl(); })
+            return static_cast<const QuantT&>(*this).CanTrainRowsImpl();
+        else
+            return true;
+    }
+    void
+    ValidateTrainingRowsShape(const TrainingRows& rows) const {
+        if constexpr (requires(const QuantT& q) { q.ValidateTrainingRowsShapeImpl(rows); })
+            static_cast<const QuantT&>(*this).ValidateTrainingRowsShapeImpl(rows);
+        else if (rows.Dim() != this->dim_ || rows.Count() == 0)
+            throw std::invalid_argument("invalid quantizer TrainingRows shape");
+    }
+    bool
+    ReTrainRows(const TrainingRows& rows) {
+        if (!CanTrainRows())
+            throw std::invalid_argument("quantizer configuration rejects TrainingRows");
+        ValidateTrainingRowsShape(rows);
+        this->is_trained_ = false;
+        return TrainRows(rows);
+    }
+    bool
+    TrainRows(const TrainingRows& rows) {
+        if constexpr (SupportsTrainingRows()) {
+            if (!CanTrainRows())
+                throw std::invalid_argument("quantizer configuration rejects TrainingRows");
+            ValidateTrainingRowsShape(rows);
+            if (this->is_trained_)
+                return true;
+            return cast().TrainRowsImpl(rows);
+        } else {
+            throw std::invalid_argument("quantizer does not support TrainingRows");
+        }
+    }
+
     bool
     Train(const float* data, uint64_t count) {
         if (this->is_trained_) {
@@ -235,6 +282,28 @@ public:
         return cast().ScanBatchDistImpl(computer, count, codes, dists);
     }
 
+    /**
+     * @brief Evaluate contiguous ordinary row codes, never a quantizer-specific packed layout.
+     * Writes exactly count distances without reading padding past the last row.
+     */
+    inline void
+    ScanRowBatchDists(Computer<QuantT>& computer,
+                      uint64_t count,
+                      const uint8_t* codes,
+                      float* dists) const {
+        return cast().ScanRowBatchDistImpl(computer, count, codes, dists);
+    }
+
+    inline void
+    ScanRowBatchDistImpl(Computer<QuantT>& computer,
+                         uint64_t count,
+                         const uint8_t* codes,
+                         float* dists) const {
+        for (uint64_t i = 0; i < count; ++i) {
+            cast().ComputeDistImpl(computer, codes + i * code_size_, dists + i);
+        }
+    }
+
     inline void
     ScanBatchDistsWithThreshold(Computer<QuantT>& computer,
                                 uint64_t count,
@@ -354,6 +423,9 @@ private:
     }
 
     friend QuantT;
+
+    template <typename, typename>
+    friend class QuantizerAdapter;
 
 private:
     uint64_t dim_{0};

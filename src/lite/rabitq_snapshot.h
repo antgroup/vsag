@@ -189,7 +189,7 @@ struct EncodedSnapshot {
 };
 
 inline EncodedSnapshot
-load_snapshot_payload(std::istream& input, uint64_t expected_version) {
+load_snapshot_payload(std::istream& input, uint64_t expected_version, uint64_t extra_rows = 0) {
     char magic[8]{};
     input.read(magic, sizeof(magic));
     codec_require(input and std::memcmp(magic, "VSAGLQ01", 8) == 0, "invalid snapshot magic");
@@ -221,6 +221,12 @@ load_snapshot_payload(std::istream& input, uint64_t expected_version) {
     }
     read_bytes(input, model.flips);
     EncodedRecords codes(dim);
+    if (extra_rows != 0) {
+        const auto stride = std::max(codes.FilterBytes(), codes.SupplementBytes());
+        codec_require(extra_rows <= 1000000 - count and extra_rows <= UINT64_MAX / stride - count,
+                      "encoded snapshot replay capacity overflow");
+        codes.Reserve(count + extra_rows);
+    }
     codes.Resize(count);
     for (uint64_t id = 0; id < count; ++id) {
         auto& metadata = codes.metadata[id];
@@ -321,8 +327,10 @@ save_mutable_snapshot(std::ostream& output, const MutableGraphState& state) {
 }
 
 inline MutableGraphState
-load_mutable_snapshot(std::istream& input, bool use_incoming_adjacency = false) {
-    auto loaded = load_snapshot_payload(input, 1);
+load_mutable_snapshot(std::istream& input,
+                      bool use_incoming_adjacency = false,
+                      uint64_t extra_rows = 0) {
+    auto loaded = load_snapshot_payload(input, 1, extra_rows);
     const uint64_t max_degree = read_u64(input);
     const uint64_t ef_search = read_u64(input);
     codec_require(max_degree >= 2 and max_degree <= 64 and ef_search >= max_degree,

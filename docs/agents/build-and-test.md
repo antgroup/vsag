@@ -29,13 +29,20 @@ make pyvsag
 
 Prefer these targets over invoking `cmake` directly so behavior matches CI.
 
+`make pyvsag` writes the wheel to `wheelhouse/`; install it into a clean virtual environment before
+running `tests/python`. See the [pyvsag guide](../docs/en/src/guide/pyvsag.md).
+
 `make test-module MODULE=<name>` is the local acceleration path for one unit-test subsystem. The maintained module names are `gpu`, `simd`, `common`, `algorithm`, `factory`, `attr`, `datacell`, `layout`, `quantization`, `storage`, `io`, `utils`, and `impl`. It accepts the same `CASE` and `SHARD` runtime arguments as `make test`; use the aggregate `make test` path before submitting changes.
 
 ## Development environment
 
 - Recommended: use the published Docker development image
   (`vsaglib/vsag:ubuntu`).
-- Maintained CI images use the `ci-x86-*` and `ci-aarch64-*` tags and are
+- Hosted CI on main uses [`ci-main-*` platform tags](../../docker/README.md)
+  for OpenBLAS (amd64 and arm64) and MKL (amd64). Hosted jobs pull these
+  images from GHCR; adjacent Docker Hub comments retain the alternative addresses
+  for debugging. Lite and Lint validate preinstalled LLVM 20 tools instead of
+  installing packages at job runtime. These images are
   published to both `vsaglib/vsag` on Docker Hub and
   `ghcr.io/antgroup/vsag` on GitHub Container Registry.
 - Supported local environments include Ubuntu 20.04+ and CentOS 7+.

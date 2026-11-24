@@ -106,6 +106,11 @@ fused RaBitQ records. Post-build `Add` decodes fused records on demand for
 pairwise graph updates, so it does not retain an SQ8 or raw-vector copy; batch
 adds are preferable when insertion throughput matters.
 
+For `graph_type="pipnn"`, fused HGraph preencodes the batch in parallel and reuses
+those bytes when publishing the index, so each input is encoded once. The temporary
+code buffer grows with the input batch. When all input labels are accepted, it is
+released before PiPNN builds the bottom graph.
+
 The fused layout is opt-in and has stricter constraints than ordinary split
 storage:
 

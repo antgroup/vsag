@@ -65,7 +65,9 @@ public:
     using norm_type = float;
     using error_type = float;
     using sum_type = float;
-
+    // =============================================================================
+    //  Construction
+    // =============================================================================
     explicit RaBitQuantizer(
         int dim,
         uint64_t pca_dim,
@@ -89,6 +91,37 @@ public:
 
     bool
     TrainImpl(const float* data, uint64_t count);
+    static constexpr bool TRAINING_ROWS_SUPPORTED = true;
+    bool
+    CanTrainRowsImpl() const {
+        return true;
+    }
+    void
+    ValidateTrainingRowsShapeImpl(const TrainingRows& rows) const {
+        if (rows.Dim() != original_dim_ || original_dim_ <= 0 || rows.Count() == 0)
+            throw std::invalid_argument("invalid RaBitQ TrainingRows shape");
+        if (pca_dim_ != original_dim_ &&
+            (rows.Count() < 2 || original_dim_ > INT32_MAX ||
+             rows.Count() > static_cast<uint64_t>(PTRDIFF_MAX) / sizeof(float) / original_dim_ ||
+             static_cast<uint64_t>(original_dim_) >
+                 static_cast<uint64_t>(PTRDIFF_MAX) / sizeof(float) / original_dim_))
+            throw std::invalid_argument("invalid RaBitQ PCA TrainingRows span");
+    }
+
+    bool
+    TrainRowsImpl(const TrainingRows& rows);
+
+    bool
+    UsesPcaForTraining() const {
+        return pca_dim_ != original_dim_;
+    }
+
+    // Internal typed-input training. PCA retains the original dense conversion fallback.
+    bool
+    TrainHalf(const void* data, uint64_t count, DataTypes data_type);
+
+    bool
+    ReTrainHalf(const void* data, uint64_t count, DataTypes data_type);
 
     void
     SetCentroid(const float* centroid);
@@ -97,7 +130,9 @@ public:
     // instead of retaining one dense dim-by-dim matrix per cluster.
     void
     ShareFusedModelFrom(const RaBitQuantizer& source);
-
+    // =============================================================================
+    //  Core Encode / Decode — fundamental Impl overrides
+    // =============================================================================
     bool
     EncodeOneImpl(const float* data, uint8_t* codes) const;
 
@@ -109,13 +144,22 @@ public:
 
     bool
     DecodeBatchImpl(const uint8_t* codes, float* data, uint64_t count);
-
+    // =============================================================================
+    //  Basic Distance — code-code and query-base Impl overrides
+    // =============================================================================
     float
     ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) const;
 
     float
     ComputeQueryBaseImpl(const uint8_t* query_codes, const uint8_t* base_codes) const;
 
+    float
+    RecoverQueryBaseDistance(const uint8_t* query_codes,
+                             const uint8_t* base_codes,
+                             float ip_bq_estimate) const;
+    // =============================================================================
+    //  Query Processing — transform query for residual/SIMD computation
+    // =============================================================================
     void
     ProcessQueryImpl(const float* query, Computer<RaBitQuantizer>& computer) const;
 
@@ -142,7 +186,10 @@ public:
                                  float query_raw_norm,
                                  norm_type mrq_norm_sqr,
                                  Computer<RaBitQuantizer>& computer) const;
-
+    // =============================================================================
+    //  HNSW Four-Bit Search — prepare query planes and compute distances
+    //  (compatibility path for HNSW-style fused codes)
+    // =============================================================================
     void
     PrepareHnswFourBitQuery(const float* transformed_query,
                             Vector<uint8_t>& query_planes,
@@ -184,7 +231,10 @@ public:
                     float filter_inner_product,
                     float* distance,
                     float* lower_bound) const;
-
+    // =============================================================================
+    //  Fused Affine Metadata — encode/decode with per-cluster affine
+    //  coefficients for RaBitQ fused (split) storage
+    // =============================================================================
     // Replaces the native split metadata in-place with fused affine coefficients.
     // The x/y plane payload and the record sizes are unchanged.
     bool
@@ -201,7 +251,10 @@ public:
                          bool legacy_hnsw_codec,
                          float* data,
                          bool apply_inverse_rotation = true) const;
-
+    // =============================================================================
+    //  Fused Pair Distance — pairwise IP/L2 in code domain
+    //  (used by IVF centroid-aware distance; avoids full reconstruction)
+    // =============================================================================
     // Pairwise inner product of two fused codes evaluated in the code domain. With
     // v = centroid + residual_scale * (code - full_center),
     //   <v1,v2> = <c1,c2> + a2*(<c1,code2> - c0*S(c1)) + a1*(<code1,c2> - c0*S(c2))
@@ -271,7 +324,9 @@ public:
                                  const uint8_t* one_bit_code,
                                  const uint8_t* supplement_code,
                                  float* distance) const;
-
+    // =============================================================================
+    //  Quantizer Framework — CRTP Impl hooks for the generic pipeline
+    // =============================================================================
     [[nodiscard]] float
     DefaultRaBitQErrorRate() const {
         return rabitq_error_rate_;
@@ -279,6 +334,17 @@ public:
 
     void
     ComputeDistImpl(Computer<RaBitQuantizer>& computer, const uint8_t* codes, float* dists) const;
+
+    void
+    ComputeDistsBatch4Impl(Computer<RaBitQuantizer>& computer,
+                           const uint8_t* codes1,
+                           const uint8_t* codes2,
+                           const uint8_t* codes3,
+                           const uint8_t* codes4,
+                           float& dist1,
+                           float& dist2,
+                           float& dist3,
+                           float& dist4) const;
 
     void
     ScanBatchDistImpl(Computer<RaBitQuantizer<metric>>& computer,
@@ -301,6 +367,9 @@ public:
     }
 
 public:
+    // =============================================================================
+    //  SQ (Scalar Query) Encoding — SQ4/SQ8 query quantization helpers
+    // =============================================================================
     // query sq4 related
     void
     ReOrderSQ4(const uint8_t* input, uint8_t* output) const;
@@ -328,6 +397,10 @@ public:
     RecoverOrderSQ(const uint8_t* output, uint8_t* input) const;
 
 public:
+    // =============================================================================
+    //  Base Multi-Bit & Scalar Code — Extend-RaBitQ, scalar code build,
+    //  split/merge code storage
+    // =============================================================================
     // base multi-bit related
     void
     EncodeExtendRaBitQ(const float* o_prime, uint8_t* code, float& y_norm) const;
@@ -417,7 +490,10 @@ public:
     MergeSplitCode(const uint8_t* one_bit_code,
                    const uint8_t* supplement_code,
                    uint8_t* full_code) const;
-
+    // =============================================================================
+    //  FastScan32 Batch Acceleration — 32-code block packing, query
+    //  preparation, and high-accuracy batch distance computation
+    // =============================================================================
     static constexpr uint64_t FASTSCAN_BATCH_SIZE = 32;
     static constexpr uint64_t FASTSCAN_MAX_FILTER_BITS = 3;
 
@@ -502,6 +578,9 @@ public:
                               float* full_add) const;
 
     bool
+    // [reorder-stage] Consumes the already-recovered original (non-FastScan)
+    // filter IP (recovered by RecoverFastScan32OriginalQueryFilterInnerProduct
+    // above) and builds the full x+y distance.
     ComputeDistWithSplitCodeAndOriginalQueryFilterInnerProduct(
         Computer<RaBitQuantizer>& original_computer,
         const uint8_t* supplement_code,
@@ -513,7 +592,14 @@ public:
     [[nodiscard]] float
     ComputeTransformedResidualQueryNormSqr(const float* transformed_query) const;
 
+    // =============================================================================
+    //  Distance Computation — One-Bit Lower Bound (filter stage)
+    //  Coarse x-bit estimates and optional lower bounds for graph traversal.
+    // =============================================================================
     bool
+    // [filter-stage] Coarse x-bit estimate for fast traversal pruning.
+    // Writes the estimate to *dists and, when non-null, the pruning-safe
+    // lower bound to *lower_bound; use before the reorder stage.
     ComputeDistWithOneBitLowerBound(
         Computer<RaBitQuantizer>& computer,
         const uint8_t* one_bit_code,
@@ -527,6 +613,8 @@ public:
     // reranking. The x=1 four-bit traversal estimate is approximate, so that
     // mode returns NaN and requires the full path to rescan the x-bit code.
     bool
+    // [filter-stage] Same as above, but also returns the exact filter
+    // inner product in *filter_inner_product for later split-code re-ranking.
     ComputeDistWithOneBitLowerBoundAndFilterIP(
         Computer<RaBitQuantizer>& computer,
         const uint8_t* one_bit_code,
@@ -535,6 +623,9 @@ public:
         float* filter_inner_product,
         float runtime_rabitq_error_rate = std::numeric_limits<float>::quiet_NaN()) const;
 
+    // [filter-stage] Use batch kernels for L2/IP with 1-4 filter bits and split-code storage.
+    // Other metrics or bit widths use four per-code calls. For L2/IP with 1-4 filter bits but
+    // without split-code storage, all four computed flags are set to false.
     void
     ComputeDistsWithOneBitLowerBoundBatch4(
         Computer<RaBitQuantizer>& computer,
@@ -555,8 +646,14 @@ public:
         bool& computed3,
         bool& computed4,
         float runtime_rabitq_error_rate = std::numeric_limits<float>::quiet_NaN()) const;
-
+    // =============================================================================
+    //  Distance Computation — Split-Code Full Distance (reorder stage)
+    //  Full x+y distance from split (filter + supplement) codes.
+    //  Use these after the filter stage has narrowed the candidate set.
+    // =============================================================================
     bool
+    // [reorder-stage] Full x+y distance from scratch.
+    // Use when the filter-stage distance is unavailable (e.g. brute-force).
     ComputeDistWithSplitCode(Computer<RaBitQuantizer>& computer,
                              const uint8_t* one_bit_code,
                              const uint8_t* supplement_code,
@@ -564,6 +661,8 @@ public:
 
     // Computes the full x+y split distance from the raw x-bit inner product emitted by
     // ComputeDistWithOneBitLowerBound(). Only the y-bit supplement record is required.
+    // [reorder-stage] Full distance from a pre-computed filter inner
+    // product. Scans only y-bit supplement (cheaper than full split).
     bool
     ComputeDistWithSplitCodeAndFilterInnerProduct(Computer<RaBitQuantizer>& computer,
                                                   const uint8_t* supplement_code,
@@ -576,6 +675,9 @@ public:
     // x+y distance. Passing it here lets the reorder path scan only the y-bit
     // supplement planes instead of rescanning the x-bit filter planes. The
     // x=1 four-bit traversal estimate is rejected because it is approximate.
+    // [reorder-stage] Full distance from the exact filter-stage distance.
+    // Also scans only y-bit supplement. Rejected for x=1 four-bit
+    // because its filter estimate is approximate, not exact.
     bool
     ComputeDistWithSplitCodeAndFilterDist(Computer<RaBitQuantizer>& computer,
                                           const uint8_t* one_bit_code,
@@ -583,13 +685,17 @@ public:
                                           float filter_dist,
                                           float* dists) const;
 
+    // [reorder-stage] Same as above but uses filter IP instead of distance.
+    // Use when retaining the filter IP is cheaper than the filter distance.
     bool
     ComputeDistWithSplitCodeAndFilterIP(Computer<RaBitQuantizer>& computer,
                                         const uint8_t* one_bit_code,
                                         const uint8_t* supplement_code,
                                         float filter_inner_product,
                                         float* dists) const;
-
+    // =============================================================================
+    //  Code Layout & Metadata — offset queries for code/supplement/norm fields
+    // =============================================================================
     [[nodiscard]] uint64_t
     OneBitRecordNormOffset() const;
 
@@ -643,8 +749,13 @@ public:
 
     [[nodiscard]] uint64_t
     AlignCodeField(uint64_t size) const;
-
+    // =============================================================================
+    //  Private — Internal Methods
+    // =============================================================================
 private:
+    bool
+    finish_training(const float* rotation_input, uint64_t count);
+
     struct FastScan32Layout {
         uint64_t packed_size{0};
         uint64_t metadata_record_offset{0};
@@ -755,7 +866,9 @@ private:
 
     [[nodiscard]] norm_type
     compute_filter_code_norm(const uint8_t* filter_code, uint32_t filter_bits) const;
-
+    // =============================================================================
+    //  Member Variables
+    // =============================================================================
     // bit related
     uint64_t num_bits_per_dim_query_{32};
     uint32_t num_bits_per_dim_base_{1};

@@ -47,6 +47,7 @@
 #include "pyramid_fast_build.h"
 #include "quantization/transform_quantization/transform_quantizer_parameter.h"
 #include "query_context.h"
+#include "simd/bf16_simd.h"
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
 #include "storage/serialization_tags.h"
@@ -76,9 +77,10 @@ namespace {
 bool
 supports_parallel_encode(const FlattenInterfacePtr& codes) {
     const auto name = codes->GetQuantizerName();
-    return codes->InMemory() &&
-           (name == QUANTIZATION_TYPE_VALUE_FP32 || name == QUANTIZATION_TYPE_VALUE_RABITQ ||
-            name == QUANTIZATION_TYPE_VALUE_SQ8);
+    const auto terminal_name = GetBaseQuantizerName(name);
+    return codes->InMemory() && (terminal_name == QUANTIZATION_TYPE_VALUE_FP32 ||
+                                 terminal_name == QUANTIZATION_TYPE_VALUE_RABITQ ||
+                                 terminal_name == QUANTIZATION_TYPE_VALUE_SQ8);
 }
 
 void
@@ -750,13 +752,30 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
     const auto* build_vectors = optimized_build_codes_ == nullptr ? data_vectors : nullptr;
 
     if (graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
-        // PiPNN is restricted to float32 dense input by the constructor, so the
-        // representation-free rows can be handed back as float pointers unchanged.
+        // Borrow input rows in their original dtype; no full FP32 expansion.
+        const bool half_input = common_param_.data_type_ == DataTypes::DATA_TYPE_FP16 ||
+                                common_param_.data_type_ == DataTypes::DATA_TYPE_BF16;
+        // Reservoir caches are only supported for FP32 input; half input always builds cold.
+        const bool cache_attempt = has_loaded_cache() and not half_input;
+        std::vector<uint8_t> global_hits(static_cast<uint64_t>(data_num), 0);
         Vector<const float*> rows(allocator_);
-        rows.reserve(static_cast<uint64_t>(data_num));
+        Vector<const uint16_t*> half_rows(allocator_);
+        if (half_input) {
+            half_rows.reserve(static_cast<uint64_t>(data_num));
+        } else {
+            rows.reserve(static_cast<uint64_t>(data_num));
+        }
         for (const auto input_index : input_indices) {
-            rows.emplace_back(static_cast<const float*>(
-                element_ptr(build_vectors == nullptr ? data_vectors : build_vectors, input_index)));
+            if (input_index < 0 or input_index >= input_count) {
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    "PiPNN input index is outside the source dataset");
+            }
+            const auto* row = element_ptr(data_vectors, input_index);
+            if (half_input) {
+                half_rows.emplace_back(static_cast<const uint16_t*>(row));
+            } else {
+                rows.emplace_back(static_cast<const float*>(row));
+            }
         }
         for (const auto& [hname, hierarchy] : hierarchies_) {
             auto pipnn_parameter = pipnn_param_;
@@ -767,22 +786,83 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
                                             allocator_,
                                             this->thread_pool_.get(),
                                             this->build_thread_count_);
-            GraphBuildFunc build_graph =
-                [&](GraphInterfacePtr& graph, const Vector<InnerIdType>& ids, uint32_t level) {
-                    // `rows` is indexed by compacted inner id while `ids` is this node's own id
-                    // list, which is a strict subset as soon as an element is missing from the
-                    // node. Remap positionally for every level rather than assuming level 0 spans
-                    // the whole [0, data_num) range: the public path API currently requires at
-                    // least one path per element, but that caller-side invariant is not something
-                    // this builder should depend on.
-                    Vector<const float*> node_rows(allocator_);
+            GraphBuildFunc build_graph = [&](GraphInterfacePtr& graph,
+                                             const Vector<InnerIdType>& ids,
+                                             uint32_t level,
+                                             const std::string& node_path) {
+                // `rows` is indexed by compacted inner id while `ids` is this node's own id
+                // list, which is a strict subset as soon as an element is missing from the
+                // node. Remap positionally for every level rather than assuming level 0 spans
+                // the whole [0, data_num) range: the public path API currently requires at
+                // least one path per element, but that caller-side invariant is not something
+                // this builder should depend on.
+                graph->SetMaxCapacity(static_cast<InnerIdType>(data_num));
+                if (half_input) {
+                    Vector<const uint16_t*> node_rows(allocator_);
                     node_rows.reserve(ids.size());
                     for (const auto id : ids) {
-                        node_rows.emplace_back(rows[id]);
+                        node_rows.emplace_back(half_rows[id]);
                     }
-                    graph->SetMaxCapacity(static_cast<InnerIdType>(data_num));
-                    pipnn_builder.Build(graph, ids, node_rows);
+                    pipnn_builder.Build(graph, ids, node_rows, common_param_.data_type_);
+                    return;
+                }
+                Vector<const float*> node_rows(allocator_);
+                node_rows.reserve(ids.size());
+                for (const auto id : ids) {
+                    node_rows.emplace_back(rows[id]);
+                }
+                std::vector<std::string> node_sources;
+                if (source_ids != nullptr) {
+                    node_sources.reserve(ids.size());
+                    for (const auto id : ids) {
+                        node_sources.emplace_back(source_ids[input_indices[id]]);
+                    }
+                }
+                auto& graph_cache = cache_->CreateGraphCache(hname, node_path);
+                const auto imported_snapshot = graph_cache.pipnn;
+                const uint64_t old_memory =
+                    imported_snapshot == nullptr ? 0 : imported_snapshot->GetMemoryUsage();
+                auto charge_snapshot = [&]() {
+                    if (graph_cache.pipnn != nullptr) {
+                        pipnn_cache_memory_.fetch_add(graph_cache.pipnn->GetMemoryUsage(),
+                                                      std::memory_order_release);
+                    }
                 };
+                pipnn_cache_memory_.fetch_sub(old_memory, std::memory_order_acq_rel);
+                try {
+                    pipnn_builder.Build(graph,
+                                        ids,
+                                        node_rows,
+                                        source_ids == nullptr ? nullptr : &node_sources,
+                                        imported_snapshot.get(),
+                                        &graph_cache.pipnn);
+                } catch (...) {
+                    charge_snapshot();
+                    throw;
+                }
+                charge_snapshot();
+                if (cache_attempt) {
+                    const auto hits =
+                        graph_cache.pipnn == nullptr ? 0 : graph_cache.pipnn->reused_rows;
+                    build_cache_hit_memberships_ += hits;
+                    build_cache_missed_memberships_ += ids.size() - hits;
+                    if (graph_cache.pipnn != nullptr) {
+                        const auto& mask = graph_cache.pipnn->reuse_mask;
+                        for (uint64_t row = 0; row < mask.size(); ++row) {
+                            if (mask[row] != 0 and global_hits[ids[row]] == 0) {
+                                global_hits[ids[row]] = 1;
+                                ++build_cache_hit_nodes_;
+                            }
+                        }
+                    }
+                    build_cache_missed_nodes_ =
+                        static_cast<uint64_t>(data_num) - build_cache_hit_nodes_;
+                    build_cache_hit_rate_ = data_num == 0
+                                                ? 0.0F
+                                                : static_cast<float>(build_cache_hit_nodes_) /
+                                                      static_cast<float>(data_num);
+                }
+            };
             hierarchy->root->Build(build_graph);
 
             auto& root = *hierarchy->root;
@@ -807,15 +887,25 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
                 for (int level = 0; level <= max_route_level; ++level) {
                     Vector<InnerIdType> route_ids(allocator_);
                     Vector<const float*> route_rows(allocator_);
+                    Vector<const uint16_t*> half_route_rows(allocator_);
                     for (InnerIdType id = 0; id < data_num; ++id) {
                         if (route_levels[id] >= level) {
                             route_ids.emplace_back(id);
-                            route_rows.emplace_back(rows[id]);
+                            if (half_input) {
+                                half_route_rows.emplace_back(half_rows[id]);
+                            } else {
+                                route_rows.emplace_back(rows[id]);
+                            }
                         }
                     }
                     auto route_graph = root.make_route_graph();
                     route_graph->SetMaxCapacity(static_cast<InnerIdType>(data_num));
-                    pipnn_builder.Build(route_graph, route_ids, route_rows);
+                    if (half_input) {
+                        pipnn_builder.Build(
+                            route_graph, route_ids, half_route_rows, common_param_.data_type_);
+                    } else {
+                        pipnn_builder.Build(route_graph, route_ids, route_rows);
+                    }
                     root.routing_->graphs.emplace_back(std::move(route_graph));
                 }
             }
@@ -1302,6 +1392,7 @@ std::unordered_map<std::string, uint64_t>
 Pyramid::GetMemoryUsageDetail() const {
     std::shared_lock resize_lock(resize_mutex_);
     std::unordered_map<std::string, uint64_t> memory_usage;
+    memory_usage["pipnn_build_cache"] = pipnn_cache_memory_.load(std::memory_order_acquire);
     memory_usage["points_mutex"] = points_mutex_ == nullptr ? 0 : points_mutex_->GetMemoryUsage();
     memory_usage["pool"] = pool_ == nullptr ? 0 : pool_->GetMemoryUsage();
     memory_usage["label_table"] = label_table_ == nullptr ? 0 : label_table_->GetMemoryUsage();
@@ -2266,6 +2357,14 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
                 .SetJson(value);
             inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][FAST_ENCODE_RABITQ_ROUNDS_KEY]
                 .SetJson(value);
+        } else if (key == SAQ_AVG_BITS) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][SAQ_AVG_BITS_KEY].SetJson(value);
+        } else if (key == SAQ_SEGMENT_COUNT) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][SAQ_SEGMENT_COUNT_KEY].SetJson(
+                value);
+        } else if (key == SAQ_RANDOM_ROTATION) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][SAQ_RANDOM_ROTATION_KEY].SetJson(
+                value);
         } else if (key == PYRAMID_PRECISE_QUANTIZATION_TYPE) {
             inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetJson(value);
         } else if (key == PYRAMID_GRAPH_MAX_DEGREE) {
@@ -2320,7 +2419,9 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
                    key == PIPNN_PARAMETER_LEADER_SAMPLE_RATE or key == PIPNN_PARAMETER_FANOUT or
                    key == PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT or
                    key == PIPNN_PARAMETER_HASH_PLANE_COUNT or
-                   key == PIPNN_PARAMETER_RESERVOIR_SIZE) {
+                   key == PIPNN_PARAMETER_RESERVOIR_SIZE or
+                   key == PIPNN_PARAMETER_ADAPTIVE_PRUNING or
+                   key == PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP) {
             inner_json[GRAPH_KEY][key].SetJson(value);
         } else if (key == PYRAMID_INDEX_MIN_SIZE) {
             inner_json[INDEX_MIN_SIZE].SetJson(value);
@@ -2369,7 +2470,8 @@ Pyramid::Build(const DatasetPtr& base) {
         return {};
     }
     CHECK_ARGUMENT(GetNumElements() == 0, "index is not empty");
-    CHECK_ARGUMENT(not(adaptive_pruning_.enabled && has_loaded_cache()),
+    CHECK_ARGUMENT(not(adaptive_pruning_.enabled && has_loaded_cache() &&
+                       graph_type_ != GRAPH_TYPE_VALUE_PIPNN),
                    "adaptive_pruning does not yet support building from imported cache; disable "
                    "adaptive_pruning or build without importing a cache");
     const auto data_num = base->GetNumElements();
@@ -3157,10 +3259,11 @@ Pyramid::populate_hierarchy_trees(const DatasetPtr& base, const Vector<int64_t>*
     if (thread_pool_ != nullptr && hierarchies_.size() > 1) {
         Vector<std::future<void>> futures(allocator_);
         for (const auto& [hname, hierarchy_ptr] : hierarchies_) {
-            const std::string hierarchy_name = hname;
+            // Hierarchy keys stay alive until every future below has completed.
+            const auto* hierarchy_name = &hname;
             futures.push_back(thread_pool_->GeneralEnqueue(
                 [&hierarchy = *hierarchy_ptr, base, hierarchy_name, data_num, input_indices]() {
-                    populate_path_tree(hierarchy, base, hierarchy_name, data_num, input_indices);
+                    populate_path_tree(hierarchy, base, *hierarchy_name, data_num, input_indices);
                 }));
         }
         for (auto& future : futures) {
@@ -3488,10 +3591,14 @@ Pyramid::calc_native_distance_by_id(const void* query,
     if (raw_vector_ != nullptr && calculate_precise_distance) {
         flat = this->raw_vector_;
     }
-    InnerIdType inner_id;
+    InnerIdType inner_id = 0;
     {
         std::shared_lock<std::shared_mutex> label_lock(label_lookup_mutex_);
-        inner_id = label_table_->GetIdByLabel(id);
+        auto [found, found_id] = label_table_->TryGetIdByLabel(id);
+        if (not found) {
+            ThrowLabelNotFound(id);
+        }
+        inner_id = found_id;
     }
     auto computer = flat->FactoryComputer(query);
     float distance = 0.0F;
@@ -3537,6 +3644,34 @@ Pyramid::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
     }
 }
 
+void
+Pyramid::GetFloat32VectorByInnerId(InnerIdType inner_id, float* data) const {
+    if (data_type_ != DataTypes::DATA_TYPE_FP16 and data_type_ != DataTypes::DATA_TYPE_BF16) {
+        this->GetVectorByInnerId(inner_id, data);
+        return;
+    }
+    std::shared_lock<std::shared_mutex> lock(resize_mutex_);
+    auto codes = decodable_codes();
+    auto buffer = codes->AcquireCodesById(inner_id);
+    bool decoded = false;
+    if (buffer) {
+        // Split RaBitQ uses its own Float32 quantizer rather than the native adapter.
+        if (codes->SupportSplitCodeStorage()) {
+            decoded = codes->Decode(buffer.Data(), data);
+        } else {
+            Vector<float> native_row(dim_, allocator_);
+            decoded = codes->Decode(buffer.Data(), native_row.data());
+            if (decoded) {
+                this->expand_native_half_row(native_row.data(), data);
+            }
+        }
+    }
+    if (not decoded) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "Pyramid vector source does not support decode");
+    }
+}
+
 std::string
 Pyramid::GetStats() const {
     if (GetNumElements() == 0) {
@@ -3554,6 +3689,9 @@ Pyramid::GetStats() const {
     analyzer_param.search_params = R"({"pyramid": {"ef_search": 500}})";
     auto analyzer = CreateAnalyzer(analyzer_param);
     JsonType stats = analyzer->GetStats();
+    if (graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
+        stats["pipnn_build"].SetJson(cache_->GetPiPNNBuildStats());
+    }
     if (build_cache_hit_rate_ >= 0.0F) {
         stats["build_cache_hit_rate"].SetFloat(build_cache_hit_rate_);
         stats["build_cache_hit_nodes"].SetUint64(build_cache_hit_nodes_);
@@ -3714,6 +3852,10 @@ Pyramid::fulfill_cache(PyramidBuildCache& cache_snapshot) const {
             }
             if (not graph_cache.neighbors_.empty()) {
                 auto& target_cache = cache_snapshot.CreateGraphCache(hname, node_path);
+                const auto* retained_cache = cache_->GetGraphCache(hname, node_path);
+                if (retained_cache != nullptr) {
+                    target_cache.pipnn = retained_cache->pipnn;
+                }
                 target_cache.source_ids_ = std::move(graph_cache.source_ids_);
                 if (support_duplicate_) {
                     PyramidBuildCache::GroupOwners owners(target_cache.source_ids_.size());
@@ -3748,6 +3890,7 @@ void
 Pyramid::ImportCache(std::istream& in_stream) {
     IOStreamReader reader(in_stream);
     this->cache_->Deserialize(reader);
+    pipnn_cache_memory_.store(cache_->GetPiPNNMemoryUsage(), std::memory_order_release);
 }
 
 std::vector<int64_t>

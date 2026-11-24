@@ -34,6 +34,7 @@
 #include <utility>
 #include <vector>
 
+#include "datacell/sparse_graph_datacell.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index/index_impl.h"
@@ -322,15 +323,21 @@ TEST_CASE("Pyramid immutable preserves reverse label lookup", "[ut][pyramid][imm
         int64_t candidates[] = {999, 42};
         const auto result = index->CalcDistancesById(vectors.data(), candidates, 2);
         CHECK(result->GetDistances()[0] == 0.0F);
-        CHECK(result->GetDistances()[1] == -1.0F);
+        CHECK(std::isnan(result->GetDistances()[1]));
+        CHECK(result->GetValids()[0]);
+        CHECK_FALSE(result->GetValids()[1]);
+        CHECK_THROWS_AS(index->CalcDistanceById(vectors.data(), 42), vsag::VsagException);
     };
     source.index->SetImmutable();
     source.index->SetImmutable();
     check(source.index);
     CHECK_FALSE(source.index->CheckIdExist(118));
     int64_t removed_id = 118;
-    CHECK(source.index->CalcDistancesById(vectors.data(), &removed_id, 1)->GetDistances()[0] ==
-          -1.0F);
+    auto removed_result = source.index->CalcDistancesById(vectors.data(), &removed_id, 1);
+    CHECK(std::isnan(removed_result->GetDistances()[0]));
+    CHECK_FALSE(removed_result->GetValids()[0]);
+    CHECK_THROWS_AS(source.index->CalcDistanceById(vectors.data(), removed_id),
+                    vsag::VsagException);
     std::stringstream stream;
     if (streaming) {
         source.index->SerializeStreaming(stream);
@@ -415,6 +422,56 @@ namespace vsag {
 // public mutation API or changing production serialization.
 class PyramidDuplicateTestPeer {
 public:
+    static void
+    CheckPiPNNGraphs(Pyramid& index, const float* vectors, uint64_t count) {
+        const auto check_graph = [&](const GraphInterfacePtr& graph,
+                                     Vector<InnerIdType> ids,
+                                     float alpha) {
+            std::sort(ids.begin(), ids.end());
+            auto policy = index.pipnn_param_;
+            policy.alpha = alpha;
+            auto graph_param = std::make_shared<SparseGraphDatacellParameter>();
+            graph_param->max_degree_ = graph->MaximumDegree();
+            auto expected = std::make_shared<SparseGraphDataCell>(graph_param, index.allocator_);
+            expected->SetMaxCapacity(static_cast<InnerIdType>(count));
+            Vector<const float*> rows(index.allocator_);
+            for (auto id : ids) {
+                rows.emplace_back(vectors + id * PYRAMID_TEST_DIM);
+            }
+            // HGraph uses this same builder. Compare every constructed graph against
+            // a serial invocation, including hierarchy overrides and sparse route IDs.
+            PiPNNGraphBuilder builder(
+                policy, PYRAMID_TEST_DIM, MetricType::METRIC_TYPE_L2SQR, index.allocator_);
+            builder.Build(expected, ids, rows);
+            Vector<InnerIdType> actual_neighbors(index.allocator_);
+            Vector<InnerIdType> expected_neighbors(index.allocator_);
+            for (auto id : ids) {
+                graph->GetNeighbors(id, actual_neighbors);
+                expected->GetNeighbors(id, expected_neighbors);
+                std::sort(actual_neighbors.begin(), actual_neighbors.end());
+                std::sort(expected_neighbors.begin(), expected_neighbors.end());
+                REQUIRE(actual_neighbors == expected_neighbors);
+            }
+        };
+        for (const auto& [name, hierarchy] : index.hierarchies_) {
+            const auto walk = [&](const auto& self, IndexNode& node) -> void {
+                if (node.status_ == IndexNode::Status::GRAPH) {
+                    check_graph(node.graph_, node.get_ids_unlocked(), hierarchy->alpha);
+                }
+                for (const auto& [key, child] : node.children_) {
+                    self(self, *child);
+                }
+            };
+            walk(walk, *hierarchy->root);
+            if (hierarchy->root->has_routing()) {
+                REQUIRE_FALSE(hierarchy->root->routing_->graphs.empty());
+                for (const auto& graph : hierarchy->root->routing_->graphs) {
+                    check_graph(graph, graph->GetIds(), hierarchy->alpha);
+                }
+            }
+        }
+    }
+
     static IndexNode&
     Root(Pyramid& index) {
         return *index.hierarchies_.begin()->second->root;
@@ -2856,4 +2913,70 @@ TEST_CASE("Pyramid joins accepted node tasks before reporting failures",
     pool->WaitUntilEmpty();
     pool->before_task = {};
     CHECK(pool->running == 0);
+}
+TEST_CASE("Pyramid adaptive PiPNN reuses the shared builder for every graph",
+          "[ut][pyramid][pipnn][pyramid_pipnn_adaptive]") {
+    const auto root_type = GENERATE(std::string("single_layer"), std::string("multi_layer"));
+    const auto threads = GENERATE(1, 4);
+    const auto step = GENERATE(0.0F, 0.06F);
+    CAPTURE(root_type, threads, step);
+    constexpr uint64_t count = 512;
+    vsag::IndexCommonParam common;
+    common.dim_ = PYRAMID_TEST_DIM;
+    common.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    common.thread_pool_ = vsag::SafeThreadPool::FactoryDefaultThreadPool();
+    auto config = vsag::JsonType::Parse(R"({
+        "base_quantization_type":"fp32", "graph_type":"pipnn", "max_degree":8,
+        "alpha":1.2, "pipnn_adaptive_pruning":true,
+        "hierarchies":[{"name":"site", "alpha":1.3},
+                       {"name":"category", "alpha":1.1, "max_degree":12}]
+    })");
+    config["root_graph_type"].SetString(root_type);
+    config["build_thread_count"].SetInt(threads);
+    config["pipnn_adaptive_pruning_adjust_step"].SetFloat(step);
+    auto index = std::make_shared<vsag::Pyramid>(
+        vsag::Pyramid::CheckAndMappingExternalParam(config, common), common);
+    std::vector<float> vectors(count * PYRAMID_TEST_DIM);
+    FillRootVectors(vectors, count);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<std::vector<std::string>> site(count), category(count);
+    for (uint64_t i = 0; i < count; ++i) {
+        site[i] = {i % 2 == 0 ? "a/x" : "b/y"};
+        category[i] = {i % 3 == 0 ? "tech" : "news"};
+    }
+    auto data = vsag::Dataset::Make()
+                    ->NumElements(count)
+                    ->Dim(PYRAMID_TEST_DIM)
+                    ->Ids(ids.data())
+                    ->Float32Vectors(vectors.data())
+                    ->Paths("site", site)
+                    ->Paths("category", category)
+                    ->Owner(false);
+    REQUIRE(index->Build(data).empty());
+    vsag::PyramidDuplicateTestPeer::CheckPiPNNGraphs(*index, vectors.data(), count);
+}
+
+TEST_CASE("Pyramid maps SAQ parameters", "[ut][pyramid][SAQ]") {
+    auto external_param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "saq",
+        "saq_avg_bits": 4.5,
+        "saq_segment_count": 2,
+        "saq_random_rotation": false
+    })");
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto mapped = vsag::Pyramid::CheckAndMappingExternalParam(external_param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::PyramidParameters>(mapped);
+    REQUIRE(typed_param != nullptr);
+    const auto base_json = typed_param->base_codes_param->ToJson();
+    const auto quantization = base_json["quantization_params"];
+    REQUIRE(quantization["type"].GetString() == std::string("saq"));
+    REQUIRE(quantization["saq_avg_bits"].GetFloat() == 4.5F);
+    REQUIRE(quantization["saq_segment_count"].GetUint64() == 2);
+    REQUIRE_FALSE(quantization["saq_random_rotation"].GetBool());
 }

@@ -27,15 +27,17 @@ add_library (rabitq_split_datacell_factory OBJECT ${RABITQ_SPLIT_FACTORY_SRCS})
 target_link_libraries (
   rabitq_split_datacell_factory
   PRIVATE transform quantizer io attr coverage_config vsag_src_common)
-if (CMAKE_GENERATOR MATCHES "Ninja")
-    set_property (GLOBAL APPEND PROPERTY JOB_POOLS rabitq_split_factory_pool=1)
-    set_property (
-      TARGET rabitq_split_datacell_factory
-      PROPERTY JOB_POOL_COMPILE rabitq_split_factory_pool)
-endif ()
 
 add_library (datacell OBJECT ${DATACELL_SRCS})
 target_link_libraries (datacell PRIVATE transform quantizer io attr coverage_config vsag_src_common)
+if (NOT VSAG_DATACELL_COMPILE_JOBS STREQUAL "0")
+    # Both object libraries share one budget on memory-limited builders.
+    # With the default 0, all sources follow the build's global parallelism.
+    set_property (GLOBAL APPEND PROPERTY JOB_POOLS
+                  vsag_datacell_compile_pool=${VSAG_DATACELL_COMPILE_JOBS})
+    set_property (TARGET datacell rabitq_split_datacell_factory
+                  PROPERTY JOB_POOL_COMPILE vsag_datacell_compile_pool)
+endif ()
 
 if (ENABLE_TESTS)
     file (GLOB_RECURSE DATACELL_TESTS "*_test.cpp")

@@ -47,8 +47,10 @@
 #include "io/user_defined_io/user_defined_io_parameter.h"
 #include "pipnn_storage_build.h"
 #include "quantization/scalar_quantization/scalar_quantizer_parameter.h"
+#include "simd/bf16_simd.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
+#include "utils/half_input.h"
 #include "utils/util_functions.h"
 #include "vsag/options.h"
 
@@ -101,8 +103,8 @@ make_temporary_flatten_like(const FlattenInterfaceParamPtr& source_param,
 static bool
 need_temporary_sq8_build_data(const FlattenInterfacePtr& basic_flatten_codes,
                               bool has_precise_reorder) {
-    return not has_precise_reorder and
-           basic_flatten_codes->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_RABITQ;
+    const auto name = basic_flatten_codes->GetQuantizerName();
+    return not has_precise_reorder and GetBaseQuantizerName(name) == QUANTIZATION_TYPE_VALUE_RABITQ;
 }
 
 static void
@@ -125,6 +127,31 @@ wait_all_futures(std::vector<std::future<void>>& futures) {
     }
 }
 
+const float*
+HGraph::fused_float_input(const void* data, uint64_t count, Vector<float>& scratch) const {
+    if (data_type_ != DataTypes::DATA_TYPE_FP16 and data_type_ != DataTypes::DATA_TYPE_BF16) {
+        return static_cast<const float*>(data);
+    }
+    CHECK_ARGUMENT(dim_ > 0, "fused HGraph input dimension must be positive");
+    if (data == nullptr and count != 0) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "fused HGraph half input must not be null");
+    }
+    const auto dim = static_cast<uint64_t>(dim_);
+    CHECK_ARGUMENT(count <= std::numeric_limits<uint64_t>::max() / dim,
+                   "fused HGraph input element count overflows");
+    const auto size = count * dim;
+    CHECK_ARGUMENT(size <= std::numeric_limits<size_t>::max() / sizeof(float),
+                   "fused HGraph converted input size overflows");
+    scratch.resize(size);
+    const auto* half = static_cast<const uint16_t*>(data);
+    for (uint64_t i = 0; i < size; ++i) {
+        scratch[i] = data_type_ == DataTypes::DATA_TYPE_FP16 ? half_input::FP16ToFloat(half[i])
+                                                             : generic::BF16ToFloat(half[i]);
+    }
+    return scratch.data();
+}
+
 void
 HGraph::Train(const DatasetPtr& base) {
     this->check_fused_mutation_supported("Train");
@@ -137,9 +164,10 @@ HGraph::sample_train_dataset(const DatasetPtr& base) const {
     int64_t dim = base->GetDim();
     if (rabitq_fused_datacell_ != nullptr) {
         return vsag::sample_train_data(
-            base, total_elements, dim, train_sample_count_, allocator_, 0x52425131U);
+            base, total_elements, dim, train_sample_count_, allocator_, 0x52425131U, data_type_);
     }
-    return vsag::sample_train_data(base, total_elements, dim, train_sample_count_, allocator_);
+    return vsag::sample_train_data(
+        base, total_elements, dim, train_sample_count_, allocator_, std::nullopt, data_type_);
 }
 
 void
@@ -148,9 +176,11 @@ HGraph::train_codes_with_dataset(const DatasetPtr& train_data) {
     this->basic_flatten_codes_->Train(data_ptr, train_data->GetNumElements());
     if (rabitq_fused_datacell_ != nullptr) {
         CHECK_ARGUMENT(rabitq_split_codes_ != nullptr, "fused HGraph lost its RaBitQ split codes");
-        rabitq_split_codes_->TrainFusedCodec(static_cast<const float*>(data_ptr),
-                                             train_data->GetNumElements(),
-                                             K_FUSED_CLUSTER_COUNT);
+        Vector<float> train_scratch(allocator_);
+        rabitq_split_codes_->TrainFusedCodec(
+            fused_float_input(data_ptr, train_data->GetNumElements(), train_scratch),
+            train_data->GetNumElements(),
+            K_FUSED_CLUSTER_COUNT);
         rabitq_fused_datacell_->SetCodecModel(rabitq_split_codes_->ExportFusedCodec());
     }
     if (has_precise_reorder()) {
@@ -173,11 +203,7 @@ HGraph::Build(const DatasetPtr& data) {
     this->build_cache_missed_nodes_ = 0;
     std::vector<int64_t> ret;
     const bool using_build_cache = this->has_loaded_cache();
-    if (using_build_cache and graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
-        throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            "HGraph PiPNN does not support build_with_cache");
-    }
-    if (using_build_cache) {
+    if (using_build_cache and graph_type_ != GRAPH_TYPE_VALUE_PIPNN) {
         CHECK_ARGUMENT(
             not adaptive_pruning_.enabled,
             "adaptive_pruning does not yet support building from imported cache; disable "
@@ -229,6 +255,12 @@ HGraph::build_by_pipnn(const DatasetPtr& data) {
                        "extra_infos size mismatch");
     }
     return this->build_by_batch_graph(data, true);
+}
+
+RaBitQFusedCodeView
+HGraph::FusedBatchCodes::View(uint64_t input_idx) const {
+    const auto* one_bit_code = codes.data() + input_idx * stride;
+    return {one_bit_code, one_bit_code + one_bit_size, clusters[input_idx]};
 }
 
 std::vector<int64_t>
@@ -297,8 +329,8 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
     if (not defer_persistent_codes or this->rabitq_fused_datacell_ != nullptr) {
         this->train_codes_with_dataset(this->sample_train_dataset(data));
     }
-    this->validate_fused_encoding_data(static_cast<const float*>(vectors),
-                                       static_cast<uint64_t>(total));
+    // Validate every encoding before publishing IDs, and retain it for the actual code write.
+    auto fused_codes = this->prepare_fused_codes(data);
     this->resize(current_count + new_ids_count);
     this->total_count_ += new_ids_count;
     const bool all_rows_are_valid =
@@ -323,6 +355,14 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
             batch_insert_flatten_codes(this->raw_vector_);
         }
     };
+    auto insert_persistent_row = [&](int64_t input_idx, InnerIdType inner_id) {
+        if (fused_codes != nullptr) {
+            const auto view = fused_codes->View(static_cast<uint64_t>(input_idx));
+            this->insert_persistent_codes(get_data(data, input_idx), inner_id, &view);
+        } else {
+            this->insert_persistent_codes(get_data(data, input_idx), inner_id);
+        }
+    };
     bool persistent_codes_batched = false;
     if (not defer_persistent_codes and all_rows_are_valid) {
         batch_insert_persistent_codes();
@@ -337,7 +377,7 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         this->PublishThroughTotalCount();
     }
     Vector<std::pair<InnerIdType, int64_t>> deferred_code_ids(allocator_);
-    Vector<const float*> pipnn_vectors(allocator_);
+    Vector<const void*> pipnn_vectors(allocator_);
     if (use_pipnn) {
         pipnn_vectors.reserve(valid_indices.size());
     }
@@ -354,7 +394,7 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         if (defer_persistent_codes) {
             deferred_code_ids.emplace_back(inner_id, i);
         } else if (not persistent_codes_batched and not this->using_dedup_storage()) {
-            this->insert_persistent_codes(get_data(data, i), inner_id);
+            insert_persistent_row(i, inner_id);
         }
         if (temporary_sq8_build_data != nullptr and not temporary_codes_batched) {
             temporary_sq8_build_data->InsertVector(get_data(data, i), inner_id);
@@ -368,7 +408,7 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         }
         if (use_pipnn) {
             pipnn_vectors.emplace_back(
-                static_cast<const float*>(get_data(data, static_cast<uint32_t>(i))));
+                static_cast<const void*>(get_data(data, static_cast<uint32_t>(i))));
         }
         auto level = this->get_random_level() - 1;
         if (level >= 0) {
@@ -384,25 +424,42 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         }
     }
 
-    if (this->rabitq_fused_datacell_ != nullptr and all_rows_are_valid) {
-        constexpr InnerIdType batch_size = 4096;
-        const auto batch_count = (static_cast<InnerIdType>(total) + batch_size - 1) / batch_size;
+    if (this->rabitq_fused_datacell_ != nullptr and all_rows_are_valid and not inner_ids.empty()) {
+        const bool use_parallel = this->thread_pool_ != nullptr and
+                                  this->build_thread_count_ > 1 and
+                                  not this->thread_pool_->IsCurrentThread();
+        const auto worker_count =
+            use_parallel ? std::min<uint64_t>(this->build_thread_count_, inner_ids.size()) : 1;
+        const auto batch_size = (inner_ids.size() + worker_count - 1) / worker_count;
         std::vector<std::future<void>> futures;
-        HGraphBuildTaskGuard future_guard(futures, static_cast<uint64_t>(batch_count));
-        for (InnerIdType begin = 0; begin < total; begin += batch_size) {
-            const auto end = std::min<InnerIdType>(begin + batch_size, total);
-            auto publish_batch = [this, data, &inner_ids, begin, end]() {
-                for (InnerIdType i = begin; i < end; ++i) {
-                    this->sync_fused_node_codes(inner_ids[i], get_data(data, i));
+        HGraphBuildTaskGuard future_guard(futures, use_parallel ? worker_count : 0);
+        for (uint64_t begin = 0; begin < inner_ids.size(); begin += batch_size) {
+            const auto end = std::min<uint64_t>(begin + batch_size, inner_ids.size());
+            auto publish_batch = [this, data, &inner_ids, &fused_codes, begin, end]() {
+                for (uint64_t i = begin; i < end; ++i) {
+                    if (fused_codes != nullptr) {
+                        const auto view = fused_codes->View(i);
+                        this->rabitq_fused_datacell_->SetNodeCodes(
+                            inner_ids[i],
+                            label_table_->GetLabelById(inner_ids[i]),
+                            view.cluster_id,
+                            view.one_bit_code,
+                            view.supplement_code);
+                    } else {
+                        this->sync_fused_node_codes(inner_ids[i],
+                                                    get_data(data, static_cast<int64_t>(i)));
+                    }
                 }
             };
-            if (this->thread_pool_ != nullptr and this->build_thread_count_ > 1) {
+            if (use_parallel) {
                 futures.emplace_back(this->thread_pool_->GeneralEnqueue(std::move(publish_batch)));
             } else {
                 publish_batch();
             }
         }
         wait_all_futures(futures);
+        // The common case no longer needs a second full code buffer while PiPNN builds its graph.
+        fused_codes.reset();
     }
 
     auto build_data = (has_precise_reorder() and not build_by_base_) ? this->high_precise_codes_
@@ -425,13 +482,67 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
             });
     };
     if (use_pipnn) {
+        const bool half_input = this->data_type_ == DataTypes::DATA_TYPE_FP16 ||
+                                this->data_type_ == DataTypes::DATA_TYPE_BF16;
+        // Keep borrowed half rows in their native format throughout graph building.
+        Vector<const float*> pipnn_f32_vectors(allocator_);
+        Vector<const uint16_t*> pipnn_half_vectors(allocator_);
+        if (half_input) {
+            pipnn_half_vectors.reserve(pipnn_vectors.size());
+            for (const auto* vec : pipnn_vectors) {
+                pipnn_half_vectors.emplace_back(static_cast<const uint16_t*>(vec));
+            }
+        } else {
+            pipnn_f32_vectors.reserve(pipnn_vectors.size());
+            for (const auto* vec : pipnn_vectors) {
+                pipnn_f32_vectors.emplace_back(static_cast<const float*>(vec));
+            }
+        }
         PiPNNGraphBuilder pipnn_builder(pipnn_parameter,
                                         static_cast<uint64_t>(this->dim_),
                                         this->metric_,
                                         this->allocator_,
                                         this->thread_pool_.get(),
                                         this->build_thread_count_);
-        pipnn_builder.Build(bottom_graph_, inner_ids, pipnn_vectors);
+        if (half_input) {
+            // Reservoir caches only cover FP32 input; half input always builds cold.
+            pipnn_builder.Build(bottom_graph_, inner_ids, pipnn_half_vectors, data_type_);
+        } else {
+            std::vector<std::string> pipnn_sources;
+            if (source_id != nullptr) {
+                pipnn_sources.reserve(valid_indices.size());
+                for (const auto index : valid_indices) {
+                    pipnn_sources.emplace_back(source_id[index]);
+                }
+            }
+            const auto imported_snapshot = cache_->pipnn;
+            auto refresh_cache_memory = [&]() {
+                pipnn_cache_memory_.store(
+                    cache_->pipnn == nullptr ? 0 : cache_->pipnn->GetMemoryUsage(),
+                    std::memory_order_release);
+                mark_memory_usage_dirty();
+            };
+            try {
+                pipnn_builder.Build(bottom_graph_,
+                                    inner_ids,
+                                    pipnn_f32_vectors,
+                                    source_id == nullptr ? nullptr : &pipnn_sources,
+                                    imported_snapshot.get(),
+                                    &cache_->pipnn);
+            } catch (...) {
+                refresh_cache_memory();
+                throw;
+            }
+            refresh_cache_memory();
+            if (imported_snapshot != nullptr) {
+                build_cache_hit_nodes_ = cache_->pipnn == nullptr ? 0 : cache_->pipnn->reused_rows;
+                build_cache_missed_nodes_ = inner_ids.size() - build_cache_hit_nodes_;
+                build_cache_hit_rate_ = inner_ids.empty()
+                                            ? 0.0F
+                                            : static_cast<float>(build_cache_hit_nodes_) /
+                                                  static_cast<float>(inner_ids.size());
+            }
+        }
         if (this->using_dedup_storage() and not defer_persistent_codes) {
             materialize_storage();
         }
@@ -497,7 +608,7 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
             batch_insert_persistent_codes();
         } else {
             for (const auto& [inner_id, local_idx] : deferred_code_ids) {
-                this->insert_persistent_codes(get_data(data, local_idx), inner_id);
+                insert_persistent_row(local_idx, inner_id);
             }
         }
     }
@@ -538,7 +649,7 @@ HGraph::add_impl(const DatasetPtr& data) {
 
     this->validate_add_data(data);
     auto context = this->prepare_add_context(data);
-    this->prepare_fused_add_codes(data, context);
+    context.fused_codes = this->prepare_fused_codes(data);
     this->prepare_graph_read_codes(data, context);
     auto batch = this->prepare_add_batch(data);
     this->prepare_temporary_graph_read_codes(data, context, batch);
@@ -574,13 +685,20 @@ HGraph::add_impl(const DatasetPtr& data) {
 }
 
 void
-HGraph::validate_fused_vector_data(const float* data, uint64_t count) const {
+HGraph::validate_fused_vector_data(const void* input, uint64_t count) const {
     if (this->rabitq_fused_datacell_ == nullptr) {
         return;
     }
-    CHECK_ARGUMENT(data != nullptr, "fused RaBitQ base vectors must not be null");
+    CHECK_ARGUMENT(input != nullptr, "fused RaBitQ base vectors must not be null");
+    Vector<float> scratch(allocator_);
     const auto dim = static_cast<uint64_t>(this->dim_);
+    const auto bytes =
+        (data_type_ == DataTypes::DATA_TYPE_FP16 or data_type_ == DataTypes::DATA_TYPE_BF16)
+            ? sizeof(uint16_t)
+            : sizeof(float);
     for (uint64_t row = 0; row < count; ++row) {
+        const auto* data =
+            fused_float_input(static_cast<const uint8_t*>(input) + row * dim * bytes, 1, scratch);
         for (uint64_t d = 0; d < dim; ++d, ++data) {
             if (not IsFiniteRaBitQValue(*data)) {
                 throw VsagException(ErrorType::INVALID_ARGUMENT,
@@ -590,47 +708,36 @@ HGraph::validate_fused_vector_data(const float* data, uint64_t count) const {
     }
 }
 
-void
-HGraph::validate_fused_encoding_data(const float* data, uint64_t count) const {
+std::unique_ptr<HGraph::FusedBatchCodes>
+HGraph::prepare_fused_codes(const DatasetPtr& data) const {
     if (this->rabitq_fused_datacell_ == nullptr or this->optimized_build_codes_ != nullptr) {
-        return;
+        return nullptr;
     }
     CHECK_ARGUMENT(rabitq_split_codes_ != nullptr, "fused HGraph lost its RaBitQ split codes");
-    ByteBuffer one_bit(rabitq_split_codes_->OneBitCodeSize(), allocator_);
-    ByteBuffer supplement(rabitq_split_codes_->SupplementCodeSize(), allocator_);
-    const auto dim = static_cast<uint64_t>(this->dim_);
-    for (uint64_t row = 0; row < count; ++row) {
-        uint32_t cluster_id = 0;
-        CHECK_ARGUMENT(rabitq_split_codes_->EncodeFused(
-                           data + row * dim, one_bit.data, supplement.data, &cluster_id),
-                       "failed to encode fused RaBitQ node codes");
-    }
-}
-
-void
-HGraph::prepare_fused_add_codes(const DatasetPtr& data, AddContext& context) const {
-    if (this->rabitq_fused_datacell_ == nullptr or this->optimized_build_codes_ != nullptr) {
-        return;
-    }
-    CHECK_ARGUMENT(rabitq_split_codes_ != nullptr, "fused HGraph lost its RaBitQ split codes");
-    auto encoded = std::make_unique<FusedAddCodes>(this->allocator_);
+    auto encoded = std::make_unique<FusedBatchCodes>(this->allocator_);
     const auto count = static_cast<uint64_t>(data->GetNumElements());
     const auto dim = static_cast<uint64_t>(this->dim_);
     encoded->one_bit_size = rabitq_split_codes_->OneBitCodeSize();
     encoded->stride = encoded->one_bit_size + rabitq_split_codes_->SupplementCodeSize();
     if (encoded->stride == 0 or count > std::numeric_limits<uint64_t>::max() / encoded->stride) {
-        throw VsagException(ErrorType::INVALID_ARGUMENT, "fused Add code buffer size overflow");
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "fused batch code buffer size overflow");
     }
     encoded->codes.resize(count * encoded->stride);
     encoded->clusters.resize(count);
-    const auto* vectors = static_cast<const float*>(get_data(data));
+    const auto* vectors = static_cast<const uint8_t*>(get_data(data));
+    const auto element_bytes =
+        (data_type_ == DataTypes::DATA_TYPE_FP16 or data_type_ == DataTypes::DATA_TYPE_BF16)
+            ? sizeof(uint16_t)
+            : sizeof(float);
     auto encode_range = [&](uint64_t begin, uint64_t end) {
+        Vector<float> scratch(allocator_);
         for (uint64_t row = begin; row < end; ++row) {
             auto* code = encoded->codes.data() + row * encoded->stride;
-            CHECK_ARGUMENT(rabitq_split_codes_->EncodeFused(vectors + row * dim,
-                                                            code,
-                                                            code + encoded->one_bit_size,
-                                                            &encoded->clusters[row]),
+            CHECK_ARGUMENT(rabitq_split_codes_->EncodeFused(
+                               fused_float_input(vectors + row * dim * element_bytes, 1, scratch),
+                               code,
+                               code + encoded->one_bit_size,
+                               &encoded->clusters[row]),
                            "failed to encode fused RaBitQ node codes");
         }
     };
@@ -672,7 +779,7 @@ HGraph::prepare_fused_add_codes(const DatasetPtr& data, AddContext& context) con
     } else {
         encode_range(0, count);
     }
-    context.fused_codes = std::move(encoded);
+    return encoded;
 }
 
 void
@@ -986,9 +1093,11 @@ HGraph::sync_fused_node_codes(InnerIdType inner_id, const void* data) {
     ByteBuffer one_bit(rabitq_split_codes_->OneBitCodeSize(), allocator_);
     ByteBuffer supplement(rabitq_split_codes_->SupplementCodeSize(), allocator_);
     uint32_t cluster_id = 0;
-    CHECK_ARGUMENT(rabitq_split_codes_->EncodeFused(
-                       static_cast<const float*>(data), one_bit.data, supplement.data, &cluster_id),
-                   "failed to encode fused RaBitQ node codes");
+    Vector<float> scratch(allocator_);
+    CHECK_ARGUMENT(
+        rabitq_split_codes_->EncodeFused(
+            fused_float_input(data, 1, scratch), one_bit.data, supplement.data, &cluster_id),
+        "failed to encode fused RaBitQ node codes");
     rabitq_fused_datacell_->SetNodeCodes(
         inner_id, label, cluster_id, one_bit.data, supplement.data);
 }
@@ -1063,12 +1172,7 @@ HGraph::prepare_codes_before_probe_if_needed(const void* data,
                                              const AddContext& context) {
     if (this->should_insert_codes_before_probe(context.use_dedup_storage)) {
         if (context.fused_codes != nullptr) {
-            const auto& encoded = *context.fused_codes;
-            const auto input_idx = static_cast<uint64_t>(row.input_idx);
-            RaBitQFusedCodeView view;
-            view.one_bit_code = encoded.codes.data() + input_idx * encoded.stride;
-            view.supplement_code = view.one_bit_code + encoded.one_bit_size;
-            view.cluster_id = encoded.clusters[input_idx];
+            const auto view = context.fused_codes->View(static_cast<uint64_t>(row.input_idx));
             this->insert_persistent_codes(data, row.inner_id, &view);
         } else {
             this->insert_persistent_codes(data, row.inner_id);
@@ -1531,9 +1635,15 @@ HGraph::InitFeatures() {
     // About Train
     auto name = this->basic_flatten_codes_->GetQuantizerName();
 
-    if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16 and
-        name != QUANTIZATION_TYPE_VALUE_FP16 and name != QUANTIZATION_TYPE_VALUE_SQ8_LOCAL and
-        name != QUANTIZATION_TYPE_VALUE_SQ4_LOCAL) {
+    // Adapter names are accepted only by this no-train/range classification.
+    // Preserve name unchanged for independent raw-get and other feature gates.
+    const auto terminal_name = GetBaseQuantizerName(name);
+    const bool no_train_terminal = terminal_name == QUANTIZATION_TYPE_VALUE_FP32 or
+                                   terminal_name == QUANTIZATION_TYPE_VALUE_BF16 or
+                                   terminal_name == QUANTIZATION_TYPE_VALUE_FP16 or
+                                   terminal_name == QUANTIZATION_TYPE_VALUE_SQ8_LOCAL or
+                                   terminal_name == QUANTIZATION_TYPE_VALUE_SQ4_LOCAL;
+    if (not no_train_terminal) {
         this->index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN);
     } else {
         this->index_feature_list_->SetFeatures({
@@ -1813,8 +1923,9 @@ HGraph::elp_optimize() {
     param.is_inner_id_allowed = nullptr;
     searcher_->SetMockParameters(bottom_graph_, basic_flatten_codes_, pool_, param, dim_);
     // TODO(ZXY): optimize PREFETCH_DEPTH_CODE and add default value for the others
+    // PREFETCH_STRIDE_VISIT is not swept: the unfiltered search measured here prefetches all
+    // visited tags upfront, so every candidate value would run the same code.
     optimizer_->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_CODE, 1, 10, 1));
-    optimizer_->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_VISIT, 1, 10, 1));
     optimizer_->Optimize(searcher_);
 }
 
@@ -1902,6 +2013,9 @@ HGraph::ImportCache(std::istream& in_stream) {
     // EstimateBuildMemory() independently rechecks the live eligibility.
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ESTIMATE_BUILD_MEMORY,
                                           this->can_estimate_build_memory());
+    pipnn_cache_memory_.store(cache_->pipnn == nullptr ? 0 : cache_->pipnn->GetMemoryUsage(),
+                              std::memory_order_release);
+    mark_memory_usage_dirty();
 }
 
 void
@@ -1952,7 +2066,10 @@ HGraph::collect_refine_candidates(const DatasetPtr& data,
     std::unordered_set<InnerIdType> seen;
 
     Vector<InnerIdType> current_neighbors(allocator_);
-    this->bottom_graph_->GetNeighbors(inner_id, current_neighbors);
+    {
+        SharedLock lock(neighbors_mutex_, inner_id);
+        this->bottom_graph_->GetNeighbors(inner_id, current_neighbors);
+    }
     seen.reserve(current_neighbors.size() + effective_refine_ef);
 
     // Optimisation #2: replace the per-neighbour ComputePairVectors loop with
@@ -2086,7 +2203,7 @@ HGraph::refine_nodes_two_phase(
     const bool use_parallel =
         this->thread_pool_ != nullptr && this->build_thread_count_ > 1 && ids_to_refine.size() > 1;
 
-    constexpr size_t block_size = 128;
+    constexpr uint64_t block_size = cache_refine_block_size_;
     const size_t num_blocks =
         use_parallel ? (ids_to_refine.size() + block_size - 1) / block_size : 1;
     const size_t effective_parallelism =
@@ -2142,19 +2259,15 @@ HGraph::refine_nodes_two_phase(
             candidates->Pop();
         }
 
-        // Write forward edges (lock inner_id only).
-        // Use read-modify-write to preserve reverse edges installed by
-        // concurrent workers. Minimize lock scope: snapshot under lock,
-        // compute distances + prune outside lock, then re-acquire to write.
+        // Keep the complete forward read-modify-write under one node lock. Releasing it
+        // after the snapshot would let a competing reverse-edge update be overwritten.
+        // Candidate search and initial selection above do not hold this lock.
         {
-            // Snapshot existing neighbors under lock
+            LockGuard cur_lock(neighbors_mutex_, inner_id);
             Vector<InnerIdType> existing_neighbors(allocator_);
-            {
-                LockGuard cur_lock(neighbors_mutex_, inner_id);
-                this->bottom_graph_->GetNeighbors(inner_id, existing_neighbors);
-            }
+            this->bottom_graph_->GetNeighbors(inner_id, existing_neighbors);
 
-            // Merge + prune outside lock (no contention during distance computation)
+            // Merge and prune the current adjacency before publishing its replacement.
             auto merged = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
             std::unordered_set<InnerIdType> seen_ids;
             seen_ids.reserve(existing_neighbors.size() + selected_neighbors.size());
@@ -2176,8 +2289,6 @@ HGraph::refine_nodes_two_phase(
                 merged->Pop();
             }
 
-            // Write back under lock
-            LockGuard cur_lock(neighbors_mutex_, inner_id);
             this->bottom_graph_->InsertNeighborsById(inner_id, final_neighbors);
         }
 
@@ -2256,7 +2367,7 @@ HGraph::refine_nodes_two_phase(
             std::vector<std::future<void>> futures;
             futures.reserve((ids_to_refine.size() + block_size - 1) / block_size);
             for (size_t i = 0; i < ids_to_refine.size(); i += block_size) {
-                const auto end = std::min(i + block_size, ids_to_refine.size());
+                const auto end = std::min<uint64_t>(i + block_size, ids_to_refine.size());
                 futures.emplace_back(this->thread_pool_->GeneralEnqueue(
                     [&refine_one_node, &ids_to_refine, i, end]() {
                         for (size_t idx = i; idx < end; ++idx) {
@@ -2624,14 +2735,112 @@ HGraph::cache_warm_start_and_classify(BuildCachePlan& plan) {
         hit_rate);
 }
 
+// A miss can select an empty entry before another worker fills its adjacency. The now-full
+// entry may reject every stale reverse candidate, leaving that miss unreachable. Join such
+// misses after refinement drains, protecting a spanning tree of the entry's component so
+// installing a backlink cannot disconnect an existing reachable node or exceed its degree.
+// Requires exclusive bulk-build access (no external queries or mutations), and all warm-start
+// and refinement workers joined. Draining workers alone does not exclude external visitors.
+template <typename CandidateCollector>
+static void
+connect_cache_misses(const GraphInterfacePtr& graph,
+                     const std::vector<InnerIdType>& missed_ids,
+                     InnerIdType entry,
+                     uint64_t count,
+                     const FlattenInterfacePtr& codes,
+                     Allocator* allocator,
+                     CandidateCollector collect_candidates) {
+    if (count < 2 or missed_ids.empty() or entry >= count) {
+        return;
+    }
+    constexpr auto unseen = std::numeric_limits<InnerIdType>::max();
+    Vector<InnerIdType> parent(count, unseen, allocator);
+    Vector<InnerIdType> queue(allocator);
+    Vector<InnerIdType> neighbors(allocator);
+    auto discover = [&](InnerIdType start) {
+        queue.clear();
+        queue.push_back(start);
+        for (uint64_t cursor = 0; cursor < queue.size(); ++cursor) {
+            const auto id = queue[cursor];
+            neighbors.clear();
+            graph->GetNeighbors(id, neighbors);
+            for (auto neighbor : neighbors) {
+                if (parent[neighbor] == unseen) {
+                    parent[neighbor] = id;
+                    queue.push_back(neighbor);
+                }
+            }
+        }
+    };
+    parent[entry] = entry;
+    discover(entry);
+    for (auto missed : missed_ids) {
+        if (parent[missed] != unseen) {
+            continue;
+        }
+        // Fresh construction candidates include the completed entry component. Cached
+        // forward neighbors may belong to an unreachable component; do not attach from it.
+        auto candidates = collect_candidates(missed);
+        Vector<InnerIdType> frontier(allocator);
+        while (not candidates->Empty()) {
+            const auto id = candidates->Top().second;
+            if (parent[id] != unseen) {
+                frontier.push_back(id);
+            }
+            candidates->Pop();
+        }
+        std::reverse(frontier.begin(), frontier.end());
+        if (frontier.empty()) {
+            frontier.push_back(entry);
+        }
+        UnorderedSet<InnerIdType> seen(allocator);
+        for (uint64_t cursor = 0; cursor < frontier.size(); ++cursor) {
+            const auto neighbor = frontier[cursor];
+            if (not seen.insert(neighbor).second) {
+                continue;
+            }
+            neighbors.clear();
+            graph->GetNeighbors(neighbor, neighbors);
+            if (neighbors.size() < graph->MaximumDegree()) {
+                neighbors.push_back(missed);
+            } else {
+                uint64_t victim = neighbors.size();
+                float farthest = -std::numeric_limits<float>::infinity();
+                for (uint64_t i = 0; i < neighbors.size(); ++i) {
+                    const auto id = neighbors[i];
+                    // Keep tree edges and backlinks to the entry. A non-tree target
+                    // retains its parent edge, including when it had only two in-edges.
+                    if (id != entry and parent[id] != neighbor) {
+                        const auto distance = codes->ComputePairVectors(neighbor, id);
+                        if (victim == neighbors.size() or distance > farthest) {
+                            victim = i;
+                            farthest = distance;
+                        }
+                    }
+                }
+                if (victim == neighbors.size()) {
+                    // All slots protect tree children or the entry: find capacity deeper
+                    // in the reachable component instead of disconnecting one of them.
+                    frontier.insert(frontier.end(), neighbors.begin(), neighbors.end());
+                    continue;
+                }
+                neighbors[victim] = missed;
+            }
+            graph->InsertNeighborsById(neighbor, neighbors);
+            parent[missed] = neighbor;
+            discover(missed);
+            break;
+        }
+    }
+}
+
 // Step 3: refine missed nodes (global entry) first, then hit nodes.
 // Rationale: running missed_refine first lets cold-start nodes install
 // both their own forward neighbours and their reverse-edge contributions
 // back into hit-node adjacency lists before hit_refine kicks in. The
-// subsequent hit_refine therefore sees a richer local frontier (warm
-// seed merged with reverse edges produced by missed_refine) and can
-// still exploit the cheap self-entry path on nodes whose neighbour list
-// remains non-empty.
+// subsequent hit_refine therefore sees a richer frontier. Self-entry is safe when every
+// cached node is retained. Additions or removals can split the warm graph into components;
+// those hits must also search from the global entry to join the reachable graph.
 //
 // Hit nodes whose neighbour list is empty when hit_refine starts
 // (either because warm_start could not map any cached neighbour, or
@@ -2653,6 +2862,21 @@ HGraph::cache_run_refine_two_phase(const DatasetPtr& data, BuildCachePlan& plan)
         flatten_codes->GetQuantizerName(),
         this->basic_flatten_codes_ ? this->basic_flatten_codes_->GetQuantizerName() : "null",
         this->high_precise_codes_ ? this->high_precise_codes_->GetQuantizerName() : "null");
+    // The route entry point may itself be a cache miss. Give an empty entry point a
+    // connection into the warm graph before refinement starts; otherwise misses can build
+    // an isolated component while hit nodes only explore their own cached component.
+    if (not plan.hit_ids.empty() and
+        std::find(plan.missed_ids.begin(), plan.missed_ids.end(), this->entry_point_id_) !=
+            plan.missed_ids.end()) {
+        Vector<InnerIdType> entry_neighbors(allocator_);
+        this->bottom_graph_->GetNeighbors(this->entry_point_id_, entry_neighbors);
+        if (entry_neighbors.empty()) {
+            entry_neighbors.push_back(plan.hit_ids.front());
+            this->bottom_graph_->InsertNeighborsById(this->entry_point_id_, entry_neighbors);
+        }
+    }
+    const bool unchanged_cache_membership =
+        plan.missed_ids.empty() and plan.hit_ids.size() == this->cache_->source_ids_.size();
     this->refine_nodes_two_phase(data,
                                  plan.missed_ids,
                                  "missed_refine",
@@ -2666,9 +2890,22 @@ HGraph::cache_run_refine_two_phase(const DatasetPtr& data, BuildCachePlan& plan)
                                  "hit_refine",
                                  1,
                                  this->ef_construct_ / 3,
-                                 /*use_self_as_entry=*/true,
+                                 /*use_self_as_entry=*/unchanged_cache_membership,
                                  flatten_codes,
                                  plan.inner_id_to_input_idx);
+    // Both refinement calls have joined all workers. As in PublishNode(), bulk Build
+    // requires no concurrent external search; the helper relies on both preconditions.
+    connect_cache_misses(
+        this->bottom_graph_,
+        plan.missed_ids,
+        this->entry_point_id_,
+        this->total_count_.load(),
+        flatten_codes,
+        allocator_,
+        [&](InnerIdType id) {
+            return this->collect_refine_candidates(
+                data, id, plan.inner_id_to_input_idx.at(id), flatten_codes, 0, false);
+        });
 }
 
 // Step 4: rebuild route graphs via ODescent.

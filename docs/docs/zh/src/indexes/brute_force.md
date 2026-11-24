@@ -66,16 +66,18 @@ auto result = index->KnnSearch(query, /*topk=*/10, "{}").value();
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `base_quantization_type` | string | `"fp32"` | `fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq` —— 各量化器细节见[量化章节](../quantization/) |
+| `base_io_type` | string | `"block_memory_io"` | 编码向量的存储后端，支持 `block_memory_io`、`memory_io`、`mmap_io`、`buffer_io`、`async_io`、`uring_io`、`reader_io`。 |
+| `base_file_path` | string | `"./default_file_path"` | IO 类型为磁盘后端（`mmap_io`、`buffer_io`、`async_io`、`uring_io`）时的文件路径。 |
+| `base_pq_dim` | int | `1` | Product Quantizer 子空间维度。仅在 `base_quantization_type` 为 `pq` 或 `pqfs` 时有效。必须整除 `dim`。 |
+| `precise_quantization_type` | string | `"fp32"` | 精排向量的量化类型。始终会解析（默认 `fp32`）；`use_residual` 仅切换内部的 `use_reorder` 标志。 |
+| `precise_io_type` | string | `"block_memory_io"` | 精排编码的存储后端。始终会解析；`use_residual` 仅切换 `use_reorder`。 |
+| `precise_file_path` | string | `"./default_file_path"` | 精排 IO 为磁盘后端时的文件路径。 |
+| `store_raw_vector` | bool | `false` | 为 `true` 时对 `fp32` 和 `int8` 的 base/precise quantizer 设置 `hold_molds`（其他量化类型忽略此标志）。FP32 cosine 场景下可启用 `GetRawVectorByIds`。**不会**创建独立的原始向量存储。 |
+| `thread_count` | int | `1` | 构建时的内部线程池大小。 |
 | `use_attribute_filter` | bool | `false` | 启用属性过滤（参见 [属性过滤](../advanced/attribute_filter.md)） |
+| `use_residual` | bool | `false` | 启用精确编码构建（内部映射为 `use_reorder`）。注意：BruteForce 的线性扫描**不执行**重排序步骤，precise codes 在搜索时无实际效果。 |
 | `resize_increase_count_bit` | int | `10` | 扩容批次 slot 数的 `log2`，取值范围为 `1` 到 `31`。`1` 表示每次按 2 个 slot 对齐，`10` 表示按 1024 个 slot 对齐。较小取值减少预分配，但可能增加重分配次数。 |
 
-> **关于 `store_raw_vector` 的说明。** `store_raw_vector` 字段会被共用的
-> `InnerIndexParameter` 解析，但 BruteForce **不会**根据它决定是否启用
-> `GetRawVectorByIds`。在 BruteForce 上，原始向量读取能力仅在
-> `base_quantization_type = fp32`、并且度量不是 `cosine` 或量化器配置了
-> 持有向量范数（`hold_molds`）时开启。在 BruteForce 上设置
-> `store_raw_vector: true` 目前不会改变任何能力标志 —— 如果需要量化索引同时
-> 支持 `GetRawVectorByIds`，请使用 HGraph 或 IVF。
 
 下面是一个使用 `sq8` 量化以节省内存、同时保持线性扫描语义的示例：
 
@@ -96,12 +98,18 @@ auto result = index->KnnSearch(query, /*topk=*/10, "{}").value();
 
 ## 搜索参数
 
-BruteForce 没有任何索引特有的搜索旋钮（不存在 `ef`、`nprobe` 之类的参数），但通用的
-`IndexSearchParameter` 字段都生效：
+BruteForce 没有任何索引特有的搜索旋钮（不存在 `ef`、`nprobe` 之类的参数）。
+`IndexSearchParameter` 字段中仅 `parallelism` 和 `use_extra_info_filter` 会被
+线性扫描消费；根级 `threshold` 键也会被消费（独立读取）。其余字段会被静默接受：
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `parallelism` | int | `1` | 把单条查询的线性扫描拆分到索引内部线程池中的若干线程上。该参数同时作用于 `KnnSearch` 和 `RangeSearch`。该值越大，大语料下的单查询延迟越低，代价是占用更多 CPU 核。`<= 0` 的取值会被钳制到 `1`。 |
+| `use_extra_info_filter` | bool | `false` | 在扫描过程中应用基于 extra-info 的谓词（参见 [Extra Info](../advanced/extra_info.md)）。 |
+| `threshold` | float | —（不传） | 根级参数，不在任何子对象内。KNN 查询仅返回距离 ≤ `threshold` 的结果。 |
+| `enable_reorder` | bool | `true` | 被解析但**不被消费** — BruteForce 始终直接扫描 base codes。 |
+| `factor` | float | `0` | 被解析但**不被消费** — 线性扫描检查所有编码。 |
+| `timeout_ms` | int | 不限制 | 被解析但**不被消费** — 线性扫描无法在中途中断。 |
 
 ```cpp
 // 默认单线程扫描。

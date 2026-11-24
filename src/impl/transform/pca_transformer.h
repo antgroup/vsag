@@ -14,7 +14,7 @@
 // limitations under the License.
 
 #pragma once
-
+#include "utils/training_rows.h"
 #include "vector_transformer.h"
 
 namespace vsag {
@@ -57,6 +57,9 @@ public:
     Train(const float* data, uint64_t count) override;
 
     void
+    TrainRows(const TrainingRows& rows);
+
+    void
     Serialize(StreamWriter& writer) const override;
 
     void
@@ -89,12 +92,11 @@ public:
     }
 
 public:
-    // make public for test
     void
-    CopyPCAMatrixForTest(float* out_pca_matrix) const;
+    CopyPCAMatrix(float* out_pca_matrix) const;
 
     void
-    CopyMeanForTest(float* out_mean) const;
+    CopyMean(float* out_mean) const;
 
     void
     SetMeanForTest(const float* input_mean);

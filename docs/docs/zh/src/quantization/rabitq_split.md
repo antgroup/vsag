@@ -98,6 +98,10 @@ label、filter code 和 supplement，record stride 仍向上对齐到 64-byte。
 解码 fused record 来更新图，不会常驻保存 SQ8 或原始向量副本；关注插入
 吞吐时建议使用批量 Add。
 
+当 `graph_type="pipnn"` 时，fused HGraph 并行预编码整个批次，并在发布索引时复用
+这些字节，每条输入只编码一次。临时编码缓冲区随输入批次增大；输入标签全部被接受时，
+该缓冲区会在 PiPNN 构建底层图前释放。
+
 融合布局是显式启用的，并且比普通 split storage 有更严格的约束：
 
 - `1 <= x <= 4`、`y >= 1` 且 `x + y <= 8`。

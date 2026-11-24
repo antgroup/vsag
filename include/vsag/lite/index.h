@@ -109,6 +109,11 @@ public:
     Dim() const;
 
 private:
+    friend class PersistentIndex;
+
+    static tl::expected<std::unique_ptr<Index>, Error>
+    load_with_extra_rows(std::istream& input, uint64_t extra_rows);
+
     struct Impl;
     explicit Index(std::unique_ptr<Impl> impl);
     std::unique_ptr<Impl> impl_;

@@ -79,6 +79,18 @@ Search parameters use the same `hgraph` object as HGraph:
 In the flat phase, search is exact. In the graph phase, the internal HGraph uses
 the supplied HGraph search parameters such as `ef_search`.
 
+`hgraph` inherits every HGraph build key with one exception: `precise_io_type: "user_defined_io"`
+is rejected at both the outer level and inside `hgraph`, because the temporary flat and graph
+instances would share one Reader/Writer pair and truncate the backing store. The wrapper itself
+only understands `transition_threshold` and `hgraph`; other HGraph-shaped keys placed at the top
+level (for example a top-level `max_degree`) are ignored, so put them inside `hgraph`.
+
+Two phases behave differently at search time. In the flat phase the request is handled by the
+BruteForce parameter parser, which only understands `parallelism`, `factor`, `enable_reorder`,
+`timeout_ms` and `use_extra_info_filter` inside the `hgraph` object, consumes just
+`parallelism`, `use_extra_info_filter` and the root-level `threshold`, and never requires
+`ef_search`. In the graph phase the full HGraph parser applies and `ef_search` is mandatory.
+
 ## Lifecycle notes
 
 - `Build` chooses the initial phase from the input size: below

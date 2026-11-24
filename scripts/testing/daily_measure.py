@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Account an indivisible non-Catch test command once, excluding compile/download."""
 import argparse
+import datetime as dt
 import os
 from pathlib import Path
 import signal
@@ -40,7 +41,15 @@ def main():
             "command": command, "contract": "Full non-Catch command; detailed inventory in command logs"}
     plan = dp.build_plan(ctx, os.environ["VSAG_DAILY_ENVIRONMENT"], [unit], [])
     dp.write(output / "plan.json", plan)
-    record = shards.execute(command, Path(args.cwd).resolve(), temporary, output / "output.log", args.timeout, cancel)
+    window_path = Path(os.environ["VSAG_DAILY_CONTEXT"]).with_name("window.json")
+    deadline = dp.execution_deadline(ctx, dp.load(window_path) if window_path.exists() else None)
+    remaining = min(args.timeout, (deadline - dt.datetime.now(dt.timezone.utc)).total_seconds())
+    if remaining <= 0:
+        record = {"status": "budget_exhausted", "seconds": 0, "exit_code": 1}
+        (output / "output.log").write_text("Execution window exhausted before command start\n")
+    else:
+        record = shards.execute(command, Path(args.cwd).resolve(), temporary,
+                                output / "output.log", remaining, cancel)
     record["key"] = unit["key"]
     dp.write(output / "daily-result.json",
              dp.sealed({"schema_version": 1, "kind": "daily-result", "plan": plan,

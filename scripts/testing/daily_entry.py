@@ -11,11 +11,16 @@ def command(binary, profile=None):
     if os.environ.get("VSAG_DAILY_COVERAGE") == "1":
         profile = "unit-coverage"
     lane = os.environ["VSAG_DAILY_LANE"] + "-" + binary
+    shard = os.environ.get("VSAG_DAILY_SHARD_INDEX")
+    if shard is not None:
+        lane += "-shard" + shard
     args = [sys.executable, str(Path(__file__).with_name("daily_run.py")),
             "--context", os.environ["VSAG_DAILY_CONTEXT"], "--binary", "build/tests/" + binary,
             "--lane", lane, "--environment", os.environ["VSAG_DAILY_ENVIRONMENT"] + "/" + platform.system() + "/" + platform.machine(),
             "--profile", profile, "--output", "daily-results/" + lane,
             "--workers", os.environ.get("VSAG_DAILY_WORKERS", "2")]
+    if shard is not None:
+        args += ["--shard-index", shard, "--shard-count", os.environ["VSAG_DAILY_SHARD_COUNT"]]
     if os.environ.get("VSAG_DAILY_CORE_ONLY") == "1":
         args.append("--core-only")
     return args

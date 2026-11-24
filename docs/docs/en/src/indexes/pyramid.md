@@ -93,7 +93,9 @@ Pyramid accepts `dtype: "float16"` and `dtype: "bfloat16"` input for `Build`, `A
 
 For either half input type, supply `Dataset::Float16Vectors` with a contiguous `uint16_t` buffer containing the **encoded FP16 or BF16 bit patterns**, not integers obtained by numerically casting floats. `dtype` determines how these bits are interpreted. Build/Add buffers contain `NumElements() * Dim()` entries; query buffers must use the same input format as the index. Supply IDs and paths as in the example above, replacing `Float32Vectors(data)` and `Float32Vectors(q)` with `Float16Vectors(half_data)` and `Float16Vectors(half_query)`. With `Owner(false)`, keep the borrowed buffers (including IDs and paths) alive for the operation.
 
-For half input, supported `base_quantization_type` and, when `use_reorder` is `true`, `precise_quantization_type` values are `fp16`, `bf16`, `pq`, `sq8`, and `fp32`. Quantizer-specific requirements still apply (for example, PQ training and dimension settings). A minimal matching-format configuration is:
+FP16/BF16 input supports the same originally legal FP32 storage-quantizer configurations, not a separate limited quantizer list: `fp32`, `fp16`, `bf16`, ordinary `sq4`/`sq8`, `sq4_uniform`/`sq8_uniform`, `sq4_local`/`sq8_local`, `pq`, `pqfs`, `rabitq`, and eligible `tq` chains. This applies to base storage and, when enabled, precise storage; it does not make every base/precise combination legal. Existing metric, dimension, training, graph, and IO restrictions still apply. Local SQ4/SQ8 remain prohibited inside TQ chains. Split RaBitQ supports 3+5 bits, including MRLE; a split TQ chain is restricted to `"mrle, rabitq"`. HGraph fused RaBitQ remains L2/IP-only, requires flat in-memory graph storage and its existing IO constraints, and does not support TQ. Half input does not relax any of these restrictions.
+
+A minimal matching-format configuration is:
 
 ```json
 {
@@ -110,13 +112,13 @@ For half input, supported `base_quantization_type` and, when `use_reorder` is `t
 
 For BF16 input with BF16 storage, change `dtype` to `"bfloat16"` and `base_quantization_type` to `"bf16"`. Cross-format storage conversion is also supported, such as FP16 input with BF16 storage or BF16 input with FP32 storage; this does not change the required input format of subsequent queries. `metric_type: "cosine"` normalizes vectors before encoding, so matching-format input does not imply byte-for-byte preservation for cosine.
 
-For L2/IP, matching FP16-to-FP16 and BF16-to-BF16 storage preserves the input bit patterns verbatim. Cross-format storage and `pq`/`sq8`/`fp32` storage convert the input through float32; they do not provide the same half-bit preservation guarantee.
+For L2/IP, matching FP16-to-FP16 and BF16-to-BF16 storage preserves the input bit patterns verbatim. Cross-format storage and other quantizers use FP32 conversion as required; they do not provide the same half-bit preservation guarantee.
 
 For `CalcDistanceById` and `CalcDistancesById` on half-input indexes, use the `DatasetPtr` overload with a native half query buffer matching the index dtype. The raw `const float*` overloads accept only float32 indexes and reject half-input indexes.
 
 An FP16 or BF16 stored vector code occupies `2 * dim` bytes, compared with `4 * dim` for FP32. This is **vector-code size, not total index memory**: graphs, IDs, paths, allocation overhead, and any reorder/raw-vector copies also consume space. Half input alone does not select half storage or halve total memory.
 
-Use `graph_type: "nsw"` or `"odescent"` with half input. **PiPNN remains float32-only.** These guarantees describe Pyramid, not every VSAG index.
+Half input supports `graph_type: "nsw"`, `"odescent"`, and `"pipnn"`. These guarantees describe Pyramid, not every VSAG index.
 
 ## Build parameters
 
@@ -124,7 +126,7 @@ Build-time parameters live under `index_param`.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `base_quantization_type` | string | — | Coarse storage quantizer (`fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`, `tq`). See the [Quantization chapter](../quantization/) for per-quantizer details. |
+| `base_quantization_type` | string | `"fp32"` | Coarse storage quantizer (`fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_local`, `sq4_local`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`, `saq`, `tq`). See the [Quantization chapter](../quantization/) for per-quantizer details. |
 | `tq_chain` | string | — | Transform chain used when `base_quantization_type` is `tq`, for example `"mrle, rabitq"`. |
 | `mrle_dim` | int | `0` | Prefix dimension retained by MRLE; `0` keeps the input dimension. |
 | `max_degree` | int | `64` | Maximum out-degree per node within a sub-graph. |
@@ -142,6 +144,8 @@ Build-time parameters live under `index_param`.
 | `pipnn_leaf_neighbor_count` | int | `5` | Nearest candidates contributed per point and leaf; the primary PiPNN quality/build-work knob. Undersized leaves use at least `4`. |
 | `pipnn_hash_plane_count` | int | `12` | Direction-hash bits, in `[1, 15]`; `max_degree <= 2^pipnn_hash_plane_count`. |
 | `pipnn_reservoir_size` | int | `64` | Candidate slots retained per point before final pruning; effective capacity is at least `max_degree`. |
+| `pipnn_adaptive_pruning` | bool | `false` | Use HGraph's shared PiPNN dynamic-alpha selector during L2 batch builds. |
+| `pipnn_adaptive_pruning_adjust_step` | float | `0.06` | Alpha adjustment step for the PiPNN selector. |
 | `no_build_levels` | int[] | `[]` | Tree levels that skip graph construction (0-indexed from the root). |
 | `use_reorder` | bool | `false` | Keep a high-precision copy for rescoring. |
 | `precise_quantization_type` | string | `"fp32"` | Quantizer for reordering. Use `"rabitq"` with `rabitq_bits_per_dim_precise` to enable RaBitQ x+y split reorder from base storage. |
@@ -149,6 +153,9 @@ Build-time parameters live under `index_param`.
 | `rabitq_bits_per_dim_precise` | int | unset | RaBitQ split `y` bits. When set with `base_quantization_type: "rabitq"` and `precise_quantization_type: "rabitq"`, Pyramid uses split storage; `rabitq_bits_per_dim_base` remains `x`, and `x + y <= 8`. |
 | `fast_encode_rabitq` | bool | `true` | Use the fast multi-bit RaBitQ encoder for RaBitQ base or precise storage; set to `false` for the exact encoder. |
 | `fast_encode_rabitq_rounds` | int | `6` | Fast RaBitQ refinement rounds in `[1, 32]`. |
+| `saq_avg_bits` | float | `4.0` | SAQ average record bits per dimension, in `[1, 8]`. |
+| `saq_segment_count` | int | `0` | SAQ segment count; `0` selects boundaries dynamically. |
+| `saq_random_rotation` | bool | `true` | Apply an independent orthogonal rotation inside each SAQ segment. |
 | `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | Base and reorder storage backends; `uring_io` is available in builds with liburing. |
 | `base_file_path` / `precise_file_path` | string | — | Required for disk-backed storage such as `buffer_io`, `async_io`, `uring_io`, or `mmap_io`. |
 | `store_raw_vector` | bool | `false` | Preserve an FP32 copy for `GetRawVectorByIds` and precise distance-by-id calculations. |
@@ -157,16 +164,61 @@ Build-time parameters live under `index_param`.
 | `root_graph_type` | string | `"single_layer"` | Root graph layout: `single_layer` preserves the original sparse bottom graph; `multi_layer` uses a preallocated Flat or Compressed bottom graph with HGraph-style sparse routing layers and joint construction. `multi_layer` supports `graph_type: "nsw"` and `"pipnn"`. Do not specify this option when `no_build_levels` disables level 0. |
 | `support_duplicate` | bool | `false` | Group code-equivalent vectors with distinct external labels, using construction-code `CompareVectors` semantics. External labels must remain unique. |
 | `build_thread_count` | int | `1` | Threads used for parallel build. |
+| `rabitq_error_rate` | float | `1.9` | RaBitQ lower-bound error multiplier applied during encoding for both base and precise quantizers. Must be finite and positive. |
+| `rabitq_bits_per_dim_query` | uint | `32` | Query-side bit precision for RaBitQ encoding, either `4` or `32`. Must be `32` when split storage is used. |
+| `rabitq_pca_dim` | uint | `0` | Optional PCA dimension reduction applied before RaBitQ encoding; `0` disables PCA. |
+| `rabitq_use_fht` | bool | `false` | Use FHT instead of a random rotation in RaBitQ encoding. |
+| `base_pq_dim` | int | `1` | Product Quantizer subspace dimension. Effective only when `base_quantization_type` is `pq` or `pqfs`. |
+| `base_supplement_io_type` | string | — | Separate IO backend for RaBitQ split supplement planes. Supported values: `block_memory_io`, `async_io`, `buffer_io`. When this key is omitted, the supplement shares `base_io_type`. Homogeneous backends (same type for base and supplement) are always supported. Mixed backends support only `base_io_type` = `block_memory_io` with `base_supplement_io_type` = `async_io` (falls back to `buffer_io` when libaio is unavailable). `uring_io` is not supported for split supplements regardless of the base backend. Effective only in RaBitQ split mode. |
+| `base_supplement_file_path` | string | — | File path for the RaBitQ supplement IO backend, required when `base_supplement_io_type` is disk-backed. |
+| `build_block_size` | int | `10000` | ODescent block construction size; effective only with `graph_type: "odescent"`. |
+| `min_in_degree` | int | `1` | ODescent minimum in-degree; effective only with `graph_type: "odescent"`. |
+| `extra_info` | object | `{"io_params": {...block_memory_io...}}` | IO configuration for the extra-info block associated with each bottom-graph node. Use when `extra_info_size` is set in the common parameters. |
+| `persist_source_id` | bool | `false` | Persist the SourceID table so build-cache imports can match source identities across builds. Set to `true` before serializing an index whose cache will be reused. |
+| `adaptive_pruning_adjust_step` | float | `0.06` | Alpha adjustment step for the experimental NSW adaptive pruning selector. Requires `adaptive_pruning: true`. |
+| `adaptive_pruning_apply_to_reverse` | bool | `false` | Apply the adaptive pruning policy to reverse edges during NSW graph construction. Experimental. |
+| `adaptive_pruning_apply_to_upper` | bool | `false` | Apply the adaptive pruning policy to upper routing layers. Experimental; currently unsupported, setting it causes construction to fail. |
 | `hierarchies` | array | `[]` | Named hierarchy definitions. Each element is either a string (inherits all top-level params) or an object with `name` and optional overrides (`max_degree`, `ef_construction`, `alpha`, `no_build_levels`, `index_min_size`, `root_graph_type`). When present, multi-hierarchy mode is activated and each hierarchy maintains its own independent path tree. |
 
-PiPNN supports Pyramid builds with `dtype: "float32"` and `metric_type` set to `"l2"`, `"ip"`, or
-`"cosine"`. It batch-builds every constructed graph in each hierarchy; with
+PiPNN supports dense Pyramid builds with `dtype: "float32"`, `"float16"`, or `"bfloat16"` and
+`metric_type` set to `"l2"`, `"ip"`, or `"cosine"`; sparse and `int8` inputs are not supported.
+For FP16/BF16 input, PiPNN borrows the full input rows in their original half format rather than
+materializing a full FP32 input copy. It converts bounded, local partition/leaf operands to FP32
+for BLAS matrix operations and accumulates in FP32; this is not a native half-precision matrix
+backend. Final vector-storage quantization is configured independently of the input dtype,
+subject to the supported quantizers listed above.
+Quantizer training is separate from PiPNN graph construction: training may still materialize the full selected training sample in an FP32 buffer (potentially the full dataset when all rows are selected). Borrowing half input therefore does not guarantee that the complete build avoids a full-sample FP32 buffer. Validation of these half-input paths is in progress; no performance or non-regression claim is made.
+It batch-builds every constructed graph in each hierarchy; with
 `root_graph_type: "multi_layer"`, this also includes every root routing layer. Search, incremental
 `Add`, removal, duplicate handling, reorder, and serialization retain the standard Pyramid
 behavior. Levels in `no_build_levels` are still skipped.
 The `pipnn_*` values are global to the Pyramid index; hierarchy objects may continue to override
 `max_degree` and `alpha`, and those overrides are applied when PiPNN builds that hierarchy.
 `ef_construction` does not tune PiPNN.
+
+### Adaptive PiPNN pruning
+
+Set the following fields under `index_param` to enable the same final-reservoir pruning policy
+used by HGraph PiPNN:
+
+```json
+{
+    "graph_type": "pipnn",
+    "alpha": 1.2,
+    "pipnn_adaptive_pruning": true,
+    "pipnn_adaptive_pruning_adjust_step": 0.06
+}
+```
+
+This policy requires `metric_type: "l2"` and applies to every batch-built path graph and root
+routing graph. Each hierarchy supplies its own effective `alpha` and degree limit; the policy
+and step are shared. Incremental `Add` retains the existing NSW insertion policy. The separate
+`adaptive_pruning` switch controls NSW and must remain disabled for PiPNN.
+
+Enabled policies require finite `alpha >= 1`, a finite nonnegative step,
+`alpha - 2*step > 0`, and finite `alpha + 3*step`. A zero step preserves fixed-alpha PiPNN
+selection. Loading an enabled index requires matching policy, base alpha, step, and hierarchy
+configuration. Older indexes without the fields default to disabled; rebuild to change policy.
 
 ### RaBitQ split configuration
 
@@ -211,13 +263,21 @@ reduce recall unless the embedding model was trained for prefix dimensions.
 
 ## Build cache
 
-`ExportCache` captures per-hierarchy, per-node NSW graph seeds and `ImportCache` makes them available to a later `Build`. Cache data uses the index cache payload format, not the streaming index serialization format. Set `persist_source_id: true` before footer-serializing an index whose cache will be reused, and provide a unique `Dataset::SourceID` and external label for every vector in both builds. Cache warm builds apply only to `graph_type: "nsw"`; ODescent, missing source IDs, and repeated source IDs or labels fall back to a normal cold build (which retains its normal repeated-label rejection behavior). `ef_construction` is not an eligibility condition. At least 80% of input source IDs must overlap the imported cache. Cache misses are constructed normally. Single-layer root hits receive forward-row repair; multi-layer nodes rebuild routing overlays, which are not cached.
+`ExportCache` captures per-hierarchy, per-node NSW graph seeds and `ImportCache` makes them available to a later `Build`. Cache data uses the index cache payload format, not the streaming index serialization format. Set `persist_source_id: true` before footer-serializing an index whose cache will be reused, and provide a unique `Dataset::SourceID` and external label for every vector in both builds. The following NSW warm-build rules apply to `graph_type: "nsw"`; ODescent, missing source IDs, and repeated source IDs or labels fall back to a normal cold build (which retains its normal repeated-label rejection behavior). `ef_construction` is not an eligibility condition. At least 80% of input source IDs must overlap the imported cache. Cache misses are constructed normally. Single-layer root hits receive forward-row repair; multi-layer nodes rebuild routing overlays, which are not cached.
 
 With `support_duplicate: true`, Pyramid stores explicit per-graph group membership and the actual adjacency-row owner, not the minimum label or inner ID. Warm construction remaps SourceIDs and verifies current graph membership and construction-code equality. Missing or moved representatives, changed equivalence classes and unusable class rows turn the affected classes into misses; unrelated valid classes remain reusable. Removed aliases alone do not invalidate their class. Newly merged code classes are conservatively rebuilt. Hash-keyed ordered indexes compare exact construction-code bytes to resolve collisions, rather than assuming hash equality. At least 80% of each graph's memberships must remain reusable; missing/legacy group metadata or insufficient reuse triggers graph-level cold fallback. All-identical graphs without useful cached adjacency still cold-build. Representative adjacency is restored before aliases, and edges to invalid classes are filtered. Aliases count as memberships, not restored edges or routing entries.
 
 Concurrent insertion uses a transient graph-local exact-code representative registry, holding only the corresponding admission stripe through representative publication. It references existing construction codes instead of copying full vectors and is rehydrated when needed after loading an index. After cold construction and warm refinement, duplicate-enabled NSW `Build` checks both forward reachability from each bottom graph's entry and return reachability to that entry. When needed, bounded, geometrically selected bridges preserve the protected forward tree and maximum degree. Together these checks ensure strong connectivity among the graph's physical representatives, including those selected as query-specific entries by routed descent. Return-path checking uses CSR reverse adjacency with O(R + E) temporary memory for R representatives and E edges, released per graph. This is a Build-time invariant, not a guarantee for arbitrary later `Add` operations. Finite-budget approximate search can still miss whole vector groups. No universal recall or construction speedup is guaranteed. After deserialization, sparse empty adjacency rows retain physical-owner identity. Legacy dense/compressed storage can lose that identity for an isolated empty duplicate group; admission first preserves owners observable through rows, incoming edges or routing, then normalizes an otherwise unobservable persisted duplicate group without changing its labels. This does not recover historical owner identity or restore arbitrary incremental graph connectivity. The one-time legacy admission scan uses O(H + A + E) traversal work and O(H) visitation memory, where H is the stored ID high-water mark, A is the visited duplicate membership count and E is the traversed edge count; exact-code ordered-index operations add their usual comparison cost.
 
-Duplicate-aware cache payloads use a versioned Pyramid-only format. This reader accepts legacy ordinary caches; older readers cannot read the new duplicate payload. Ordinary caches without group metadata retain the legacy format. HGraph cache and index serialization formats are unchanged. `GetStats()` separates vector and graph-membership hit/miss counts from restored-edge counts; graph fallback contributes misses, not restored groups.
+Duplicate-aware cache payloads use a versioned Pyramid-only format. This reader accepts legacy ordinary caches; older readers cannot read the new duplicate payload. Ordinary caches without group metadata retain the legacy format. Legacy NSW cache and index serialization formats are unchanged. `GetStats()` separates vector and graph-membership hit/miss counts from restored-edge counts; graph fallback contributes misses, not restored groups.
+
+### PiPNN reservoir cache
+
+`graph_type: "pipnn"` supports versioned reservoir export/import through the same cache APIs.
+Source IDs and FP32 content fingerprints identify reusable rows; incompatible/legacy snapshots
+and duplicate-group graphs cold-build. Pyramid isolates caches by hierarchy and node path.
+See [PiPNN reservoir cache](../advanced/build_cache.md#pipnn-reservoir-cache) for the lifecycle,
+compatibility, memory cost, approximate quality and diagnostics.
 
 ## Search parameters
 
@@ -225,14 +285,21 @@ Search-time parameters live under the `pyramid` sub-object:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `ef_search` | int | `100` | Candidate list size for the leaf-level graph search. |
+| `ef_search` | int | — (required) | Candidate list size for the leaf-level graph search. Omitting it fails parsing; `KnnSearch` further requires it in `[1, max(100 * topk, 1000)]`. The `100` in the parameter struct is not an omittable default. |
 | `factor` | float | unset | KNN reorder candidate multiplier. Values `<= 1` add no limit. When greater than `1`, Pyramid first completes the unchanged subgraph searches and merges their results, then sends at most `min(max(ef_search, topk), floor(topk * factor))` main-graph candidates to reorder. RaBitQ lower-bound safety candidates may be merged after this limit, matching HGraph; `reorder_candidate_count` reports the actual merged count. The value must be finite and positive. It has no effect on range search or when reorder is disabled. |
 | `hops_limit` | int | unlimited | Per-graph KNN hop cap for the root bottom graph and every non-root graph; ignored when it is not greater than `ef_search`. Sparse root routing layers are never hop-limited. FLAT scans and range search are unaffected. |
 | `subindex_ef_search` | int | `50` | Candidate list size used when traversing intermediate sub-graphs on the path. |
 | `parallelism` | int | `1` | Maximum concurrent sub-graph searches for one request. Values greater than `1` use the index thread pool; results are merged and de-duplicated before reordering. See the thread pool requirement below. |
 | `hierarchies` | string[] | `[]` | Select which hierarchy to search. Empty means use the default (unnamed) hierarchy. |
 | `hierarchy_op` | string | `"single"` | How to combine results across hierarchies: `single` (search one hierarchy), `union`, or `intersection`. **Note:** `union` and `intersection` are not yet implemented — setting them will cause `KnnSearch`/`RangeSearch` to return an error. |
+| `rabitq_one_bit_search` | bool | auto | Enable RaBitQ one-bit lower-bound safety-candidate collection during graph traversal. When not set, defaults to `true` when both `use_reorder` is enabled and the base codes are stored as RaBitQ split data cells; otherwise `false`. |
+| `timeout_ms` | int | — | Soft timeout in milliseconds; graph traversal stops expanding during the coarse search after the timeout, and reorder batch loops check the timer between batches. **Omit** the key to disable the timeout; setting `0` causes an immediate timeout, not unlimited. |
 | `rabitq_error_rate` | float | `1.9` | Positive lower-bound error multiplier for this search. The default `1.9` is relatively large; increasing it improves accuracy but slows down search. |
+| `threshold` | float | — | (root-level) KNN distance upper bound. Candidates whose distance exceeds the threshold are discarded during search. Only effective for `KnnSearch`, not `RangeSearch`. |
+
+
+> **Note:** `enable_reorder` in the root-level search JSON is accepted but **ignored** by Pyramid; reorder is controlled at build time by `use_reorder`.
+
 
 ```cpp
 auto result = index->KnnSearch(

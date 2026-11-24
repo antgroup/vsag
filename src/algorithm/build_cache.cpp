@@ -14,6 +14,10 @@
 
 #include "build_cache.h"
 
+#include <algorithm>
+#include <limits>
+#include <type_traits>
+
 #include "impl/allocator/default_allocator.h"
 #include "vsag_exception.h"
 
@@ -67,6 +71,10 @@ BuildCache::BuildCache(Allocator* allocator)
 
 void
 BuildCache::Serialize(StreamWriter& writer) const {
+    if (pipnn != nullptr) {
+        StreamWriter::WriteObj(writer, std::numeric_limits<uint64_t>::max());
+        StreamWriter::WriteObj(writer, uint64_t{2});
+    }
     uint64_t source_ids_size = source_ids_.size();
     StreamWriter::WriteObj(writer, source_ids_size);
     Vector<InnerIdType> empty(allocator_);
@@ -80,27 +88,152 @@ BuildCache::Serialize(StreamWriter& writer) const {
             StreamWriter::WriteVector(writer, empty);
         }
     }
+    if (pipnn != nullptr) {
+        StreamWriter::WriteString(writer, pipnn->policy);
+        StreamWriter::WriteObj(writer, static_cast<uint64_t>(pipnn->source_ids.size()));
+        for (const auto& id : pipnn->source_ids) {
+            StreamWriter::WriteString(writer, id);
+        }
+        StreamWriter::WriteVector(writer, pipnn->fingerprints);
+        StreamWriter::WriteVector(writer, pipnn->offsets);
+        StreamWriter::WriteVector(writer, pipnn->targets);
+        StreamWriter::WriteVector(writer, pipnn->distances);
+        StreamWriter::WriteVector(writer, pipnn->hashes);
+        StreamWriter::WriteVector(writer, pipnn->inner_ids);
+        StreamWriter::WriteVector(writer, pipnn->graph_offsets);
+        StreamWriter::WriteVector(writer, pipnn->graph_targets);
+        StreamWriter::WriteVector(writer, pipnn->graph_distances);
+    }
 }
 
 void
 BuildCache::Deserialize(StreamReader& reader) {
+    BuildCache result(allocator_);
     uint64_t source_ids_size = 0;
     StreamReader::ReadObj(reader, source_ids_size);
+    uint64_t version = 0;
+    const bool versioned = source_ids_size == std::numeric_limits<uint64_t>::max();
+    if (versioned) {
+        StreamReader::ReadObj(reader, version);
+        if (version != 1 and version != 2) {
+            throw VsagException(ErrorType::INVALID_BINARY, "unsupported PiPNN cache version");
+        }
+        StreamReader::ReadObj(reader, source_ids_size);
+    }
     if (source_ids_size > remaining_bytes(reader) / (sizeof(uint64_t) * 2)) {
         throw VsagException(ErrorType::INVALID_BINARY, "corrupted build cache source-id count");
     }
-    source_ids_.clear();
-    source_ids_.reserve(source_ids_size);
-    neighbors_.clear();
+    result.source_ids_.reserve(source_ids_size);
     for (uint64_t i = 0; i < source_ids_size; ++i) {
         auto source_id = read_string(reader);
-        source_ids_.push_back(source_id);
+        result.source_ids_.push_back(source_id);
         Vector<InnerIdType> neighbors(allocator_);
         read_neighbors(reader, neighbors);
         if (!neighbors.empty()) {
-            neighbors_.emplace(std::move(source_id), std::move(neighbors));
+            result.neighbors_.emplace(std::move(source_id), std::move(neighbors));
         }
     }
+    if (versioned) {
+        auto snapshot = std::make_shared<PiPNNBuildCache>(allocator_);
+        snapshot->policy = read_string(reader);
+        uint64_t count = 0;
+        StreamReader::ReadObj(reader, count);
+        if (count > remaining_bytes(reader) / sizeof(uint64_t)) {
+            throw VsagException(ErrorType::INVALID_BINARY, "corrupted PiPNN source count");
+        }
+        UnorderedSet<std::string> seen(allocator_);
+        for (uint64_t i = 0; i < count; ++i) {
+            auto id = read_string(reader);
+            if (id.empty() or not seen.emplace(id).second) {
+                throw VsagException(ErrorType::INVALID_BINARY, "invalid PiPNN source ID");
+            }
+            snapshot->source_ids.push_back(std::move(id));
+        }
+        auto read_vector = [&](auto& values) {
+            using Value = typename std::decay_t<decltype(values)>::value_type;
+            uint64_t size = 0;
+            StreamReader::ReadObj(reader, size);
+            if (size > remaining_bytes(reader) / sizeof(Value)) {
+                throw VsagException(ErrorType::INVALID_BINARY, "corrupted PiPNN vector length");
+            }
+            values.resize(size);
+            reader.Read(reinterpret_cast<char*>(values.data()), size * sizeof(Value));
+        };
+        read_vector(snapshot->fingerprints);
+        read_vector(snapshot->offsets);
+        read_vector(snapshot->targets);
+        read_vector(snapshot->distances);
+        if (snapshot->fingerprints.size() != count or snapshot->offsets.size() != count + 1 or
+            snapshot->offsets.front() != 0 or
+            snapshot->offsets.back() != snapshot->targets.size() or
+            snapshot->targets.size() != snapshot->distances.size() or
+            not std::is_sorted(snapshot->offsets.begin(), snapshot->offsets.end())) {
+            throw VsagException(ErrorType::INVALID_BINARY, "invalid PiPNN cache offsets");
+        }
+        for (const auto target : snapshot->targets) {
+            if (target >= count) {
+                throw VsagException(ErrorType::INVALID_BINARY, "invalid PiPNN cache target");
+            }
+        }
+        if (version == 2) {
+            read_vector(snapshot->hashes);
+            read_vector(snapshot->inner_ids);
+            read_vector(snapshot->graph_offsets);
+            read_vector(snapshot->graph_targets);
+            read_vector(snapshot->graph_distances);
+            if (snapshot->hashes.size() != snapshot->targets.size() or
+                snapshot->inner_ids.size() != count or
+                snapshot->graph_offsets.size() != count + 1 or
+                snapshot->graph_offsets.front() != 0 or
+                snapshot->graph_offsets.back() != snapshot->graph_targets.size() or
+                snapshot->graph_distances.size() != snapshot->graph_targets.size() or
+                not std::is_sorted(snapshot->graph_offsets.begin(),
+                                   snapshot->graph_offsets.end())) {
+                throw VsagException(ErrorType::INVALID_BINARY, "invalid PiPNN graph cache offsets");
+            }
+            for (const auto target : snapshot->graph_targets) {
+                if (target >= count) {
+                    throw VsagException(ErrorType::INVALID_BINARY,
+                                        "invalid PiPNN graph cache target");
+                }
+            }
+            Vector<uint64_t> graph_seen(count, std::numeric_limits<uint64_t>::max(), allocator_);
+            for (uint64_t row = 0; row < count; ++row) {
+                const auto begin =
+                    snapshot->targets.begin() + static_cast<int64_t>(snapshot->offsets[row]);
+                const auto end =
+                    snapshot->targets.begin() + static_cast<int64_t>(snapshot->offsets[row + 1]);
+                if (std::adjacent_find(begin, end, std::greater_equal<InnerIdType>{}) != end) {
+                    throw VsagException(ErrorType::INVALID_BINARY, "unsorted PiPNN candidate row");
+                }
+                if (std::find(begin, end, row) != end) {
+                    throw VsagException(ErrorType::INVALID_BINARY, "PiPNN candidate self-edge");
+                }
+                for (uint64_t edge = snapshot->graph_offsets[row];
+                     edge < snapshot->graph_offsets[row + 1];
+                     ++edge) {
+                    const auto target = snapshot->graph_targets[edge];
+                    if (target == row or graph_seen[target] == row) {
+                        throw VsagException(ErrorType::INVALID_BINARY,
+                                            "PiPNN graph self-edge or duplicate target");
+                    }
+                    graph_seen[target] = row;
+                    const auto candidate = std::lower_bound(begin, end, target);
+                    if (candidate == end or *candidate != target or
+                        snapshot->graph_distances[edge] !=
+                            snapshot->distances[static_cast<uint64_t>(candidate -
+                                                                      snapshot->targets.begin())]) {
+                        throw VsagException(ErrorType::INVALID_BINARY,
+                                            "PiPNN graph edge does not match its candidate row");
+                    }
+                }
+            }
+        }
+        result.pipnn = std::move(snapshot);
+    }
+    source_ids_.swap(result.source_ids_);
+    neighbors_.swap(result.neighbors_);
+    pipnn = std::move(result.pipnn);
 }
 
 const Vector<InnerIdType>*

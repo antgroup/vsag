@@ -124,4 +124,66 @@ TEST_CASE("BucketReorder reranks bucket locations", "[ut][reorder][bucket]") {
     }
 }
 
+TEST_CASE("BucketReorder accounts actual distance evaluations",
+          "[ut][reorder][bucket][statistics]") {
+    auto allocator = Engine::CreateDefaultAllocator();
+    auto bucket_param = std::make_shared<BucketDataCellParameter>();
+    bucket_param->quantizer_parameter = std::make_shared<FP32QuantizerParameter>();
+    bucket_param->io_parameter = std::make_shared<MemoryIOParameter>();
+    bucket_param->buckets_count = 2;
+
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common_param.dim_ = 1;
+    auto bucket = BucketInterface::MakeInstance(bucket_param, common_param);
+    float vectors[] = {1.0F, 2.0F, 3.0F, 4.0F};
+    bucket->Train(vectors, 4);
+    for (InnerIdType i = 0; i < 4; ++i) {
+        bucket->InsertVector(vectors + i, i % 2, i);
+    }
+
+    std::vector<std::pair<BucketIdType, InnerIdType>> locations{{0, 0}, {1, 0}, {0, 1}, {1, 1}};
+    uint64_t expected_evaluations = 4;
+    SearchStatistics stats;
+    QueryContext ctx{.alloc = allocator.get(), .stats = &stats};
+    SECTION("distinct bucket locations") {
+    }
+    SECTION("duplicate bucket locations are evaluated once") {
+        locations[3] = locations[2];
+        expected_evaluations = 3;
+    }
+    SECTION("distance evaluation tracking can be disabled") {
+        ctx.track_distance_evaluations = false;
+        expected_evaluations = 0;
+    }
+
+    BucketReorder reorder(
+        bucket,
+        [&locations](InnerIdType inner_id) { return locations[inner_id]; },
+        allocator.get());
+    auto candidates = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
+    for (InnerIdType i = 0; i < 4; ++i) {
+        candidates->Push(20.0F + i, i);
+    }
+    float query = 0.0F;
+    auto result = reorder.Reorder(candidates, &query, 2, ctx);
+
+    CHECK(result->Size() == 2);
+    CHECK(stats.reorder_distance_count.load(std::memory_order_relaxed) == 4);
+    CHECK(stats.reorder_candidate_count.load(std::memory_order_relaxed) == 4);
+    CHECK(stats.distance_evaluations.load(std::memory_order_relaxed) == expected_evaluations);
+    CHECK(stats.distance_evaluations_by_phase[static_cast<uint8_t>(DistanceEvaluationPhase::RERANK)]
+              .load(std::memory_order_relaxed) == expected_evaluations);
+    CHECK(stats
+              .distance_evaluations_by_phase[static_cast<uint8_t>(
+                  DistanceEvaluationPhase::APPROXIMATE)]
+              .load(std::memory_order_relaxed) == 0);
+    CHECK(
+        stats.distance_evaluations_by_backend[static_cast<uint8_t>(DistanceEvaluationBackend::FP32)]
+            .load(std::memory_order_relaxed) == expected_evaluations);
+    CHECK(ctx.distance_phase == DistanceEvaluationPhase::APPROXIMATE);
+    CHECK(stats.complete.load(std::memory_order_relaxed));
+}
+
 }  // namespace vsag

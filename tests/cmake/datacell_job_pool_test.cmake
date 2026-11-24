@@ -13,8 +13,12 @@ endif ()
 
 file (READ "${ninja_file}" ninja_content)
 file (READ "${rules_file}" rules_content)
+load_cache ("${VSAG_BUILD_DIR}" READ_WITH_PREFIX build_cache_ ENABLE_ASAN)
+if (NOT DEFINED build_cache_ENABLE_ASAN)
+    message (FATAL_ERROR "VSAG_BUILD_DIR must declare ENABLE_ASAN")
+endif ()
 
-function (assert_object_pool source target expect_pool)
+function (assert_object_pool source target pool expect_pool)
     set (object_path "src/datacell/CMakeFiles/${target}.dir/${source}.o")
     string (FIND "${ninja_content}" "build ${object_path}:" block_start)
     if (block_start EQUAL -1)
@@ -27,7 +31,7 @@ function (assert_object_pool source target expect_pool)
         message (FATAL_ERROR "Ninja object rule is not terminated: ${object_path}")
     endif ()
     string (SUBSTRING "${remaining_content}" 0 ${block_length} object_rule)
-    string (FIND "${object_rule}" "pool = rabitq_split_factory_pool" pool_position)
+    string (FIND "${object_rule}" "pool = ${pool}" pool_position)
 
     if (expect_pool AND pool_position EQUAL -1)
         message (FATAL_ERROR "Serial pool is missing from ${object_path}")
@@ -41,7 +45,7 @@ set (rabitq_split_factory_sources
      rabitq_split_datacell_factory_ip.cpp
      rabitq_split_datacell_factory_cosine.cpp)
 foreach (source IN LISTS rabitq_split_factory_sources)
-    assert_object_pool ("${source}" rabitq_split_datacell_factory TRUE)
+    assert_object_pool ("${source}" rabitq_split_datacell_factory rabitq_split_factory_pool TRUE)
 endforeach ()
 
 file (GLOB datacell_sources RELATIVE "${VSAG_SOURCE_DIR}/src/datacell"
@@ -49,11 +53,20 @@ file (GLOB datacell_sources RELATIVE "${VSAG_SOURCE_DIR}/src/datacell"
 list (FILTER datacell_sources EXCLUDE REGEX "_test\\.cpp$")
 list (REMOVE_ITEM datacell_sources ${rabitq_split_factory_sources})
 foreach (source IN LISTS datacell_sources)
-    assert_object_pool ("${source}" datacell FALSE)
+    assert_object_pool ("${source}" datacell rabitq_split_factory_pool FALSE)
+    assert_object_pool ("${source}" datacell datacell_compile_pool "${build_cache_ENABLE_ASAN}")
 endforeach ()
 
 if (NOT rules_content MATCHES "pool rabitq_split_factory_pool\n  depth = 1")
     message (FATAL_ERROR "The RaBitQ split factory pool must have capacity one")
+endif ()
+
+if (build_cache_ENABLE_ASAN)
+    if (NOT rules_content MATCHES "pool datacell_compile_pool\n  depth = 1")
+        message (FATAL_ERROR "The sanitizer datacell pool must have capacity one")
+    endif ()
+elseif (rules_content MATCHES "pool datacell_compile_pool\n")
+    message (FATAL_ERROR "Non-ASan builds must retain ordinary datacell compile concurrency")
 endif ()
 
 message (STATUS "Datacell Ninja job-pool assignments passed")
