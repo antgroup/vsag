@@ -269,7 +269,7 @@ so compare recall at matched `ef_search` rather than adjacency.
 
 The GPU graph is built from a different partition and from quantized scores, so recall can differ
 slightly from the CPU build. On one RTX 2080 Ti, SIFT-1M (128-d, `max_degree` 32, `alpha` 1.2) built in about 2.2 s at
-Recall@10 0.992 with `ef_search` 128, against about 21 s and 0.993 for the CPU build on the same
+Recall@10 0.992 with `ef_search` 128, against about 17 s and 0.993 for the CPU build on the same
 machine. Treat this as a single measurement, not a guarantee. `tools/eval/pipnn_gpu.yaml` reproduces the comparison with `eval_performance`.
 
 ### Experimental PiPNN adaptive alpha

@@ -239,7 +239,7 @@ PiPNN 构建（采用 [GPiPNN](https://arxiv.org/abs/2611.05690) 的全流程驻
 GPU 图与 CPU 图并不逐位一致（划分和打分方式不同），请在相同 `ef_search` 下比较召回，而不是比较邻接表。
 
 在一块 RTX 2080 Ti 上，SIFT-1M（128 维，`max_degree` 32，`alpha` 1.2）约 2.2 秒完成构建，
-`ef_search` 128 时 Recall@10 为 0.992；同机 CPU 构建约 21 秒、0.993。这只是一次测量，不构成保证。可用 `eval_performance` 运行 `tools/eval/pipnn_gpu.yaml` 复现该对比。
+`ef_search` 128 时 Recall@10 为 0.992；同机 CPU 构建约 17 秒、0.993。这只是一次测量，不构成保证。可用 `eval_performance` 运行 `tools/eval/pipnn_gpu.yaml` 复现该对比。
 
 ### 实验性 PiPNN 动态 alpha
 
