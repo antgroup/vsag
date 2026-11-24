@@ -50,7 +50,9 @@ public:
     Build(const DatasetPtr& data) override;
 
     float
-    CalcDistanceById(const float* vector, int64_t id) const override;
+    CalcDistanceById(const float* vector,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override;
 
     void
     Deserialize(StreamReader& reader) override;

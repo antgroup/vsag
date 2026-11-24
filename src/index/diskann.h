@@ -71,6 +71,21 @@ public:
         SAFE_CALL(return this->build(base));
     }
 
+    tl::expected<DatasetPtr, Error>
+    CalDistanceById(const float* query,
+                    const int64_t* ids,
+                    int64_t count,
+                    bool calculate_precise_distance = true) const override {
+        SAFE_CALL(return this->cal_distance_by_id(query, ids, count, calculate_precise_distance));
+    }
+
+    tl::expected<float, Error>
+    CalcDistanceById(const float* vector,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override {
+        SAFE_CALL(return this->calc_distance_by_id(vector, id, calculate_precise_distance));
+    }
+
     IndexType
     GetIndexType() const override {
         return IndexType::DISKANN;
@@ -187,6 +202,17 @@ private:
     tl::expected<Checkpoint, Error>
     continue_build(const DatasetPtr& base, const BinarySet& binary_set);
 
+    DatasetPtr
+    cal_distance_by_id(const float* query,
+                       const int64_t* ids,
+                       int64_t count,
+                       bool calculate_precise_distance = true) const;
+
+    float
+    calc_distance_by_id(const float* vector,
+                        int64_t id,
+                        bool calculate_precise_distance = true) const;
+
     tl::expected<DatasetPtr, Error>
     knn_search(const DatasetPtr& query,
                int64_t k,
@@ -265,6 +291,8 @@ private:
     size_t sector_len_;
 
     int64_t build_batch_num_ = 10;
+
+    bool support_calc_distance_by_id_ = false;
 
     int64_t dim_;
     bool use_reference_ = true;

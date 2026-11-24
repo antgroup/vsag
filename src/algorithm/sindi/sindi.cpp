@@ -551,10 +551,12 @@ SINDI::GetSparseVectorByInnerId(InnerIdType inner_id,
 }
 
 float
-SINDI::CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
+SINDI::CalcDistanceById(const DatasetPtr& vector,
+                        int64_t id,
+                        bool calculate_precise_distance) const {
     std::shared_lock rlock(this->global_mutex_);
 
-    if (use_reorder_) {
+    if (use_reorder_ && calculate_precise_distance) {
         return this->rerank_flat_index_->CalcDistanceById(vector, id);
     }
 
@@ -580,8 +582,11 @@ SINDI::calc_distance_by_inner_id(const SparseVector& sparse_query, InnerIdType i
 }
 
 DatasetPtr
-SINDI::CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count) const {
-    if (use_reorder_) {
+SINDI::CalDistanceById(const DatasetPtr& query,
+                       const int64_t* ids,
+                       int64_t count,
+                       bool calculate_precise_distance) const {
+    if (use_reorder_ && calculate_precise_distance) {
         std::shared_lock rlock(this->global_mutex_);
         return this->rerank_flat_index_->CalDistanceById(query, ids, count);
     }

@@ -358,17 +358,23 @@ cal_distance_one_by_one(const int64_t* ids, int64_t count, Allocator* allocator,
 }  // namespace
 
 DatasetPtr
-InnerIndexInterface::CalDistanceById(const float* query, const int64_t* ids, int64_t count) const {
-    return cal_distance_one_by_one(
-        ids, count, allocator_, [&](int64_t id) { return this->CalcDistanceById(query, id); });
+InnerIndexInterface::CalDistanceById(const float* query,
+                                     const int64_t* ids,
+                                     int64_t count,
+                                     bool calculate_precise_distance) const {
+    return cal_distance_one_by_one(ids, count, allocator_, [&](int64_t id) {
+        return this->CalcDistanceById(query, id, calculate_precise_distance);
+    });
 }
 
 DatasetPtr
 InnerIndexInterface::CalDistanceById(const DatasetPtr& query,
                                      const int64_t* ids,
-                                     int64_t count) const {
-    return cal_distance_one_by_one(
-        ids, count, allocator_, [&](int64_t id) { return this->CalcDistanceById(query, id); });
+                                     int64_t count,
+                                     bool calculate_precise_distance) const {
+    return cal_distance_one_by_one(ids, count, allocator_, [&](int64_t id) {
+        return this->CalcDistanceById(query, id, calculate_precise_distance);
+    });
 }
 
 InnerIndexPtr
