@@ -242,6 +242,11 @@ public:
     }
 
     bool
+    IsDistanceLowerBoundInMemory() const override {
+        return base_->IsDistanceLowerBoundInMemory();
+    }
+
+    bool
     HoldMolds() const override {
         return base_->HoldMolds();
     }

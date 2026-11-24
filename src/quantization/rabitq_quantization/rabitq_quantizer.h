@@ -191,7 +191,8 @@ public:
         const uint8_t* one_bit_code,
         float* dists,
         float* lower_bound,
-        float runtime_rabitq_error_rate = std::numeric_limits<float>::quiet_NaN()) const;
+        float runtime_rabitq_error_rate = std::numeric_limits<float>::quiet_NaN(),
+        bool allow_uncorrected_estimate = false) const;
 
     void
     ComputeDistsWithOneBitLowerBoundBatch4(

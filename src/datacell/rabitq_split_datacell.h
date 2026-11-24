@@ -371,23 +371,19 @@ public:
                     computed4,
                     this->query_rabitq_error_rate(ctx));
                 if (not computed1) {
-                    this->add_filter_fallback_full_count(ctx, 1);
-                    this->compute_full_dist_after_one_bit_failure(
+                    this->handle_filter_distance_failure(
                         idx[i], code1, comp, result_dists + i, lower_bound1, ctx);
                 }
                 if (not computed2) {
-                    this->add_filter_fallback_full_count(ctx, 1);
-                    this->compute_full_dist_after_one_bit_failure(
+                    this->handle_filter_distance_failure(
                         idx[i + 1], code2, comp, result_dists + i + 1, lower_bound2, ctx);
                 }
                 if (not computed3) {
-                    this->add_filter_fallback_full_count(ctx, 1);
-                    this->compute_full_dist_after_one_bit_failure(
+                    this->handle_filter_distance_failure(
                         idx[i + 2], code3, comp, result_dists + i + 2, lower_bound3, ctx);
                 }
                 if (not computed4) {
-                    this->add_filter_fallback_full_count(ctx, 1);
-                    this->compute_full_dist_after_one_bit_failure(
+                    this->handle_filter_distance_failure(
                         idx[i + 3], code4, comp, result_dists + i + 3, lower_bound4, ctx);
                 }
             } catch (...) {
@@ -414,8 +410,7 @@ public:
                     lower_bound,
                     this->query_rabitq_error_rate(ctx));
                 if (not computed) {
-                    this->add_filter_fallback_full_count(ctx, 1);
-                    this->compute_full_dist_after_one_bit_failure(
+                    this->handle_filter_distance_failure(
                         idx[i], one_bit_code, comp, result_dists + i, lower_bound, ctx);
                 }
             } catch (...) {
@@ -608,6 +603,11 @@ public:
     [[nodiscard]] bool
     InMemory() const override {
         return OneBitIOTmpl::InMemory and SupplementIOTmpl::InMemory;
+    }
+
+    [[nodiscard]] bool
+    IsDistanceLowerBoundInMemory() const override {
+        return OneBitIOTmpl::InMemory;
     }
 
     bool
@@ -942,23 +942,19 @@ private:
                 computed4,
                 this->query_rabitq_error_rate(ctx));
             if (not computed1) {
-                this->add_filter_fallback_full_count(ctx, 1);
-                this->compute_full_dist_after_one_bit_failure(
+                this->handle_filter_distance_failure(
                     idx[i], code1, computer, result_dists + i, lower_bound1, ctx);
             }
             if (not computed2) {
-                this->add_filter_fallback_full_count(ctx, 1);
-                this->compute_full_dist_after_one_bit_failure(
+                this->handle_filter_distance_failure(
                     idx[i + 1], code2, computer, result_dists + i + 1, lower_bound2, ctx);
             }
             if (not computed3) {
-                this->add_filter_fallback_full_count(ctx, 1);
-                this->compute_full_dist_after_one_bit_failure(
+                this->handle_filter_distance_failure(
                     idx[i + 2], code3, computer, result_dists + i + 2, lower_bound3, ctx);
             }
             if (not computed4) {
-                this->add_filter_fallback_full_count(ctx, 1);
-                this->compute_full_dist_after_one_bit_failure(
+                this->handle_filter_distance_failure(
                     idx[i + 3], code4, computer, result_dists + i + 3, lower_bound4, ctx);
             }
         }
@@ -973,8 +969,7 @@ private:
                 lower_bound,
                 this->query_rabitq_error_rate(ctx));
             if (not computed) {
-                this->add_filter_fallback_full_count(ctx, 1);
-                this->compute_full_dist_after_one_bit_failure(
+                this->handle_filter_distance_failure(
                     idx[i], one_bit_code, computer, result_dists + i, lower_bound, ctx);
             }
         }
@@ -1068,12 +1063,29 @@ private:
     }
 
     void
-    compute_full_dist_after_one_bit_failure(InnerIdType id,
-                                            const uint8_t* one_bit_code,
-                                            Computer<RaBitQuantizer<metric>>* computer,
-                                            float* result_dist,
-                                            float* lower_bound,
-                                            QueryContext* ctx) const {
+    handle_filter_distance_failure(InnerIdType id,
+                                   const uint8_t* one_bit_code,
+                                   Computer<RaBitQuantizer<metric>>* computer,
+                                   float* result_dist,
+                                   float* lower_bound,
+                                   QueryContext* ctx) const {
+        if constexpr (OneBitIOTmpl::InMemory and not SupplementIOTmpl::InMemory) {
+            // Keep traversal on the resident filter even for degenerate records.
+            if (not this->quantizer_->ComputeDistWithOneBitLowerBound(
+                    *computer,
+                    one_bit_code,
+                    result_dist,
+                    lower_bound,
+                    this->query_rabitq_error_rate(ctx),
+                    true)) {
+                *result_dist = std::numeric_limits<float>::max();
+                if (lower_bound != nullptr) {
+                    *lower_bound = std::numeric_limits<float>::lowest();
+                }
+            }
+            return;
+        }
+        this->add_filter_fallback_full_count(ctx, 1);
         bool supplement_need_release = false;
         const uint8_t* supplement_code = nullptr;
         try {

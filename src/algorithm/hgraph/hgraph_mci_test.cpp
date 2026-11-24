@@ -980,6 +980,142 @@ TEST_CASE("HGraph MCI one-bit dispatch shares HGraph scoring and same-base reord
     }
 }
 
+#ifdef HAVE_LIBAIO
+TEST_CASE("HGraph and MCI scan the resident RaBitQ split filter and refine from disk",
+          "[ut][hgraph][mci][mci_split_disk]") {
+    const int filter_bits = GENERATE(1, 3);
+    constexpr int64_t total = 69;
+    constexpr int64_t dim = 64;
+    constexpr int64_t k = 3;
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto vectors = fixtures::generate_vectors(total, dim, true, 23);
+    // Opposite pairs have an exactly zero centroid. The center records exercise the
+    // degenerate low-bit score in a four-record batch and the scalar tail of a full scan.
+    for (int64_t row = 4; row < total - 1; row += 2) {
+        for (int64_t j = 0; j < dim; ++j) {
+            vectors[(row + 1) * dim + j] = -vectors[row * dim + j];
+        }
+    }
+    std::fill_n(vectors.begin(), 4 * dim, 0.0F);
+    std::fill_n(vectors.end() - dim, dim, 0.0F);
+
+    auto config = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
+    auto build = config["index_param"];
+    build["build_thread_count"].SetInt(1);
+    build["graph_type"].SetString("nsw");
+    build["base_quantization_type"].SetString("rabitq");
+    build["precise_quantization_type"].SetString("rabitq");
+    build["rabitq_bits_per_dim_base"].SetInt(filter_bits);
+    build["rabitq_bits_per_dim_precise"].SetInt(8 - filter_bits);
+    build["base_io_type"].SetString("block_memory_io");
+    build["base_supplement_io_type"].SetString("async_io");
+    build["base_supplement_file_path"].SetString(
+        (std::filesystem::temp_directory_path() /
+         ("vsag-split-supplement-" +
+          std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())))
+            .string());
+    build["store_raw_vector"].SetBool(true);
+    build["use_reorder"].SetBool(true);
+    auto index = vsag::Factory::CreateIndex("hgraph", config.Dump()).value();
+    REQUIRE(index->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+
+    vsag::DefaultAllocator allocator;
+    vsag::Vector<vsag::InnerIdType> members(total, &allocator);
+    std::iota(members.begin(), members.end(), 0);
+    auto cliques = vsag::HGraphMCITestAccess::GetCliques(index);
+    cliques->AppendNewClique(members, total);
+    cliques->MarkAvailable(total);
+    cliques->Flush(total);
+    auto all_valid = std::make_shared<HalfRatioAllValidFilter>(ids);
+    std::vector<int64_t> valid_ids;
+    std::copy_if(ids.begin(), ids.end(), std::back_inserter(valid_ids), [](int64_t id) {
+        return id % 2 == 0;
+    });
+    auto even_ids = std::make_shared<HalfRatioAllValidFilter>(valid_ids);
+    auto query = make_dataset(ids, vectors, 20, 1, dim);
+    auto base = vsag::HGraphMCITestAccess::GetBaseCodes(index);
+    REQUIRE_FALSE(base->InMemory());
+    auto computer = base->FactoryComputer(query->GetFloat32Vectors());
+    std::vector<float> full(total), coarse(total), lower_bounds(total);
+    base->Query(full.data(), computer, members.data(), total);
+    base->QueryWithDistanceLowerBound(
+        coarse.data(), lower_bounds.data(), computer, members.data(), total);
+    for (vsag::InnerIdType center : {0U, static_cast<vsag::InnerIdType>(total - 1)}) {
+        float scalar = 0.0F;
+        float bound = 0.0F;
+        base->QueryWithDistanceLowerBound(&scalar, &bound, computer, &center, 1);
+        REQUIRE(std::isfinite(scalar));
+        REQUIRE(coarse[center] == Catch::Approx(scalar));
+        REQUIRE(lower_bounds[center] == bound);
+        REQUIRE(bound <= full[center]);
+    }
+
+    auto search = vsag::JsonType::Parse(R"({"hgraph":{"ef_search":24,"use_mci":true,
+        "mci_use_memory_quantization":true,"mci_seed_coverage":0.0,"mci_seed_ratio":0.4,
+        "rabitq_one_bit_search":true,"skip_strategy":"deterministic_accumulative"}})");
+    auto params = search["hgraph"];
+    for (const std::string route : {"hgraph", "iterator", "hybrid", "mci_full", "mci_cliques"}) {
+        const bool mci = route == "mci_full" or route == "mci_cliques";
+        const auto& filter = mci ? all_valid : even_ids;
+        params["hgraph_valid_ratio_threshold"].SetFloat(mci ? 1.0F : 0.0F);
+        params["mci_seed_coverage"].SetFloat(route == "mci_full" ? 1.0F : 0.0F);
+        params["use_hybrid_traversal"].SetBool(route == "hybrid");
+        for (bool reorder : {false, true}) {
+            CAPTURE(filter_bits, route, reorder);
+            params["enable_reorder"].SetBool(reorder);
+            vsag::IteratorContext* iter = nullptr;
+            std::unique_ptr<vsag::IteratorContext> iter_owner;
+            std::set<int64_t> seen;
+            const int pages = route == "iterator" ? 3 : 1;
+            for (int page = 0; page < pages; ++page) {
+                CAPTURE(page);
+                auto result =
+                    route == "iterator"
+                        ? index->KnnSearch(query, k, search.Dump(), filter, iter, page == 2)
+                        : index->KnnSearch(query, k, search.Dump(), filter);
+                if (page == 0) {
+                    iter_owner.reset(iter);
+                }
+                REQUIRE(result.has_value());
+                const auto count = result.value()->GetDim();
+                REQUIRE(count > 0);
+                REQUIRE(count <= k);
+                if (page < 2) {
+                    REQUIRE(count == k);
+                }
+                const auto stats = vsag::JsonType::Parse(result.value()->GetStatistics());
+                if (route != "iterator") {
+                    REQUIRE(stats["mci_hybrid_route"].GetString() == (mci ? "mci" : route));
+                }
+                if (mci) {
+                    REQUIRE((stats["hops"].GetInt() == 0) == (route == "mci_full"));
+                    REQUIRE(stats["dist_cmp"].GetInt() == total);
+                }
+                if (route == "hybrid") {
+                    REQUIRE(stats["hybrid_dist_computations"].GetInt() > 0);
+                }
+                if (page == 0) {
+                    REQUIRE(stats["rabitq_filter_count"].GetInt() > 0);
+                }
+                REQUIRE(stats["rabitq_filter_fallback_full_count"].GetInt() == 0);
+                const auto full_count = stats["rabitq_full_count"].GetInt();
+                REQUIRE(full_count == stats["reorder_distance_count"].GetInt());
+                REQUIRE((full_count > 0) == reorder);
+                REQUIRE((stats["io_cnt"].GetInt() > 0) == reorder);
+                for (int64_t j = 0; j < count; ++j) {
+                    auto id = result.value()->GetIds()[j];
+                    REQUIRE(filter->CheckValid(id));
+                    REQUIRE(seen.insert(id).second);
+                    REQUIRE(result.value()->GetDistances()[j] ==
+                            Catch::Approx(reorder ? full[id] : coarse[id]).margin(1e-5F));
+                }
+            }
+        }
+    }
+}
+#endif
+
 TEST_CASE("HGraph MCI memory quantization rejects unsupported base storage",
           "[ut][hgraph][mci][mci_memory]") {
 #ifdef HAVE_LIBAIO
@@ -1023,6 +1159,10 @@ TEST_CASE("HGraph MCI memory quantization rejects unsupported base storage",
     auto search = vsag::JsonType::Parse(R"({"hgraph":{"ef_search":16,
         "hgraph_valid_ratio_threshold":1.0,"mci_use_memory_quantization":true,
         "rabitq_one_bit_search":true}})");
+    // Disk supplements require selecting the resident low-bit scorer.
+    if (layout == "disk_supplement") {
+        search["hgraph"]["rabitq_one_bit_search"].SetBool(false);
+    }
     auto unsupported = index->KnnSearch(query, 5, search.Dump(), filter);
     REQUIRE_FALSE(unsupported.has_value());
     REQUIRE(unsupported.error().type == vsag::ErrorType::INVALID_ARGUMENT);

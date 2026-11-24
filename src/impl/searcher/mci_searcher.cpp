@@ -525,8 +525,8 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
         return heap;
     }
     if (mci_param.use_one_bit_distance) {
-        CHECK_ARGUMENT(flatten->InMemory(),
-                       "MCI one-bit scoring requires fully in-memory base codes");
+        CHECK_ARGUMENT(flatten->IsDistanceLowerBoundInMemory(),
+                       "MCI low-bit scoring requires in-memory filter codes");
     }
 
     const auto total = static_cast<InnerIdType>(flatten->TotalCount());

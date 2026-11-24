@@ -24,6 +24,7 @@
 #include "container_types.h"
 #include "impl/heap/search_candidate_queue.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/searcher/searcher_utils.h"
 #include "index_common_param.h"
 #include "query_context.h"
 #include "vsag/filter.h"
@@ -233,8 +234,13 @@ HybridMCISearcher::Search(const GraphInterfacePtr& graph,
             return;
         }
         batch_dists.resize(count);
-        flatten->Query(
-            batch_dists.data(), computer, batch_ids.data(), static_cast<InnerIdType>(count), ctx);
+        query_traversal_distances(flatten,
+                                  param.use_split_filter,
+                                  batch_dists.data(),
+                                  computer,
+                                  batch_ids.data(),
+                                  static_cast<InnerIdType>(count),
+                                  ctx);
         distance_computations += count;
         if (stats != nullptr) {
             stats->dist_computations += count;
