@@ -132,9 +132,27 @@ auto d = index->CalcDistanceById(query, /*id=*/42);
 | brute_force  | yes                             | yes (default loop)  | Always precise (no quantization). |
 | pyramid      | yes                             | yes (default loop)  | |
 | sindi        | no                              | yes                 | Sparse vectors only. |
+| diskann      | yes (opt-in)                    | no                  | Requires `support_calc_distance_by_id=true` at build time; otherwise calls return `UNSUPPORTED_INDEX_OPERATION`. |
 
 Indexes that do not implement the API surface for a given overload return an
 `UNSUPPORTED_INDEX_OPERATION` error.
+
+### DiskANN (opt-in)
+
+DiskANN only enables this feature when the build parameter
+`support_calc_distance_by_id` is set to `true` (default `false`), because the lookup needs an
+extra `tag -> internal id` map to be kept in memory.
+
+- When the parameter is `false`, `CheckFeature(SUPPORT_CAL_DISTANCE_BY_ID)` returns `false`
+  and both `CalcDistanceById` and `CalDistanceById` return `UNSUPPORTED_INDEX_OPERATION`.
+- When the parameter is `true`, DiskANN follows exactly the same contract as the other
+  indexes: a missing ID makes the single-ID call return `INVALID_ARGUMENT`, while the batch
+  call reports `NaN` plus `false` in `GetValids()` for that slot and never fails because of
+  missing IDs. `count == 0` yields an empty result with `GetValids() == nullptr`.
+- On an empty or not-yet-built index (with the feature enabled), the single-ID call returns
+  `INVALID_ARGUMENT` and the batch call reports every requested ID as invalid.
+- Only the dense `const float*` overloads are supported; the `DatasetPtr` overloads return
+  `UNSUPPORTED_INDEX_OPERATION`.
 
 ## Notes
 

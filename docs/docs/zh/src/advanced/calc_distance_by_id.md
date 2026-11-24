@@ -121,8 +121,25 @@ auto d = index->CalcDistanceById(query, /*id=*/42);
 | brute_force  | 支持                       | 支持（默认循环） | 总是精确（无量化）。 |
 | pyramid      | 支持                       | 支持（默认循环） | |
 | sindi        | 不支持                     | 支持             | 仅稀疏向量。 |
+| diskann      | 支持（需显式开启）         | 不支持           | 需在建索引时设置 `support_calc_distance_by_id=true`，否则调用返回 `UNSUPPORTED_INDEX_OPERATION`。 |
 
 对于未实现某重载的索引，调用会返回 `UNSUPPORTED_INDEX_OPERATION` 错误。
+
+### DiskANN（需显式开启）
+
+DiskANN 只有在建索引参数 `support_calc_distance_by_id` 为 `true`（默认为 `false`）时才开启
+该能力，因为按 ID 查距离需要额外在内存中维护一份 `tag -> internal id` 的映射。
+
+- 该参数为 `false` 时，`CheckFeature(SUPPORT_CAL_DISTANCE_BY_ID)` 返回 `false`，
+  `CalcDistanceById` 与 `CalDistanceById` 均返回 `UNSUPPORTED_INDEX_OPERATION`。
+- 该参数为 `true` 时，DiskANN 与其他索引遵循完全相同的契约：单个 ID 不存在时
+  `CalcDistanceById` 返回 `INVALID_ARGUMENT`；批量接口不会因为 ID 缺失而失败，缺失位置
+  距离为 `NaN` 且 `GetValids()` 对应位置为 `false`；`count == 0` 返回空结果，
+  `GetValids()` 为 `nullptr`。
+- 在空索引或尚未建好的索引上（功能已开启）：单个 ID 调用返回 `INVALID_ARGUMENT`，
+  批量调用会把所有请求的 ID 标记为无效。
+- 仅支持稠密的 `const float*` 重载，`DatasetPtr` 重载返回
+  `UNSUPPORTED_INDEX_OPERATION`。
 
 ## 注意事项
 

@@ -2230,15 +2230,59 @@ int64_t PQFlashIndex<T, LabelT>::range_search(const T *query, const double range
 
 template <typename T, typename LabelT>
 void PQFlashIndex<T, LabelT>::cal_distance_by_ids(const float *query, const int64_t *ids, int64_t count,
-                                                  float *distances, bool use_reorder)
+                                                  float *distances, bool use_reorder, std::vector<bool> *valids)
 {
+    if (count <= 0)
+    {
+        return;
+    }
+
+    if (valids != nullptr)
+    {
+        valids->assign((size_t) count, false);
+    }
+
+    std::vector<uint32_t> inner_ids((size_t) count, 0);
+    std::vector<int64_t> found_positions;
+    found_positions.reserve((size_t) count);
+    for (int64_t i = 0; i < count; ++i)
+    {
+        auto it = this->tag_to_id_map.find((LabelT)ids[i]);
+        if (it != this->tag_to_id_map.end())
+        {
+            inner_ids[(size_t) i] = it->second;
+            found_positions.push_back(i);
+            if (valids != nullptr)
+            {
+                (*valids)[(size_t) i] = true;
+            }
+        }
+        else
+        {
+            // a missing tag is reported through the validity mask, never fatal
+            distances[i] = std::numeric_limits<float>::quiet_NaN();
+        }
+    }
+
+    if (found_positions.empty())
+    {
+        return;
+    }
+
+    const uint64_t found_count = found_positions.size();
+    std::vector<uint32_t> found_inner_ids(found_count);
+    for (uint64_t k = 0; k < found_count; ++k)
+    {
+        found_inner_ids[k] = inner_ids[(size_t) found_positions[k]];
+    }
+
     std::shared_ptr<float[]> aligned_query_T = std::shared_ptr<float[]>(new float[this->data_dim]); // TODO: add support for other data type
 
     for (size_t i = 0; i < this->data_dim; i++)
     {
         aligned_query_T[i] = (float) query[i];
     }
-    
+
     if (metric == diskann::Metric::COSINE) {
         normalize(aligned_query_T.get(), this->data_dim);
     }
@@ -2246,41 +2290,45 @@ void PQFlashIndex<T, LabelT>::cal_distance_by_ids(const float *query, const int6
     pq_table.preprocess_query(aligned_query_T.get());
     auto pq_dists = std::shared_ptr<float[]>(new float[NUM_CENTROID * this->n_chunks]);
     pq_table.populate_chunk_distances(aligned_query_T.get(), pq_dists.get());
-    auto pq_coord_scratch = std::shared_ptr<uint8_t[]>(new uint8_t[count * this->n_chunks]);
 
-    std::vector<uint32_t> inner_ids;
-    inner_ids.resize(count);
-    for (int64_t i = 0; i < count; ++i) {
-        auto it = this->tag_to_id_map.find((LabelT)ids[i]);
-        if (it != this->tag_to_id_map.end()) {
-            inner_ids[i] = it->second;
-        } else {
-            throw diskann::ANNException("Tag " + std::to_string(ids[i]) + " not found in the index.", -1);
+    if (not use_reorder)
+    {
+        std::shared_ptr<uint8_t[]> pq_coord_scratch(new uint8_t[found_count * this->n_chunks]);
+        diskann::aggregate_coords(found_inner_ids, this->data, this->n_chunks, pq_coord_scratch.get());
+        std::vector<float> found_distances(found_count);
+        diskann::pq_dist_lookup(pq_coord_scratch.get(), found_count, this->n_chunks, pq_dists.get(), found_distances.data());
+        for (uint64_t k = 0; k < found_count; ++k)
+        {
+            distances[found_positions[k]] = found_distances[k];
         }
     }
-    if (not use_reorder) {
-        diskann::aggregate_coords(inner_ids, this->data, this->n_chunks, pq_coord_scratch.get());
-        diskann::pq_dist_lookup(pq_coord_scratch.get(), count, this->n_chunks, pq_dists.get(), distances);
-    } else {
-        auto sector_scratch = std::shared_ptr<char[]>(new char[count * sector_len]);
+    else
+    {
+        std::shared_ptr<char[]> sector_scratch(new char[found_count * sector_len]);
         std::vector<AlignedRead> sorted_read_reqs;
-        for (int64_t i = 0; i < count; ++i) {
-            uint32_t id = inner_ids[i];
+        sorted_read_reqs.reserve(found_count);
+        for (uint64_t k = 0; k < found_count; ++k)
+        {
+            uint32_t id = found_inner_ids[k];
             sorted_read_reqs.emplace_back(NODE_SECTOR_NO(((size_t)id)) * sector_len, sector_len,
-                                          sector_scratch.get() + i * sector_len);
+                                          sector_scratch.get() + k * sector_len);
         }
         reader->read(sorted_read_reqs);
-        for (int64_t i = 0; i < count; ++i) {
-            uint32_t id = inner_ids[i];
-            char *node_disk_buf = OFFSET_TO_NODE(sector_scratch.get() + i * sector_len, id);
+        for (uint64_t k = 0; k < found_count; ++k)
+        {
+            uint32_t id = found_inner_ids[k];
+            char *node_disk_buf = OFFSET_TO_NODE(sector_scratch.get() + k * sector_len, id);
             T *node_fp_coords = OFFSET_TO_NODE_COORDS(node_disk_buf);
             float exact_dist = dist_cmp_float->compare((float *)aligned_query_T.get(), (float *)node_fp_coords, (uint32_t)data_dim);
-            distances[i] = exact_dist;
+            distances[found_positions[k]] = exact_dist;
         }
     }
-    for (int64_t i = 0; i < count; ++i) {
-        if (metric == diskann::Metric::INNER_PRODUCT || metric == diskann::Metric::COSINE) {
-            distances[i] = distances[i] / 2;
+
+    if (metric == diskann::Metric::INNER_PRODUCT || metric == diskann::Metric::COSINE)
+    {
+        for (uint64_t k = 0; k < found_count; ++k)
+        {
+            distances[found_positions[k]] = distances[found_positions[k]] / 2;
         }
     }
 }
