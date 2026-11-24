@@ -4063,3 +4063,58 @@ TEST_CASE("HGraph Concurrent Tune(disable_future_tuning=false) and CalDistanceBy
 
     REQUIRE(cal_count.load() > 0);
 }
+
+TEST_CASE("HGraph UpdateVector skips removed neighbors", "[ft][hgraph][update][remove][pr]") {
+    using namespace fixtures;
+    constexpr int64_t dim = 32;
+    constexpr int64_t count = 64;
+    HGraphTestIndex::HGraphBuildParam build_param("l2", dim, "fp32");
+    build_param.support_remove = true;
+    const auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim, count, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    const auto* base_ids = dataset->base_->GetIds();
+    const auto* base_vectors = dataset->base_->GetFloat32Vectors();
+    const int64_t kept_id = base_ids[0];
+    // Keep a single live node: all of its graph neighbors are then removed labels, so the
+    // changed-neighborhood check in UpdateVector must skip them instead of failing.
+    std::vector<int64_t> removed_ids(base_ids + 1, base_ids + count);
+    auto remove_result = index->Remove(removed_ids, vsag::RemoveMode::MARK_REMOVE);
+    REQUIRE(remove_result.has_value());
+    REQUIRE(remove_result.value() == static_cast<uint32_t>(count - 1));
+
+    std::vector<float> updated_vector(base_vectors, base_vectors + dim);
+    for (int64_t i = 0; i < dim; ++i) {
+        updated_vector[i] += 0.5F;
+    }
+    auto new_base = vsag::Dataset::Make();
+    new_base->NumElements(1)->Dim(dim)->Float32Vectors(updated_vector.data())->Owner(false);
+
+    auto before = index->CalcDistanceById(updated_vector.data(), kept_id);
+    REQUIRE(before.has_value());
+    REQUIRE(before.value() > 1e-3F);
+
+    INFO("UpdateVector must skip removed neighbors instead of failing with INVALID_ARGUMENT");
+    auto update_result = index->UpdateVector(kept_id, new_base, false);
+    REQUIRE(update_result.has_value());
+    if (update_result.value()) {
+        auto after = index->CalcDistanceById(updated_vector.data(), kept_id);
+        REQUIRE(after.has_value());
+        REQUIRE(after.value() < 1e-3F);
+    }
+}
+
+TEST_CASE("HGraph CalcDistanceById of a removed label", "[ft][hgraph][distance][remove][pr]") {
+    using namespace fixtures;
+    constexpr int64_t dim = 128;
+    constexpr uint64_t count = 100;
+    HGraphTestIndex::HGraphBuildParam build_param("l2", dim, "fp32");
+    build_param.support_remove = true;
+    const auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim, count, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+    TestIndex::TestCalcDistanceByIdRemovedLabel(index, dataset);
+}

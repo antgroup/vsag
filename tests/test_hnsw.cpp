@@ -539,6 +539,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
         TestBuildIndex(index, dataset, true);
         TestBatchCalcDistanceById(index, dataset, 1e-5, true, false);
+        TestCalcDistanceByIdRemovedLabel(index, dataset);
         vsag::Options::Instance().set_block_size_limit(origin_size);
     }
 }

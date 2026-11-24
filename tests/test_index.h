@@ -218,6 +218,11 @@ public:
                               bool is_sparse = false);
 
     static void
+    TestCalcDistanceByIdRemovedLabel(const IndexPtr& index,
+                                     const TestDatasetPtr& dataset,
+                                     bool is_sparse = false);
+
+    static void
     TestGetMinAndMaxId(const IndexPtr& index,
                        const TestDatasetPtr& dataset,
                        bool expected_success = true);

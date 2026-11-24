@@ -691,3 +691,43 @@ TEST_CASE("LazyHGraph supports concurrent search during transition", "[ut][lazy_
     REQUIRE(index->GetPhase() == vsag::LazyHGraph::Phase::GRAPH);
     REQUIRE(index->CheckIdExist(2000));
 }
+
+TEST_CASE("LazyHGraph calculates batch distance by id in flat and graph phases",
+          "[ut][lazy_hgraph]") {
+    auto index = MakeLazyIndex(4);
+    std::vector<float> vectors;
+    std::vector<int64_t> ids;
+    auto data = MakeDataset(3, 1900, vectors, ids);
+    REQUIRE(index->Add(data).empty());
+
+    // valid, missing, valid: the batch path must consult the active sub-index's label table.
+    const std::vector<int64_t> batch_ids = {1900, -1, 1902};
+    const auto count = static_cast<int64_t>(batch_ids.size());
+    const auto* query = vectors.data() + DIM;
+    auto check = [&](const char* phase) {
+        INFO(phase);
+        auto result = index->CalDistanceById(query, batch_ids.data(), count);
+        REQUIRE(result != nullptr);
+        REQUIRE(result->GetNumElements() * result->GetDim() == count);
+        const auto* distances = result->GetDistances();
+        const auto* valids = result->GetValids();
+        REQUIRE(distances != nullptr);
+        REQUIRE(valids != nullptr);
+        REQUIRE(valids[0]);
+        REQUIRE(std::abs(distances[0] - L2(query, vectors.data())) < 1e-4F);
+        REQUIRE_FALSE(valids[1]);
+        REQUIRE(std::isnan(distances[1]));
+        REQUIRE(valids[2]);
+        REQUIRE(std::abs(distances[2] - L2(query, vectors.data() + 2 * DIM)) < 1e-4F);
+    };
+
+    check("flat phase");
+
+    std::vector<float> more_vectors;
+    std::vector<int64_t> more_ids;
+    auto more = MakeDataset(1, 1903, more_vectors, more_ids);
+    REQUIRE(index->Add(more).empty());
+    REQUIRE(index->GetPhase() == vsag::LazyHGraph::Phase::GRAPH);
+
+    check("graph phase");
+}

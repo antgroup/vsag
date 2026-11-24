@@ -391,9 +391,12 @@ public:
     /**
      * @brief Sets the per-entry validity flags of the dataset.
      *
-     * The array has one flag per entry of the Distances() array (NumElements() * Dim() entries).
-     * It follows the same ownership rules as the other pointer-backed Dataset fields. It is used
-     * by CalDistanceById to mark which requested IDs existed at lookup time.
+     * The array has one flag per entry of the Distances() array, i.e. NumElements() * Dim()
+     * entries. Batch CalDistanceById results always populate NumElements() and Dim() and set
+     * exactly that many flags (NumElements() * Dim() == requested count). Missing, removed, or
+     * otherwise invalid IDs get a quiet-NaN distance and a false flag; valid IDs get a finite
+     * distance and a true flag.
+     * It follows the same ownership rules as the other pointer-backed Dataset fields.
      *
      * @param valids Pointer to the validity flags.
      * @return DatasetPtr A shared pointer to the dataset with updated valids.

@@ -51,8 +51,9 @@ query_ds->NumElements(1)->SparseVectors(/* ... */);
 auto r = index->CalDistanceById(query_ds, ids, count, /*calculate_precise_distance=*/true);
 ```
 
-The result `Dataset` holds `count` distances in `GetDistances()`. A value of `-1.0F` means the
-corresponding id was invalid (not present in the index).
+The result `Dataset` holds `count` distances in `GetDistances()`, with `NumElements()` and `Dim()`
+set so that `NumElements() * Dim() == count`. An id that is missing or has been removed gets a
+`NaN` distance and a `false` entry in the `GetValids()` mask (same length as `GetDistances()`).
 
 ### `calculate_precise_distance`
 

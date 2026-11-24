@@ -486,17 +486,18 @@ public:
         auto distances = py::array_t<float>(count);
         auto dist_view = distances.mutable_unchecked<1>();
 
-        for (int64_t i = 0; i < count; ++i) {
-            dist_view(i) = -1.0F;
+        auto result = index_->CalDistanceById(query.data(), ids.data(), count);
+        if (!result.has_value()) {
+            throw std::runtime_error("calDistanceById failed: " + result.error().message);
         }
 
-        auto result = index_->CalDistanceById(query.data(), ids.data(), count);
-
-        if (result.has_value()) {
-            const auto* dist_data = result.value()->GetDistances();
-            for (int64_t i = 0; i < count; ++i) {
-                dist_view(i) = dist_data[i];
-            }
+        // Missing or removed ids carry a quiet-NaN distance in the returned array.
+        const auto* dist_data = result.value()->GetDistances();
+        if (count > 0 && dist_data == nullptr) {
+            throw std::runtime_error("calDistanceById failed: result carries no distances");
+        }
+        for (int64_t i = 0; i < count; ++i) {
+            dist_view(i) = dist_data[i];
         }
 
         return distances;

@@ -490,6 +490,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         TestRangeSearch(index, dataset, search_param, 0.94, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
         TestCalcDistanceById(index, dataset, 1e-5, true);
+        TestBatchCalcDistanceById(index, dataset, 1e-5, true);
     }
 }
 

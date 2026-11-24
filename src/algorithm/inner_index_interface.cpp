@@ -439,8 +439,16 @@ InnerIndexInterface::CalDistanceById(const float* query,
                                      int64_t count,
                                      bool calculate_precise_distance) const {
     auto result = Dataset::Make();
+    result->NumElements(1)->Dim(count);
     result->Owner(true, allocator_);
+    // An empty request has nothing to compute; allocating zero bytes may legitimately fail.
+    if (count <= 0) {
+        return result;
+    }
     auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
+    if (distances == nullptr) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate distance buffer");
+    }
     result->Distances(distances);
     std::vector<bool> validity(count, false);
     for (int64_t i = 0; i < count; ++i) {
@@ -470,8 +478,16 @@ InnerIndexInterface::CalDistanceById(const DatasetPtr& query,
                                      int64_t count,
                                      bool calculate_precise_distance) const {
     auto result = Dataset::Make();
+    result->NumElements(1)->Dim(count);
     result->Owner(true, allocator_);
+    // An empty request has nothing to compute; allocating zero bytes may legitimately fail.
+    if (count <= 0) {
+        return result;
+    }
     auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
+    if (distances == nullptr) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate distance buffer");
+    }
     result->Distances(distances);
     std::vector<bool> validity(count, false);
     for (int64_t i = 0; i < count; ++i) {
@@ -513,7 +529,10 @@ AttachValids(const DatasetPtr& dataset, const std::vector<bool>& validity, Alloc
         return;
     }
     auto* valids = static_cast<bool*>(allocator->Allocate(sizeof(bool) * validity.size()));
-    CHECK_ARGUMENT(valids != nullptr, "CalDistanceById valids allocation failed");
+    if (valids == nullptr) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                            "CalDistanceById valids allocation failed");
+    }
     for (uint64_t i = 0; i < validity.size(); ++i) {
         valids[i] = validity[i];
     }
@@ -867,9 +886,12 @@ InnerIndexInterface::analyze_quantizer(JsonType& stats,
                     }
                 }
             }
-            tmp_inversion_count_rate =
-                static_cast<float>(inversion_count) /
-                (static_cast<float>(search_count * (search_count - 1)) / 2.0F);
+            tmp_inversion_count_rate = 0.0F;
+            if (search_count > 1) {
+                tmp_inversion_count_rate =
+                    static_cast<float>(inversion_count) /
+                    (static_cast<float>(search_count * (search_count - 1)) / 2.0F);
+            }
             inversion_count_rate += tmp_inversion_count_rate;
         }
         stats["quantization_bias_ratio"].SetFloat(bias_ratio /
@@ -929,6 +951,7 @@ InnerIndexInterface::cal_distance_by_id(const float* query,
                                         const FlattenInterfacePtr& data,
                                         std::vector<bool>* validity) const {
     auto result = Dataset::Make();
+    result->NumElements(1)->Dim(count);
     result->Owner(true, allocator_);
     std::vector<bool> local_validity(count, false);
     if (count <= 0) {
@@ -938,7 +961,9 @@ InnerIndexInterface::cal_distance_by_id(const float* query,
         return result;
     }
     auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
-    CHECK_ARGUMENT(distances != nullptr, "failed to allocate distance buffer");
+    if (distances == nullptr) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate distance buffer");
+    }
     result->Distances(distances);
     std::fill(distances, distances + count, std::numeric_limits<float>::quiet_NaN());
     // Only labels that exist are computed; missing or removed labels keep a NaN distance.
