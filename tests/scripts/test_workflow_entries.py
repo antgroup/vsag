@@ -330,6 +330,64 @@ class EntryTests(unittest.TestCase):
                                    ('simd', 'simd-build-asan-simd')]:
                 self.assertEqual(condition('main-ci.yml', name, values), selected == profile, name)
 
+    def test_macos_asan_cache_has_one_trusted_writer(self):
+        action = './.github/actions/asan-build-and-test-build-asan-macos-arm64'
+        branch = job('main-ci.yml', 'platforms-build-asan-macos-arm64')
+        self.assertIn('uses: ' + action, branch)
+        writer = re.search(r'(?m)^          save-cache: (.+)$', branch)[1]
+        workflow_ref = 'antgroup/vsag/.github/workflows/main-ci.yml@refs/heads/main'
+        for event, ref, allowed in (
+            ('push', workflow_ref, True),
+            ('push', workflow_ref.replace('@refs/heads/main', '@refs/heads/0.18'), False),
+            ('push', workflow_ref.replace('antgroup/', 'fork/'), False),
+            ('push', workflow_ref.replace('main-ci.yml', 'another-ci.yml'), False),
+            ('schedule', workflow_ref, False),
+            ('workflow_dispatch', workflow_ref, False),
+            ('pull_request', workflow_ref, False),
+        ):
+            with self.subTest(event=event, ref=ref):
+                self.assertEqual(expression(writer, {
+                    'github.event_name': event, 'github.workflow_ref': ref,
+                }), allowed)
+
+        nightly = job('daily_test.yml', 'full-platform-build-asan-macos-arm64')
+        self.assertIn('uses: ' + action, nightly)
+        self.assertNotIn('save-cache:', nightly)
+        build = (ROOT / action / 'action.yml').read_text()
+        self.assertIn("  save-cache:\n", build)
+        self.assertIn("    default: 'false'\n", build)
+        save_step = build.split('- name: Save macOS ASan compiler cache\n', 1)[1]
+        self.assertIn('uses: actions/cache/save@v5', save_step)
+        save = re.search(r'(?m)^      if: (.+)$', save_step)[1]
+        for allowed in ('false', 'true'):
+            for hit in ('true', 'false', ''):
+                with self.subTest(allowed=allowed, hit=hit):
+                    self.assertEqual(expression(save, {
+                        'inputs.save-cache': allowed, 'steps.cache.outputs.cache-hit': hit,
+                    }), allowed == 'true' and hit != 'true')
+
+    def test_macos_asan_restores_one_rotatable_generation_for_all_callers(self):
+        setup = './.github/actions/setup-macos-asan-cache'
+        build = (ROOT / '.github/actions/asan-build-and-test-build-asan-macos-arm64/action.yml').read_text()
+        pr = job('pr-ci-community.yml', 'build-asan-macos-arm64')
+        for reader in (build, pr):
+            self.assertIn('uses: ' + setup, reader)
+            self.assertNotIn('uses: hendrikmuhs/ccache-action', reader)
+        self.assertNotIn('actions/cache/save', pr)
+        restore = (ROOT / setup / 'action.yml').read_text()
+        key = re.search(r'(?m)^        key: (.+)$', restore)[1]
+        self.assertTrue(key.startswith('ccache-build-macos-'))
+        for rotation_input in ('./CMakeLists.txt', './.circleci/fresh_ci_cache.commit'):
+            self.assertIn("hashFiles('" + rotation_input + "')", key)
+        self.assertIn('restore-keys: ' + key + '-\n', restore)
+        self.assertIn('uses: actions/cache/restore@v5', restore)
+        self.assertIn('save: false', restore)
+        self.assertNotIn('actions/cache/save', restore)
+        cache_path = 'path: ${{ github.workspace }}/.ccache'
+        self.assertIn(cache_path, restore)
+        self.assertIn(cache_path, build)
+        self.assertIn('key: ${{ steps.cache.outputs.cache-primary-key }}', build)
+
     def test_consumers_do_not_start_after_build_failure(self):
         values = self.context()
         for state in ('failure', 'cancelled', 'skipped', ''):
