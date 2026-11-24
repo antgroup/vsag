@@ -53,6 +53,7 @@ DatasetPtr DeepCopy(Allocator* allocator = nullptr) const;  // independent copy
 | `Dim(int64_t)` | `GetDim()` | `int64_t` | Dense vector dimensionality. |
 | `Ids(const int64_t*)` | `GetIds()` | `const int64_t*` | Per-element ids (length `NumElements`). |
 | `Distances(const float*)` | `GetDistances()` | `const float*` | Distances (search output; length depends on `k`/matches). |
+| `Valids(const bool*)` | `GetValids()` | `const bool*` | Per-distance validity flags (same length as `Distances`). Set by `CalcDistancesById`; `false` means the requested ID does not exist or was removed, and its distance is NaN. `nullptr` when absent. |
 
 ## Vector payloads
 
@@ -214,7 +215,5 @@ Legacy `dist_cmp` and `reorder_distance_count` remain available unchanged for co
 Python preserves `(ids, distances)` tuple unpacking. Opt in with
 `knn_search_with_statistics`: the dense overload returns one statistics JSON string, while the
 sparse CSR overload returns one string per query. `range_search_with_statistics` returns the range
-arrays plus one statistics JSON string. C preserves `SearchResult_t`; call
-`vsag_search_result_enable_statistics()` before a search and release returned statistics with
-`vsag_search_result_destroy_statistics()`. Legacy callers retain `other_result` ownership and
-incur no statistics allocation. Legacy HNSW and DiskANN are explicit non-goals.
+arrays plus one statistics JSON string. C returns the statistics JSON string of a `vsag_search_result_t` through
+`vsag_search_result_statistics()`. Legacy HNSW and DiskANN are explicit non-goals.

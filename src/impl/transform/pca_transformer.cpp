@@ -17,9 +17,12 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
 #include <cstring>
+#include <limits>
 #include <random>
 
+#include "common.h"
 #include "impl/blas/blas_function.h"
 #include "vsag_exception.h"
 
@@ -60,6 +63,40 @@ PCATransformer::Train(const float* data, uint64_t count) {
     ComputeCovarianceMatrix(centralized_data.data(), count, covariance_matrix.data());
 
     // 4. eigen decomposition (stored in pca_matrix_)
+    PerformEigenDecomposition(covariance_matrix.data());
+}
+
+void
+PCATransformer::TrainRows(const TrainingRows& rows) {
+    // Partial memory optimization: retain the original centralized N*D matrix,
+    // covariance D*D matrix, original SGEMM shape and eigen decomposition.
+    const bool valid_shape = rows.Dim() == input_dim_ && input_dim_ > 0 &&
+                             input_dim_ <= std::numeric_limits<int32_t>::max() && output_dim_ > 0 &&
+                             output_dim_ <= input_dim_ && rows.Count() >= 2;
+    CHECK_ARGUMENT(valid_shape, "invalid PCA TrainingRows shape");
+    const bool valid_extent =
+        rows.Count() <= static_cast<uint64_t>(PTRDIFF_MAX) / sizeof(float) / input_dim_ &&
+        static_cast<uint64_t>(input_dim_) <=
+            static_cast<uint64_t>(PTRDIFF_MAX) / sizeof(float) / input_dim_;
+    CHECK_ARGUMENT(valid_extent, "PCA TrainingRows allocation overflow");
+    Vector<float> centralized_data(rows.Count() * input_dim_, 0.0F, allocator_);
+    Vector<float> covariance_matrix(input_dim_ * input_dim_, 0.0F, allocator_);
+    Vector<float> row(input_dim_, 0.0F, allocator_);
+    std::fill(mean_.begin(), mean_.end(), 0.0F);
+    for (uint64_t i = 0; i < rows.Count(); ++i) {
+        rows.Read(i, row.data());
+        for (uint64_t j = 0; j < input_dim_; ++j) {
+            mean_[j] += row[j];
+        }
+    }
+    for (uint64_t j = 0; j < input_dim_; ++j) {
+        mean_[j] /= static_cast<float>(rows.Count());
+    }
+    for (uint64_t i = 0; i < rows.Count(); ++i) {
+        rows.Read(i, row.data());
+        CentralizeData(row.data(), centralized_data.data() + i * input_dim_);
+    }
+    ComputeCovarianceMatrix(centralized_data.data(), rows.Count(), covariance_matrix.data());
     PerformEigenDecomposition(covariance_matrix.data());
 }
 
@@ -140,21 +177,28 @@ void
 PCATransformer::ComputeCovarianceMatrix(const float* centralized_data,
                                         uint64_t count,
                                         float* covariance_matrix) const {
-    for (uint64_t i = 0; i < count; ++i) {
-        for (uint64_t j = 0; j < input_dim_; ++j) {
-            for (uint64_t k = 0; k < input_dim_; ++k) {
-                covariance_matrix[j * input_dim_ + k] +=
-                    centralized_data[i * input_dim_ + j] * centralized_data[i * input_dim_ + k];
-            }
-        }
-    }
-
-    // unbiased estimat
-    float scale = 1.0F / static_cast<float>(count - 1);
-    for (uint64_t j = 0; j < input_dim_; ++j) {
-        for (uint64_t k = 0; k < input_dim_; ++k) {
-            covariance_matrix[j * input_dim_ + k] *= scale;
-        }
+    // Compute the covariance C = X^T X / (count - 1) with the configured BLAS backend.
+    const auto dim = static_cast<int32_t>(input_dim_);
+    const auto max_chunk = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
+    uint64_t processed = 0;
+    while (processed < count) {
+        const auto chunk = static_cast<int32_t>(std::min(count - processed, max_chunk));
+        const float beta = processed == 0 ? 0.0F : 1.0F;
+        BlasFunction::Sgemm(BlasFunction::RowMajor,
+                            BlasFunction::Trans,
+                            BlasFunction::NoTrans,
+                            dim,
+                            dim,
+                            chunk,
+                            1.0F / static_cast<float>(count - 1),
+                            centralized_data + processed * input_dim_,
+                            dim,
+                            centralized_data + processed * input_dim_,
+                            dim,
+                            beta,
+                            covariance_matrix,
+                            dim);
+        processed += static_cast<uint64_t>(chunk);
     }
 }
 
@@ -175,28 +219,30 @@ PCATransformer::PerformEigenDecomposition(const float* covariance_matrix) {
                                                eigen_values.data());
 
     if (ssyev_result != 0) {
-        logger::error(fmt::format("Error in sgeqrf: {}", ssyev_result));
+        logger::error(fmt::format("Error in ssyev: {}", ssyev_result));
         return false;
     }
 
-    // 2. pca_matrix_[i][input_dim_] = eigen_vectors[- 1 - i][input_dim_]
+    // LAPACKE stores eigenvectors column-wise even when the matrix buffer is row-major. The
+    // eigenvalues are ascending, while PCA needs the eigenvectors as descending rows so that a
+    // row-major matrix-vector product emits principal components in decreasing-variance order.
     for (uint64_t i = 0; i < output_dim_; ++i) {
         for (uint64_t j = 0; j < input_dim_; ++j) {
-            pca_matrix_[i * input_dim_ + j] = eigen_vectors[(input_dim_ - 1 - i) * input_dim_ + j];
+            pca_matrix_[i * input_dim_ + j] = eigen_vectors[j * input_dim_ + (input_dim_ - 1 - i)];
         }
     }
     return true;
 }
 
 void
-PCATransformer::CopyPCAMatrixForTest(float* out_pca_matrix) const {
+PCATransformer::CopyPCAMatrix(float* out_pca_matrix) const {
     for (uint64_t i = 0; i < pca_matrix_.size(); i++) {
         out_pca_matrix[i] = pca_matrix_[i];
     }
 }
 
 void
-PCATransformer::CopyMeanForTest(float* out_mean) const {
+PCATransformer::CopyMean(float* out_mean) const {
     for (uint64_t i = 0; i < mean_.size(); i++) {
         out_mean[i] = mean_[i];
     }

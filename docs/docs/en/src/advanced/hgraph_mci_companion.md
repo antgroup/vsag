@@ -75,8 +75,9 @@ and exhausted candidates or stalled construction can stop below it.
 Migration warning: `mci_incremental_added_mct` is no longer supported. Remove this old
 clique-count setting from `index_param` and configure `mci_incremental_degree_min`,
 `mci_incremental_degree_n_divisor`, and `mci_incremental_degree_mcs_divisor` instead.
-The old key is ignored, not translated; leaving it in the JSON applies the new defaults
-unless the degree parameters are explicitly set. There is no equivalent one-to-one mapping
+The old key is **not** ignored: the HGraph parameter mapper has no branch for it, so leaving it
+in the JSON fails the build with `invalid config param: mci_incremental_added_mct`. Remove it and
+set the new degree keys instead. There is no equivalent one-to-one mapping
 because overlapping cliques contribute different numbers of unique neighbors. Recheck recall
 and mutation cost, and rebuild old snapshots with the new configuration rather than assuming
 that a removed parameter provides snapshot compatibility.
@@ -144,13 +145,19 @@ enumeration cheap in absolute terms -- 32768 inner ids are 128 KiB and therefore
 so the saturated skip stays a win instead of turning a wide predicate into a scan-sized seed
 phase.
 
-For the pure MCI route with non-contiguous vector storage, a certified complete, sorted seed
-list can be scored directly through the existing batched distance backend, without initializing
-visited marks or maintaining an expansion queue. This shortcut requires static CSR, a complete
-valid bitmap, no timeout and no mutable-predicate revalidation; it validates IDs and the pinned
-deletion view before use. Other queries retain ordinary traversal. The result heap still keeps
-`max(k, ef_search)` entries so existing reorder behavior is preserved. This changes execution
-overhead, not the seed budget, distance precision or serialized index.
+For the pure MCI route, a certified complete, sorted, unique seed list is validated before
+scoring. With static CSR and no timeout, it rechecks the user predicate when required and checks
+the pinned deletion view, then uses the same batched scoring code as ordinary traversal. Both
+contiguous FP32 and non-contiguous storage are supported; a bitmap is optional. This path keeps
+the ordinary locking policy and does not require `search_no_lock=true`. It creates no visited
+marks or expansion frontier. Failed validation falls back to ordinary traversal with its full
+candidate budget. Clique marks and packed filters are initialized only if expansion is needed.
+
+When no duplicate-aware or conjugate-search candidate retention is required, the complete-seed
+path keeps only the requested `k` results; otherwise it preserves the larger candidate budget.
+Equal-distance ties may select different equivalent IDs. Seed budgets, distance precision,
+timeout behavior and serialized indexes remain unchanged. Fully covered lists are enumerated
+directly instead of applying the general strided sampling formula.
 
 The companion needs a `Filter` object with a meaningful `ValidRatio()` hint. Bitset and
 function filters are accepted, but a custom `Filter` gives the search planner better

@@ -34,8 +34,18 @@ def select(base, head):
         return {"heavy": "true", "lint": "full", "pattern": ""}
 
 
+def select_for_event(base, head, event_name, ref):
+    result = select(base, head)
+    # Unknown/build/header changes are conservative; pure docs remain skipped.
+    result["python"] = result["heavy"]
+    return result
+
+
 def main():
-    result = select(os.environ.get("BEFORE_SHA"), os.environ.get("AFTER_SHA"))
+    result = select_for_event(
+        os.environ.get("BEFORE_SHA"), os.environ.get("AFTER_SHA"),
+        os.environ.get("GITHUB_EVENT_NAME"), os.environ.get("GITHUB_REF"),
+    )
     with open(os.environ["GITHUB_OUTPUT"], "a") as output:
         for key, value in result.items():
             output.write(f"{key}={value}\n")

@@ -12,7 +12,7 @@ runs:
       shell: sh
       run: rm -rf ./build
     - name: Download Test
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@v7
       with:
         name: test_x86-${{ github.run_id }}
         path: ./build
@@ -21,12 +21,12 @@ runs:
       run: |
         echo leak:libomp.so > omp.supp
         echo leak:libgomp.so >> omp.supp
-        export LSAN_OPTIONS=suppressions=omp.supp
+        export LSAN_OPTIONS="suppressions=$(pwd)/omp.supp"
         chmod +x ./build/tests/${{ inputs.matrix-test-type }}
         ./scripts/testing/test_parallel_by_name.sh ${{ inputs.matrix-test-type }}
     - name: Upload Log
       if: always()
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         path: ./log
         name: log-x86-${{ inputs.matrix-test-type }}-${{ github.run_id }}

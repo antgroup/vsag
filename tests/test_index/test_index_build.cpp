@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "framework/daily_test_plan.h"
 #include "test_index_common.h"
 
 namespace fixtures {
@@ -20,6 +21,7 @@ void
 TestIndex::TestBuildIndex(const IndexPtr& index,
                           const TestDatasetPtr& dataset,
                           bool expected_success) {
+    fixtures::daily::Phase daily_phase("Build");
     if (not index->CheckFeature(vsag::SUPPORT_BUILD)) {
         return;
     }

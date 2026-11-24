@@ -15,12 +15,93 @@
 
 #include "index_impl.h"
 
+#include <cmath>
+#include <numeric>
 #include <sstream>
 
 #include "algorithm/hgraph/hgraph.h"
 #include "index_common_param.h"
 #include "unittest.h"
 #include "vsag/engine.h"
+#include "vsag/vsag.h"
+
+TEST_CASE("Empty SAQ indexes round trip before initial training",
+          "[ut][index_impl][SAQ][saq_empty_state]") {
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 32;
+    const std::string name = GENERATE("hgraph", "pyramid");
+    const std::string metric = GENERATE("l2", "ip", "cosine");
+    const bool use_stream = GENERATE(false, true);
+    CAPTURE(name, metric, use_stream);
+    auto parameters = vsag::JsonType::Parse(R"({
+        "dim": 64, "dtype": "float32", "metric_type": "l2",
+        "index_param": {
+            "base_quantization_type": "saq", "saq_random_rotation": true,
+            "max_degree": 8, "ef_construction": 32, "build_thread_count": 1,
+            "use_reorder": true, "precise_quantization_type": "fp32"
+        }
+    })");
+    parameters["metric_type"].SetString(metric);
+    const auto create_index = [&]() {
+        auto result = vsag::Factory::CreateIndex(name, parameters.Dump());
+        REQUIRE(result.has_value());
+        return result.value();
+    };
+    const auto restore_index = [&](const auto& source) {
+        auto restored = create_index();
+        if (use_stream) {
+            std::stringstream stream;
+            REQUIRE(source->Serialize(stream).has_value());
+            auto result = restored->Deserialize(stream);
+            INFO((result.has_value() ? "" : result.error().message));
+            REQUIRE(result.has_value());
+        } else {
+            auto binary = source->Serialize();
+            REQUIRE(binary.has_value());
+            auto result = restored->Deserialize(binary.value());
+            INFO((result.has_value() ? "" : result.error().message));
+            REQUIRE(result.has_value());
+        }
+        return restored;
+    };
+    auto index = restore_index(create_index());
+    REQUIRE(index->GetNumElements() == 0);
+    auto vectors = fixtures::generate_vectors(count, dim, false, 251);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 1000);
+    std::vector<std::string> paths(count, "branch");
+    auto base = vsag::Dataset::Make()
+                    ->NumElements(count)
+                    ->Dim(dim)
+                    ->Ids(ids.data())
+                    ->Float32Vectors(vectors.data())
+                    ->Paths(paths.data())
+                    ->Owner(false);
+    auto added = index->Add(base);
+    REQUIRE(added.has_value());
+    REQUIRE(added.value().empty());
+    REQUIRE(index->GetNumElements() == count);
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(dim)
+                     ->Float32Vectors(vectors.data())
+                     ->Paths(paths.data())
+                     ->Owner(false);
+    const std::string search_parameters =
+        R"({"hgraph":{"ef_search":64},"pyramid":{"ef_search":64}})";
+    auto before = index->KnnSearch(query, 5, search_parameters);
+    REQUIRE(before.has_value());
+    REQUIRE(before.value()->GetDim() == 5);
+    auto restored = restore_index(index);
+    auto after = restored->KnnSearch(query, 5, search_parameters);
+    REQUIRE(after.has_value());
+    REQUIRE(after.value()->GetDim() == 5);
+    for (int64_t i = 0; i < 5; ++i) {
+        CHECK(after.value()->GetIds()[i] == before.value()->GetIds()[i]);
+        CHECK(std::isfinite(after.value()->GetDistances()[i]));
+        CHECK(after.value()->GetDistances()[i] == before.value()->GetDistances()[i]);
+    }
+}
 
 TEST_CASE("immutable index test", "[ut][index_impl]") {
     vsag::IndexCommonParam common_param;

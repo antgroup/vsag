@@ -15,9 +15,11 @@ VSAG 提供了一系列索引实现，它们共享同一套构建式 API、同�
 | `simq` | [SIMQ](simq.md) | 多向量检索（ColBERT / late-interaction），基于 MaxSim 打分 |
 | `sindi_v2` | [SINDI_V2](sindi_v2.md) | 支持内存与磁盘 I/O 的稀疏向量（BM25 / 学习稀疏）检索 |
 | `pyramid` | [Pyramid](pyramid.md) | 多租户 / 标签分区的层级索引 |
+| `warp` | [WARP](warp.md) | 多向量（ColBERT 类）文档，基于 MaxSim 的精确检索 |
 
 `brute_force` 作为精确检索基线也可使用（见
 [创建索引](../guide/create_index.md) 与 `examples/cpp/105_index_brute_force.cpp`）。
+WARP 是 `brute_force` 的多向量变体：同样是全量扫描，但每篇文档是一组 token 向量。
 
 ## 参数约定
 

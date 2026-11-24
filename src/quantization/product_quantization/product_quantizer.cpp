@@ -15,8 +15,11 @@
 
 #include "product_quantizer.h"
 
+#include <cstring>
+
 #include "impl/blas/blas_function.h"
 #include "impl/cluster/kmeans_cluster.h"
+#include "pq_training_rows.h"
 #include "simd/fp32_simd.h"
 #include "simd/normalize.h"
 #include "utils/prefetch.h"
@@ -76,18 +79,44 @@ ProductQuantizer<metric>::TrainImpl(const float* data, uint64_t count) {
 
     for (int64_t i = 0; i < pq_dim_; ++i) {
         for (int64_t j = 0; j < count; ++j) {
-            memcpy(slice.data() + j * subspace_dim_,
-                   train_data + j * this->dim_ + i * subspace_dim_,
-                   subspace_dim_ * sizeof(float));
+            std::memcpy(slice.data() + j * subspace_dim_,
+                        train_data + j * this->dim_ + i * subspace_dim_,
+                        subspace_dim_ * sizeof(float));
         }
         KMeansCluster cluster(subspace_dim_, this->allocator_);
         cluster.Run(CENTROIDS_PER_SUBSPACE, slice.data(), count);
-        memcpy(this->codebooks_.data() + i * CENTROIDS_PER_SUBSPACE * subspace_dim_,
-               cluster.k_centroids_,
-               CENTROIDS_PER_SUBSPACE * subspace_dim_ * sizeof(float));
+        std::memcpy(this->codebooks_.data() + i * CENTROIDS_PER_SUBSPACE * subspace_dim_,
+                    cluster.k_centroids_,
+                    CENTROIDS_PER_SUBSPACE * subspace_dim_ * sizeof(float));
     }
     this->transpose_codebooks();
 
+    this->is_trained_ = true;
+    return true;
+}
+
+template <MetricType metric>
+bool
+ProductQuantizer<metric>::TrainRowsImpl(const TrainingRows& rows) {
+    // Original prefix sampling, not reservoir sampling.  One packed subspace is
+    // retained at a time; pq_dim==1 is still S*D algorithm workspace.
+    const uint64_t count = std::min<uint64_t>(rows.Count(), 65536UL);
+    if (subspace_dim_ <= 0 || this->dim_ <= 0 ||
+        count > static_cast<uint64_t>(PTRDIFF_MAX) / sizeof(float) / subspace_dim_) {
+        throw std::invalid_argument("invalid PQ provider workspace shape");
+    }
+    Vector<float> slice(count * subspace_dim_, this->allocator_);
+    detail::PQTrainingRows input(rows, metric == MetricType::METRIC_TYPE_COSINE, this->allocator_);
+    for (int64_t i = 0; i < pq_dim_; ++i) {
+        input.Pack(i * subspace_dim_, subspace_dim_, slice.data());
+        // Keep the original Run overload/configuration, seeding and cluster count.
+        KMeansCluster cluster(subspace_dim_, this->allocator_);
+        cluster.Run(CENTROIDS_PER_SUBSPACE, slice.data(), count);
+        std::memcpy(this->codebooks_.data() + i * CENTROIDS_PER_SUBSPACE * subspace_dim_,
+                    cluster.k_centroids_,
+                    CENTROIDS_PER_SUBSPACE * subspace_dim_ * sizeof(float));
+    }
+    this->transpose_codebooks();
     this->is_trained_ = true;
     return true;
 }
@@ -125,9 +154,9 @@ bool
 ProductQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, float* data) {
     for (int i = 0; i < pq_dim_; ++i) {
         auto idx = codes[i];
-        memcpy(data + i * subspace_dim_,
-               this->get_codebook_data(i, idx),
-               subspace_dim_ * sizeof(float));
+        std::memcpy(data + i * subspace_dim_,
+                    this->get_codebook_data(i, idx),
+                    subspace_dim_ * sizeof(float));
     }
     return true;
 }
@@ -303,10 +332,10 @@ void
 ProductQuantizer<metric>::transpose_codebooks() {
     for (int64_t i = 0; i < this->pq_dim_; ++i) {
         for (int64_t j = 0; j < CENTROIDS_PER_SUBSPACE; ++j) {
-            memcpy(this->reverse_codebooks_.data() + j * this->dim_ + i * subspace_dim_,
-                   this->codebooks_.data() + i * CENTROIDS_PER_SUBSPACE * subspace_dim_ +
-                       j * subspace_dim_,
-                   subspace_dim_ * sizeof(float));
+            std::memcpy(this->reverse_codebooks_.data() + j * this->dim_ + i * subspace_dim_,
+                        this->codebooks_.data() + i * CENTROIDS_PER_SUBSPACE * subspace_dim_ +
+                            j * subspace_dim_,
+                        subspace_dim_ * sizeof(float));
         }
     }
 }

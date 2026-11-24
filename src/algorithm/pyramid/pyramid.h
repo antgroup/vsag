@@ -101,10 +101,15 @@ public:
         }
         if (graph_type_ == GRAPH_TYPE_VALUE_PIPNN and
             (common_param.repr_ != RecordRepr::DENSE or
-             common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT)) {
+             (common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT and
+              common_param.data_type_ != DataTypes::DATA_TYPE_FP16 and
+              common_param.data_type_ != DataTypes::DATA_TYPE_BF16))) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                "Pyramid PiPNN only supports dense float32 indexes");
+                                "Pyramid PiPNN only supports dense floating-point indexes");
         }
+        CHECK_ARGUMENT(not pipnn_param_.adaptive_pruning or
+                           common_param.metric_ == MetricType::METRIC_TYPE_L2SQR,
+                       "Pyramid PiPNN adaptive pruning only supports L2");
         base_codes_ = FlattenInterface::MakeInstance(pyramid_param->base_codes_param, common_param);
         if (pyramid_param->has_hierarchies) {
             for (const auto& h_param : pyramid_param->hierarchies) {
@@ -281,6 +286,9 @@ public:
 
     void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
+
+    void
+    GetFloat32VectorByInnerId(InnerIdType inner_id, float* data) const override;
 
     friend class PyramidAnalyzer;
     friend class PyramidDuplicateTestPeer;
@@ -689,6 +697,7 @@ private:
     bool store_paths_{false};        // whether to retain paths for ID-based retrieval
 
     std::unique_ptr<PyramidBuildCache> cache_{nullptr};  // per-graph caches for warm-start build
+    std::atomic<uint64_t> pipnn_cache_memory_{0};
 
     float build_cache_hit_rate_{-1.0F};           // cache hit rate from last cache-based build
     uint64_t build_cache_hit_nodes_{0};           // number of nodes with cache hit

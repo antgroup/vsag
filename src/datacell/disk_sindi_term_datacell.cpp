@@ -17,6 +17,7 @@
 
 #include <fmt/format.h>
 
+#include <cstring>
 #include <limits>
 #include <type_traits>
 
@@ -717,8 +718,8 @@ DiskSindiTermDataCell<IOTmpl>::GetSparseVector(uint32_t inner_id,
     }
     data->ids_ = static_cast<uint32_t*>(allocator->Allocate(sizeof(uint32_t) * data->len_));
     data->vals_ = static_cast<float*>(allocator->Allocate(sizeof(float) * data->len_));
-    memcpy(data->ids_, ids.data(), data->len_ * sizeof(uint32_t));
-    memcpy(data->vals_, vals.data(), data->len_ * sizeof(float));
+    std::memcpy(data->ids_, ids.data(), data->len_ * sizeof(uint32_t));
+    std::memcpy(data->vals_, vals.data(), data->len_ * sizeof(float));
 }
 
 template <typename IOTmpl>

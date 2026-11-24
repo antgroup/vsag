@@ -15,7 +15,9 @@
 
 #include "sindi_parameter.h"
 
+#include <cmath>
 #include <limits>
+#include <nlohmann/json.hpp>
 
 #include "impl/logger/logger.h"
 #include "inner_string_params.h"
@@ -266,8 +268,6 @@ SINDISearchParameter::FromJson(const JsonType& json) {
                    fmt::format("parameters must contains {}", INDEX_SINDI));
     const auto search_json = json[INDEX_SINDI];
 
-    execution_options = SindiSearchOptions::Parse(json);
-
     // Parse common search parameters (timeout_ms, factor, etc.)
     IndexSearchParameter::FromJson(search_json);
 
@@ -326,13 +326,22 @@ SINDISearchParameter::FromJson(const JsonType& json) {
         window_parallelism = parse_positive_worker_count(
             search_json["window_parallelism"], 16, "window_parallelism");
     }
-    execution_options.rerank_parallelism = window_parallelism;
-    worker_n_candidate = 0;
-    if (search_json.Contains("worker_n_candidate")) {
-        worker_n_candidate = parse_positive_worker_count(search_json["worker_n_candidate"],
-                                                         std::numeric_limits<uint32_t>::max(),
-                                                         "worker_n_candidate");
+    parallel_n_candidate_ratio = DEFAULT_PARALLEL_N_CANDIDATE_RATIO;
+    profile_cpu = search_json.Contains("profile_cpu") and search_json["profile_cpu"].GetBool();
+    if (search_json.Contains("parallel_n_candidate_ratio")) {
+        parallel_n_candidate_ratio =
+            search_json["parallel_n_candidate_ratio"].GetInnerJson()->get<double>();
+        const bool valid_ratio =
+            std::isfinite(parallel_n_candidate_ratio) and parallel_n_candidate_ratio >= 1.0;
+        CHECK_ARGUMENT(valid_ratio, "parallel_n_candidate_ratio must be finite and >= 1");
     }
+    const bool supported_execution_parameters =
+        not search_json.Contains("worker_n_candidate") and
+        not search_json.Contains("filter_callback_limit_weight") and
+        not search_json.Contains("window_scheduler");
+    CHECK_ARGUMENT(supported_execution_parameters,
+                   "unsupported SINDI execution parameter; use window_parallelism and "
+                   "parallel_n_candidate_ratio");
 
     if (search_json.Contains(LEGACY_USE_TERM_LISTS_HEAP_INSERT_KEY)) {
         logger::warn(
@@ -347,14 +356,12 @@ SINDISearchParameter::ToJson() const {
     json[INDEX_SINDI].SetJson(JsonType());
     json[INDEX_SINDI][SPARSE_QUERY_PRUNE_RATIO].SetFloat(query_prune_ratio);
     json[INDEX_SINDI][SPARSE_N_CANDIDATE].SetInt(n_candidate);
-    if (worker_n_candidate != 0) {
-        json[INDEX_SINDI]["worker_n_candidate"].SetInt(worker_n_candidate);
-    }
     json[INDEX_SINDI]["window_parallelism"].SetInt(window_parallelism);
+    json[INDEX_SINDI]["parallel_n_candidate_ratio"].SetDouble(parallel_n_candidate_ratio);
+    json[INDEX_SINDI]["profile_cpu"].SetBool(profile_cpu);
     json[INDEX_SINDI][SPARSE_FILTER_CALLBACK_LIMIT].SetUint64(filter_callback_limit);
     json[INDEX_SINDI][SPARSE_TERM_PRUNE_RATIO].SetFloat(term_prune_ratio);
     json[INDEX_SINDI][SPARSE_TERM_RETAIN_THRESHOLD].SetUint64(term_retain_threshold);
-    execution_options.WriteTo(json);
     return json;
 }
 

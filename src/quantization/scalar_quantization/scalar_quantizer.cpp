@@ -15,6 +15,8 @@
 
 #include "scalar_quantizer.h"
 
+#include <cstring>
+
 #include "scalar_quantization_trainer.h"
 #include "scalar_quantization_utils.h"
 #include "simd/normalize.h"
@@ -73,6 +75,43 @@ ScalarQuantizer<metric, bit>::TrainImpl(const float* data, uint64_t count) {
     return true;
 }
 
+template <MetricType metric, int bit>
+bool
+ScalarQuantizer<metric, bit>::ReTrainHalf(const uint16_t* data, uint64_t count, bool bf16) {
+    if (data == nullptr || count == 0) {
+        return false;
+    }
+    this->is_trained_ = false;
+    ScalarQuantizationTrainer trainer(this->dim_, BIT_PER_DIM);
+    trainer.TrainHalf(data,
+                      count,
+                      bf16,
+                      this->diff_.data(),
+                      this->lower_bound_.data(),
+                      metric == MetricType::METRIC_TYPE_COSINE);
+    for (uint64_t i = 0; i < static_cast<uint64_t>(this->dim_); ++i) {
+        this->diff_[i] -= this->lower_bound_[i];
+    }
+    this->is_trained_ = true;
+    return true;
+}
+
+template <MetricType metric, int bit>
+bool
+ScalarQuantizer<metric, bit>::ReTrainRows(const TrainingRows& input) {
+    this->is_trained_ = false;
+    ScalarQuantizationTrainer trainer(this->dim_, BIT_PER_DIM);
+    trainer.TrainRows(input,
+                      this->diff_.data(),
+                      this->lower_bound_.data(),
+                      metric == MetricType::METRIC_TYPE_COSINE);
+    for (uint64_t i = 0; i < static_cast<uint64_t>(this->dim_); ++i) {
+        this->diff_[i] -= this->lower_bound_[i];
+    }
+    this->is_trained_ = true;
+    return true;
+}
+
 static inline void
 fill_codes(uint8_t* codes, uint8_t value, uint8_t value_bit_size, uint64_t index) {
     // fill one value to codes, in index * value_bit_size, value is in [0, 2^value_bit_size)
@@ -122,7 +161,7 @@ ScalarQuantizer<metric, bit>::encode_one_with_scratch(const float* data,
         Normalize(data, normalized, this->dim_);
         cur = normalized;
     }
-    memset(codes, 0, this->code_size_);
+    std::memset(codes, 0, this->code_size_);
     for (uint64_t d = 0; d < this->dim_; d++) {
         if (diff_[d] < std::numeric_limits<float>::epsilon()) {
             delta = 1.0F;
@@ -194,7 +233,7 @@ ScalarQuantizer<metric, bit>::ProcessQueryImpl(const float* query,
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
         Normalize(query, reinterpret_cast<float*>(computer.buf_), this->dim_);
     } else {
-        memcpy(computer.buf_, query, this->dim_ * sizeof(float));
+        std::memcpy(computer.buf_, query, this->dim_ * sizeof(float));
     }
 }
 
@@ -221,6 +260,57 @@ ScalarQuantizer<metric, bit>::ComputeDistImpl(Computer<ScalarQuantizer>& compute
     } else {
         logger::error("unsupported metric type");
         dists[0] = 0;
+    }
+}
+
+template <MetricType metric, int bit>
+void
+ScalarQuantizer<metric, bit>::ComputeDistsBatch4Impl(Computer<ScalarQuantizer>& computer,
+                                                     const uint8_t* codes1,
+                                                     const uint8_t* codes2,
+                                                     const uint8_t* codes3,
+                                                     const uint8_t* codes4,
+                                                     float& dist1,
+                                                     float& dist2,
+                                                     float& dist3,
+                                                     float& dist4) const {
+    if constexpr (metric == MetricType::METRIC_TYPE_L2SQR and bit == 8) {
+        SQ8ComputeL2SqrBatch4(reinterpret_cast<float*>(computer.buf_),
+                              codes1,
+                              codes2,
+                              codes3,
+                              codes4,
+                              lower_bound_.data(),
+                              diff_.data(),
+                              this->dim_,
+                              dist1,
+                              dist2,
+                              dist3,
+                              dist4);
+    } else if constexpr ((metric == MetricType::METRIC_TYPE_IP or
+                          metric == MetricType::METRIC_TYPE_COSINE) and
+                         bit == 8) {
+        SQ8ComputeIPBatch4(reinterpret_cast<float*>(computer.buf_),
+                           codes1,
+                           codes2,
+                           codes3,
+                           codes4,
+                           lower_bound_.data(),
+                           diff_.data(),
+                           this->dim_,
+                           dist1,
+                           dist2,
+                           dist3,
+                           dist4);
+        dist1 = 1 - dist1;
+        dist2 = 1 - dist2;
+        dist3 = 1 - dist3;
+        dist4 = 1 - dist4;
+    } else {
+        this->ComputeDistImpl(computer, codes1, &dist1);
+        this->ComputeDistImpl(computer, codes2, &dist2);
+        this->ComputeDistImpl(computer, codes3, &dist3);
+        this->ComputeDistImpl(computer, codes4, &dist4);
     }
 }
 

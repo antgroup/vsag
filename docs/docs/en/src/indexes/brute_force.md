@@ -70,17 +70,18 @@ Advanced users can pass an `index_param` object to enable quantization or storag
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `base_quantization_type` | string | `"fp32"` | `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq` — see the [Quantization chapter](../quantization/) for per-quantizer details |
+| `base_io_type` | string | `"block_memory_io"` | Storage backend for the encoded vectors. Supports `block_memory_io`, `memory_io`, `mmap_io`, `buffer_io`, `async_io`, `uring_io`, `reader_io`. |
+| `base_file_path` | string | `"./default_file_path"` | File path when the base IO type is disk-backed (`mmap_io`, `buffer_io`, `async_io`, `uring_io`). |
+| `base_pq_dim` | int | `1` | Product Quantizer subspace dimension. Effective only when `base_quantization_type` is `pq` or `pqfs`. Must divide `dim`. |
+| `precise_quantization_type` | string | `"fp32"` | Quantizer for the precise codes. Always resolved (defaults to `fp32`); `use_residual` only toggles the internal `use_reorder` flag. |
+| `precise_io_type` | string | `"block_memory_io"` | Storage backend for precise codes. Always resolved; `use_residual` only toggles `use_reorder`. |
+| `precise_file_path` | string | `"./default_file_path"` | File path when the precise IO type is disk-backed. |
+| `store_raw_vector` | bool | `false` | When `true`, sets `hold_molds` on the `fp32` and `int8` base and precise quantizers (other quantizer types ignore the flag). For FP32 cosine, this enables `GetRawVectorByIds`. Does **not** create a separate raw-vector store. |
+| `thread_count` | int | `1` | Sets the internal thread pool size for build operations. |
 | `use_attribute_filter` | bool | `false` | Enable attribute-based filtering (see [Attribute Filter](../advanced/attribute_filter.md)) |
+| `use_residual` | bool | `false` | Enables precise-code construction (maps to `use_reorder` internally). Note: BruteForce's linear scan does **not** perform a reorder step; precise codes have no search-time effect. |
 | `resize_increase_count_bit` | int | `10` | `log2` of the slot-growth batch. Valid range is `1` to `31`; `1` grows in 2-slot batches and `10` in 1,024-slot batches. Smaller values reduce preallocation but can increase reallocations. |
 
-> **Note on `store_raw_vector`.** The `store_raw_vector` flag is parsed by the shared
-> `InnerIndexParameter` but BruteForce does **not** consult it when deciding whether
-> `GetRawVectorByIds` is available. On BruteForce, raw-vector retrieval is enabled strictly
-> when `base_quantization_type` is `fp32` and either the metric is not `cosine` or the
-> quantizer is configured to hold the per-vector norms (`hold_molds`). Setting
-> `store_raw_vector: true` on BruteForce currently has no observable effect on the
-> capability flags — use HGraph or IVF if you need a quantized index that still answers
-> `GetRawVectorByIds`.
 
 Example with `sq8` quantization for memory savings while keeping linear scan semantics:
 
@@ -103,12 +104,19 @@ precision).
 
 ## Search parameters
 
-BruteForce does not expose any index-specific search knobs (no `ef`, `nprobe`, etc.), but the
-generic `IndexSearchParameter` fields are honored:
+BruteForce does not expose any index-specific search knobs (no `ef`, `nprobe`, etc.). Of
+the `IndexSearchParameter` fields, only `parallelism` and `use_extra_info_filter` are consumed
+by the linear scan; the root-level `threshold` key is also consumed (read separately).
+The remaining fields are accepted silently:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `parallelism` | int | `1` | Split the linear scan of a single query across this many threads in the index's internal thread pool. It applies to both `KnnSearch` and `RangeSearch`. Larger values cut single-query latency on large corpora at the cost of using more cores. Values `<= 0` are clamped to `1`. |
+| `use_extra_info_filter` | bool | `false` | Apply extra-info-based predicates during the scan (see [Extra Info](../advanced/extra_info.md)). |
+| `threshold` | float | — (unset) | Root-level key (outside any sub-object). KNN queries return results whose distance ≤ `threshold`. |
+| `enable_reorder` | bool | `true` | Parsed but **not consumed** by the linear scan — BruteForce always scans the base codes directly. |
+| `factor` | float | `0` | Parsed but **not consumed** — the linear scan examines all codes. |
+| `timeout_ms` | int | no limit | Parsed but **not consumed** — the linear scan cannot be interrupted mid-query. |
 
 ```cpp
 // Single-threaded scan (default).

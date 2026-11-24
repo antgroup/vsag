@@ -7,7 +7,7 @@ runs:
       shell: bash -e {0}
       run: touch /tmp/clean_up
     - name: Overwrite Test Artifact X86
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         path: /tmp/clean_up
         name: test_x86-${{ github.run_id }}
@@ -15,7 +15,7 @@ runs:
         retention-days: 3
         overwrite: 'true'
     - name: Overwrite Test Artifact Aarch64
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         path: /tmp/clean_up
         name: test_aarch64-${{ github.run_id }}
@@ -23,7 +23,7 @@ runs:
         retention-days: 3
         overwrite: 'true'
     - name: Overwrite Test Artifact macOS arm64
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         path: /tmp/clean_up
         name: test_macos_arm64-${{ github.run_id }}

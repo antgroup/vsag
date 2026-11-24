@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <functional>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -43,12 +44,16 @@ public:
 
 public:
     int64_t topk{0};
+    // Result count the filtered KNN search tries to reach by re-expanding filter-rejected bridges.
+    uint64_t min_results{0};
     int64_t rerank_topk{0};
     float radius{0.0F};
     InnerIdType ep{0};
     uint64_t ef{10};
     uint32_t hops_limit{std::numeric_limits<uint32_t>::max()};
     FilterPtr is_inner_id_allowed{nullptr};
+    // Optional invocation-owned cancellation; cancellable scanners poll after admission.
+    std::function<bool()> scan_cancelled;
     float skip_ratio{0.2F};
     FilterSearchSkipStrategyType skip_strategy_type{
         FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE};

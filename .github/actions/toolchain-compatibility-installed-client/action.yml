@@ -15,7 +15,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
       with:
         ref: ${{ inputs.target-ref }}
     - name: Install toolchain and dependencies
@@ -51,7 +51,7 @@ runs:
         bash scripts/release/check_compatibility.sh "$RUNNER_TEMP/vsag-install" "$ABI" "$RUNNER_TEMP/compatibility-reports"
     - name: Retain compatibility evidence
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: compatibility-${{ inputs.matrix-compiler }}-abi${{ inputs.matrix-abi }}
         path: ${{ runner.temp }}/compatibility-reports

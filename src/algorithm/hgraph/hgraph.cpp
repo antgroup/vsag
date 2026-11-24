@@ -17,6 +17,8 @@
 #include <datacell/compressed_graph_datacell_parameter.h>
 #include <fmt/format.h>
 
+#include <cstring>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -32,6 +34,7 @@
 #include "datacell/rabitq_split_datacell.h"
 #include "datacell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
+#include "hgraph_fgim.h"
 #include "impl/filter/filter_headers.h"
 #include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
@@ -124,9 +127,11 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
                                            common_param.metric_ == MetricType::METRIC_TYPE_L2SQR;
         CHECK_ARGUMENT(valid_adaptive_metric, "PiPNN adaptive pruning only supports L2");
         if (common_param.repr_ != RecordRepr::DENSE or
-            common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
+            (common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT and
+             common_param.data_type_ != DataTypes::DATA_TYPE_FP16 and
+             common_param.data_type_ != DataTypes::DATA_TYPE_BF16)) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                "HGraph PiPNN only supports dense float32 indexes");
+                                "HGraph PiPNN only supports dense floating-point indexes");
         }
     }
     if (this->deduplicate_storage_ && this->graph_type_ != GRAPH_TYPE_VALUE_NSW &&
@@ -324,10 +329,29 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     };
 
     auto train_count = std::min(this->train_sample_count_, this->GetNumElements());
-    Vector<float> train_data(train_count * dim_, 0, allocator_);
+    const auto element_size =
+        (data_type_ == DataTypes::DATA_TYPE_FP16 or data_type_ == DataTypes::DATA_TYPE_BF16)
+            ? sizeof(uint16_t)
+            : sizeof(float);
+    CHECK_ARGUMENT(dim_ > 0, "Tune training dimension must be positive");
+    CHECK_ARGUMENT(static_cast<uint64_t>(dim_) <= std::numeric_limits<size_t>::max() / element_size,
+                   "Tune training row size overflows");
+    const auto row_bytes = static_cast<size_t>(dim_) * element_size;
+    CHECK_ARGUMENT(static_cast<uint64_t>(train_count) <=
+                       (std::numeric_limits<size_t>::max() - (sizeof(float) - 1)) / row_bytes,
+                   "Tune training buffer size overflows");
+    const auto train_bytes = static_cast<size_t>(train_count) * row_bytes;
+    // Train consumes tightly packed native input, including FP16/BF16. Keep the
+    // allocation float-aligned, and decode through aligned scratch: odd half
+    // dimensions need not leave each packed row aligned for Decode's float* API.
+    Vector<float> train_data((train_bytes + sizeof(float) - 1) / sizeof(float), 0, allocator_);
     if (is_tune_base_code or is_tune_precise_code or is_tune_raw_code) {
+        Vector<float> decoded_row(dim_, 0, allocator_);
+        auto* packed_data = reinterpret_cast<uint8_t*>(train_data.data());
         for (InnerIdType i = 0; i < train_count; i++) {
-            decode_tune_source(i, train_data.data() + i * dim_);
+            decode_tune_source(i, decoded_row.data());
+            std::memcpy(
+                packed_data + static_cast<size_t>(i) * row_bytes, decoded_row.data(), row_bytes);
         }
     }
 
@@ -665,6 +689,12 @@ HGraph::GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const {
 
 void
 HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
+    const auto parameters = std::dynamic_pointer_cast<HGraphParameter>(create_param_ptr_);
+    CHECK_ARGUMENT(parameters != nullptr, "HGraph Merge requires HGraph parameters");
+    if (parameters->merge_strategy == "fgim") {
+        HGraphFGIM::Merge(*this, merge_units, parameters->fgim_refinement_iterations);
+        return;
+    }
     this->check_fused_mutation_supported("Merge");
     CHECK_ARGUMENT(not this->using_dedup_storage(),
                    "HGraph deduplicate_storage does not support Merge");
@@ -768,6 +798,59 @@ HGraph::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
     codes->Decode(buffer.Data(), data);
 }
 
+bool
+HGraph::TryDecodeStoredRow(InnerIdType inner_id, float* data) const {
+    std::shared_lock<std::shared_mutex> lock;
+    if (this->using_dedup_storage() && !this->immutable_.load(std::memory_order_acquire)) {
+        lock = this->acquire_global_read_lock();
+    }
+    auto codes = (has_precise_reorder()) ? high_precise_codes_ : basic_flatten_codes_;
+    codes = (create_new_raw_vector_) ? raw_vector_ : codes;
+    auto buffer = codes->AcquireCodesById(inner_id);
+    if (not buffer) {
+        return false;
+    }
+    return codes->Decode(buffer.Data(), data);
+}
+
+void
+HGraph::GetFloat32VectorByInnerId(InnerIdType inner_id, float* data) const {
+    if (data_type_ != DataTypes::DATA_TYPE_FP16 and data_type_ != DataTypes::DATA_TYPE_BF16) {
+        this->GetVectorByInnerId(inner_id, data);
+        return;
+    }
+    std::shared_lock<std::shared_mutex> lock;
+    if (this->using_dedup_storage() && !this->immutable_.load(std::memory_order_acquire)) {
+        lock = this->acquire_global_read_lock();
+    }
+    auto codes = (has_precise_reorder()) ? high_precise_codes_ : basic_flatten_codes_;
+    codes = (create_new_raw_vector_) ? raw_vector_ : codes;
+    auto buffer = codes->AcquireCodesById(inner_id);
+    if (not buffer) {
+        // Fused RaBitQ decode is already FP32, unlike the regular native Decode ABI.
+        if (rabitq_fused_datacell_ != nullptr and codes.get() == basic_flatten_codes_.get() and
+            rabitq_split_codes_ != nullptr and
+            rabitq_split_codes_->DecodeFusedById(inner_id, data)) {
+            return;
+        }
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            fmt::format("failed to get vector by inner id {}", inner_id));
+    }
+    if (GetCodeSlotPhysicalFlatten(codes)->SupportSplitCodeStorage()) {
+        if (not codes->Decode(buffer.Data(), data)) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "HGraph vector source does not support decode");
+        }
+        return;
+    }
+    Vector<float> native_row(dim_, allocator_);
+    if (not codes->Decode(buffer.Data(), native_row.data())) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "HGraph vector source does not support decode");
+    }
+    this->expand_native_half_row(native_row.data(), data);
+}
+
 void
 HGraph::SetImmutable() {
     if (this->immutable_.load(std::memory_order_acquire)) {
@@ -864,6 +947,9 @@ HGraph::GetStats() const {
         stats["live_count"].SetInt64(0);
         stats["deleted_count"].SetInt64(GetNumberRemoved());
         stats["_analysis"]["skipped"]["structure"].SetString("index is empty");
+        if (cache_ != nullptr and cache_->pipnn != nullptr) {
+            stats["pipnn_build"].SetJson(cache_->pipnn->GetBuildStats());
+        }
         populate_mci_stats(stats);
         AddAnalysisMetadata(stats, GetName(), "stats", "partial");
         return stats.Dump(4);
@@ -886,6 +972,9 @@ HGraph::GetStats() const {
     } else {
         stats["build_cache_hit_rate"]["skipped_reason"].SetString(
             "index was not built from an imported cache");
+    }
+    if (cache_ != nullptr and cache_->pipnn != nullptr) {
+        stats["pipnn_build"].SetJson(cache_->pipnn->GetBuildStats());
     }
     populate_mci_stats(stats);
     AddAnalysisMetadata(stats, GetName(), "stats", "complete");
@@ -954,8 +1043,42 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
     }
 }
 
+void
+HGraph::SetClusterVectorNodeLocks(bool enabled) {
+    if (rabitq_fused_datacell_ != nullptr or mci_parameters_.enabled or using_dedup_storage() or
+        create_new_raw_vector_) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "cluster vector node locks require a plain, non-MCI graph");
+    }
+    auto mutexes = enabled ? neighbors_mutex_ : nullptr;
+    basic_flatten_codes_->SetExternalReadMutexArray(mutexes);
+    if (has_precise_reorder()) {
+        high_precise_codes_->SetExternalReadMutexArray(mutexes);
+    }
+    cluster_vector_node_locks_ = enabled;
+}
+
+LockGuard
+HGraph::AcquireClusterNodeWriteLock(int64_t label) {
+    CHECK_ARGUMENT(cluster_vector_node_locks_, "cluster vector node locks are not enabled");
+    InnerIdType id;
+    {
+        std::shared_lock label_lock(label_lookup_mutex_);
+        id = label_table_->GetIdByLabel(label);
+    }
+    return {neighbors_mutex_, id};
+}
+
 bool
 HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
+    if (cluster_vector_node_locks_ and not force_update) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "externally locked node updates must use force_update");
+    }
+    CHECK_ARGUMENT(new_base != nullptr, "new_base is nullptr");
+    CHECK_ARGUMENT(new_base->GetNumElements() == 1, "updated dataset must contain one vector");
+    CHECK_ARGUMENT(new_base->GetDim() == dim_,
+                   "updated vector dimension must match the index dimension");
     std::shared_lock<std::shared_mutex> force_remove_rlock;
     if (this->support_force_remove()) {
         force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
@@ -971,6 +1094,7 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
     void* new_base_vec = nullptr;
     uint64_t data_size = 0;
     get_vectors(data_type_, dim_, new_base, &new_base_vec, &data_size);
+    CHECK_ARGUMENT(new_base_vec != nullptr, "updated vector must not be null");
     if (this->rabitq_fused_datacell_ != nullptr) {
         CHECK_ARGUMENT(new_base->GetDim() == dim_,
                        "updated vector dimension must match the index dimension");
@@ -983,16 +1107,23 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
         float self_dist = 0.0F;
         if (this->rabitq_fused_datacell_ == nullptr) {
             // 1. check whether vectors are same
-            Vector<int8_t> base_data(data_size, allocator_);
-            GetVectorByInnerId(inner_id, reinterpret_cast<float*>(base_data.data()));
-            const float old_self_dist =
-                this->CalcDistanceById(reinterpret_cast<float*>(base_data.data()), id);
-            self_dist = this->CalcDistanceById(static_cast<float*>(new_base_vec), id);
-            if (std::abs(old_self_dist - self_dist) < 1e-3) {
+            // Decode() writes through a shared float* ABI whose payload width is per-cell:
+            // half-input adapter cells emit packed 16-bit words while an FP32 writer emits
+            // full floats. Size this scratch for the widest writer so neither layout
+            // overruns it, and skip the equality shortcut when the cell cannot decode at
+            // all (RaBitQ split codes report false) instead of comparing untouched bytes.
+            Vector<float> base_data(dim_, allocator_);
+            const bool have_old_self_dist = this->TryDecodeStoredRow(inner_id, base_data.data());
+            float old_self_dist = 0.0F;
+            if (have_old_self_dist) {
+                old_self_dist = this->calc_native_distance_by_id(base_data.data(), id, true);
+            }
+            self_dist = this->calc_native_distance_by_id(new_base_vec, id, true);
+            if (have_old_self_dist and std::abs(old_self_dist - self_dist) < 1e-3) {
                 return true;
             }
         } else {
-            self_dist = this->CalcDistanceById(static_cast<float*>(new_base_vec), id);
+            self_dist = this->calc_native_distance_by_id(new_base_vec, id, true);
         }
 
         // 2. check whether the neighborhood relationship is same
@@ -1006,9 +1137,8 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
 
             float neighbor_dist = 0;
             try {
-                neighbor_dist =
-                    this->CalcDistanceById(static_cast<float*>(new_base_vec),
-                                           this->label_table_->GetLabelById(neighbor_inner_id));
+                neighbor_dist = this->calc_native_distance_by_id(
+                    new_base_vec, this->label_table_->GetLabelById(neighbor_inner_id), true);
             } catch (const std::runtime_error& e) {
                 // incase that neighbor has been deleted
                 continue;
@@ -1039,13 +1169,25 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
     } else if (this->using_dedup_storage() && !this->immutable_.load(std::memory_order_acquire)) {
         map_lock = this->acquire_global_read_lock();
     }
-    std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
+    std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_, std::defer_lock);
+    if (not cluster_vector_node_locks_) {
+        codes_lock.lock();
+    }
+    // The owner pins storage and holds this node exclusively. Reacquiring the
+    // codes lock here would invert a brute-force reader's codes -> node order.
     bool update_status = basic_flatten_codes_->UpdateVector(new_base_vec, inner_id);
     if (update_status and rabitq_fused_datacell_ != nullptr) {
         this->sync_fused_node_codes(inner_id, new_base_vec);
     }
     if (has_precise_reorder()) {
         update_status = update_status && high_precise_codes_->UpdateVector(new_base_vec, inner_id);
+    }
+    if (update_status and create_new_raw_vector_ and raw_vector_ != nullptr and
+        raw_vector_.get() != basic_flatten_codes_.get() and
+        raw_vector_.get() != high_precise_codes_.get()) {
+        // Independent raw storage uses the same logical ID and native input
+        // dtype. Shared base/precise storage was updated above already.
+        update_status = raw_vector_->UpdateVector(new_base_vec, inner_id);
     }
     return update_status;
 }
@@ -1144,10 +1286,13 @@ HGraph::mark_memory_usage_dirty() const {
 
 uint64_t
 HGraph::GetMemoryUsage() const {
+    // Snapshot charge is separate from the cached structural total: imports and
+    // replacements are visible without traversing cache containers in this getter.
     const bool stale = this->memory_usage_accounted_version_.load(std::memory_order_acquire) !=
                        this->memory_usage_version_.load(std::memory_order_acquire);
     if (not stale) {
-        return InnerIndexInterface::GetMemoryUsage();
+        return InnerIndexInterface::GetMemoryUsage() +
+               pipnn_cache_memory_.load(std::memory_order_acquire);
     }
     // The breakdown dereferences component containers that mutating paths replace or grow, so it
     // has to exclude them. It never waits for them though: the locks are taken with try_lock and a
@@ -1170,7 +1315,8 @@ HGraph::GetMemoryUsage() const {
             this->cal_memory_usage();
         }
     }
-    return InnerIndexInterface::GetMemoryUsage();
+    return InnerIndexInterface::GetMemoryUsage() +
+           pipnn_cache_memory_.load(std::memory_order_acquire);
 }
 
 }  // namespace vsag

@@ -38,6 +38,10 @@ exact version:
 pip install pyvsag==X.Y.Z
 ```
 
+Releases built on the C API ship one `py3-none-manylinux_2_28` wheel per architecture (Linux, glibc
+2.28 or later, CPython 3.10 or later). Earlier releases shipped one wheel per CPython version, down
+to 3.6, built for `manylinux2014`; pin one of those if you need an older interpreter or glibc.
+
 Binding releases may not match every core C++ tag. The repository also contains C and
 Node.js/TypeScript bindings. See the corresponding release series page and repository examples for
 their support and packaging state.

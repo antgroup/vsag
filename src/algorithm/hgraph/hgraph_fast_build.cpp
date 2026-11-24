@@ -138,7 +138,8 @@ bool
 HGraph::need_temporary_sq8_build_data_for_add() const {
     return this->rabitq_fused_datacell_ == nullptr and this->optimized_build_codes_ == nullptr and
            not this->has_precise_reorder() and
-           this->basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_RABITQ;
+           GetBaseQuantizerName(this->basic_flatten_codes_->GetQuantizerName()) ==
+               QUANTIZATION_TYPE_VALUE_RABITQ;
 }
 
 void

@@ -12,7 +12,7 @@ runs:
       shell: sh
       run: rm -rf ./build
     - name: Download Test
-      uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
       with:
         name: test_aarch64-${{ github.run_id }}
         path: ./build
@@ -30,7 +30,7 @@ runs:
       run: |
         echo leak:libomp.so > omp.supp
         echo leak:libgomp.so >> omp.supp
-        export LSAN_OPTIONS=suppressions=omp.supp
+        export LSAN_OPTIONS="suppressions=$(pwd)/omp.supp"
         chmod +x ./build/tests/${{ inputs.matrix-test-type }}
         if [ "$SMOKE" = "true" ]; then
           python3 scripts/ci/platform_smoke.py "${{ inputs.matrix-test-type }}"
@@ -39,7 +39,7 @@ runs:
         fi
     - name: Upload Log
       if: always()
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         path: ./log
         name: log-aarch64-${{ inputs.matrix-test-type }}-${{ github.run_id }}

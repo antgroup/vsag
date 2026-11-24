@@ -21,8 +21,11 @@
 #include <numeric>
 
 #include "allocator/memory_record_allocator.h"
+#include "framework/daily_test_plan.h"
 #include "functest.h"
 #include "test_index.h"
+#include "vsag/engine.h"
+#include "vsag/search_resource.h"
 
 namespace fixtures {
 
@@ -207,7 +210,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
                              "SINDI Build and Search",
                              "[ft][build][search][sindi]") {
     fixtures::SINDIParam param;
-    param.use_reorder = GENERATE(true, false);
+    param.use_reorder = DAILY_GENERATE(true, false);
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
     auto index = TestFactory("sindi", build_param, true);
     auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
@@ -234,7 +237,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
                              "SINDI threshold backfills after non-finite candidates",
                              "[ft][search][sindi][threshold][nonfinite][pr]") {
     fixtures::SINDIParam param;
-    param.use_reorder = GENERATE(false, true);
+    param.use_reorder = DAILY_GENERATE(false, true);
     param.sparse_value_quant_type = "fp32";
     auto index = TestFactory("sindi", GenerateBuildParameter(param), true);
 
@@ -248,7 +251,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     auto base = vsag::Dataset::Make();
     base->NumElements(2)->Ids(ids)->SparseVectors(base_vectors)->Owner(false);
     REQUIRE(index->Build(base).has_value());
-    if (GENERATE(false, true)) {
+    if (DAILY_GENERATE(false, true)) {
         REQUIRE(index->SetImmutable().has_value());
     }
 
@@ -321,7 +324,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     auto base = vsag::Dataset::Make();
     base->NumElements(2)->Ids(ids)->SparseVectors(base_vectors)->Owner(false);
     REQUIRE(index->Build(base).has_value());
-    if (GENERATE(false, true)) {
+    if (DAILY_GENERATE(false, true)) {
         REQUIRE(index->SetImmutable().has_value());
     }
 
@@ -341,8 +344,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Analyze", "[ft][analyze][sindi]") {
     fixtures::SINDIParam param;
-    param.use_reorder = GENERATE(true, false);
-    param.sparse_value_quant_type = GENERATE("fp32", "sq8", "fp16");
+    param.use_reorder = DAILY_GENERATE(true, false);
+    param.sparse_value_quant_type = DAILY_GENERATE("fp32", "sq8", "fp16");
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
     auto index = TestFactory("sindi", build_param, true);
     auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
@@ -379,8 +382,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
                              "SINDI Concurrent",
                              "[ft][concurrent][sindi]") {
     fixtures::SINDIParam param;
-    param.use_reorder = GENERATE(true, false);
-    param.remap_term_ids = GENERATE(true, false);
+    param.use_reorder = DAILY_GENERATE(true, false);
+    param.remap_term_ids = DAILY_GENERATE(true, false);
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
     auto index = TestFactory("sindi", build_param, true);
     auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
@@ -392,17 +395,17 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
                              "SINDI Serialize File",
                              "[ft][serialize][sindi]") {
     fixtures::SINDIParam param;
-    param.deserialize_without_footer = GENERATE(true, false);
+    param.deserialize_without_footer = DAILY_GENERATE(true, false);
     param.deserialize_without_buffer = true;
-    param.use_reorder = GENERATE(true, false);
-    param.sparse_value_quant_type = GENERATE("fp32", "sq8", "fp16");
-    param.remap_term_ids = GENERATE(true, false);
+    param.use_reorder = DAILY_GENERATE(true, false);
+    param.sparse_value_quant_type = DAILY_GENERATE("fp32", "sq8", "fp16");
+    param.remap_term_ids = DAILY_GENERATE(true, false);
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
     auto search_param_with_prune_ratio =
-        fixtures::SINDITestIndex::GenerateSearchParameter(GENERATE(0.0F, 0.2F));
+        fixtures::SINDITestIndex::GenerateSearchParameter(DAILY_GENERATE(0.0F, 0.2F));
     auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("ip");
+    auto size = DAILY_GENERATE(1024 * 1024 * 2);
+    auto metric_type = DAILY_GENERATE("ip");
     const std::string name = "sindi";
     vsag::Options::Instance().set_block_size_limit(size);
     auto index = TestFactory(name, build_param, true);
@@ -434,8 +437,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
                              "Sindi Duplicate ID Test",
                              "[ft][build][duplicate][sindi]") {
     fixtures::SINDIParam param;
-    param.use_reorder = GENERATE(true, false);
-    param.remap_term_ids = GENERATE(true, false);
+    param.use_reorder = DAILY_GENERATE(true, false);
+    param.remap_term_ids = DAILY_GENERATE(true, false);
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
     auto index = TestFactory("sindi", build_param, true);
     auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
@@ -446,7 +449,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
                              "SINDI Remap Build and Search",
                              "[ft][build][search][sindi]") {
     fixtures::SINDIParam param;
-    param.use_reorder = GENERATE(true, false);
+    param.use_reorder = DAILY_GENERATE(true, false);
     param.remap_term_ids = true;
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
     auto index = TestFactory("sindi", build_param, true);
@@ -478,7 +481,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Mark Remove", "[ft][remove][sindi]") {
     fixtures::SINDIParam param;
-    param.use_reorder = GENERATE(true, false);
+    param.use_reorder = DAILY_GENERATE(true, false);
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
     auto index = TestFactory("sindi", build_param, true);
     auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
@@ -625,7 +628,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     } index_allocator;
 
     fixtures::SINDIParam param;
-    param.use_reorder = GENERATE(false, true);
+    param.use_reorder = DAILY_GENERATE(false, true);
     auto created =
         vsag::Factory::CreateIndex("sindi", GenerateBuildParameter(param), &index_allocator);
     REQUIRE(created.has_value());
@@ -639,7 +642,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     request.query_ = query;
     request.topk_ = 5;
     request.params_str_ = search_param;
-    request.mode_ = GENERATE(vsag::SearchMode::KNN_SEARCH, vsag::SearchMode::RANGE_SEARCH);
+    request.mode_ = DAILY_GENERATE(vsag::SearchMode::KNN_SEARCH, vsag::SearchMode::RANGE_SEARCH);
     request.radius_ = 100.0F;
     request.limited_size_ = 5;
     auto baseline = index->SearchWithRequest(request);
@@ -747,8 +750,17 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
                              "[ft][sindi][timeout][pr]") {
     fixtures::SINDIParam param;
     param.use_reorder = false;
-    auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
-    auto index = TestFactory("sindi", build_param, true);
+    auto build_param =
+        nlohmann::json::parse(fixtures::SINDITestIndex::GenerateBuildParameter(param));
+    build_param["index_param"]["immutable"] = true;
+    vsag::Resource common(vsag::Engine::CreateDefaultAllocator(), nullptr);
+    vsag::SearchResourceOptions queryOptions;
+    queryOptions.max_background_workers = 15;
+    vsag::SearchResource resources(common, queryOptions);
+    vsag::Engine engine(&resources);
+    auto created = engine.CreateIndex("sindi", build_param.dump());
+    REQUIRE(created.has_value());
+    auto index = created.value();
     auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
     TestBuildIndex(index, dataset, true);
 
@@ -782,19 +794,32 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     const std::string parallel_timeout_param = R"({"sindi":{"n_candidate":20,
         "query_prune_ratio":0.0,"term_prune_ratio":0.0,
         "window_parallelism":2,"timeout_ms":0}})";
-    auto parallel = index->KnnSearch(query, 5, parallel_timeout_param);
+    auto generous_parallel = nlohmann::json::parse(parallel_timeout_param);
+    generous_parallel["sindi"]["timeout_ms"] = 60000;
+    auto parallel = index->KnnSearch(query, 5, generous_parallel.dump());
     REQUIRE(parallel.has_value());
-    REQUIRE(parallel.value()->GetStatistics({"is_timeout"})[0] == "false");
-    REQUIRE(parallel.value()->GetDim() == result.value()->GetDim());
+    REQUIRE(parallel.value()->GetDim() == 5);
+    REQUIRE(nlohmann::json::parse(parallel.value()->GetStatistics())["sindi_strategy"] ==
+            "accel_v1");
+    parallel = index->KnnSearch(query, 5, parallel_timeout_param);
+    REQUIRE_FALSE(parallel.has_value());
+    REQUIRE(parallel.error().type == vsag::ErrorType::INTERNAL_ERROR);
+    REQUIRE(parallel.error().message.find("deadline") != std::string::npos);
 
     vsag::SearchRequest request;
     request.query_ = query;
     request.topk_ = 5;
-    request.params_str_ = parallel_timeout_param;
+    request.params_str_ = generous_parallel.dump();
     auto parallel_request = index->SearchWithRequest(request);
     REQUIRE(parallel_request.has_value());
-    REQUIRE(parallel_request.value()->GetStatistics({"is_timeout"})[0] == "false");
-    REQUIRE(parallel_request.value()->GetDim() == result.value()->GetDim());
+    REQUIRE(parallel_request.value()->GetDim() == 5);
+    REQUIRE(nlohmann::json::parse(parallel_request.value()->GetStatistics())["sindi_strategy"] ==
+            "accel_v1");
+    request.params_str_ = parallel_timeout_param;
+    parallel_request = index->SearchWithRequest(request);
+    REQUIRE_FALSE(parallel_request.has_value());
+    REQUIRE(parallel_request.error().type == vsag::ErrorType::INTERNAL_ERROR);
+    REQUIRE(parallel_request.error().message.find("deadline") != std::string::npos);
 
     auto range = index->RangeSearch(query, 100.0F, timeout_param, 5);
     REQUIRE(range.has_value());
@@ -805,8 +830,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     REQUIRE(range.value()->GetDim() <= 5);
 
     auto parallel_range = index->RangeSearch(query, 100.0F, parallel_timeout_param, 5);
-    REQUIRE(parallel_range.has_value());
-    REQUIRE(parallel_range.value()->GetStatistics({"is_timeout"})[0] == "true");
+    REQUIRE_FALSE(parallel_range.has_value());
 
     auto normal_range =
         index->RangeSearch(query, 100.0F, fixtures::SINDITestIndex::search_param, 5);

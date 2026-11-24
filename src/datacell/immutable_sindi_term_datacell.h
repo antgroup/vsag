@@ -152,7 +152,7 @@ private:
                     const SparseTermComputerPtr& computer,
                     MappedQueryTerms& mapped_terms) const;
 
-    template <InnerSearchMode mode, InnerSearchType type>
+    template <InnerSearchMode mode, InnerSearchType type, bool cancellable = false>
     bool
     insert_heap_by_terms(float* dists,
                          const ImmutableSINDIWindow& window,
@@ -164,7 +164,7 @@ private:
                          SparseEvaluationTracker* candidate_tracker = nullptr,
                          const uint64_t* filter_callback_remaining = nullptr) const;
 
-    template <InnerSearchMode mode, InnerSearchType type>
+    template <InnerSearchMode mode, InnerSearchType type, bool cancellable = false>
     bool
     insert_heap_by_dists(float* dists,
                          uint32_t dists_size,

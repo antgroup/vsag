@@ -15,7 +15,13 @@
 
 #include "hgraph_analyzer.h"
 
+#include <cstring>
+#include <vector>
+
+#include "datacell/rabitq_split_datacell.h"
 #include "impl/heap/standard_heap.h"
+#include "simd/bf16_simd.h"
+#include "simd/fp16_simd.h"
 
 namespace vsag {
 
@@ -48,6 +54,21 @@ mark_duplicate_ids(const GraphInterfacePtr& graph,
 }
 
 }  // namespace
+
+DatasetPtr
+HGraphAnalyzer::make_query_dataset(const float* native_query) const {
+    auto query = Dataset::Make()->Dim(dim_)->NumElements(1)->Owner(false);
+    // Sample rows hold native values inside float-sized scratch storage.
+    if (hgraph_->data_type_ == DataTypes::DATA_TYPE_FP16 or
+        hgraph_->data_type_ == DataTypes::DATA_TYPE_BF16) {
+        query->Float16Vectors(reinterpret_cast<const uint16_t*>(native_query));
+    } else if (hgraph_->data_type_ == DataTypes::DATA_TYPE_INT8) {
+        query->Int8Vectors(reinterpret_cast<const int8_t*>(native_query));
+    } else {
+        query->Float32Vectors(native_query);
+    }
+    return query;
+}
 
 FlattenInterfacePtr
 HGraphAnalyzer::select_precise_codes() const {
@@ -123,9 +144,36 @@ HGraphAnalyzer::calculate_base_groundtruth() {
     }
     base_sample_datas_.resize(static_cast<std::vector<float>::size_type>(base_sample_size_) *
                               static_cast<std::vector<float>::size_type>(dim_));
+    const auto codes = select_precise_codes();
+    const bool fused_half_samples = (hgraph_->data_type_ == DataTypes::DATA_TYPE_FP16 or
+                                     hgraph_->data_type_ == DataTypes::DATA_TYPE_BF16) and
+                                    hgraph_->rabitq_fused_datacell_ != nullptr and
+                                    hgraph_->rabitq_split_codes_ != nullptr and
+                                    codes.get() == hgraph_->basic_flatten_codes_.get();
+    Vector<uint16_t> native_sample(fused_half_samples ? dim_ : 0, allocator_);
     for (uint64_t i = 0; i < this->base_sample_size_; ++i) {
-        InnerIdType sample_id = base_sample_ids_[i];
-        hgraph_->GetVectorByInnerId(sample_id, base_sample_datas_.data() + i * dim_);
+        const InnerIdType sample_id = base_sample_ids_[i];
+        auto* sample = base_sample_datas_.data() + i * dim_;
+        if (not fused_half_samples) {
+            hgraph_->GetVectorByInnerId(sample_id, sample);
+            continue;
+        }
+        auto buffer = codes->AcquireCodesById(sample_id);
+        if (buffer) {
+            codes->Decode(buffer.Data(), sample);
+            continue;
+        }
+        // The fused fallback returns FP32, unlike the native quantizer adapter.
+        if (not hgraph_->rabitq_split_codes_->DecodeFusedById(sample_id, sample)) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                fmt::format("failed to decode analysis sample {}", sample_id));
+        }
+        for (uint64_t d = 0; d < dim_; ++d) {
+            native_sample[d] = hgraph_->data_type_ == DataTypes::DATA_TYPE_FP16
+                                   ? generic::FloatToFP16(sample[d])
+                                   : generic::FloatToBF16(sample[d]);
+        }
+        std::memcpy(sample, native_sample.data(), dim_ * sizeof(uint16_t));
     }
     calculate_groundtruth(
         base_sample_datas_, base_sample_ids_, base_ground_truth_, this->base_sample_size_);
@@ -278,6 +326,7 @@ HGraphAnalyzer::calculate_quantization_result(
     float total_quantization_inversion_count_rate = 0.0F;
     uint32_t valid_sample_count = 0;
     uint32_t valid_inversion_sample_count = 0;
+    const InnerIndexInterface& index = *hgraph_;
     for (int i = 0; i < sample_size; ++i) {
         auto id = sample_ids[i];
         const auto& result = search_result.at(id);
@@ -285,10 +334,11 @@ HGraphAnalyzer::calculate_quantization_result(
         if (actual_topk == 0) {
             continue;
         }
-        const auto* query = sample_datas.data() + static_cast<uint64_t>(i) * dim_;
+        const auto query =
+            make_query_dataset(sample_datas.data() + static_cast<uint64_t>(i) * dim_);
         float sample_error = 0.0F;
-        auto base_result = hgraph_->CalcDistancesById(query, result.data(), actual_topk, false);
-        auto precise_result = hgraph_->CalcDistancesById(query, result.data(), actual_topk, true);
+        auto base_result = index.CalcDistancesById(query, result.data(), actual_topk, false);
+        auto precise_result = index.CalcDistancesById(query, result.data(), actual_topk, true);
         if (base_result == nullptr or precise_result == nullptr) {
             continue;
         }
@@ -297,22 +347,39 @@ HGraphAnalyzer::calculate_quantization_result(
         if (base_distance == nullptr or precise_distance == nullptr) {
             continue;
         }
-        uint32_t inversion_count = 0;
+        const auto* base_valids = base_result->GetValids();
+        const auto* precise_valids = precise_result->GetValids();
+        if (base_valids == nullptr or precise_valids == nullptr) {
+            continue;
+        }
+        // Skip labels that were removed concurrently; their distances are NaN.
+        std::vector<uint32_t> kept;
+        kept.reserve(actual_topk);
         for (uint32_t j = 0; j < actual_topk; ++j) {
-            sample_error += std::abs(base_distance[j] - precise_distance[j]);
-            for (uint32_t k = j + 1; k < actual_topk; ++k) {
-                if ((base_distance[j] - base_distance[k]) *
-                        (precise_distance[j] - precise_distance[k]) <
+            if (base_valids[j] and precise_valids[j]) {
+                kept.push_back(j);
+            }
+        }
+        if (kept.empty()) {
+            continue;
+        }
+        const auto kept_count = static_cast<uint32_t>(kept.size());
+        uint32_t inversion_count = 0;
+        for (uint32_t j = 0; j < kept_count; ++j) {
+            sample_error += std::abs(base_distance[kept[j]] - precise_distance[kept[j]]);
+            for (uint32_t k = j + 1; k < kept_count; ++k) {
+                if ((base_distance[kept[j]] - base_distance[kept[k]]) *
+                        (precise_distance[kept[j]] - precise_distance[kept[k]]) <
                     0) {
                     inversion_count++;
                 }
             }
         }
-        total_quantization_error += sample_error / static_cast<float>(actual_topk);
-        if (actual_topk > 1) {
+        total_quantization_error += sample_error / static_cast<float>(kept_count);
+        if (kept_count > 1) {
             total_quantization_inversion_count_rate +=
                 static_cast<float>(inversion_count) /
-                (static_cast<float>(actual_topk) * static_cast<float>(actual_topk - 1) / 2.0F);
+                (static_cast<float>(kept_count) * static_cast<float>(kept_count - 1) / 2.0F);
             valid_inversion_sample_count++;
         }
         valid_sample_count++;
@@ -340,6 +407,23 @@ HGraphAnalyzer::GetQuantizationInversionRatio(const std::string& search_param) {
 
 bool
 HGraphAnalyzer::SetQuery(const DatasetPtr& query) {
+    if (query == nullptr or query->GetNumElements() <= 0 or query->GetDim() != dim_) {
+        return false;
+    }
+    const auto* query_vectors = hgraph_->get_data(query);
+    if (query_vectors == nullptr) {
+        logger::error("Query vectors must match the index dtype");
+        return false;
+    }
+    uint64_t element_bytes = sizeof(float);
+    if (hgraph_->data_type_ == DataTypes::DATA_TYPE_FP16 or
+        hgraph_->data_type_ == DataTypes::DATA_TYPE_BF16) {
+        element_bytes = sizeof(uint16_t);
+    } else if (hgraph_->data_type_ == DataTypes::DATA_TYPE_INT8) {
+        element_bytes = sizeof(int8_t);
+    } else if (hgraph_->data_type_ != DataTypes::DATA_TYPE_FLOAT) {
+        return false;
+    }
     if (query_sample_size_ != 0) {
         query_sample_ids_.clear();
         query_sample_datas_.clear();
@@ -350,13 +434,11 @@ HGraphAnalyzer::SetQuery(const DatasetPtr& query) {
     query_sample_ids_.resize(query_sample_size_);
     query_sample_datas_.resize(static_cast<std::vector<float>::size_type>(query_sample_size_) *
                                static_cast<std::vector<float>::size_type>(dim_));
-    if (const float* query_vectors = query->GetFloat32Vectors()) {
-        std::memcpy(query_sample_datas_.data(),
-                    query_vectors,
-                    static_cast<unsigned long>(query_sample_size_ * dim_) * sizeof(float));
-    } else {
-        logger::error("Query dataset is empty or not float32");
-        return false;
+    const auto row_bytes = static_cast<uint64_t>(dim_) * element_bytes;
+    for (uint64_t i = 0; i < query_sample_size_; ++i) {
+        std::memcpy(query_sample_datas_.data() + i * dim_,
+                    hgraph_->get_data(query, static_cast<int64_t>(i)),
+                    row_bytes);
     }
     std::iota(query_sample_ids_.begin(), query_sample_ids_.end(), 0);
     return true;
@@ -420,21 +502,8 @@ HGraphAnalyzer::calculate_search_result(const Vector<float>& sample_datas,
                                         const std::string& search_param,
                                         uint32_t sample_size) {
     auto time_cost = 0.0F;
-    Vector<int8_t> int8_query(allocator_);
-    if (hgraph_->data_type_ == DataTypes::DATA_TYPE_INT8) {
-        int8_query.resize(dim_);
-    }
     for (int i = 0; i < sample_size; ++i) {
-        auto query = Dataset::Make();
-        query->Dim(dim_)->NumElements(1)->Owner(false);
-        const auto* sample = sample_datas.data() + static_cast<uint64_t>(i) * dim_;
-        if (hgraph_->data_type_ == DataTypes::DATA_TYPE_INT8) {
-            // INT8 Decode writes raw bytes into each sample's float-sized scratch row.
-            std::memcpy(int8_query.data(), sample, dim_ * sizeof(int8_t));
-            query->Int8Vectors(int8_query.data());
-        } else {
-            query->Float32Vectors(sample);
-        }
+        auto query = make_query_dataset(sample_datas.data() + static_cast<uint64_t>(i) * dim_);
         double single_query_time;
         DatasetPtr result = nullptr;
         {
@@ -569,7 +638,8 @@ HGraphAnalyzer::GetStats() {
 }
 JsonType
 HGraphAnalyzer::AnalyzeIndexBySearch(const SearchRequest& request) {
-    SetQuery(request.query_);
+    CHECK_ARGUMENT(SetQuery(request.query_),
+                   "analysis query must contain native vectors matching the index dtype and dim");
     JsonType stats;
     stats["avg_distance_query"].SetFloat(GetQueryAvgDistance());
     stats["recall_query"].SetFloat(GetQuerySearchRecall(request.params_str_));

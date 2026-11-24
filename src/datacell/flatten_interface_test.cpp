@@ -15,13 +15,82 @@
 
 #include "flatten_interface_test.h"
 
+#include <array>
 #include <fstream>
+#include <stdexcept>
 
 #include "simd/simd.h"
 #include "storage/serialization_template_test.h"
 #include "unittest.h"
 
 namespace vsag {
+namespace {
+class RecordingNodeMutex final : public EmptyMutex {
+public:
+    void
+    SharedLock(uint32_t id) override {
+        if (fail_on_second_lock and lock_count == 1) {
+            throw std::runtime_error("injected node lock failure");
+        }
+        locked.at(lock_count++) = id;
+    }
+
+    void
+    SharedUnlock(uint32_t id) override {
+        unlocked.at(unlock_count++) = id;
+    }
+
+    bool fail_on_second_lock{false};
+    uint64_t lock_count{0};
+    uint64_t unlock_count{0};
+    std::array<uint32_t, 3> locked{};
+    std::array<uint32_t, 3> unlocked{};
+};
+}  // namespace
+
+TEST_CASE("Batch node read guard preserves ordered locking and rolls back on failure",
+          "[ut][datacell]") {
+    RecordingNodeMutex mutexes;
+    const std::array<InnerIdType, 3> ids{7, 3, 7};
+
+    SECTION("Duplicate IDs are locked once and input order is preserved") {
+        {
+            BatchNodeReadGuard guard(mutexes, ids.data(), ids.size(), 8);
+            REQUIRE(mutexes.lock_count == 2);
+            REQUIRE(mutexes.locked[0] == 3);
+            REQUIRE(mutexes.locked[1] == 7);
+            REQUIRE(mutexes.unlock_count == 0);
+        }
+        REQUIRE(mutexes.unlock_count == 2);
+        REQUIRE(mutexes.unlocked[0] == 7);
+        REQUIRE(mutexes.unlocked[1] == 3);
+        REQUIRE(ids[0] == 7);
+        REQUIRE(ids[1] == 3);
+        REQUIRE(ids[2] == 7);
+    }
+
+    SECTION("A failed acquisition releases previously acquired locks") {
+        mutexes.fail_on_second_lock = true;
+        REQUIRE_THROWS_AS(BatchNodeReadGuard(mutexes, ids.data(), ids.size(), 8),
+                          std::runtime_error);
+        REQUIRE(mutexes.lock_count == 1);
+        REQUIRE(mutexes.unlock_count == 1);
+        REQUIRE(mutexes.unlocked[0] == 3);
+    }
+
+    SECTION("Invalid IDs are rejected before acquiring locks") {
+        REQUIRE_THROWS_AS(BatchNodeReadGuard(mutexes, ids.data(), ids.size(), 7), VsagException);
+        REQUIRE(mutexes.lock_count == 0);
+        REQUIRE(mutexes.unlock_count == 0);
+    }
+
+    SECTION("An empty batch needs no locks") {
+        BatchNodeReadGuard guard(mutexes, nullptr, 0, 0);
+        REQUIRE(mutexes.lock_count == 0);
+        REQUIRE(mutexes.unlock_count == 0);
+    }
+}
+
 void
 FlattenInterfaceTest::BasicTest(int64_t dim, uint64_t base_count, float error) {
     int64_t query_count = 100;

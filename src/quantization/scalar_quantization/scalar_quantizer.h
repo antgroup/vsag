@@ -19,6 +19,7 @@
 #include "inner_string_params.h"
 #include "quantization/quantizer.h"
 #include "scalar_quantizer_parameter.h"
+#include "utils/training_rows.h"
 
 namespace vsag {
 
@@ -54,6 +55,19 @@ public:
     bool
     TrainImpl(const float* data, uint64_t count);
 
+    static constexpr bool BOUNDED_HALF_BATCH = true;
+
+    bool
+    ReTrainRows(const TrainingRows& input);
+    static constexpr bool TRAINING_ROWS_SUPPORTED = true;
+    bool
+    TrainRowsImpl(const TrainingRows& input) {
+        return ReTrainRows(input);
+    }
+
+    bool
+    ReTrainHalf(const uint16_t* data, uint64_t count, bool bf16);
+
     bool
     EncodeOneImpl(const float* data, uint8_t* codes) const;
 
@@ -71,6 +85,17 @@ public:
 
     void
     ComputeDistImpl(Computer<ScalarQuantizer>& computer, const uint8_t* codes, float* dists) const;
+
+    void
+    ComputeDistsBatch4Impl(Computer<ScalarQuantizer>& computer,
+                           const uint8_t* codes1,
+                           const uint8_t* codes2,
+                           const uint8_t* codes3,
+                           const uint8_t* codes4,
+                           float& dist1,
+                           float& dist2,
+                           float& dist3,
+                           float& dist4) const;
 
     void
     SerializeImpl(StreamWriter& writer);

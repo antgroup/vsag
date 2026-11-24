@@ -30,6 +30,7 @@
 #include "common.h"
 #include "flatten_interface.h"
 #include "flatten_optimized_build_interface.h"
+#include "flatten_pairwise_distance_interface.h"
 #include "impl/cluster/kmeans_cluster.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "inner_string_params.h"
@@ -45,11 +46,14 @@
 #include "quantization/rabitq_quantization/rabitq_quantizer.h"
 #include "query_context.h"
 #include "rabitq_fused_code_storage.h"
+#include "simd/bf16_simd.h"
+#include "simd/fp16_simd.h"
 #include "simd/rabitq_refine_simd.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "type_helpers.h"
 #include "utils/byte_buffer.h"
+#include "utils/half_input.h"
 #include "utils/timer.h"
 
 namespace vsag {
@@ -266,6 +270,7 @@ template <MetricType metric,
           typename QuantizerT = RaBitQuantizer<metric>>
 class RaBitQSplitDataCell : public FlattenInterface,
                             public FlattenOptimizedBuildInterface,
+                            public FlattenPairwiseDistanceInterface,
                             public RaBitQSplitResidualOriginalQueryInterface,
                             public RaBitQSplitDataCellInterface {
 public:
@@ -285,6 +290,68 @@ public:
         ByteBuffer scalar_code_;
         uint64_t code_sum_{0};
     };
+
+    class PairwiseDistanceComputer final : public FlattenPairwiseDistanceComputer {
+    public:
+        explicit PairwiseDistanceComputer(RaBitQSplitDataCell& source)
+            : source_(source),
+              codes_(source.allocator_),
+              packed_code_(source.code_size_, source.allocator_) {
+        }
+
+        float
+        Compute(InnerIdType id1, InnerIdType id2, QueryContext* ctx = nullptr) override {
+            // Keep both entries alive if fetching the second ID evicts the first one.
+            const auto left = acquire(id1);
+            const auto right = acquire(id2);
+            const float distance =
+                source_.bottom_quantizer().ComputeScalarCodesDistance(left->scalar_code_.data,
+                                                                      left->code_sum_,
+                                                                      right->scalar_code_.data,
+                                                                      right->code_sum_);
+            source_.add_distance_evaluations(ctx, 1);
+            return distance;
+        }
+
+    private:
+        std::shared_ptr<OptimizedBuildComputer>
+        acquire(InnerIdType id) {
+            const auto found = codes_.find(id);
+            if (found != codes_.end()) {
+                return found->second;
+            }
+            auto code = std::make_shared<OptimizedBuildComputer>(
+                source_.bottom_quantizer().GetScalarCodeSize(), source_.allocator_);
+            CHECK_ARGUMENT(source_.GetCodesById(id, packed_code_.data),
+                           "failed to read split RaBitQ pairwise code");
+            code->code_sum_ = source_.bottom_quantizer().UnpackScalarCode(packed_code_.data,
+                                                                          code->scalar_code_.data);
+            if (codes_.size() == CACHE_CAPACITY) {
+                codes_.erase(order_[next_]);
+            }
+            codes_.emplace(id, code);
+            order_[next_] = id;
+            next_ = (next_ + 1) % CACHE_CAPACITY;
+            return code;
+        }
+
+        // Bound auxiliary memory independently of the index size. FIFO eviction keeps the
+        // cache local to one search/connection, without retaining stale codes across Add calls.
+        static constexpr uint64_t CACHE_CAPACITY = 512;
+        RaBitQSplitDataCell& source_;
+        UnorderedMap<InnerIdType, std::shared_ptr<OptimizedBuildComputer>> codes_;
+        ByteBuffer packed_code_;
+        std::array<InnerIdType, CACHE_CAPACITY> order_{};
+        uint64_t next_{0};
+    };
+
+    std::unique_ptr<FlattenPairwiseDistanceComputer>
+    FactoryPairwiseDistanceComputer() override {
+        if (this->optimized_build_active_ or this->fused_code_storage_ != nullptr) {
+            return nullptr;
+        }
+        return std::make_unique<PairwiseDistanceComputer>(*this);
+    }
 
     class FusedComputer final : public ComputerInterface {
     public:
@@ -320,7 +387,9 @@ public:
                                  const IOParamPtr& supplement_io_param,
                                  const IndexCommonParam& common_param)
         : common_param_(common_param), allocator_(common_param.allocator_.get()) {
-        this->quantizer_ = std::make_shared<QuantizerT>(quantization_param, common_param);
+        auto quantizer_common = common_param;
+        quantizer_common.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+        this->quantizer_ = std::make_shared<QuantizerT>(quantization_param, quantizer_common);
         this->quantization_param_ =
             std::dynamic_pointer_cast<RaBitQuantizerParameter>(quantization_param);
         if (not this->bottom_quantizer().SupportSplitCodeStorage()) {
@@ -596,6 +665,7 @@ public:
                        "optimized build filter codes are packaged during finalization");
         {
             std::lock_guard lock(this->mutex_);
+            this->restore_deferred_split_layouts();
             if (idx == std::numeric_limits<InnerIdType>::max()) {
                 idx = this->total_count_.load(std::memory_order_relaxed);
             }
@@ -605,7 +675,9 @@ public:
         }
         ByteBuffer full_code(this->code_size_, this->allocator_);
         ByteBuffer supplement_code(this->supplement_code_size_, this->allocator_);
-        this->quantizer_->EncodeOne(static_cast<const float*>(vector), full_code.data);
+        Vector<float> input_scratch(this->allocator_);
+        const float* input = this->prepare_dense_input(vector, 1, input_scratch);
+        this->quantizer_->EncodeOne(input, full_code.data);
         this->bottom_quantizer().SplitCode(full_code.data, filter_code, supplement_code.data);
         this->supplement_layout_->Write(idx, supplement_code.data);
     }
@@ -620,6 +692,7 @@ public:
         CHECK_ARGUMENT(full_add != nullptr, "residual full factor output is required");
         {
             std::lock_guard lock(this->mutex_);
+            this->restore_deferred_split_layouts();
             if (idx == std::numeric_limits<InnerIdType>::max()) {
                 idx = this->total_count_.load(std::memory_order_relaxed);
             }
@@ -629,7 +702,9 @@ public:
         }
         ByteBuffer full_code(this->code_size_, this->allocator_);
         ByteBuffer supplement_code(this->supplement_code_size_, this->allocator_);
-        this->quantizer_->EncodeOne(static_cast<const float*>(vector), full_code.data);
+        Vector<float> input_scratch(this->allocator_);
+        const float* input = this->prepare_dense_input(vector, 1, input_scratch);
+        this->quantizer_->EncodeOne(input, full_code.data);
         this->bottom_quantizer().SplitCode(full_code.data, filter_code, supplement_code.data);
         *full_add = std::numeric_limits<float>::quiet_NaN();
         this->bottom_quantizer().ComputeResidualFullFactor(
@@ -1419,7 +1494,8 @@ public:
             return this->FactoryFusedComputer(query);
         }
         auto computer = this->quantizer_->FactoryComputer();
-        computer->SetQuery(static_cast<const float*>(query));
+        Vector<float> input_scratch(this->allocator_);
+        computer->SetQuery(this->prepare_dense_input(query, 1, input_scratch));
         return computer;
     }
 
@@ -1489,7 +1565,29 @@ public:
     void
     Train(const void* data, uint64_t count) override {
         if (this->quantizer_) {
-            this->quantizer_->Train(static_cast<const float*>(data), count);
+            // Do not bypass TransformQuantizer chains, even dimension-preserving ones.
+            if constexpr (std::is_same_v<QuantizerT, typename Accessor::BottomQuantizerType>) {
+                if (this->dense_input_element_size() == sizeof(uint16_t) and
+                    (not this->quantizer_->UsesPcaForTraining() or data == nullptr or count == 0)) {
+                    this->quantizer_->TrainHalf(data, count, this->common_param_.data_type_);
+                    return;
+                }
+            }
+            const auto type = this->common_param_.data_type_;
+            if ((type == DataTypes::DATA_TYPE_FP16 or type == DataTypes::DATA_TYPE_BF16) and
+                this->quantizer_->CanTrainRows()) {
+                CHECK_ARGUMENT(this->common_param_.dim_ > 0, "invalid split training dimension");
+                const uint64_t stride =
+                    static_cast<uint64_t>(this->common_param_.dim_) * sizeof(uint16_t);
+                CHECK_ARGUMENT(count <= static_cast<uint64_t>(PTRDIFF_MAX) / stride,
+                               "split training extent overflows");
+                TrainingRows rows(
+                    data, count, this->common_param_.dim_, type, stride, count * stride);
+                CHECK_ARGUMENT(this->quantizer_->TrainRows(rows), "split provider training failed");
+                return;
+            }
+            Vector<float> input_scratch(this->allocator_);
+            this->quantizer_->Train(this->prepare_dense_input(data, count, input_scratch), count);
         }
     }
 
@@ -1539,6 +1637,7 @@ public:
         }
         this->supplement_layout_->Resize(final_capacity);
         this->max_capacity_ = final_capacity;
+        this->split_layouts_deferred_ = false;
 
         auto finalize_range = [this](InnerIdType begin, InnerIdType end) {
             ByteBuffer one_bit_code(this->one_bit_code_size_, allocator_);
@@ -1624,6 +1723,7 @@ public:
 
     void
     AbortOptimizedBuild() noexcept override {
+        // Keep exception unwinding allocation-free. Normal writes restore any deferred capacity.
         this->optimized_build_active_ = false;
         this->optimized_build_scalar_layout_.reset();
         this->optimized_build_code_sums_.reset();
@@ -1640,25 +1740,8 @@ public:
     void
     InsertVector(const void* vector,
                  InnerIdType idx = std::numeric_limits<InnerIdType>::max()) override {
-        {
-            std::lock_guard lock(this->mutex_);
-            if (idx == std::numeric_limits<InnerIdType>::max()) {
-                idx = this->total_count_.load(std::memory_order_relaxed);
-            }
-            // Optimized-build workers write disjoint IDs without locking, so both temporary
-            // arrays must be fully sized before the workers start.
-            CHECK_ARGUMENT(
-                not this->optimized_build_active_ or
-                    static_cast<uint64_t>(idx) < this->optimized_build_code_sums_->size(),
-                "optimized RaBitQ build storage must be resized before inserting vectors");
-            this->total_count_.store(
-                std::max(this->total_count_.load(std::memory_order_relaxed), idx + 1),
-                std::memory_order_release);
-        }
-        if (this->fused_code_storage_ != nullptr and not this->optimized_build_active_) {
-            return;
-        }
-        this->write_encoded_vector(static_cast<const float*>(vector), idx);
+        Vector<float> input_scratch(this->allocator_);
+        this->insert_vector_with_scratch(vector, idx, input_scratch);
     }
 
     bool
@@ -1671,16 +1754,23 @@ public:
             return true;
         }
         std::lock_guard lock(this->mutex_);
-        this->write_encoded_vector(static_cast<const float*>(vector), idx);
+        this->restore_deferred_split_layouts();
+        Vector<float> input_scratch(this->allocator_);
+        this->write_encoded_vector(this->prepare_dense_input(vector, 1, input_scratch), idx);
         return true;
     }
 
     void
     BatchInsertVector(const void* vectors, InnerIdType count, InnerIdType* idx_vec) override {
-        auto dim = quantizer_->GetDim();
+        const auto stride =
+            static_cast<uint64_t>(this->common_param_.dim_) * this->dense_input_element_size();
+        // Reuse one decoded row, not a whole-batch FP32 expansion. FLOAT input leaves
+        // this vector empty and therefore adds no input-conversion allocation.
+        Vector<float> input_scratch(this->allocator_);
         for (InnerIdType i = 0; i < count; ++i) {
             auto idx = idx_vec == nullptr ? std::numeric_limits<InnerIdType>::max() : idx_vec[i];
-            this->InsertVector(static_cast<const float*>(vectors) + dim * i, idx);
+            this->insert_vector_with_scratch(
+                static_cast<const uint8_t*>(vectors) + stride * i, idx, input_scratch);
         }
     }
 
@@ -1856,7 +1946,10 @@ public:
     void
     Resize(InnerIdType new_capacity) override {
         if (new_capacity <= this->max_capacity_) {
-            return;
+            if (this->optimized_build_active_ or not this->split_layouts_deferred_) {
+                return;
+            }
+            new_capacity = this->max_capacity_;
         }
         if (this->fused_code_storage_ != nullptr) {
             if (this->optimized_build_active_) {
@@ -1866,13 +1959,17 @@ public:
             this->max_capacity_ = new_capacity;
             return;
         }
-        if (not this->external_filter_code_storage_) {
-            this->x_bit_layout_->Resize(new_capacity);
-        }
-        this->supplement_layout_->Resize(new_capacity);
         if (this->optimized_build_active_) {
+            // FinalizeOptimizedBuild materializes the split layouts after construction.
             this->optimized_build_scalar_layout_->Resize(new_capacity);
             this->optimized_build_code_sums_->resize(new_capacity, 0);
+            this->split_layouts_deferred_ = true;
+        } else {
+            if (not this->external_filter_code_storage_) {
+                this->x_bit_layout_->Resize(new_capacity);
+            }
+            this->supplement_layout_->Resize(new_capacity);
+            this->split_layouts_deferred_ = false;
         }
         this->max_capacity_ = new_capacity;
     }
@@ -2585,19 +2682,19 @@ public:
 
     bool
     CompareRawVectorWithId(const void* vector, InnerIdType id) override {
-        if (this->fused_code_storage_ == nullptr) {
-            return FlattenInterface::CompareRawVectorWithId(vector, id);
-        }
         if (vector == nullptr) {
             return false;
+        }
+        Vector<float> input_scratch(this->allocator_);
+        const float* input = this->prepare_dense_input(vector, 1, input_scratch);
+        if (this->fused_code_storage_ == nullptr) {
+            // Encode is an FP32 internal API, including in the base implementation.
+            return FlattenInterface::CompareRawVectorWithId(input, id);
         }
         ByteBuffer one_bit_code(one_bit_code_size_, allocator_);
         ByteBuffer supplement_code(supplement_code_size_, allocator_);
         uint32_t cluster_id = 0;
-        if (not this->EncodeFused(static_cast<const float*>(vector),
-                                  one_bit_code.data,
-                                  supplement_code.data,
-                                  &cluster_id)) {
+        if (not this->EncodeFused(input, one_bit_code.data, supplement_code.data, &cluster_id)) {
             return false;
         }
         RaBitQFusedCodeView stored;
@@ -2677,6 +2774,7 @@ public:
     Serialize(StreamWriter& writer) override {
         CHECK_ARGUMENT(not this->optimized_build_active_,
                        "cannot serialize RaBitQ split codes during optimized build");
+        this->restore_deferred_split_layouts();
         FlattenInterface::Serialize(writer);
         if (this->fused_code_storage_ != nullptr) {
             StreamWriter::WriteObj(writer, kFusedModelMagic);
@@ -2767,6 +2865,7 @@ public:
                                 "Merge rabitq split datacell failed: not match type");
         }
 
+        this->restore_deferred_split_layouts();
         for (InnerIdType i = 0; i < ptr->total_count_.load(std::memory_order_relaxed); ++i) {
             ByteBuffer one_bit(one_bit_code_size_, allocator_);
             ByteBuffer supplement(supplement_code_size_, allocator_);
@@ -2798,6 +2897,7 @@ public:
             (*this->optimized_build_code_sums_)[to] = (*this->optimized_build_code_sums_)[from];
             return;
         }
+        this->restore_deferred_split_layouts();
         ByteBuffer one_bit(one_bit_code_size_, allocator_);
         ByteBuffer supplement(supplement_code_size_, allocator_);
         this->x_bit_layout_->Read(from, one_bit.data);
@@ -2871,6 +2971,7 @@ public:
     // mismatched one-bit IO parameter type.
     std::string supplement_io_type_{};
     bool optimized_build_active_{false};
+    bool split_layouts_deferred_{false};
     uint64_t optimized_build_record_size_{0};
     bool external_filter_code_storage_{false};
     RabitQFusedInterface* fused_code_storage_{nullptr};
@@ -2879,6 +2980,74 @@ public:
     uint64_t optimized_build_prefetch_bytes_{0};
 
 private:
+    // Insert/update callers hold mutex_; other callers already require exclusive access.
+    void
+    restore_deferred_split_layouts() {
+        if (not this->optimized_build_active_ and this->split_layouts_deferred_) {
+            this->Resize(this->max_capacity_);
+        }
+    }
+
+    void
+    insert_vector_with_scratch(const void* vector, InnerIdType idx, Vector<float>& input_scratch) {
+        {
+            std::lock_guard lock(this->mutex_);
+            this->restore_deferred_split_layouts();
+            if (idx == std::numeric_limits<InnerIdType>::max()) {
+                idx = this->total_count_.load(std::memory_order_relaxed);
+            }
+            // Optimized-build workers write disjoint IDs without locking, so both temporary
+            // arrays must be fully sized before the workers start.
+            CHECK_ARGUMENT(
+                not this->optimized_build_active_ or
+                    static_cast<uint64_t>(idx) < this->optimized_build_code_sums_->size(),
+                "optimized RaBitQ build storage must be resized before inserting vectors");
+            this->total_count_.store(
+                std::max(this->total_count_.load(std::memory_order_relaxed), idx + 1),
+                std::memory_order_release);
+        }
+        if (this->fused_code_storage_ != nullptr and not this->optimized_build_active_) {
+            return;
+        }
+        this->write_encoded_vector(this->prepare_dense_input(vector, 1, input_scratch), idx);
+    }
+
+    // Only raw-input entry points call this helper. Encode/TrainFusedCodec and
+    // transformed-query APIs already receive FP32 and must not convert again.
+    [[nodiscard]] uint64_t
+    dense_input_element_size() const {
+        const auto type = this->common_param_.data_type_;
+        return (type == DataTypes::DATA_TYPE_FP16 or type == DataTypes::DATA_TYPE_BF16)
+                   ? sizeof(uint16_t)
+                   : sizeof(float);
+    }
+
+    const float*
+    prepare_dense_input(const void* data, uint64_t count, Vector<float>& scratch) const {
+        if (this->dense_input_element_size() == sizeof(float) or count == 0) {
+            return static_cast<const float*>(data);
+        }
+        CHECK_ARGUMENT(data != nullptr, "RaBitQ half input must not be null");
+        const auto dim = static_cast<uint64_t>(this->common_param_.dim_);
+        if (dim != 0 and count > std::numeric_limits<uint64_t>::max() / dim) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "RaBitQ input element count overflows");
+        }
+        const auto size = count * dim;
+        CHECK_ARGUMENT(size <= std::numeric_limits<size_t>::max() / sizeof(float),
+                       "RaBitQ converted input size overflows");
+        scratch.resize(size);
+        const auto* bytes = static_cast<const uint8_t*>(data);
+        for (uint64_t i = 0; i < size; ++i) {
+            uint16_t value;
+            std::memcpy(&value, bytes + i * sizeof(value), sizeof(value));
+            scratch[i] = this->common_param_.data_type_ == DataTypes::DATA_TYPE_FP16
+                             ? half_input::FP16ToFloat(value)
+                             : generic::BF16ToFloat(value);
+        }
+        return scratch.data();
+    }
+
     static constexpr uint64_t SUPPLEMENT_STORAGE_MAGIC = 0x3150505553514252ULL;
     static constexpr uint32_t SUPPLEMENT_STORAGE_VERSION = 1;
 
@@ -3172,10 +3341,16 @@ private:
             return result;
         }
         result->transformed_query_.resize(fused_quantizers_.front()->GetDim());
-        fused_quantizers_.front()->TransformFusedQuery(static_cast<const float*>(query),
-                                                       result->transformed_query_,
-                                                       result->query_raw_norm_,
-                                                       result->mrq_norm_sqr_);
+        Vector<float> input_scratch(this->allocator_);
+        const float* input = this->prepare_dense_input(query, 1, input_scratch);
+        for (uint64_t i = 0; i < static_cast<uint64_t>(common_param_.dim_); ++i) {
+            if (not std::isfinite(input[i])) {
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    "RaBitQ query must contain only finite values");
+            }
+        }
+        fused_quantizers_.front()->TransformFusedQuery(
+            input, result->transformed_query_, result->query_raw_norm_, result->mrq_norm_sqr_);
         if constexpr (full_only) {
             return result;
         }

@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <cstring>
 #include <sstream>
 #include <string>
 
@@ -54,6 +55,55 @@ public:
 
     explicit TransformQuantizer(const QuantizerParamPtr& param,
                                 const IndexCommonParam& common_param);
+
+    static constexpr bool TRAINING_ROWS_SUPPORTED = true;
+
+    bool
+    CanTrainRowsImpl() const {
+        if (!quantizer_->CanTrainRows())
+            return false;
+        for (const auto& t : transform_chain_) {
+            auto type = t->GetType();
+            if (type != VectorTransformerType::FHT &&
+                type != VectorTransformerType::RANDOM_ORTHOGONAL &&
+                type != VectorTransformerType::MRLE)
+                return false;
+        }
+        return true;
+    }
+
+    bool
+    TrainRowsImpl(const TrainingRows& rows) {
+        // Only admitted transforms ignore the training data; preserve order/count.
+        for (const auto& t : transform_chain_) t->Train(nullptr, rows.Count());
+        struct Context {
+            const TransformQuantizer* self;
+            const TrainingRows* input;
+        } context{this, &rows};
+        auto read = [](const void* ptr, uint64_t row, float* output) {
+            const auto& c = *static_cast<const Context*>(ptr);
+            // Invocation-private scratch: callbacks may execute on different workers.
+            Vector<float> input(c.input->Dim(), c.self->allocator_);
+            Vector<float> primary(c.self->allocator_), secondary(c.self->allocator_);
+            c.input->Read(row, input.data());
+            const float* result =
+                c.self->ExecuteChainTransform(input.data(), nullptr, nullptr, primary, secondary);
+            std::memcpy(output, result, c.self->GetTransformedDim() * sizeof(float));
+        };
+        auto columns =
+            [](const void* ptr, uint64_t row, uint64_t begin, uint64_t width, float* output) {
+                const auto& c = *static_cast<const Context*>(ptr);
+                Vector<float> input(c.input->Dim(), c.self->allocator_);
+                Vector<float> primary(c.self->allocator_), secondary(c.self->allocator_);
+                c.input->Read(row, input.data());
+                const float* result = c.self->ExecuteChainTransform(
+                    input.data(), nullptr, nullptr, primary, secondary);
+                std::memcpy(output, result + begin, width * sizeof(float));
+            };
+        TrainingRows transformed(rows.Count(), GetTransformedDim(), read, &context, columns);
+        this->is_trained_ = quantizer_->ReTrainRows(transformed);
+        return this->is_trained_;
+    }
 
     bool
     TrainImpl(const float* data, uint64_t count);
@@ -260,9 +310,9 @@ TransformQuantizer<QuantTmpl, metric>::TrainImpl(const float* data, uint64_t cou
     for (uint64_t i = 0; i < count; ++i) {
         const auto* transformed = ExecuteChainTransform(
             data + i * this->dim_, nullptr, nullptr, primary_scratch, secondary_scratch);
-        memcpy(transformed_data.data() + i * transformed_dim,
-               transformed,
-               transformed_dim * sizeof(float));
+        std::memcpy(transformed_data.data() + i * transformed_dim,
+                    transformed,
+                    transformed_dim * sizeof(float));
     }
 
     // 3. train quantizer based on transformed data

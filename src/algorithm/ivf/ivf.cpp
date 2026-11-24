@@ -39,6 +39,7 @@
 #include "impl/reorder/flatten_reorder.h"
 #include "index/index_impl.h"
 #include "inner_string_params.h"
+#include "ivf_input.h"
 #include "ivf_nearest_partition.h"
 #include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
 #include "query_context.h"
@@ -51,6 +52,21 @@
 namespace vsag {
 
 namespace {
+
+void
+check_ivf_data_type(DataTypes data_type) {
+    if (data_type == DataTypes::DATA_TYPE_INT8) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("IVF not support {} datatype", DATATYPE_INT8));
+    }
+    if (data_type != DataTypes::DATA_TYPE_FLOAT && data_type != DataTypes::DATA_TYPE_FP16 &&
+        data_type != DataTypes::DATA_TYPE_BF16) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("IVF requires float32, float16 or bfloat16 datatype, got {}",
+                        ToString(data_type)));
+    }
+}
 
 BucketDataCellParamPtr
 make_precise_bucket_param(const IVFParameterPtr& param) {
@@ -112,6 +128,8 @@ public:
             }
         }
         if (ctx.stats != nullptr) {
+            ctx.stats->reorder_candidate_count.fetch_add(static_cast<uint32_t>(candidate_count),
+                                                         std::memory_order_relaxed);
             ctx.stats->reorder_distance_count.fetch_add(static_cast<uint32_t>(candidate_count),
                                                         std::memory_order_relaxed);
         }
@@ -219,10 +237,7 @@ build_default_ivf_param(const JsonType& external_param) {
 ParamPtr
 IVF::CheckAndMappingExternalParam(const JsonType& external_param,
                                   const IndexCommonParam& common_param) {
-    if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
-        throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            fmt::format("IVF not support {} datatype", DATATYPE_INT8));
-    }
+    check_ivf_data_type(common_param.data_type_);
 
     auto inner_json = build_default_ivf_param(external_param);
     for (const auto& [key, ignored] : external_param.GetInnerJson()->items()) {
@@ -266,6 +281,8 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
                 value);
         } else if (key == IVF_KMEANS_ITER_COUNT) {
             inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_KMEANS_ITER_COUNT_KEY].SetJson(value);
+        } else if (key == IVF_E_MEANS_EPOCHS) {
+            inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_E_MEANS_EPOCHS_KEY].SetJson(value);
         } else if (key == GNO_IMI_FIRST_ORDER_BUCKETS_COUNT) {
             inner_json[IVF_PARTITION_STRATEGY_PARAMS_KEY][IVF_PARTITION_STRATEGY_TYPE_GNO_IMI]
                       [GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY]
@@ -325,6 +342,14 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
                 .SetJson(value);
             inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][FAST_ENCODE_RABITQ_ROUNDS_KEY]
                 .SetJson(value);
+        } else if (key == SAQ_AVG_BITS) {
+            inner_json[BUCKET_PARAMS_KEY][QUANTIZATION_PARAMS_KEY][SAQ_AVG_BITS_KEY].SetJson(value);
+        } else if (key == SAQ_SEGMENT_COUNT) {
+            inner_json[BUCKET_PARAMS_KEY][QUANTIZATION_PARAMS_KEY][SAQ_SEGMENT_COUNT_KEY].SetJson(
+                value);
+        } else if (key == SAQ_RANDOM_ROTATION) {
+            inner_json[BUCKET_PARAMS_KEY][QUANTIZATION_PARAMS_KEY][SAQ_RANDOM_ROTATION_KEY].SetJson(
+                value);
         } else if (key == IVF_THREAD_COUNT) {
             inner_json[BUILD_THREAD_COUNT_KEY].SetJson(value);
         } else if (key == TRAIN_SAMPLE_COUNT_KEY) {
@@ -405,6 +430,18 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
 }
 
 IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
+    : IVF(
+          param,
+          [&] {
+              check_ivf_data_type(common_param.data_type_);
+              return common_param;
+          }(),
+          PrivateTrainingRowsPilot{}) {
+}
+
+IVF::IVF(const IVFParameterPtr& param,
+         const IndexCommonParam& common_param,
+         PrivateTrainingRowsPilot /*pilot*/)
     : InnerIndexInterface(param, common_param),
       buckets_per_data_(param->buckets_per_data),
       location_map_(common_param.allocator_.get()),
@@ -453,8 +490,11 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
                 [this](InnerIdType inner_id) { return this->get_location(inner_id); },
                 allocator_);
         } else {
+            // IVF widens native half rows before passing them to precise flat codes.
+            auto reorder_common_param = modified_common_param;
+            reorder_common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
             this->reorder_codes_ =
-                FlattenInterface::MakeInstance(param->precise_codes_param, modified_common_param);
+                FlattenInterface::MakeInstance(param->precise_codes_param, reorder_common_param);
             this->reorder_ = std::make_shared<FlattenReorder>(this->reorder_codes_, allocator_);
         }
     }
@@ -704,13 +744,24 @@ IVF::CalcDistancesById(const float* query,
     }
     for (int64_t i = 0; i < count; ++i) {
         if (not validity[i]) {
-            distances[i] = -1.0F;
+            distances[i] = std::numeric_limits<float>::quiet_NaN();
         }
     }
     if (topk == -1) {
+        AttachValids(result, validity, allocator_);
         return result;
     }
     return ApplyTopkWithValidity(distances, ids, count, 1, topk, validity, allocator_);
+}
+
+float
+IVF::CalcDistanceById(const DatasetPtr& query, int64_t id, bool calculate_precise_distance) const {
+    CHECK_ARGUMENT(query != nullptr, "distance query must not be null");
+    CHECK_ARGUMENT(query->GetNumElements() == 1, "single-ID distance requires one query");
+    CHECK_ARGUMENT(query->GetDim() == dim_, "distance query dimension mismatch");
+    const IVFInput input(query, common_param_.data_type_);
+    Vector<float> scratch(allocator_);
+    return this->CalcDistanceById(input.Rows(0, 1, scratch), id, calculate_precise_distance);
 }
 
 float
@@ -719,7 +770,7 @@ IVF::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_dis
     std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
     auto [success, inner_id] = this->label_table_->TryGetIdByLabel(id);
     if (not success) {
-        return -1.0F;
+        ThrowLabelNotFound(id);
     }
     if (this->bucket_->SupportSplitCodeStorage() and calculate_precise_distance) {
         float dist = 0.0F;

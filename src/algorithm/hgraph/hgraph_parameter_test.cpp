@@ -801,6 +801,46 @@ TEST_CASE("HGraph Search Parameters reject ef_search integer overflow",
         R"({"hgraph": {"ef_search": 9223372036854775808}})"));
 }
 
+TEST_CASE("HGraph Search Parameters reject wrong types for optional fields",
+          "[ut][HGraphSearchParameters][type_guard]") {
+    // hops_limit: now guarded by read_optional_uint32 — rejecting oversized, float, bool.
+    REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+        R"({"hgraph": {"ef_search": 40, "hops_limit": 4294967296}})"));
+    REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+        R"({"hgraph": {"ef_search": 40, "hops_limit": 3.5}})"));
+    // The four original bare GetBool() keys now reject non-bool values.
+    REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+        R"({"hgraph": {"ef_search": 40, "use_extra_info_filter": 1}})"));
+    REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+        R"({"hgraph": {"ef_search": 40, "rabitq_one_bit_search": 1}})"));
+    REQUIRE_THROWS(
+        vsag::HGraphSearchParameters::FromJson(R"({"hgraph": {"ef_search": 40, "use_mci": 1}})"));
+    REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+        R"({"hgraph": {"ef_search": 40, "use_hybrid_traversal": 1}})"));
+    // Additional keys that the read_optional_* helpers now type-guard.
+    // bool fields
+    REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+        R"({"hgraph": {"ef_search": 40, "use_conjugate_graph_search": 1}})"));
+    // int64_t field
+    REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+        R"({"hgraph": {"ef_search": 40, "mci_seed_max_count": "not_a_number"}})"));
+    // float fields (read_optional_float)
+    for (const auto& key : {"mci_seed_ratio",
+                            "mci_seed_coverage",
+                            "hgraph_valid_ratio_threshold",
+                            "brute_force_threshold",
+                            "rabitq_error_rate",
+                            "skip_ratio"}) {
+        auto json = fmt::format(R"({{"hgraph":{{"ef_search":40,"{}":"not_a_number"}}}})", key);
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(json));
+    }
+    // double fields (read_optional_hybrid_cost)
+    for (const auto& key : {"hybrid_vob", "hybrid_filter_cost_ratio"}) {
+        auto json = fmt::format(R"({{"hgraph":{{"ef_search":40,"{}":"not_a_number"}}}})", key);
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(json));
+    }
+}
+
 TEST_CASE("HGraph maps label_remap_type to inner index parameter", "[ut][HGraphParameter]") {
     auto param = vsag::JsonType::Parse(R"({
         "base_quantization_type": "fp32",
@@ -1361,4 +1401,27 @@ TEST_CASE("HGraph flat adaptive parameters map and reject obsolete options",
     }
     json["adaptive_pruning"].SetJson(vsag::JsonType::Parse(R"({"enabled":true})"));
     CHECK_THROWS(vsag::HGraph::CheckAndMappingExternalParam(json, common));
+}
+
+TEST_CASE("HGraph maps SAQ parameters", "[ut][HGraphParameter][SAQ]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "saq",
+        "saq_avg_bits": 3.5,
+        "saq_segment_count": 2,
+        "saq_random_rotation": false
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto mapped = vsag::HGraph::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(mapped);
+
+    REQUIRE(typed_param != nullptr);
+    const auto base_json = typed_param->base_codes_param->ToJson();
+    const auto quantization = base_json["quantization_params"];
+    REQUIRE(quantization["type"].GetString() == std::string("saq"));
+    REQUIRE(quantization["saq_avg_bits"].GetFloat() == 3.5F);
+    REQUIRE(quantization["saq_segment_count"].GetUint64() == 2);
+    REQUIRE_FALSE(quantization["saq_random_rotation"].GetBool());
 }

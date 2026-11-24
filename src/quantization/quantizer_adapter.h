@@ -21,6 +21,7 @@
 
 #include "data_type.h"
 #include "index_common_param.h"
+#include "inner_string_params.h"
 #include "quantization/computer.h"
 #include "quantization/product_quantization/product_quantizer.h"
 #include "quantization/quantizer.h"
@@ -40,6 +41,27 @@ public:
 
     bool
     TrainImpl(const float* data, uint64_t count);
+    static constexpr bool TRAINING_ROWS_SUPPORTED = QuantT::SupportsTrainingRows();
+    bool
+    CanTrainRowsImpl() const {
+        return this->inner_quantizer_->CanTrainRows();
+    }
+    void
+    ValidateTrainingRowsShapeImpl(const TrainingRows& rows) const {
+        this->inner_quantizer_->ValidateTrainingRowsShape(rows);
+    }
+    bool
+    TrainRowsImpl(const TrainingRows& input) {
+        // Provider values are already FP32, regardless of external adapter dtype.
+        if constexpr (TRAINING_ROWS_SUPPORTED) {
+            if (input.Dim() != this->dim_ || input.Count() == 0)
+                throw std::invalid_argument("invalid adapter TrainingRows shape");
+            this->is_trained_ = false;
+            this->is_trained_ = this->inner_quantizer_->ReTrainRows(input);
+            return this->is_trained_;
+        }
+        throw std::invalid_argument("adapter inner quantizer rejects TrainingRows");
+    }
 
     bool
     EncodeOneImpl(const float* data, uint8_t* codes);
@@ -70,6 +92,41 @@ public:
                     const uint8_t* codes,
                     float* dists) const;
 
+    bool
+    ComputeDistWithThresholdImpl(Computer<QuantizerAdapter<QuantT, DataT>>& computer,
+                                 const uint8_t* codes,
+                                 float threshold,
+                                 float* dists) const;
+
+    bool
+    ComputeDistWithLowerBoundImpl(Computer<QuantizerAdapter<QuantT, DataT>>& computer,
+                                  const uint8_t* codes,
+                                  float* dists,
+                                  float* lower_bound) const;
+
+    void
+    Package32(const uint8_t* codes, uint8_t* packaged_codes, int64_t valid_size) const override;
+
+    void
+    Unpack32(const uint8_t* packaged_codes, uint8_t* codes) const override;
+
+    void
+    ComputeDistsBatch4Impl(Computer<QuantizerAdapter<QuantT, DataT>>& computer,
+                           const uint8_t* codes1,
+                           const uint8_t* codes2,
+                           const uint8_t* codes3,
+                           const uint8_t* codes4,
+                           float& dists1,
+                           float& dists2,
+                           float& dists3,
+                           float& dists4) const;
+
+    void
+    ScanRowBatchDistImpl(Computer<QuantizerAdapter<QuantT, DataT>>& computer,
+                         uint64_t count,
+                         const uint8_t* codes,
+                         float* dists) const;
+
     void
     ScanBatchDistImpl(Computer<QuantizerAdapter<QuantT, DataT>>& computer,
                       uint64_t count,
@@ -81,11 +138,14 @@ public:
 
     [[nodiscard]] std::string
     NameImpl() const {
-        return std::string("QUANTIZATION_ADAPTER_") + inner_quantizer_->Name();
+        return std::string(QUANTIZATION_ADAPTER_NAME_PREFIX) + inner_quantizer_->Name();
     }
 
 private:
-    using Base = Quantizer<QuantT>;
+    // Own an actual inner Computer rather than aliasing its representation:
+    // TransformQuantizer has a specialized Computer with additional state.
+    Computer<QuantT>&
+    get_inner_computer(Computer<QuantizerAdapter<QuantT, DataT>>& computer) const;
     std::shared_ptr<QuantT> inner_quantizer_{nullptr};
     DataTypes data_type_{DataTypes::DATA_TYPE_FLOAT};
 };

@@ -7,9 +7,12 @@ import os
 def validate(needs):
     policy = needs.get("changes", {})
     outputs = policy.get("outputs", {})
-    if policy.get("result") != "success" or outputs.get("heavy") not in ("true", "false") or outputs.get("lint") not in ("none", "changed", "full"):
+    if (policy.get("result") != "success"
+            or outputs.get("heavy") not in ("true", "false")
+            or outputs.get("python") not in ("true", "false")
+            or outputs.get("lint") not in ("none", "changed", "full")):
         return False
-    selected = {"platforms": outputs["heavy"] == "true", "python": outputs["heavy"] == "true",
+    selected = {"platforms": outputs["heavy"] == "true", "python": outputs["python"] == "true",
                 "tsan": outputs["heavy"] == "true", "lint": outputs["lint"] != "none"}
     return all(needs.get(name, {}).get("result") == ("success" if required else "skipped") for name, required in selected.items())
 
@@ -20,7 +23,7 @@ def main():
         summary.write("## Main CI\n\n| Check | Result |\n| --- | --- |\n")
         for name, value in needs.items():
             summary.write(f"| {name} | {value.get('result', 'missing')} |\n")
-        summary.write("\nDocs-only pushes intentionally skip heavy checks. Full regression belongs to the manually triggered Daily Build & Test workflow until scheduling is separately enabled.\n")
+        summary.write("\nDocs-only pushes intentionally skip heavy checks. Full regression belongs to Nightly CI.\n")
     if not validate(needs):
         raise SystemExit("A selected main check did not succeed, or classification was invalid")
 

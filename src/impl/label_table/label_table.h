@@ -19,6 +19,7 @@
 #include <vsag/filter.h>
 
 #include <atomic>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <shared_mutex>

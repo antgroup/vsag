@@ -7,7 +7,7 @@ runs:
       shell: sh
       run: rm -rf ./build
     - name: Download Test
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@v7
       with:
         name: test_x86-${{ github.run_id }}-tsan
         path: ./build/

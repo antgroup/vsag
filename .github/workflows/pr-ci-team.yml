@@ -9,6 +9,9 @@ on:
       runner:
         type: string
         default: vsag-linux-x64
+      slot-app-id:
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -31,10 +34,10 @@ jobs:
     outputs:
       cpp: ${{ steps.changes.outputs.cpp }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v4
         id: changes
         with:
           filters: |
@@ -71,7 +74,7 @@ jobs:
     steps:
       - name: Prepare writable check home
         run: mkdir -p "$HOME"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -92,7 +95,10 @@ jobs:
           python3 -m unittest tests/scripts/test_dependency_workflows.py
           python3 -m unittest tests/scripts/test_asan_artifact_workflow.py
           python3 -m unittest tests/scripts/test_toolchain_compatibility.py
+          python3 -m unittest tests/scripts/test_python_license.py
+          python3 -m unittest tests/scripts/test_daily_workflow.py
           python3 -m unittest tests/scripts/test_team_test_shards.py
+          python3 -m unittest tests/scripts/test_team_test_timings.py
           python3 -m unittest tests/scripts/test_team_mixed.py
           python3 -m unittest tests/scripts/test_team_workflow.py
           python3 -m unittest tests/scripts/test_team_timing.py
@@ -101,11 +107,137 @@ jobs:
           python3 -m unittest tests/scripts/test_compatibility_inputs.py
           python3 -m unittest tests/scripts/test_compatibility_cache.py
 
+  slot:
+    name: Acquire Team CI slot
+    needs: changes
+    if: inputs.slot-app-id != '' && needs.changes.outputs.cpp == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      checks: read
+    outputs:
+      runner: ${{ steps.wait.outputs.runner }}
+    steps:
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        id: wait
+        env:
+          SLOT_APP_ID: ${{ inputs.slot-app-id }}
+        with:
+          script: |
+            const expected = {
+              appId: process.env.SLOT_APP_ID,
+              repository: `${context.repo.owner}/${context.repo.repo}`,
+              repositoryId: String(context.payload.repository?.id),
+              pullRequest: String(context.payload.pull_request?.number),
+              runId: process.env.GITHUB_RUN_ID,
+              attempt: process.env.GITHUB_RUN_ATTEMPT,
+              headSha: process.env.TEAM_HEAD_SHA,
+              testSha: process.env.TEAM_TEST_SHA,
+            };
+            const decimal = /^[1-9][0-9]{0,19}$/;
+            const sha = /^[a-f0-9]{40}$/;
+            if (context.eventName !== "pull_request" || expected.repository !== "antgroup/vsag" ||
+                context.payload.pull_request?.base?.ref !== "main" ||
+                !["appId", "repositoryId", "pullRequest", "runId", "attempt"].every(k => decimal.test(expected[k])) ||
+                !sha.test(expected.headSha) || !sha.test(expected.testSha)) {
+              throw new Error("Invalid Team CI slot context");
+            }
+
+            // BEGIN SLOT RECEIPT
+            function readReceipt(checks, expected, prefix) {
+              const name = "Team CI slot allocation";
+              const id = `${prefix}pr/${expected.repositoryId}/${expected.runId}/${expected.attempt}`;
+              const selected = checks.filter(check =>
+                check.name === name && String(check.app?.id) === expected.appId && check.external_id === id
+              );
+              if (selected.length > 1) throw new Error("Duplicate Team CI receipts");
+              if (selected.length === 0) return null;
+              const check = selected[0];
+              if (check.head_sha !== expected.testSha || check.status !== "completed" || check.conclusion !== "neutral") {
+                throw new Error("Team CI receipt has an invalid check identity");
+              }
+              const text = check.output?.text;
+              if (typeof text !== "string" || text.length > 4096) throw new Error("Invalid Team CI receipt size");
+              const value = JSON.parse(text);
+              const keys = ["repository", "repositoryId", "pullRequest", "runId", "attempt", "headSha", "testSha"];
+              if (value?.schemaVersion !== 1 || keys.some(key => value[key] !== expected[key])) {
+                throw new Error("Team CI receipt does not match this PR attempt");
+              }
+              return value;
+            }
+
+            function readReviewRejection(checks, expected) {
+              const value = readReceipt(checks, expected, "review/");
+              if (!value) return false;
+              if (value.reason !== "workflow-review-required") {
+                throw new Error("Unknown Team CI review rejection");
+              }
+              return true;
+            }
+
+            function readAllocation(checks, expected, nowMs) {
+              const value = readReceipt(checks, expected, "");
+              if (!value) return null;
+              if (!Number.isSafeInteger(value.observedAtMs) || !Number.isSafeInteger(value.expiresAtMs) ||
+                  value.observedAtMs <= 0 || value.observedAtMs > nowMs || value.expiresAtMs <= value.observedAtMs ||
+                  typeof value.runner !== "string" || value.runner.length > 63 ||
+                  !/^vsag-linux-[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value.runner) ||
+                  typeof value.slot !== "string" || !/^[a-z][a-z0-9-]{0,63}$/.test(value.slot) ||
+                  typeof value.allocationId !== "string" || !/^[a-f0-9]{32}$/.test(value.allocationId)) {
+                throw new Error("Malformed Team CI allocation receipt");
+              }
+              if (nowMs >= value.expiresAtMs) return null;
+              return {runner: value.runner, slot: value.slot, allocationId: value.allocationId};
+            }
+            // END SLOT RECEIPT
+
+            const deadline = Date.now() + 55 * 60 * 1000;
+            const retryable = new Set([404, 408, 429, 500, 502, 503, 504]);
+            let lastApiStatus = null;
+            core.info("Waiting for the trusted Team CI dispatcher to allocate a slot.");
+            while (Date.now() < deadline) {
+              let checks;
+              try {
+                checks = await github.paginate(github.rest.checks.listForRef, {
+                  ...context.repo,
+                  ref: expected.testSha,
+                  check_name: "Team CI slot allocation",
+                  app_id: Number(expected.appId),
+                  filter: "all",
+                  per_page: 100,
+                });
+                lastApiStatus = null;
+              } catch (error) {
+                if (!retryable.has(error.status)) throw error;
+                lastApiStatus = error.status;
+              }
+              if (checks) {
+                if (readReviewRejection(checks, expected)) {
+                  core.setFailed("Team CI blocked because the workflow digest has not been approved. @wxyucs must review the workflow changes and append the trusted digest for this PR, then select Re-run all jobs.");
+                  return;
+                }
+                const receipt = readAllocation(checks, expected, Date.now());
+                if (receipt) {
+                  core.setOutput("runner", receipt.runner);
+                  core.info(`Assigned Team CI slot ${receipt.slot}`);
+                  return;
+                }
+              }
+              await new Promise(resolve => setTimeout(resolve, 30000));
+            }
+            if (lastApiStatus !== null) {
+              throw new Error(`Team CI slot wait expired while the GitHub Checks API was unavailable (HTTP ${lastApiStatus}). Verify GitHub API access and rerun all jobs.`);
+            }
+            throw new Error("Team CI slot wait expired. Verify the dispatcher and rerun all jobs.");
+
   build:
     name: Team ASan Build
-    needs: changes
-    if: needs.changes.outputs.cpp == 'true'
-    runs-on: ${{ inputs.runner }}
+    needs: [changes, slot]
+    if: >-
+      !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.cpp == 'true' &&
+      ((inputs.slot-app-id == '' && needs.slot.result == 'skipped') ||
+       (inputs.slot-app-id != '' && needs.slot.result == 'success' && needs.slot.outputs.runner != ''))
+    runs-on: ${{ inputs.slot-app-id != '' && needs.slot.outputs.runner || inputs.runner }}
     timeout-minutes: 120
     container:
       image: ${{ inputs.image }}
@@ -126,7 +258,7 @@ jobs:
     steps:
       - name: Prepare writable job home
         run: mkdir -p "$HOME"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -306,7 +438,7 @@ jobs:
           pending.rename(meta / 'complete.json')
           PY
       - name: Upload small test plan
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: team-plan-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -319,7 +451,7 @@ jobs:
           retention-days: 3
       - name: Upload build diagnostics
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: team-build-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: ci-logs/
@@ -329,8 +461,9 @@ jobs:
 
   tests:
     name: Team Test shard ${{ matrix.shard }}
-    needs: build
-    runs-on: ${{ inputs.runner }}
+    needs: [build, slot]
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    runs-on: ${{ inputs.slot-app-id != '' && needs.slot.outputs.runner || inputs.runner }}
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -480,7 +613,7 @@ jobs:
           PY
       - name: Upload small test results
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: team-results-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -490,7 +623,7 @@ jobs:
           retention-days: 3
       - name: Upload test diagnostics
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: team-test-diagnostics-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -503,8 +636,9 @@ jobs:
 
   compatibility:
     name: Team Index Compatibility
-    needs: build
-    runs-on: ${{ inputs.runner }}
+    needs: [build, slot]
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    runs-on: ${{ inputs.slot-app-id != '' && needs.slot.outputs.runner || inputs.runner }}
     timeout-minutes: 120
     container:
       image: ${{ inputs.image }}
@@ -552,7 +686,7 @@ jobs:
           PY
       - name: Upload small compatibility result
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: team-compatibility-result-${{ github.run_id }}-${{ github.run_attempt }}
           path: ci-logs/compatibility-result.json
@@ -560,7 +694,7 @@ jobs:
           retention-days: 3
       - name: Upload compatibility diagnostics
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: team-compatibility-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: ci-logs/
@@ -587,26 +721,26 @@ jobs:
       - name: Report skipped Team checks
         if: needs.changes.result == 'success' && needs.changes.outputs.cpp == 'false'
         run: echo 'Team Linux checks skipped because no relevant files changed.' >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         if: needs.changes.outputs.cpp == 'true'
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
       - name: Download small test plan
         if: needs.changes.outputs.cpp == 'true' && needs.build.result == 'success'
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: team-plan-${{ github.run_id }}-${{ github.run_attempt }}
           path: ci-summary/plan
       - name: Download small test results
         if: needs.changes.outputs.cpp == 'true' && needs.build.result == 'success'
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           pattern: team-results-*-${{ github.run_id }}-${{ github.run_attempt }}
           path: ci-summary/results
       - name: Download small compatibility result
         if: needs.changes.outputs.cpp == 'true' && needs.build.result == 'success'
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: team-compatibility-result-${{ github.run_id }}-${{ github.run_attempt }}
           path: ci-summary/compatibility
@@ -644,9 +778,25 @@ jobs:
           module.write_json('ci-summary/summary.json', summary)
           assert summary['success'], '; '.join(summary['errors'])
           PY
+      - name: Export case and example timing CSVs
+        if: ${{ always() && needs.changes.outputs.cpp == 'true' && hashFiles('ci-summary/plan/plan.json') != '' }}
+        run: |
+          python3 scripts/testing/team_test_timings.py export \
+            --plan ci-summary/plan/plan.json --results-dir ci-summary/results \
+            --platform linux-amd64 --build-profile asan \
+            --omp-num-threads "$OMP_NUM_THREADS" --openblas-num-threads "$OPENBLAS_NUM_THREADS" \
+            --output-dir ci-summary/timings
+      - name: Upload case and example timing CSVs
+        if: ${{ always() && hashFiles('ci-summary/timings/test-timings.csv') != '' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: team-test-timings-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-summary/timings/*.csv
+          if-no-files-found: error
+          retention-days: 30
       - name: Upload merged test summary
         if: ${{ !cancelled() && hashFiles('ci-summary/summary.json') != '' }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: team-summary-${{ github.run_id }}-${{ github.run_attempt }}
           path: ci-summary/summary.json
@@ -655,7 +805,7 @@ jobs:
       - name: Download build timing diagnostics
         if: always() && needs.changes.outputs.cpp == 'true'
         continue-on-error: true
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: team-build-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: ci-summary/build

@@ -94,6 +94,9 @@ public:
     GetStats() override;
 
 private:
+    DatasetPtr
+    make_query_dataset(const float* native_query) const;
+
     void
     calculate_base_groundtruth();
 

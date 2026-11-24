@@ -58,7 +58,7 @@ class MainPolicyTest(unittest.TestCase):
 
     def test_summary_rejects_failed_cancelled_missing_or_skipped_selected(self):
         m = module("main_ci_summary")
-        needs = {"changes": {"result": "success", "outputs": {"heavy": "true", "lint": "changed"}}}
+        needs = {"changes": {"result": "success", "outputs": {"heavy": "true", "python": "true", "lint": "changed"}}}
         needs.update({n: {"result": "success"} for n in ("platforms", "python", "tsan", "lint")})
         self.assertTrue(m.validate(needs))
         for name in needs:
@@ -66,9 +66,45 @@ class MainPolicyTest(unittest.TestCase):
                 bad = copy.deepcopy(needs); bad[name]["result"] = state
                 self.assertFalse(m.validate(bad))
             bad = copy.deepcopy(needs); del bad[name]; self.assertFalse(m.validate(bad))
-        needs["changes"]["outputs"] = {"heavy": "false", "lint": "none"}
+        needs["changes"]["outputs"] = {"heavy": "false", "python": "false", "lint": "none"}
         for n in ("platforms", "python", "tsan", "lint"): needs[n]["result"] = "skipped"
         self.assertTrue(m.validate(needs))
+
+    def test_main_python_restored_preserves_other_selection_and_manual_checks(self):
+        m = module("main_ci_policy")
+        for heavy in ("true", "false"):
+            policy = {"heavy": heavy, "lint": "full" if heavy == "true" else "none", "pattern": ""}
+            for event, ref in (("push", "refs/heads/main"),
+                               ("push", "refs/heads/0.18"),
+                               ("workflow_dispatch", "refs/heads/main")):
+                with patch.object(m, "select", return_value=dict(policy)):
+                    result = m.select_for_event("a" * 40, "b" * 40, event, ref)
+                self.assertEqual(result["python"], heavy)
+                self.assertEqual({k: result[k] for k in policy}, policy)
+        # A missing diff must conservatively run Python as well.
+        result = m.select_for_event("0" * 40, "a" * 40, "push", "refs/heads/main")
+        self.assertEqual((result["heavy"], result["lint"], result["python"]), ("true", "full", "true"))
+
+    def test_docs_only_requires_explicit_skips(self):
+        m = module("main_ci_summary")
+        needs = {"changes": {"result": "success", "outputs": {"heavy": "false", "python": "false", "lint": "none"}},
+                 "python": {"result": "skipped"}}
+        needs.update({n: {"result": "skipped"} for n in ("platforms", "tsan", "lint")})
+        self.assertTrue(m.validate(needs))
+        for name in ("python", "platforms", "tsan", "lint"):
+            for state in ("failure", "cancelled", "missing"):
+                bad = copy.deepcopy(needs)
+                bad[name]["result"] = state
+                self.assertFalse(m.validate(bad))
+        for policy in (None, "", "invalid"):
+            bad = copy.deepcopy(needs)
+            bad["changes"]["outputs"]["python"] = policy
+            self.assertFalse(m.validate(bad))
+        with tempfile.TemporaryDirectory() as tmp:
+            summary = Path(tmp, "summary.md")
+            with patch.dict(os.environ, MAIN_NEEDS=json.dumps(needs), GITHUB_STEP_SUMMARY=str(summary)):
+                m.main()
+            self.assertIn("Docs-only pushes intentionally skip heavy checks", summary.read_text())
 
     def test_smoke_report_cannot_pass_empty_skipped_or_failed(self):
         m = module("platform_smoke")
@@ -98,12 +134,14 @@ class MainPolicyTest(unittest.TestCase):
             for name in data[kind]: self.assertIn('"' + name + '"', source)
         for name in data["examples"]: self.assertTrue((ROOT / "examples/cpp" / (name + ".cpp")).is_file())
 
-    def test_daily_full_regression_remains_manual(self):
+    def test_nightly_full_regression_is_scheduled_and_manual(self):
         text = (ROOT / ".github/workflows/daily_test.yml").read_text()
         self.assertIn("github.event_name != 'schedule'", text)
         for profile in ('full-platform', 'full-python', 'full-lint', 'full-coverage', 'full-compatibility'):
             self.assertIn('  ' + profile + '-', text)
-        self.assertNotRegex(text, r"(?m)^    - cron: [\"']0 14 ")
+        self.assertRegex(text, r"(?m)^    - cron: [\"']0 14 ")
+        self.assertIn("workflow_dispatch:", text)
+        self.assertIn("github.event.schedule == '0 14 * * *'", text)
 
     def test_main_uses_only_light_contract_and_no_branch_wide_cancellation(self):
         text = (ROOT / ".github/workflows/main-ci.yml").read_text()
@@ -124,7 +162,7 @@ class MainPolicyTest(unittest.TestCase):
             p = Path(tmp, "scripts/testing"); p.mkdir(parents=True)
             script = p / "test_parallel_by_name.sh"; script.write_text("#!/bin/sh\necho FULL\n"); script.chmod(0o755)
             stub = 'chmod() { :; }; python3() { echo "$*"; };\n'
-            for smoke, full_examples, full, calls in (("true", "false", False, 2), ("false", "false", True, 0), ("false", "true", True, 1)):
+            for smoke, full_examples, full, calls in (("true", "false", False, 2), ("false", "false", True, 0), ("false", "true", True, 0)):
                 out = subprocess.check_output(["bash", "-eu", "-c", stub + shell], cwd=tmp, env=dict(os.environ, SMOKE=smoke, FULL_EXAMPLES=full_examples), text=True)
                 self.assertEqual("FULL" in out, full)
                 self.assertEqual(out.count("platform_smoke.py"), calls)

@@ -1,6 +1,10 @@
 name: asan-build-and-test-test-example-aarch64
 description: Shared test_example_aarch64 execution; callers own runners and dependencies.
 inputs:
+  artifact-name:
+    description: Optional caller-provided build artifact
+    required: false
+    default: ''
   inputs-smoke:
     description: Caller inputs.smoke
     required: false
@@ -15,9 +19,9 @@ runs:
       shell: sh
       run: rm -rf ./build
     - name: Download Test
-      uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
       with:
-        name: test_aarch64-${{ github.run_id }}
+        name: ${{ inputs.artifact-name || format('test_aarch64-{0}', github.run_id) }}
         path: ./build
     - name: Validate Test Artifact
       shell: sh
@@ -37,18 +41,10 @@ runs:
           python3 scripts/ci/platform_smoke.py examples
           exit 0
         fi
-        cd ./build/examples/cpp
-        for example in ./*; do
-          filename=$(basename "$example")
-          if [[ $filename =~ ^[0-9]{3} ]]; then
-            chmod +x $example
-            echo "Run $example"
-            $example
-          fi
-        done
+        python3 scripts/testing/daily_measure.py --name examples --owner bindings-examples-compatibility -- python3 scripts/ci/platform_smoke.py all-examples
     - name: Upload Smoke Example Logs
       if: always() && fromJSON(inputs.inputs-smoke)
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: smoke-examples-aarch64-${{ github.run_id }}
         path: ./log
