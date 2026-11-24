@@ -235,6 +235,9 @@ public:
                                         bool expect_all_missing_on_failure = false);
 
     static void
+    TestCalcDistanceByIdAfterRemove(const IndexPtr& index, const TestDatasetPtr& dataset);
+
+    static void
     TestGetMinAndMaxId(const IndexPtr& index,
                        const TestDatasetPtr& dataset,
                        bool expected_success = true);

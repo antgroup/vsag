@@ -718,4 +718,89 @@ TEST_CASE("Pyramid analyzer preserves native half queries above the graph statis
     REQUIRE(batch["quantization_error_query"].GetFloat() == Catch::Approx(mean_quantization_error));
 }
 
+TEST_CASE("Pyramid half input analyzer measures recall for non-groundtruth labels",
+          "[ft][pyramid][fp16][bf16][analyzer][half_recall]") {
+    const bool bf16 = GENERATE(false, true);
+    CAPTURE(bf16);
+    constexpr int64_t dim = 32;
+    constexpr int64_t count = 2048;
+    constexpr int64_t topk = 5;
+    constexpr int64_t query_count = 8;
+    const std::string search_param = R"({"pyramid":{"ef_search":5}})";
+    std::vector<float> floats(count * dim);
+    std::vector<uint16_t> halves(count * dim);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 1000);
+    std::vector<std::string> paths(count, "all/half/leaf");
+    std::mt19937 random(20261124);
+    for (uint64_t i = 0; i < floats.size(); ++i) {
+        const auto sample = static_cast<int>(random() % 128) - 64;
+        const float input = (sample < 0 ? sample : sample + 1) / 65.0F;
+        halves[i] = bf16 ? generic::FloatToBF16(input) : generic::FloatToFP16(input);
+        floats[i] = bf16 ? generic::BF16ToFloat(halves[i]) : generic::FP16ToFloat(halves[i]);
+    }
+    const auto input = [&](uint64_t row, uint64_t size) {
+        auto data = Dataset::Make()
+                        ->NumElements(size)
+                        ->Dim(dim)
+                        ->Owner(false)
+                        ->Ids(ids.data() + row)
+                        ->Paths(paths.data() + row);
+        data->Float16Vectors(halves.data() + row * dim);
+        return data;
+    };
+    auto index = MakeHalfIndex(
+        HalfPyramidParam(bf16 ? "bfloat16" : "float16", bf16 ? "bf16" : "fp16", "nsw", false, dim));
+    auto built = index->Build(input(0, count));
+    REQUIRE(built.has_value());
+    REQUIRE(built.value().empty());
+
+    // Exact L2 top-k computed independently of the index. The analyzer derives its ground truth
+    // from all labels, so any approximate result outside this set exercises the per-label
+    // distance lookup inside get_search_recall.
+    const auto exact_topk = [&](int64_t row) {
+        std::vector<std::pair<float, int64_t>> distances;
+        distances.reserve(count);
+        for (int64_t i = 0; i < count; ++i) {
+            float distance = 0.0F;
+            for (int64_t j = 0; j < dim; ++j) {
+                const float delta = floats[row * dim + j] - floats[i * dim + j];
+                distance += delta * delta;
+            }
+            distances.emplace_back(distance, ids[i]);
+        }
+        std::partial_sort(distances.begin(), distances.begin() + topk, distances.end());
+        std::vector<int64_t> labels(topk);
+        for (int64_t i = 0; i < topk; ++i) {
+            labels[i] = distances[i].second;
+        }
+        return labels;
+    };
+    uint64_t escaped = 0;
+    for (int64_t row = 0; row < query_count; ++row) {
+        auto knn = index->KnnSearch(input(row, 1), topk, search_param);
+        REQUIRE(knn.has_value());
+        const auto labels = exact_topk(row);
+        for (int64_t i = 0; i < topk; ++i) {
+            if (std::find(labels.begin(), labels.end(), knn.value()->GetIds()[i]) == labels.end()) {
+                escaped++;
+            }
+        }
+    }
+    // Without a missed label the native-distance branch below would not run, and the regression
+    // would go unnoticed; fail loudly instead of passing vacuously.
+    INFO("escaped=" << escaped);
+    REQUIRE(escaped > 0);
+
+    SearchRequest request;
+    request.query_ = input(0, query_count);
+    request.topk_ = topk;
+    request.params_str_ = search_param;
+    std::string stats_json;
+    REQUIRE_NOTHROW(stats_json = index->AnalyzeIndexBySearch(request));
+    const auto stats = JsonType::Parse(stats_json);
+    REQUIRE(std::isfinite(stats["recall_query"].GetFloat()));
+    REQUIRE(stats["recall_query"].GetFloat() > 0.0F);
+}
+
 }  // namespace vsag

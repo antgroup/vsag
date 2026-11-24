@@ -277,6 +277,40 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
 }
 
 void
+TestIndex::TestCalcDistanceByIdAfterRemove(const IndexPtr& index, const TestDatasetPtr& dataset) {
+    REQUIRE(index->CheckFeature(vsag::SUPPORT_CAL_DISTANCE_BY_ID));
+    REQUIRE(index->CheckFeature(vsag::SUPPORT_BATCH_CALC_DISTANCE_BY_ID));
+    REQUIRE(dataset->base_ != nullptr);
+    REQUIRE(dataset->base_->GetNumElements() >= 2);
+    const auto* base_ids = dataset->base_->GetIds();
+    const int64_t removed_id = base_ids[0];
+    const int64_t kept_id = base_ids[1];
+
+    auto remove_result = index->Remove(removed_id, vsag::RemoveMode::MARK_REMOVE);
+    REQUIRE(remove_result.has_value());
+    REQUIRE(remove_result.value() == 1);
+
+    auto query = get_one_query(dataset->query_, 0);
+    auto single = index->CalcDistanceById(query, removed_id);
+    REQUIRE_FALSE(single.has_value());
+    REQUIRE(single.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    // The tombstoned label is reported as invalid in the batch path, while its live neighbour keeps
+    // its distance.
+    const int64_t batch_ids[2] = {removed_id, kept_id};
+    auto batch = index->CalcDistancesById(query, batch_ids, 2);
+    REQUIRE(batch.has_value());
+    const auto* valids = batch.value()->GetValids();
+    const auto* dists = batch.value()->GetDistances();
+    REQUIRE(valids != nullptr);
+    REQUIRE(dists != nullptr);
+    REQUIRE_FALSE(valids[0]);
+    REQUIRE(std::isnan(dists[0]));
+    REQUIRE(valids[1]);
+    REQUIRE(std::isfinite(dists[1]));
+}
+
+void
 TestIndex::TestMultiQueryBatchCalcDistanceById(const IndexPtr& index,
                                                const TestDatasetPtr& dataset,
                                                float error,

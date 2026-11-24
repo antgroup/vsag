@@ -484,6 +484,9 @@ InnerIndexInterface::CalcDistancesById(const float* query,
     std::unique_ptr<float, decltype(release_distance_buffer)> all_distances_guard(
         static_cast<float*>(allocator_->Allocate(sizeof(float) * count)), release_distance_buffer);
     auto* all_distances = all_distances_guard.get();
+    if (all_distances == nullptr) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate distance buffer");
+    }
     auto calc_fn = [this, query, calculate_precise_distance](int64_t id) -> float {
         return this->CalcDistanceById(query, id, calculate_precise_distance);
     };
@@ -547,11 +550,15 @@ InnerIndexInterface::CalcDistancesById(const DatasetPtr& query,
         std::unique_ptr<float, decltype(release_distance_buffer)> out_dists_guard(
             static_cast<float*>(allocator_->Allocate(sizeof(float) * total_result)),
             release_distance_buffer);
-        CHECK_ARGUMENT(out_dists_guard.get() != nullptr, "Failed to allocate distance buffer");
+        if (not out_dists_guard) {
+            throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "Failed to allocate distance buffer");
+        }
         std::unique_ptr<int64_t, decltype(release_id_buffer)> out_ids_guard(
             static_cast<int64_t*>(allocator_->Allocate(sizeof(int64_t) * total_result)),
             release_id_buffer);
-        CHECK_ARGUMENT(out_ids_guard.get() != nullptr, "Failed to allocate ID buffer");
+        if (not out_ids_guard) {
+            throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "Failed to allocate ID buffer");
+        }
         auto* out_dists = out_dists_guard.get();
         auto* out_ids = out_ids_guard.get();
         std::vector<bool> out_validity(total_result, false);
@@ -578,7 +585,9 @@ InnerIndexInterface::CalcDistancesById(const DatasetPtr& query,
     std::unique_ptr<float, decltype(release_distance_buffer)> all_distances_guard(
         static_cast<float*>(allocator_->Allocate(sizeof(float) * num_queries_size * count_size)),
         release_distance_buffer);
-    CHECK_ARGUMENT(all_distances_guard.get() != nullptr, "Failed to allocate distance buffer");
+    if (not all_distances_guard) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "Failed to allocate distance buffer");
+    }
     auto* all_distances = all_distances_guard.get();
     std::vector<bool> validity(num_queries_size * count_size, false);
     DatasetPtr sub;
@@ -655,7 +664,10 @@ AttachValids(const DatasetPtr& dataset, const std::vector<bool>& validity, Alloc
         return;
     }
     auto* valids = static_cast<bool*>(allocator->Allocate(sizeof(bool) * validity.size()));
-    CHECK_ARGUMENT(valids != nullptr, "CalcDistancesById valids allocation failed");
+    if (valids == nullptr) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                            "CalcDistancesById valids allocation failed");
+    }
     for (uint64_t i = 0; i < validity.size(); ++i) {
         valids[i] = validity[i];
     }
@@ -684,13 +696,17 @@ ApplyTopkWithValidity(const float* distances,
     std::unique_ptr<float, decltype(release_distance_buffer)> out_dists_guard(
         static_cast<float*>(allocator->Allocate(sizeof(float) * total_result)),
         release_distance_buffer);
-    CHECK_ARGUMENT(out_dists_guard.get() != nullptr,
-                   "CalcDistancesById topk output distances allocation failed");
+    if (not out_dists_guard) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                            "CalcDistancesById topk output distances allocation failed");
+    }
     std::unique_ptr<int64_t, decltype(release_id_buffer)> out_ids_guard(
         static_cast<int64_t*>(allocator->Allocate(sizeof(int64_t) * total_result)),
         release_id_buffer);
-    CHECK_ARGUMENT(out_ids_guard.get() != nullptr,
-                   "CalcDistancesById topk output IDs allocation failed");
+    if (not out_ids_guard) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                            "CalcDistancesById topk output IDs allocation failed");
+    }
     auto* out_dists = out_dists_guard.get();
     auto* out_ids = out_ids_guard.get();
     std::vector<bool> out_validity(static_cast<uint64_t>(total_result), false);
@@ -1232,7 +1248,9 @@ InnerIndexInterface::calc_distance_by_id(const float* query,
     }
     std::vector<bool> local_validity(count, false);
     auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
-    CHECK_ARGUMENT(distances != nullptr, "failed to allocate distance buffer");
+    if (distances == nullptr) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate distance buffer");
+    }
     result->Distances(distances);
     std::fill(distances, distances + count, std::numeric_limits<float>::quiet_NaN());
     Vector<InnerIdType> inner_ids(allocator_);
