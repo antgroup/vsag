@@ -165,7 +165,11 @@ TEST_CASE("Pyramid exposes PiPNN build parameters", "[ut][PyramidParameters][pip
         "pipnn_fanout": [5, 3, 1],
         "pipnn_leaf_neighbor_count": 6,
         "pipnn_hash_plane_count": 6,
-        "pipnn_reservoir_size": 80
+        "pipnn_reservoir_size": 80,
+        "pipnn_enable_gpu_build": true,
+        "pipnn_gpu_device_id": 1,
+        "pipnn_gpu_memory_budget": 2147483648,
+        "pipnn_gpu_min_work_threshold": 1000000
     })");
     auto mapped = vsag::Pyramid::CheckAndMappingExternalParam(external, common_param);
     auto param = std::dynamic_pointer_cast<vsag::PyramidParameters>(mapped);
@@ -177,11 +181,17 @@ TEST_CASE("Pyramid exposes PiPNN build parameters", "[ut][PyramidParameters][pip
     REQUIRE(param->pipnn_param.leaf_neighbor_count == 6);
     REQUIRE(param->pipnn_param.hash_plane_count == 6);
     REQUIRE(param->pipnn_param.reservoir_size == 80);
+    REQUIRE(param->pipnn_param.enable_gpu_build);
+    REQUIRE(param->pipnn_param.gpu_device_id == 1);
+    REQUIRE(param->pipnn_param.gpu_memory_budget == 2147483648ULL);
+    REQUIRE(param->pipnn_param.gpu_min_work_threshold == 1000000);
 
     const auto serialized = param->ToJson();
     const auto restored_graph_json = serialized[vsag::GRAPH_KEY];
     REQUIRE(restored_graph_json[vsag::PIPNN_PARAMETER_MAX_LEAF_SIZE].GetUint64() == 256);
     REQUIRE(restored_graph_json[vsag::PIPNN_PARAMETER_RESERVOIR_SIZE].GetUint64() == 80);
+    REQUIRE(restored_graph_json[vsag::PIPNN_PARAMETER_ENABLE_GPU_BUILD].GetBool());
+    REQUIRE(restored_graph_json[vsag::PIPNN_PARAMETER_GPU_DEVICE_ID].GetInt() == 1);
 }
 
 std::shared_ptr<vsag::PyramidParameters>

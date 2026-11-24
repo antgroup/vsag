@@ -205,6 +205,57 @@ TEST_CASE("HGraph PiPNN builds and searches with all supported metrics",
     REQUIRE(search_result.value()->GetIds()[0] == labels[0]);
 }
 
+// Builds on the device when the machine has one and on the CPU otherwise; the index has to
+// answer the same way.
+TEST_CASE("HGraph PiPNN builds with the GPU option and finds its own points",
+          "[ut][pipnn][hgraph][gpu]") {
+    constexpr int64_t dimensions = 16;
+    constexpr int64_t count = 2000;
+    const auto metric = GENERATE(vsag::MetricType::METRIC_TYPE_L2SQR,
+                                 vsag::MetricType::METRIC_TYPE_IP,
+                                 vsag::MetricType::METRIC_TYPE_COSINE);
+    auto parameter = MakePiPNNHGraphParam();
+    parameter[vsag::PIPNN_PARAMETER_MAX_LEAF_SIZE].SetUint64(64);
+    parameter[vsag::PIPNN_PARAMETER_MIN_LEAF_SIZE].SetUint64(8);
+    parameter[vsag::PIPNN_PARAMETER_ENABLE_GPU_BUILD].SetBool(true);
+    parameter[vsag::PIPNN_PARAMETER_GPU_MIN_WORK_THRESHOLD].SetUint64(1);
+    auto common_param = MakePiPNNCommonParam(dimensions, metric);
+    auto index = MakePiPNNIndex(parameter, common_param);
+
+    std::mt19937 rng(7);
+    std::normal_distribution<float> normal(0.0F, 1.0F);
+    std::vector<float> vectors(static_cast<uint64_t>(count * dimensions));
+    std::vector<int64_t> labels(static_cast<uint64_t>(count));
+    for (int64_t point = 0; point < count; ++point) {
+        labels[point] = point;
+        float norm = 0.0F;
+        for (int64_t dim = 0; dim < dimensions; ++dim) {
+            vectors[point * dimensions + dim] = normal(rng);
+            norm += vectors[point * dimensions + dim] * vectors[point * dimensions + dim];
+        }
+        norm = std::sqrt(norm);
+        for (int64_t dim = 0; dim < dimensions; ++dim) {
+            vectors[point * dimensions + dim] /= norm;
+        }
+    }
+    auto build_result = index->Build(MakeDataset(vectors, labels, dimensions, count));
+    REQUIRE(build_result.has_value());
+    REQUIRE(index->GetNumElements() == count);
+
+    int64_t hits = 0;
+    for (int64_t point = 0; point < count; point += 20) {
+        auto query = vsag::Dataset::Make()
+                         ->NumElements(1)
+                         ->Dim(dimensions)
+                         ->Float32Vectors(vectors.data() + point * dimensions)
+                         ->Owner(false);
+        auto result = index->KnnSearch(query, 1, R"({"hgraph": {"ef_search": 64}})");
+        REQUIRE(result.has_value());
+        hits += result.value()->GetIds()[0] == labels[point] ? 1 : 0;
+    }
+    REQUIRE(hits >= 95);
+}
+
 TEST_CASE("HGraph PiPNN keeps configured ODescent routing parameters", "[ut][pipnn][hgraph]") {
     constexpr int64_t dimensions = 4;
     constexpr int64_t count = 32;
@@ -243,6 +294,10 @@ TEST_CASE("HGraph exposes PiPNN build parameters", "[ut][pipnn][hgraph][paramete
     parameter[vsag::PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT].SetUint64(6);
     parameter[vsag::PIPNN_PARAMETER_HASH_PLANE_COUNT].SetUint64(4);
     parameter[vsag::PIPNN_PARAMETER_RESERVOIR_SIZE].SetUint64(12);
+    parameter[vsag::PIPNN_PARAMETER_ENABLE_GPU_BUILD].SetBool(true);
+    parameter[vsag::PIPNN_PARAMETER_GPU_DEVICE_ID].SetUint64(1);
+    parameter[vsag::PIPNN_PARAMETER_GPU_MEMORY_BUDGET].SetUint64(1ULL << 30);
+    parameter[vsag::PIPNN_PARAMETER_GPU_MIN_WORK_THRESHOLD].SetUint64(12345);
 
     auto mapped = vsag::HGraph::CheckAndMappingExternalParam(parameter, MakePiPNNCommonParam(8));
     auto typed = std::dynamic_pointer_cast<vsag::HGraphParameter>(mapped);
@@ -254,11 +309,23 @@ TEST_CASE("HGraph exposes PiPNN build parameters", "[ut][pipnn][hgraph][paramete
     REQUIRE(typed->pipnn_param.leaf_neighbor_count == 6);
     REQUIRE(typed->pipnn_param.hash_plane_count == 4);
     REQUIRE(typed->pipnn_param.reservoir_size == 12);
+    REQUIRE(typed->pipnn_param.enable_gpu_build);
+    REQUIRE(typed->pipnn_param.gpu_device_id == 1);
+    REQUIRE(typed->pipnn_param.gpu_memory_budget == (1ULL << 30));
+    REQUIRE(typed->pipnn_param.gpu_min_work_threshold == 12345);
 
     const auto serialized = typed->ToJson();
     const auto graph_json = serialized[vsag::GRAPH_KEY];
     REQUIRE(graph_json[vsag::PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT].GetUint64() == 6);
     REQUIRE(graph_json[vsag::PIPNN_PARAMETER_HASH_PLANE_COUNT].GetUint64() == 4);
+    REQUIRE(graph_json[vsag::PIPNN_PARAMETER_ENABLE_GPU_BUILD].GetBool());
+
+    // Where the graph was built never changes what a loaded index can search.
+    auto restored = std::make_shared<vsag::HGraphParameter>();
+    restored->FromJson(serialized);
+    restored->pipnn_param.enable_gpu_build = false;
+    restored->pipnn_param.gpu_device_id = 0;
+    REQUIRE(typed->CheckCompatibility(restored));
 
     parameter[vsag::PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT].SetUint64(0);
     REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(parameter, MakePiPNNCommonParam(8)));
