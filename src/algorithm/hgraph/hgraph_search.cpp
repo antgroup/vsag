@@ -104,8 +104,13 @@ public:
                          Allocator* allocator,
                          Vector<InnerIdType>* attribute_ids = nullptr,
                          const FilterPtr& remaining_filter = nullptr,
-                         Timer* time_cost = nullptr)
+                         Timer* time_cost = nullptr,
+                         const Vector<InnerIdType>* unfinished_ids = nullptr)
         : source_(std::move(source)), ids_(allocator) {
+        const auto ready = [unfinished_ids](InnerIdType id) {
+            return unfinished_ids == nullptr or
+                   not std::binary_search(unfinished_ids->begin(), unfinished_ids->end(), id);
+        };
         const auto expired = [time_cost]() {
             return time_cost != nullptr and time_cost->CheckOvertime();
         };
@@ -121,7 +126,7 @@ public:
                     return;
                 }
                 const auto id = ids_[i];
-                if (id < count and
+                if (id < count and ready(id) and
                     (remaining_filter == nullptr or remaining_filter->CheckValid(id))) {
                     ids_[kept++] = id;
                 }
@@ -145,8 +150,8 @@ public:
             const uint64_t begin = i * count / samples;
             const uint64_t end = (i + 1) * count / samples;
             random = random * 6364136223846793005ULL + 1442695040888963407ULL;
-            accepted += static_cast<uint64_t>(
-                source_->CheckValid(static_cast<InnerIdType>(begin + random % (end - begin))));
+            const auto id = static_cast<InnerIdType>(begin + random % (end - begin));
+            accepted += static_cast<uint64_t>(ready(id) and source_->CheckValid(id));
         }
         ratio_ = samples == 0 ? 0.0F : static_cast<float>(accepted) / static_cast<float>(samples);
         const bool enumerate =
@@ -159,7 +164,7 @@ public:
                     ids_.clear();
                     return;
                 }
-                if (source_->CheckValid(id)) {
+                if (ready(id) and source_->CheckValid(id)) {
                     ids_.push_back(id);
                     // Stop as soon as the matching set is too dense for a scan. No N-byte
                     // bitmap or second copy of a dense attribute result is needed.
@@ -1125,11 +1130,17 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         // Snapshot before checking identity. Other IDs use synchronized label-table reads:
         // the published watermark can cover holes whose fused records are not initialized yet.
         const auto identity_count = this->PublishedCount();
+        bool has_unfinished_codes = false;
+        {
+            auto codes_lock = make_search_read_lock(this->persistent_codes_mutex_);
+            has_unfinished_codes = not this->pending_code_writes_.empty();
+        }
         ft = std::make_shared<FusedLabelFilter>(
             request.filter_,
             this->label_table_->GetDeletedIdsFilter(),
             *this->label_table_,
-            this->label_table_->IsIdentityMapping() ? identity_count : 0);
+            not has_unfinished_codes and this->label_table_->IsIdentityMapping() ? identity_count
+                                                                                 : 0);
     }
     if (request.enable_bitset_filter_ and request.bitset_filter_ != nullptr) {
         auto combined = std::make_shared<CombinedFilter>();
@@ -1185,7 +1196,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     // Explicit scan thresholds still win; unsupported predicates keep fused's scan fallback.
     const bool fused_mci_routing = rabitq_fused_datacell_ != nullptr and ft != nullptr and
                                    not use_custom_distance and not params.use_hybrid_traversal and
-                                   this->can_use_mci(request, params, base_search_param);
+                                   this->can_use_mci(request, params, base_search_param) and
+                                   ft->ValidRatio() < params.mci_hgraph_valid_ratio_threshold;
     const float scan_threshold = params.has_brute_force_threshold ? params.brute_force_threshold
                                  : rabitq_fused_datacell_ != nullptr and not fused_mci_routing
                                      ? 0.02F
@@ -1230,14 +1242,27 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     if (ft != nullptr and not use_custom_distance and
         (rabitq_fused_datacell_ != nullptr or scan_threshold > 0.0F) and
         (not fused_mci_routing or scan_threshold > 0.0F)) {
+        // PublishedCount is a high watermark: lower reserved slots can still lack labels.
+        // Snapshot holes under the code lock, then release it before invoking user predicates.
+        const auto prepared_count = this->PublishedCount();
+        Vector<InnerIdType> unfinished_ids(ctx.alloc);
+        {
+            auto codes_lock = make_search_read_lock(this->persistent_codes_mutex_);
+            unfinished_ids.reserve(this->pending_code_writes_.size());
+            for (const auto& entry : this->pending_code_writes_) {
+                unfinished_ids.push_back(entry.first);
+            }
+        }
+        std::sort(unfinished_ids.begin(), unfinished_ids.end());
         prepared_filter =
             std::make_shared<PreparedSearchFilter>(ft,
-                                                   this->PublishedCount(),
+                                                   prepared_count,
                                                    scan_threshold,
                                                    ctx.alloc,
                                                    have_attribute_ids ? &attribute_ids : nullptr,
                                                    remaining_filter,
-                                                   base_search_param.time_cost.get());
+                                                   base_search_param.time_cost.get(),
+                                                   &unfinished_ids);
         ft = prepared_filter;
         base_search_param.is_inner_id_allowed = ft;
     }

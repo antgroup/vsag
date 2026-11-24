@@ -301,13 +301,13 @@ auto result = index->KnnSearch(
 
 ### fused RaBitQ 与 MCI 按通过率路由
 
-构建 fused 索引时设置 `use_mci: true`，生成 MCI 伴随索引。对于能提供合格 ID 列表或支持的位图种子来源的 ID 过滤，非迭代 KNN 沿用现有路由规则：`p < hgraph_valid_ratio_threshold` 走 MCI，`p >=` 阈值走专用 fused HGraph 遍历。`p` 为过滤器的 `ValidRatio()`，阈值默认 `0.05`。这条路径不再抽样过滤器，也不套用 fused 默认的 2% 自动扫描阈值。MCI 使用当前最佳精度编码搜索伴随索引，不调用专用 fused 遍历循环。
+构建 fused 索引时设置 `use_mci: true`，生成 MCI 伴随索引。对于能提供合格 ID 列表或支持的位图种子来源的 ID 过滤，非迭代 KNN 使用以下路由规则：`p < hgraph_valid_ratio_threshold` 选中 MCI，否则继续走 fused HGraph/扫描路径。`p` 为过滤器的 `ValidRatio()`，阈值默认 `0.05`。选中 MCI 的查询不再抽样过滤器，也不套用 fused 默认的 2% 自动扫描阈值；MCI 拒绝的查询仍保留 fused 默认的选择率准备和 2% 扫描回退。MCI 使用当前最佳精度编码搜索伴随索引，不调用专用 fused 遍历循环。
 
 ```json
 {"hgraph":{"ef_search":100,"use_mci":true,"hgraph_valid_ratio_threshold":0.05,"rabitq_one_bit_search":true}}
 ```
 
-在 AVX-512 上，fused 3+5 的 MCI 搜索通过 `rabitq_one_bit_search: true` 和 `mci_batch_distance: true` 启用 Batch4 3-bit 粗筛。使用针对全码距离的保守下界决定哪些候选需要计算剩余 5-bit，重排复用已经计算的 3-bit 内积。结果边界使用用户请求的 `topk`；团扩展仍以完整距离维护 `ef_search` 大小的前沿，只有无法改善前沿和结果集的候选才跳过重排。候选数不超过 `topk` 时，直接使用全码 Batch4。三个投影和下界标量复用已有 affine 元数据，记录大小不变，也不增加完整码缓存；加载旧索引时重建这些字段。
+在 AVX-512 上，fused 3+5 的 MCI 搜索通过 `rabitq_one_bit_search: true` 和 `mci_batch_distance: true` 启用 Batch4 3-bit 粗筛。使用针对全码距离的保守下界决定哪些候选需要计算剩余 5-bit，重排复用已经计算的 3-bit 内积。结果边界使用用户请求的 `topk`；团扩展仍以完整距离维护 `ef_search` 大小的前沿，只有无法改善前沿和结果集的候选才跳过重排。候选数不超过 `topk` 时，直接使用全码 Batch4。三个投影和下界标量复用已有 affine 元数据，记录大小不变，也不增加完整码缓存。codec 版本 2 保存这些字段；加载版本 1 时重建一次，加载版本 2 不再重写记录。
 
 显式设置正数 `brute_force_threshold` 时，扫描仍优先；显式设为零时，关闭扫描并保留 MCI/HGraph 分流。MCI 伴随索引或种子来源不可用，以及带属性或 SearchRequest 位图条件的查询，继续使用原有 fused HGraph/扫描路由。`use_hybrid_traversal` 是独立的联合遍历模式，本次不改变其行为。通过统计字段 `mci_hybrid_route`（`mci`、`hgraph`、`brute_force`）确认实际路径。
 
@@ -326,7 +326,7 @@ auto params = R"({"hgraph": {"ef_search": 200, "brute_force_threshold": 0.01}})"
 auto result = index->KnnSearch(query, topk, params, my_filter).value();
 ```
 
-fused RaBitQ 的非迭代 KNN 查询在上述 MCI 路由不可用时默认启用 `0.02` 阈值；显式设置
+fused RaBitQ 的非迭代 KNN 查询在查询未选中 MCI 时默认启用 `0.02` 阈值；显式设置
 `brute_force_threshold: 0` 可关闭。ID 过滤、属性表达式、位图以及删除标记按 AND
 共同判定。属性过滤要求构建时设置 `use_attribute_filter: true`。
 
@@ -355,7 +355,7 @@ fused 对普通回调先抽样估计通过率，再对可能适合扫描的谓�
 
 取值建议：
 
-- 普通 HGraph 保持默认 `0.0`；fused KNN 在上述 MCI 路由不可用时默认使用 `0.02`。
+- 普通 HGraph 保持默认 `0.0`；fused KNN 在查询未选中 MCI 时默认使用 `0.02`。
 - 高选择性过滤（如 `ValidRatio` ≤ 0.05）下，`0.01–0.05` 是合理起点。再往上调
   实际上等于「只要带 filter 就走暴搜」。
 - 回调过滤先抽样最多 256 条记录，必要时再遍历 N 条索引记录；属性结果只在扫描预算内枚举 ID，高通过率图搜索保留紧凑过滤器。扫描阶段只计算通过全部条件的 M 条向量的距离；批量查询复用准备结果。

@@ -2285,6 +2285,7 @@ public:
                         InnerIdType count,
                         QueryContext* ctx) const override {
         auto& comp = *static_cast<FusedComputer*>(computer.get());
+        this->prepare_fused_traversal(comp);
         uint64_t fallback_count = 0;
         const auto meta = bottom_quantizer().SupplementMetaOffset();
         for (InnerIdType i = 0; i < count; i += 4) {
@@ -2509,7 +2510,7 @@ public:
         }
         std::stringstream output;
         IOStreamWriter writer(output);
-        constexpr uint32_t version = 1;
+        constexpr uint32_t version = 2;
         StreamWriter::WriteObj(writer, version);
         StreamWriter::WriteVector(writer, fused_centroids_);
         const auto cluster_count = static_cast<uint32_t>(fused_quantizers_.size());
@@ -2541,7 +2542,7 @@ public:
         IOStreamReader reader(input);
         uint32_t version = 0;
         StreamReader::ReadObj(reader, version);
-        CHECK_ARGUMENT(version == 1, "unsupported fused RaBitQ codec version");
+        CHECK_ARGUMENT(version == 1 or version == 2, "unsupported fused RaBitQ codec version");
         uint64_t centroid_count = 0;
         StreamReader::ReadObj(reader, centroid_count);
         CHECK_ARGUMENT(centroid_count == expected_centroid_count,
@@ -2567,7 +2568,9 @@ public:
             fused_quantizers_.push_back(std::move(quantizer));
         }
         refresh_fused_cluster_stats();
-        refresh_fused_refinement_bounds();
+        if (version == 1) {
+            refresh_fused_refinement_bounds();
+        }
     }
 
     bool
@@ -3138,8 +3141,8 @@ private:
     refresh_fused_refinement_bounds() {
         if (this->UsesExternalFusedCodeStorage() and not IsLegacyHnswFusedCodec() and
             bottom_quantizer().FilterBits() == 3 and bottom_quantizer().ReorderBits() == 5) {
-            // Training/deserialization owns the slab exclusively. Rebuild compact bounds for old
-            // records too; no serialized version or full-code cache is introduced.
+            // Training and version-1 deserialization own the slab exclusively. Version-2
+            // records already contain these bounds and are loaded without rewriting the slab.
             for (InnerIdType id = 0; id < this->TotalCount(); ++id) {
                 const auto view = this->get_fused_code_view(id);
                 if (view.cluster_id < fused_quantizers_.size()) {
@@ -3153,6 +3156,8 @@ private:
 
     [[nodiscard]] bool
     has_fast_fused_full_batch() const {
+        // Staged MCI refinement is enabled only with the measured AVX-512 implementation.
+        // Generic kernels preserve portability/correctness; scalar staging is not a speedup.
         return not IsLegacyHnswFusedCodec() and bottom_quantizer().FilterBits() == 3 and
                bottom_quantizer().ReorderBits() == 5 and fused_quantizers_.size() == 16 and
                fused_rotated_centroids_.size() == 16 * static_cast<uint64_t>(common_param_.dim_) and

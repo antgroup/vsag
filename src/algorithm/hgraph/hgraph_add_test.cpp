@@ -90,7 +90,7 @@ public:
     ReserveFusedHole(HGraph& graph, InnerIdType id, int64_t label) {
         // Model a later Add worker publishing before the preceding row's fused write.
         graph.total_count_.store(id + 2);
-        graph.label_table_->Insert(id, label);
+        graph.pending_code_writes_[id] = HGraph::BASE_CODE;
         graph.label_table_->Insert(id + 1, label + 1);
         graph.PublishNode(id + 1);
     }
@@ -2660,11 +2660,11 @@ TEST_CASE("HGraph fused filters bound identity shortcuts during concurrent Add",
     CHECK(filter->new_label_checks.load() > 0);
 }
 
-TEST_CASE("HGraph fused preparation reads reserved labels through the label table",
+TEST_CASE("HGraph fused preparation excludes unfinished label slots",
           "[ut][hgraph][fused][fused_filter_add]") {
     BlockSizeLimitGuard block_size_limit_guard(256UL * 1024);
     constexpr int64_t dim = 64;
-    constexpr int64_t count = 512;
+    constexpr int64_t count = 64;
     auto params = MakeFp32HGraphJson(false);
     params["support_duplicate"].SetBool(false);
     params["base_quantization_type"].SetString("rabitq");
@@ -2686,6 +2686,7 @@ TEST_CASE("HGraph fused preparation reads reserved labels through the label tabl
     struct TrackingFilter final : vsag::Filter {
         bool
         CheckValid(int64_t label) const override {
+            CHECK(label >= 1000000);
             saw_reserved_label = saw_reserved_label or label == 2000000;
             return label >= 1000000 and label < 1000512;
         }
@@ -2701,7 +2702,7 @@ TEST_CASE("HGraph fused preparation reads reserved labels through the label tabl
         query, 1, R"({"hgraph":{"ef_search":32,"brute_force_threshold":0}})", filter);
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetDim() == 1);
-    CHECK(filter->saw_reserved_label);
+    CHECK(not filter->saw_reserved_label);
     CHECK(result.value()->GetIds()[0] >= 1000000);
     CHECK(result.value()->GetIds()[0] < 1000512);
 }

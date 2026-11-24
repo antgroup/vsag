@@ -772,6 +772,19 @@ TEST_CASE("LabelTable reports identity label mappings", "[ut][LabelTable]") {
         REQUIRE(label_table.IsIdentityMapping());
     }
 
+    SECTION("identity appends preserve the cache without rescanning") {
+        LabelTable label_table(allocator.get());
+        REQUIRE(label_table.IsIdentityMapping());
+        for (InnerIdType id = 0; id < 512; ++id) {
+            label_table.Insert(id, id);
+            // Inspect before IsIdentityMapping: it must already match the current version.
+            CHECK(label_table.identity_version_.load() == label_table.labels_version_.load());
+            REQUIRE(label_table.IsIdentityMapping());
+        }
+        label_table.Insert(512, 9000);
+        REQUIRE_FALSE(label_table.IsIdentityMapping());
+    }
+
     SECTION("shifted labels") {
         LabelTable label_table(allocator.get());
         label_table.Insert(0, 8000);

@@ -345,6 +345,20 @@ TEST_CASE("Fused full batches and deferred traversal preparation match scalar sc
             }
         }
     };
+    // Refine must prepare its own computer even when the coarse hints came from another one.
+    std::array<float, count> coarse;
+    std::array<float, count> bounds;
+    std::array<float, count> hints;
+    std::array<float, count> refined;
+    split->QueryFusedMCICoarse(
+        coarse.data(), bounds.data(), hints.data(), reference_computer, ids.data(), count, nullptr);
+    auto refine_only = flatten->FactoryComputer(vectors.data());
+    split->QueryFusedMCIRefine(
+        refined.data(), hints.data(), refine_only, ids.data(), count, nullptr);
+    for (InnerIdType id = 0; id < count; ++id) {
+        CHECK(std::abs(refined[id] - expected[id]) <=
+              2e-4F * std::max(1.0F, std::abs(expected[id])));
+    }
     const auto computer = flatten->FactoryComputer(vectors.data());
     check(computer);
     RaBitQFusedTraversalQuery traversal;
@@ -573,6 +587,7 @@ TEST_CASE("MCI fused refinement preserves full-code results and rebuilds legacy 
                                 split->SupportsFusedMCIRefinement()) {
                                 CHECK(stats.rabitq_filter_count.load() == count);
                                 CHECK(stats.rabitq_reorder_hint_full_count.load() > 0);
+                                CHECK(stats.dist_cmp.load() == stats.rabitq_full_count.load());
                             }
                         }
                     }
@@ -583,7 +598,20 @@ TEST_CASE("MCI fused refinement preserves full-code results and rebuilds legacy 
     check();
     // Old affine records contain native metadata in these unused words, not MCI projections.
     // Import must regenerate it before MCI can prune using the restored codec.
-    const auto codec = split->ExportFusedCodec();
+    auto codec = split->ExportFusedCodec();
+    uint32_t codec_version = 0;
+    std::memcpy(&codec_version, codec.data(), sizeof(codec_version));
+    REQUIRE(codec_version == 2);
+    // A current payload must not rewrite already valid record bytes during import.
+    REQUIRE(split->CopySplitCodes(0, filter.data(), supplement.data()));
+    const auto original_filter = filter;
+    const auto original_supplement = supplement;
+    split->ImportFusedCodec(codec);
+    REQUIRE(split->CopySplitCodes(0, filter.data(), supplement.data()));
+    CHECK(filter == original_filter);
+    CHECK(supplement == original_supplement);
+    const uint32_t legacy_version = 1;
+    std::memcpy(codec.data(), &legacy_version, sizeof(legacy_version));
     for (InnerIdType id = 0; id < count; ++id) {
         REQUIRE(split->CopySplitCodes(id, filter.data(), supplement.data()));
         const auto aligned =

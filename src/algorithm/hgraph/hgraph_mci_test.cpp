@@ -3942,6 +3942,10 @@ TEST_CASE("Fused HGraph preserves MCI selectivity routing before implicit scans"
     params["build_thread_count"].SetInt(4);
     std::vector<int64_t> ids(count);
     std::iota(ids.begin(), ids.end(), 0);
+    const bool skipped_label = GENERATE(false, true);
+    if (skipped_label) {
+        ids[count - 2] = ids[count - 3];
+    }
     std::vector<float> vectors(count * dim);
     std::vector<vsag::AttributeSet> attrs(count);
     std::vector<vsag::AttributeValue<int32_t>> values(count);
@@ -3958,8 +3962,11 @@ TEST_CASE("Fused HGraph preserves MCI selectivity routing before implicit scans"
     auto index = made.value();
     auto data = make_dataset(ids, vectors, 0, count, dim);
     data->AttributeSets(attrs.data());
-    REQUIRE(index->Build(data).has_value());
-    REQUIRE(vsag::JsonType::Parse(index->GetStats())["mci_total_nodes"].GetInt() == count);
+    auto built = index->Build(data);
+    REQUIRE(built.has_value());
+    CHECK(built.value().size() == static_cast<uint64_t>(skipped_label));
+    REQUIRE(vsag::JsonType::Parse(index->GetStats())["mci_total_nodes"].GetInt() ==
+            count - static_cast<int64_t>(skipped_label));
     auto query = make_dataset(ids, vectors, 0, 1, dim);
     const auto check = [&](int64_t valid,
                            float threshold,
@@ -3992,11 +3999,72 @@ TEST_CASE("Fused HGraph preserves MCI selectivity routing before implicit scans"
     // The threshold boundary belongs to HGraph, including below the old scan threshold.
     check(20, 0.05F, "hgraph");
     check(40, 0.05F, "hgraph");
-    check(8, 0.01F, "hgraph");
-    check(8, 0.0F, "hgraph");
-    check(8, 0.05F, "brute_force", R"(,"brute_force_threshold":0.02)");
+    check(4, 0.01F, "brute_force");
+    check(4, 0.0F, "brute_force");
+    check(4, 0.05F, "brute_force", R"(,"brute_force_threshold":0.02)");
     check(8, 0.05F, "mci", R"(,"brute_force_threshold":0)");
-    check(8, 0.05F, "brute_force", R"(,"use_mci":false)");
+    check(4, 0.05F, "brute_force", R"(,"use_mci":false)");
+
+    // A valid-ID source with the interface default ratio must still get sparse scan fallback
+    // when MCI declines the hinted ratio of 1.
+    {
+        struct DefaultRatioFilter final : vsag::Filter {
+            [[nodiscard]] bool
+            CheckValid(int64_t id) const override {
+                return id >= 0 and id < 4;
+            }
+            void
+            GetValidIds(const int64_t** ids, int64_t& count) const override {
+                *ids = valid_ids.data();
+                count = static_cast<int64_t>(valid_ids.size());
+            }
+            std::array<int64_t, 4> valid_ids{0, 1, 2, 3};
+        };
+        auto filter = std::make_shared<DefaultRatioFilter>();
+        auto found = index->KnnSearch(
+            query, 4, R"({"hgraph":{"ef_search":30,"rabitq_one_bit_search":true}})", filter);
+        REQUIRE(found.has_value());
+        REQUIRE(found.value()->GetDim() == 4);
+        CHECK(found.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("brute_force")");
+        for (int64_t i = 0; i < 4; ++i) {
+            CHECK(filter->CheckValid(found.value()->GetIds()[i]));
+        }
+    }
+
+    // Seed only one valid ID. The query target is not that seed: recovering it requires
+    // clique expansion rather than an exhaustive seed scan.
+    {
+        std::vector<int64_t> valid_ids(40);
+        std::iota(valid_ids.begin(), valid_ids.end(), 0);
+        auto filter = std::make_shared<RangeBitmapFilter>(0, count, 40, valid_ids, true);
+        // Fix the clique topology so the test depends on expansion, not heuristic recall.
+        std::vector<vsag::InnerIdType> members(40);
+        std::iota(members.begin(), members.end(), 0);
+        auto partial_index = with_mci_fixture(index, config.Dump(), {members});
+        auto target = make_dataset(ids, vectors, 31, 1, dim);
+        auto found = partial_index->KnnSearch(
+            target,
+            k,
+            R"({"hgraph":{"ef_search":400,"rabitq_one_bit_search":true,"hgraph_valid_ratio_threshold":1,"mci_seed_coverage":0,"mci_seed_ratio":0.001,"mci_seed_max_count":1,"brute_force_threshold":0}})",
+            filter);
+        auto control = partial_index->KnnSearch(
+            target, k, R"({"hgraph":{"ef_search":400,"brute_force_threshold":1}})", filter);
+        REQUIRE(found.has_value());
+        REQUIRE(control.has_value());
+        REQUIRE(found.value()->GetDim() == k);
+        CHECK(found.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+        CHECK(std::stoull(found.value()->GetStatistics({"mci_seed_count"})[0]) == 1);
+        CHECK(std::stoull(found.value()->GetStatistics({"dist_cmp"})[0]) > 1);
+        uint64_t overlap = 0;
+        for (int64_t i = 0; i < k; ++i) {
+            CHECK(filter->CheckValid(found.value()->GetIds()[i]));
+            for (int64_t j = 0; j < k; ++j) {
+                overlap += static_cast<uint64_t>(found.value()->GetIds()[i] ==
+                                                 control.value()->GetIds()[j]);
+            }
+        }
+        CHECK(overlap >= 4);
+    }
 
     check(8, 0.05F, "hybrid", R"(,"use_hybrid_traversal":true,"brute_force_threshold":0)");
     auto excluded = vsag::Bitset::Make();

@@ -393,10 +393,11 @@ auto result = index->KnnSearch(
 
 Build the fused index with `use_mci: true` to create its MCI companion. For an ID predicate
 that provides valid IDs or a supported bitset seed source, non-iterator KNN preserves the
-existing MCI/HGraph routing rule: `p < hgraph_valid_ratio_threshold` uses MCI; `p >=` the
-threshold uses the specialized fused HGraph traversal. Here `p` is the filter's `ValidRatio()`;
-the threshold defaults to `0.05`. This route does not sample the predicate or apply the implicit
-2% fused scan threshold. MCI searches the companion using the best available distance codes;
+routing rule: `p < hgraph_valid_ratio_threshold` selects MCI; otherwise the query
+continues through the fused HGraph/scan path. Here `p` is the filter's `ValidRatio()`;
+the threshold defaults to `0.05`. Queries selected for MCI do not sample the predicate or apply
+the implicit 2% fused scan threshold. When MCI declines a query, the default fused
+selectivity preparation and 2% scan fallback remain available. MCI searches the companion using the best available distance codes;
 it does not use the specialized fused traversal loop.
 
 ```json
@@ -410,7 +411,8 @@ The result cutoff uses the requested `topk`, while clique navigation keeps its `
 frontier and complete distances. Candidates are skipped only when they cannot improve either
 frontier or results. When the candidate count does not exceed `topk`, MCI keeps the full-code
 Batch4 path. Three scalar projection/bound fields reuse existing affine metadata; record sizes
-are unchanged and no full-code cache is added. Loading an older index rebuilds these fields.
+are unchanged and no full-code cache is added. Codec version 2 persists these fields;
+loading version 1 rebuilds them once, while version 2 loads without rewriting the records.
 
 An explicit positive `brute_force_threshold` retains scan priority. An explicit zero disables
 scanning and keeps the MCI/HGraph split. Without a usable MCI companion/seed source, or with
@@ -435,7 +437,7 @@ auto params = R"({"hgraph": {"ef_search": 200, "brute_force_threshold": 0.01}})"
 auto result = index->KnnSearch(query, topk, params, my_filter).value();
 ```
 
-Non-iterator fused RaBitQ KNN queries enable a `0.02` threshold by default unless the MCI routing above is available. Set
+Non-iterator fused RaBitQ KNN queries enable a `0.02` threshold by default unless the query is selected for MCI. Set
 `brute_force_threshold: 0` explicitly to disable it. ID predicates, attribute expressions,
 bitsets and deletion marks are combined with AND. Attribute filtering requires
 `use_attribute_filter: true` at build time.
@@ -478,7 +480,7 @@ How it works (`src/algorithm/hgraph/hgraph_search.cpp`):
 
 Picking a value:
 
-- Ordinary HGraph keeps its `0.0` default; fused KNN uses `0.02` unless the MCI routing above is available.
+- Ordinary HGraph keeps its `0.0` default; fused KNN uses `0.02` unless the query is selected for MCI.
 - For highly selective filters, `0.01–0.05` is a reasonable starting point.
   Setting it higher than that effectively turns the index into a brute-force
   scanner whenever a filter is present.

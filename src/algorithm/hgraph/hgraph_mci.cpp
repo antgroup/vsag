@@ -1093,11 +1093,9 @@ HGraph::build_mci_clique_index(const void* vectors) {
         } else if (contiguous_vectors != nullptr) {
             query = contiguous_vectors + static_cast<uint64_t>(inner_id) * contiguous_stride;
         } else {
-            auto codes = precise_codes->AcquireCodesById(inner_id);
-            CHECK_ARGUMENT(codes, "failed to read hgraph mci query vector");
-            const auto decoded =
-                precise_codes->Decode(codes.Data(), decoded_queries[worker_id].data());
-            CHECK_ARGUMENT(decoded, "failed to decode hgraph mci query vector");
+            // Finalized fused records have no standalone split-code buffer. This accessor
+            // handles fused decoding and keeps skipped-label builds mapped by inner id.
+            this->GetVectorByInnerId(inner_id, decoded_queries[worker_id].data());
             query = decoded_queries[worker_id].data();
         }
         CHECK_ARGUMENT(query != nullptr, "failed to prepare hgraph mci query vector");

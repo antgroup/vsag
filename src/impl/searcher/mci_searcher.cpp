@@ -189,6 +189,7 @@ score_complete_fused_mci(const RaBitQSplitDataCellInterface& refinement,
     std::array<float, 4> hints;
     std::array<float, 4> distances;
     uint32_t pending = 0;
+    uint64_t refined_count = 0;
     const auto flush = [&]() {
         refinement.QueryFusedMCIRefine(
             distances.data(), hints.data(), computer, ids.data(), pending, ctx);
@@ -197,6 +198,7 @@ score_complete_fused_mci(const RaBitQSplitDataCellInterface& refinement,
                 result_heap->Push(distances[i], ids[i]);
             }
         }
+        refined_count += pending;
         pending = 0;
     };
     for (const auto i : order) {
@@ -215,7 +217,7 @@ score_complete_fused_mci(const RaBitQSplitDataCellInterface& refinement,
         flush();
     }
     if (ctx != nullptr and ctx->stats != nullptr) {
-        ctx->stats->dist_cmp.fetch_add(count, std::memory_order_relaxed);
+        ctx->stats->dist_cmp.fetch_add(refined_count, std::memory_order_relaxed);
     }
 }
 
@@ -403,10 +405,10 @@ search_clique_view(const CliqueDataCellSearchView& view,
         }
         for (uint64_t i = 0; i < batch_count; ++i) {
             const auto distance = batch_distances[i];
-            ++dist_cmp;
             if (refinement != nullptr and not std::isfinite(distance)) {
                 continue;
             }
+            ++dist_cmp;
             if (candidates.CanUpdate(distance)) {
                 candidates.Insert(distance, batch_ids[i], batch_depth);
                 ++accepted;

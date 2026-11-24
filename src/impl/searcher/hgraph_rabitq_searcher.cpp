@@ -614,6 +614,11 @@ public:
         if (IsFull(distance)) {
             return;
         }
+        // Equal accepted candidates must obey ef admission too. Rejected bridges remain
+        // eligible at the cutoff so filtering cannot hide a better accepted descendant.
+        if (allowed and accepted_.Size() == capacity_ and distance >= accepted_.Top().first) {
+            return;
+        }
         frontier_.Push(distance, id);
         if (allowed) {
             accepted_.Push(distance, id);

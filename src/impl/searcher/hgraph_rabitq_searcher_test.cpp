@@ -308,6 +308,50 @@ TEST_CASE("HGraph RaBitQ route honors one-bit search switch", "[ut][HGraphRaBitQ
         }
     }
 
+    SECTION("equal accepted distances obey the ef frontier bound") {
+        struct AllPass final : Filter {
+            [[nodiscard]] bool
+            CheckValid(int64_t /*id*/) const override {
+                return true;
+            }
+        };
+        constexpr InnerIdType tree_size = 127;
+        auto tree_param = std::make_shared<GraphDataCellParameter>();
+        tree_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+        tree_param->max_degree_ = 2;
+        tree_param->init_max_capacity_ = tree_size;
+        auto tree = std::make_shared<HGraphRaBitQFusedDataCell>(
+            tree_param, split->OneBitCodeSize(), split->SupplementCodeSize(), common_param);
+        for (InnerIdType id = 0; id < tree_size; ++id) {
+            const auto& node = encoded[0];
+            tree->SetNodeCodes(id, id, node.cluster_id, node.filter.data(), node.supplement.data());
+            Vector<InnerIdType> children(allocator.get());
+            for (InnerIdType child = 2 * id + 1; child <= 2 * id + 2 and child < tree_size;
+                 ++child) {
+                children.push_back(child);
+            }
+            tree->InsertNeighborsById(id, children);
+        }
+        InnerSearchParam params;
+        params.ep = 0;
+        params.ef = 1;
+        params.topk = 1;
+        params.rerank_topk = 1;
+        params.skip_ratio = 0;
+        params.enable_rabitq_one_bit_search = true;
+        params.enable_reorder = false;
+        params.rabitq_fused_computer = computer;
+        params.is_inner_id_allowed = std::make_shared<AllPass>();
+        auto visited = std::make_shared<VisitedList>(tree_size, allocator.get());
+        SearchStatistics stats;
+        QueryContext ctx;
+        ctx.stats = &stats;
+        auto result =
+            searcher.Search(tree, flatten, visited, vectors.data(), params, &ctx, nullptr);
+        REQUIRE(result->Size() == 1);
+        CHECK(stats.rabitq_filter_count.load() <= 3);
+    }
+
     SECTION("filtered traversal crosses rejected bridges beyond ef") {
         const auto skip_strategy =
             GENERATE(FilterSearchSkipStrategyType::RANDOM,
