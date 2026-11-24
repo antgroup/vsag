@@ -984,6 +984,7 @@ TestBruteForceCalcDistanceById(const fixtures::BruteForceResourcePtr& resource) 
             TestIndex::TestBuildIndex(index, dataset, true);
             TestIndex::TestCalcDistanceById(index, dataset);
             TestIndex::TestMultiQueryBatchCalcDistanceById(index, dataset, 1e-5, true);
+            TestIndex::TestCalcDistanceByIdRemovedLabel(index, dataset);
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
     }

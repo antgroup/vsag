@@ -443,11 +443,10 @@ public:
     /**
      * @brief Sets the per-entry validity flags of the dataset.
      *
-     * The array carries one flag per requested ID, i.e. one flag per entry of the Distances()
-     * array. CalcDistanceById results do not always populate NumElements()/Dim(), so consumers
-     * must derive the length from the number of requested IDs.
-     * It follows the same ownership rules as the other pointer-backed Dataset fields. It is used
-     * by CalcDistancesById to mark which requested IDs existed at lookup time.
+     * The array holds one flag per entry of Distances(), i.e. NumElements() * Dim() entries. In
+     * top-k mode that is the truncated per-row count min(topk, count), not the number of
+     * requested IDs. It follows the same ownership rules as the other pointer-backed Dataset
+     * fields. It is used by CalcDistancesById to mark which requested IDs existed at lookup time.
      *
      * @param valids Pointer to the validity flags.
      * @return DatasetPtr A shared pointer to the dataset with updated valids.
