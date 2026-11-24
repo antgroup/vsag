@@ -85,6 +85,7 @@ auto result = index->KnnSearch(
 | `pipnn_reservoir_size` | int | `64` | 最终剪枝前每个点保留的候选槽数；实际容量至少为 `max_degree` |
 | `pipnn_adaptive_pruning` | bool | `false` | 实验性逐点动态 alpha，仅用于 PiPNN 最终剪枝，要求 L2 |
 | `pipnn_adaptive_pruning_adjust_step` | float | `0.06` | 调整步长；启用时要求有限、非负、`alpha - 2*step > 0`，且 `alpha + 3*step` 有限 |
+| `pipnn_build_quantization_type` | string | `"fp32"` | CPU PiPNN 批量构图阶段使用的内部精度：`"fp32"`（默认无损）或 `"sq8_local"`（显式开启逐向量非对称 8-bit 量化与多指令集 SIMD 加速，要求 `dim <= 65535`，仅影响初始 `Build`） |
 | `use_reverse_edges` | bool | `false` | 跟踪入边，实现 O(1) 反向邻居查找；边存储约翻倍，且 `graph_storage_type: "compressed"` 不支持 |
 | `label_remap_type` | string | `"pg"` | label 到内部 ID 的 map 实现：`"pg"` 或 `"robin"`；恢复或组合兼容索引时应保持一致 |
 | `use_reorder` | bool | `false` | 是否额外保留一份高精度副本用于精排 |

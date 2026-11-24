@@ -91,6 +91,7 @@ When `graph_type` is `pipnn`, HGraph and Pyramid also accept the following build
 | `pipnn_leaf_neighbor_count` | `5` | Positive nearest-candidate count per point and leaf; undersized leaves use at least `4`. |
 | `pipnn_hash_plane_count` | `12` | Direction-hash bits in `[1, 15]`; `max_degree <= 2^pipnn_hash_plane_count`. |
 | `pipnn_reservoir_size` | `64` | Positive per-point candidate capacity before final pruning; effective capacity is `max(value, max_degree)` and must not exceed `65535`. |
+| `pipnn_build_quantization_type` | `"fp32"` | Internal precision for CPU PiPNN batch graph construction: `"fp32"` (default, lossless) or `"sq8_local"` (opt-in per-vector asymmetric 8-bit quantization with SIMD kernels; requires `dim <= 65535`, initial `Build` only). |
 
 The existing `alpha` field controls PiPNN's final robust pruning. `ef_construction` only tunes NSW
 and has no effect on PiPNN.

@@ -138,6 +138,7 @@ FP16 或 BF16 的单向量存储码占 `2 * dim` 字节，FP32 则占 `4 * dim` 
 | `pipnn_reservoir_size` | int | `64` | 最终剪枝前每个点保留的候选槽数；实际容量至少为 `max_degree` |
 | `pipnn_adaptive_pruning` | bool | `false` | 在 L2 批量构图时使用与 HGraph 共享的 PiPNN 动态 alpha 选择器 |
 | `pipnn_adaptive_pruning_adjust_step` | float | `0.06` | PiPNN 选择器的 alpha 调整步长 |
+| `pipnn_build_quantization_type` | string | `"fp32"` | CPU PiPNN 批量构图阶段使用的内部精度：`"fp32"`（默认无损）或 `"sq8_local"`（显式开启逐向量非对称 8-bit 量化与 SIMD 加速，要求 `dim <= 65535`） |
 | `no_build_levels` | int[] | `[]` | 跳过构图的层级（从根节点开始的 0-based 下标） |
 | `use_reorder` | bool | `false` | 是否保留高精度副本用于精排 |
 | `precise_quantization_type` | string | `"fp32"` | 精排使用的量化类型。与 `rabitq_bits_per_dim_precise` 配合设为 `"rabitq"` 时，可启用从 base storage 重排的 RaBitQ x+y split。 |

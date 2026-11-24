@@ -85,6 +85,7 @@ HGraph float32 L2/IP/cosine 的 `base_quantization_type` 和 `precise_quantizati
 | `pipnn_leaf_neighbor_count` | `5` | 每个点在每个叶子中贡献的最近候选数，必须为正数；过小叶子至少使用 `4` |
 | `pipnn_hash_plane_count` | `12` | 方向 hash 位数，范围 `[1, 15]`，且 `max_degree <= 2^pipnn_hash_plane_count` |
 | `pipnn_reservoir_size` | `64` | 最终剪枝前每个点的候选容量，必须为正数；实际容量为 `max(value, max_degree)` 且不能超过 `65535` |
+| `pipnn_build_quantization_type` | `"fp32"` | CPU PiPNN 批量构图阶段使用的内部精度：`"fp32"`（默认无损）或 `"sq8_local"`（显式开启逐向量非对称 8-bit 量化与 SIMD 加速，要求 `dim <= 65535`，仅影响初始 `Build`） |
 
 现有的 `alpha` 字段控制 PiPNN 的最终 robust pruning。`ef_construction` 只调节 NSW，
 对 PiPNN 不生效。

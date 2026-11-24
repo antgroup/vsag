@@ -1097,3 +1097,40 @@ TEST_CASE("Pyramid PiPNN adaptive policy maps validates and restores",
         REQUIRE_THROWS(parse(config));
     }
 }
+
+TEST_CASE("Pyramid exposes and validates PiPNN build_quantization_type",
+          "[ut][PyramidParameters][pipnn]") {
+    vsag::IndexCommonParam common;
+    common.dim_ = 16;
+    common.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common.allocator_ = vsag::Engine::CreateDefaultAllocator();
+    auto parse = [&](const vsag::JsonType& external) {
+        return std::dynamic_pointer_cast<vsag::PyramidParameters>(
+            vsag::Pyramid::CheckAndMappingExternalParam(external, common));
+    };
+    auto config = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "graph_type": "pipnn",
+        "max_degree": 32,
+        "alpha": 1.2,
+        "pipnn_build_quantization_type": "sq8_local"
+    })");
+    auto mapped = parse(config);
+    REQUIRE(mapped != nullptr);
+    REQUIRE(mapped->pipnn_param.build_quantization_type == vsag::QUANTIZATION_TYPE_VALUE_SQ8_LOCAL);
+    REQUIRE(mapped->ToJson()[vsag::GRAPH_KEY][vsag::PIPNN_PARAMETER_BUILD_QUANTIZATION_TYPE]
+                .GetString() == "sq8_local");
+
+    auto legacy = mapped->ToJson();
+    legacy[vsag::GRAPH_KEY].Erase(vsag::PIPNN_PARAMETER_BUILD_QUANTIZATION_TYPE);
+    auto restored = std::make_shared<vsag::PyramidParameters>();
+    restored->FromJson(legacy);
+    REQUIRE(restored->pipnn_param.build_quantization_type == vsag::QUANTIZATION_TYPE_VALUE_FP32);
+
+    config["pipnn_build_quantization_type"].SetString("sq8");
+    REQUIRE_THROWS(parse(config));
+
+    config["pipnn_build_quantization_type"].SetString("sq8_local");
+    config["graph_type"].SetString(GENERATE("nsw", "odescent"));
+    REQUIRE_THROWS(parse(config));
+}

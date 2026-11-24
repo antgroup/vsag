@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "data_type.h"
+#include "inner_string_params.h"
 #include "json_wrapper.h"
 #include "metric_type.h"
 #include "typing.h"
@@ -46,6 +47,7 @@ struct PiPNNGraphBuilderParameter {
     float duplicate_distance_threshold{0.0F};
     bool adaptive_pruning{false};
     float adaptive_pruning_adjust_step{0.06F};
+    std::string build_quantization_type{QUANTIZATION_TYPE_VALUE_FP32};
 
     void
     FromJson(const JsonType& json);

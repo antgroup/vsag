@@ -146,6 +146,7 @@ Build-time parameters live under `index_param`.
 | `pipnn_reservoir_size` | int | `64` | Candidate slots retained per point before final pruning; effective capacity is at least `max_degree`. |
 | `pipnn_adaptive_pruning` | bool | `false` | Use HGraph's shared PiPNN dynamic-alpha selector during L2 batch builds. |
 | `pipnn_adaptive_pruning_adjust_step` | float | `0.06` | Alpha adjustment step for the PiPNN selector. |
+| `pipnn_build_quantization_type` | string | `"fp32"` | Internal precision used during CPU PiPNN batch graph construction: `"fp32"` (lossless default) or `"sq8_local"` (opt-in per-vector asymmetric 8-bit quantization accelerated by CPU SIMD; requires `dim <= 65535`). |
 | `no_build_levels` | int[] | `[]` | Tree levels that skip graph construction (0-indexed from the root). |
 | `use_reorder` | bool | `false` | Keep a high-precision copy for rescoring. |
 | `precise_quantization_type` | string | `"fp32"` | Quantizer for reordering. Use `"rabitq"` with `rabitq_bits_per_dim_precise` to enable RaBitQ x+y split reorder from base storage. |

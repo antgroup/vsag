@@ -1517,3 +1517,84 @@ TEST_CASE("HGraph Tune trains transforms on packed native rows",
     REQUIRE(restored->Deserialize(binary.value()).has_value());
     check(restored);
 }
+
+TEST_CASE("HGraph exposes and validates PiPNN build_quantization_type",
+          "[ut][pipnn][hgraph][parameter]") {
+    const auto common = MakePiPNNCommonParam(16);
+    auto parameter = MakePiPNNHGraphParam();
+    parameter[vsag::PIPNN_PARAMETER_BUILD_QUANTIZATION_TYPE].SetString("sq8_local");
+
+    auto mapped = std::dynamic_pointer_cast<vsag::HGraphParameter>(
+        vsag::HGraph::CheckAndMappingExternalParam(parameter, common));
+    REQUIRE(mapped != nullptr);
+    REQUIRE(mapped->pipnn_param.build_quantization_type == vsag::QUANTIZATION_TYPE_VALUE_SQ8_LOCAL);
+    REQUIRE(mapped->ToJson()[vsag::GRAPH_KEY][vsag::PIPNN_PARAMETER_BUILD_QUANTIZATION_TYPE]
+                .GetString() == "sq8_local");
+
+    // Legacy JSON without the key defaults to fp32.
+    auto legacy = mapped->ToJson();
+    legacy[vsag::GRAPH_KEY].GetInnerJson()->erase(vsag::PIPNN_PARAMETER_BUILD_QUANTIZATION_TYPE);
+    auto restored = std::make_shared<vsag::HGraphParameter>();
+    restored->FromJson(legacy);
+    REQUIRE(restored->pipnn_param.build_quantization_type == vsag::QUANTIZATION_TYPE_VALUE_FP32);
+
+    // Invalid values and non-PiPNN graph types are rejected.
+    parameter[vsag::PIPNN_PARAMETER_BUILD_QUANTIZATION_TYPE].SetString("invalid_q");
+    REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(parameter, common));
+
+    parameter[vsag::PIPNN_PARAMETER_BUILD_QUANTIZATION_TYPE].SetInt(8);
+    REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(parameter, common));
+
+    parameter[vsag::PIPNN_PARAMETER_BUILD_QUANTIZATION_TYPE].SetString("sq8_local");
+    for (const auto* graph_type : {"nsw", "odescent"}) {
+        auto wrong_graph = vsag::JsonType::Parse(parameter.Dump());
+        wrong_graph["graph_type"].SetString(graph_type);
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(wrong_graph, common));
+    }
+
+    // Dimensions > 65535 fail fast at index creation for sq8_local.
+    REQUIRE_THROWS(MakePiPNNIndex(parameter, MakePiPNNCommonParam(65536)));
+}
+
+TEST_CASE("HGraph PiPNN sq8_local builds searches and round-trips", "[ut][pipnn][hgraph]") {
+    const auto metric =
+        GENERATE(vsag::MetricType::METRIC_TYPE_L2SQR, vsag::MetricType::METRIC_TYPE_COSINE);
+    constexpr int64_t count = 160;
+    constexpr int64_t dim = 32;
+    const auto common = MakePiPNNCommonParam(dim, metric);
+    auto parameter = MakePiPNNHGraphParam();
+    parameter["max_degree"].SetInt(16);
+    parameter["build_thread_count"].SetInt(4);
+    parameter["alpha"].SetFloat(1.2F);
+    parameter[vsag::PIPNN_PARAMETER_MAX_LEAF_SIZE].SetUint64(32);
+    parameter[vsag::PIPNN_PARAMETER_MIN_LEAF_SIZE].SetUint64(8);
+    parameter[vsag::PIPNN_PARAMETER_LEADER_SAMPLE_RATE].SetFloat(0.1F);
+    *parameter[vsag::PIPNN_PARAMETER_FANOUT].GetInnerJson() = {4, 2};
+    parameter[vsag::PIPNN_PARAMETER_BUILD_QUANTIZATION_TYPE].SetString("sq8_local");
+
+    auto index = MakePiPNNIndex(parameter, common);
+    std::vector<float> vectors(count * dim);
+    std::vector<int64_t> labels(count);
+    for (int64_t i = 0; i < count; ++i) {
+        labels[i] = 2000 + i;
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[i * dim + d] =
+                std::sin(static_cast<float>(i * 11 + d * 7)) + static_cast<float>(i) * 0.002F;
+        }
+    }
+    REQUIRE(index->Build(MakeDataset(vectors, labels, dim, count)).has_value());
+
+    auto query = MakeDataset(vectors, labels, dim, 1);
+    auto res = index->KnnSearch(query, 5, R"({"hgraph":{"ef_search":64}})");
+    REQUIRE(res.has_value());
+    REQUIRE(res.value()->GetDim() == 5);
+    REQUIRE(res.value()->GetIds()[0] == labels[0]);
+
+    auto binary = index->Serialize();
+    REQUIRE(binary.has_value());
+    auto restored = MakePiPNNIndex(parameter, common);
+    REQUIRE(restored->Deserialize(binary.value()).has_value());
+    auto res2 = restored->KnnSearch(query, 5, R"({"hgraph":{"ef_search":64}})");
+    REQUIRE(res2.has_value());
+    REQUIRE(res2.value()->GetIds()[0] == labels[0]);
+}
