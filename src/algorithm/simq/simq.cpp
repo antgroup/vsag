@@ -136,7 +136,7 @@ simq_graph_parameters(const std::string& quantization,
                       bool support_duplicate,
                       bool deduplicate_storage) {
     auto param = JsonType::Parse(
-        R"({"max_degree":32,"ef_construction":50,"use_reorder":false,"build_by_base":true})");
+        R"({"max_degree":32,"ef_construction":50,"use_reorder":false,"graph_type":"pipnn","build_by_base":true})");
     param["support_duplicate"].SetBool(support_duplicate);
     param["deduplicate_storage"].SetBool(deduplicate_storage);
     param["base_quantization_type"].SetString(quantization);
@@ -277,6 +277,7 @@ void
 HGraphDynamicClustering::build_hgraph(const std::vector<int>& center_ids, int64_t dim) {
     IndexCommonParam cp = common_param_;
     cp.metric_ = MetricType::METRIC_TYPE_IP;
+    cp.repr_ = RecordRepr::DENSE;
     cp.data_type_ = DataTypes::DATA_TYPE_FLOAT;
     cp.dim_ = dim;
 
