@@ -182,8 +182,10 @@ struct CudaPiPNNConfig {
 /// `vectors` holds `count` contiguous rows of `dim` floats. On success
 /// `out_neighbors` (count * max_degree slots) and `out_degrees` (count slots) hold
 /// each vertex's neighbours nearest first; slots past a vertex's degree are not
-/// specified. Only the L2 metric is built. Any other metric, a configuration the
-/// kernels do not cover, or a budget too small for the working set returns false.
+/// specified. L2, inner product and cosine are built: cosine normalizes the rows
+/// and is then exactly L2, inner product is scored as -dot on the uncentred rows.
+/// A configuration the kernels do not cover, or a budget too small for the working
+/// set, returns false.
 /// The covered range is leaf_neighbor_count, fanouts and max_degree up to 16, 16
 /// and 128, hash_plane_count up to 12, reservoir_size up to 128 and alpha >= 1.
 /// `budget_bytes` bounds the device working set: when the candidate edges do not

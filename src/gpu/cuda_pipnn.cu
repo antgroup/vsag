@@ -18,7 +18,8 @@
 // stage works on that copy without returning to the host:
 //
 //   1. quantize  (cuda_pipnn_quantize.cu) - global centring and one INT8 scale, plus
-//                  per-row squared norms.
+//                  per-row squared norms; cosine rows are normalized first and inner
+//                  product is scored as 2 * (max_norm - dot) on uncentred rows.
 //   2. partition (cuda_pipnn_partition.cu) - two flattened levels of overlapping
 //                  leader buckets; the second level handles every oversized bucket in
 //                  one launch.
@@ -316,8 +317,9 @@ CudaBuildPiPNNGraph(const float* vectors,
         count < 2 or count >= (1ULL << 31) or budget_bytes == 0) {
         return false;
     }
-    // Only the L2 metric is implemented; the INT8 scoring copy is internal to the build.
-    if (config.distance_type != DistanceType::L2Sqr) {
+    if (config.distance_type != DistanceType::L2Sqr and
+        config.distance_type != DistanceType::InnerProduct and
+        config.distance_type != DistanceType::Cosine) {
         return false;
     }
     if (config.leaf_neighbor_count == 0 or config.leaf_neighbor_count > pipnn::kMaxNeighbors or
@@ -352,6 +354,7 @@ CudaBuildPiPNNGraph(const float* vectors,
     plan.max_leaf = static_cast<uint32_t>(config.max_leaf_size);
     plan.target_leaf = std::min(std::max(pipnn::kTargetLeafSize, plan.min_leaf), plan.max_leaf);
     plan.seed = config.seed;
+    plan.metric = config.distance_type;
     if (count * plan.fanout1 * plan.fanout2 >= (1ULL << 31)) {
         return false;
     }

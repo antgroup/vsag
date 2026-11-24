@@ -23,6 +23,7 @@
 #include <cub/cub.cuh>
 #include <vector>
 
+#include "cuda_backend.h"
 #include "cuda_raii.h"
 
 namespace vsag::gpu::pipnn {
@@ -159,10 +160,14 @@ struct BuildPlan {
     uint32_t max_leaf;
     uint32_t target_leaf;
     uint64_t seed;
+    DistanceType metric;
 };
 
 /// Stage 1: uploads the rows, centres them and quantizes them to the INT8 scoring copy
-/// `d_q` (count x dim_pad) with the squared norms `d_norms`. The device is idle when it
+/// `d_q` (count x dim_pad) with the squared norms `d_norms`. Cosine rows are normalized
+/// first. Inner product is not centred and every norm is the largest one, so that the
+/// shared score `norm_a + norm_b - 2 * dot` is `2 * (max_norm - dot)`: non-negative and
+/// ordered like -dot. The device is idle when it
 /// returns and only the two outputs stay accounted in `ws`.
 bool
 QuantizeRows(const float* vectors,

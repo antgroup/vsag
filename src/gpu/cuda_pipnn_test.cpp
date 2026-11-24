@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <random>
 #include <unordered_set>
@@ -118,9 +119,20 @@ NeighborRecall(const std::vector<float>& rows,
     for (uint64_t u = 0; u < count; u += step) {
         for (uint64_t v = 0; v < count; ++v) {
             float d = 0.0F;
+            float dot = 0.0F;
+            float norm_u = 0.0F;
+            float norm_v = 0.0F;
             for (int32_t j = 0; j < dim; ++j) {
                 const float diff = rows[u * dim + j] - rows[v * dim + j];
                 d += diff * diff;
+                dot += rows[u * dim + j] * rows[v * dim + j];
+                norm_u += rows[u * dim + j] * rows[u * dim + j];
+                norm_v += rows[v * dim + j] * rows[v * dim + j];
+            }
+            if (config.distance_type == DistanceType::InnerProduct) {
+                d = -dot;
+            } else if (config.distance_type == DistanceType::Cosine) {
+                d = -dot / std::sqrt(norm_u * norm_v);
             }
             dists[v] = {u == v ? 1e30F : d, static_cast<uint32_t>(v)};
         }
@@ -151,7 +163,7 @@ TEST_CASE("PiPNN build: a refusal leaves the outputs alone", "[ut][gpu_pipnn]") 
     auto config = SmallConfig();
 
     SECTION("an unsupported metric") {
-        config.distance_type = DistanceType::InnerProduct;
+        config.distance_type = static_cast<DistanceType>(7);
         const auto graph = BuildGraph(rows, dim, config, kBudget);
         REQUIRE_FALSE(graph.built);
         REQUIRE(graph.degrees[0] == 0xFFFFFFFFU);
@@ -171,9 +183,6 @@ TEST_CASE("PiPNN build: a refusal leaves the outputs alone", "[ut][gpu_pipnn]") 
         REQUIRE_FALSE(BuildGraph(rows, dim, config, kBudget).built);
         config = SmallConfig();
         config.hash_plane_count = 13;
-        REQUIRE_FALSE(BuildGraph(rows, dim, config, kBudget).built);
-        config = SmallConfig();
-        config.distance_type = DistanceType::InnerProduct;
         REQUIRE_FALSE(BuildGraph(rows, dim, config, kBudget).built);
         config = SmallConfig();
         config.alpha = 0.9F;
@@ -214,6 +223,56 @@ TEST_CASE("PiPNN build: the graph is well formed and finds the nearest neighbour
     REQUIRE(graph.built);
     CheckWellFormed(graph, count, config);
     REQUIRE(NeighborRecall(rows, dim, graph, config, 10) >= 0.75F);
+}
+
+TEST_CASE("PiPNN build: inner product and cosine find their own nearest neighbours",
+          "[ut][gpu_pipnn]") {
+    if (NoDevice()) {
+        SKIP("no CUDA device on this machine");
+    }
+    const int32_t dim = 37;
+    const uint64_t count = 12000;
+    auto rows = ClusteredRows(count, dim, 40, 13);
+    auto config = SmallConfig();
+
+    SECTION("cosine") {
+        config.distance_type = DistanceType::Cosine;
+        const auto graph = BuildGraph(rows, dim, config, kBudget);
+        REQUIRE(graph.built);
+        CheckWellFormed(graph, count, config);
+        REQUIRE(NeighborRecall(rows, dim, graph, config, 10) >= 0.75F);
+    }
+
+    SECTION("cosine ignores the row length") {
+        config.distance_type = DistanceType::Cosine;
+        const auto plain = BuildGraph(rows, dim, config, kBudget);
+        for (uint64_t i = 0; i < count; ++i) {
+            for (int32_t d = 0; d < dim; ++d) {
+                rows[i * dim + d] *= 1.0F + static_cast<float>(i % 7);
+            }
+        }
+        const auto scaled = BuildGraph(rows, dim, config, kBudget);
+        REQUIRE(plain.built);
+        REQUIRE(scaled.built);
+        CheckWellFormed(scaled, count, config);
+        REQUIRE(NeighborRecall(rows, dim, scaled, config, 10) >= 0.75F);
+    }
+
+    SECTION("inner product") {
+        config.distance_type = DistanceType::InnerProduct;
+        const auto graph = BuildGraph(rows, dim, config, kBudget);
+        REQUIRE(graph.built);
+        CheckWellFormed(graph, count, config);
+        REQUIRE(NeighborRecall(rows, dim, graph, config, 10) >= 0.5F);
+    }
+
+    SECTION("zero rows do not break cosine") {
+        std::fill(rows.begin(), rows.begin() + 10 * dim, 0.0F);
+        config.distance_type = DistanceType::Cosine;
+        const auto graph = BuildGraph(rows, dim, config, kBudget);
+        REQUIRE(graph.built);
+        CheckWellFormed(graph, count, config);
+    }
 }
 
 TEST_CASE("PiPNN build: a small budget sorts in slabs and still agrees", "[ut][gpu_pipnn]") {

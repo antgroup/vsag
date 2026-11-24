@@ -46,11 +46,13 @@ coordinate_sign(uint32_t d, uint32_t seed) {
 }
 
 __global__ void
-column_sum_kernel(const float* x, uint64_t rows, uint32_t dim, double* partial) {
+column_sum_kernel(
+    const float* x, uint64_t rows, uint32_t dim, const float* inv_norm, double* partial) {
     for (uint32_t d = threadIdx.x; d < dim; d += blockDim.x) {
         double sum = 0.0;
         for (uint64_t r = blockIdx.x; r < rows; r += gridDim.x) {
-            sum += static_cast<double>(x[r * dim + d]);
+            const float row_scale = inv_norm != nullptr ? inv_norm[r] : 1.0F;
+            sum += static_cast<double>(x[r * dim + d] * row_scale);
         }
         partial[static_cast<uint64_t>(blockIdx.x) * dim + d] += sum;
     }
@@ -70,12 +72,18 @@ mean_kernel(const double* partial, uint32_t slices, uint32_t dim, double inv_cou
 }
 
 __global__ void
-abs_max_kernel(const float* x, uint64_t rows, uint32_t dim, const float* mean, uint32_t* max_bits) {
+abs_max_kernel(const float* x,
+               uint64_t rows,
+               uint32_t dim,
+               const float* inv_norm,
+               const float* mean,
+               uint32_t* max_bits) {
     float local = 0.0F;
     uint64_t total = rows * dim;
     for (uint64_t e = static_cast<uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x; e < total;
          e += static_cast<uint64_t>(gridDim.x) * blockDim.x) {
-        float v = fabsf(x[e] - mean[e % dim]);
+        const float row_scale = inv_norm != nullptr ? inv_norm[e / dim] : 1.0F;
+        float v = fabsf(x[e] * row_scale - mean[e % dim]);
         local = fmaxf(local, v);
     }
     for (int offset = 16; offset > 0; offset >>= 1) {
@@ -94,6 +102,7 @@ quantize_kernel(const float* x,
                 uint64_t rows,
                 uint32_t dim,
                 uint32_t dim_pad,
+                const float* inv_norm,
                 const float* mean,
                 float scale,
                 uint32_t seed,
@@ -105,7 +114,8 @@ quantize_kernel(const float* x,
         uint32_t d = static_cast<uint32_t>(e - r * dim_pad);
         int value = 0;
         if (d < dim) {
-            float v = rintf((x[r * dim + d] - mean[d]) * scale);
+            const float row_scale = inv_norm != nullptr ? inv_norm[r] : 1.0F;
+            float v = rintf((x[r * dim + d] * row_scale - mean[d]) * scale);
             value = static_cast<int>(fminf(127.0F, fmaxf(-127.0F, v))) * coordinate_sign(d, seed);
         }
         q[e] = static_cast<int8_t>(value);
@@ -124,6 +134,42 @@ norm_kernel(const int8_t* q, uint64_t count, uint32_t dim_words, int32_t* norms)
         sum = __dp4a(row[w], row[w], sum);
     }
     norms[r] = sum;
+}
+
+__global__ void
+inv_norm_kernel(const float* x, uint64_t rows, uint32_t dim, float* inv_norm) {
+    uint64_t r = static_cast<uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (r >= rows) {
+        return;
+    }
+    double sum = 0.0;
+    for (uint32_t d = 0; d < dim; ++d) {
+        sum += static_cast<double>(x[r * dim + d]) * static_cast<double>(x[r * dim + d]);
+    }
+    inv_norm[r] = sum > 0.0 ? static_cast<float>(1.0 / sqrt(sum)) : 0.0F;
+}
+
+__global__ void
+max_norm_kernel(const int32_t* norms, uint64_t count, int32_t* max_norm) {
+    int32_t local = 0;
+    for (uint64_t r = static_cast<uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x; r < count;
+         r += static_cast<uint64_t>(gridDim.x) * blockDim.x) {
+        local = max(local, norms[r]);
+    }
+    for (int offset = 16; offset > 0; offset >>= 1) {
+        local = max(local, __shfl_down_sync(0xFFFFFFFFU, local, offset));
+    }
+    if ((threadIdx.x & 31U) == 0) {
+        atomicMax(max_norm, local);
+    }
+}
+
+__global__ void
+fill_norm_kernel(int32_t* norms, uint64_t count, const int32_t* value) {
+    uint64_t r = static_cast<uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (r < count) {
+        norms[r] = *value;
+    }
 }
 
 class RawFeeder {
@@ -200,25 +246,46 @@ QuantizeRows(const float* vectors,
         DeviceArray<double> d_partial;
         DeviceArray<float> d_mean;
         DeviceArray<uint32_t> d_max;
+        DeviceArray<float> d_inv_norm;
+        const bool cosine = plan.metric == DistanceType::Cosine;
+        const bool centred = plan.metric != DistanceType::InnerProduct;
         if (not ws.alloc(d_partial, static_cast<uint64_t>(kSumSlices) * plan.dim) or
-            not ws.alloc(d_mean, plan.dim) or not ws.alloc(d_max, 1)) {
+            not ws.alloc(d_mean, plan.dim) or not ws.alloc(d_max, 1) or
+            (cosine and not ws.alloc(d_inv_norm, count))) {
+            return false;
+        }
+        VSAG_CUDA_TRY(cudaMemset(d_mean.Get(), 0, plan.dim * sizeof(float)));
+        if (cosine and not feeder.for_each([&](const float* x, uint64_t start, uint64_t rows) {
+                inv_norm_kernel<<<grid_for(rows), kBlockThreads>>>(
+                    x, rows, plan.dim, d_inv_norm.Get() + start);
+                return cudaGetLastError() == cudaSuccess;
+            })) {
             return false;
         }
         VSAG_CUDA_TRY(cudaMemset(d_partial.Get(), 0, kSumSlices * plan.dim * sizeof(double)));
         VSAG_CUDA_TRY(cudaMemset(d_max.Get(), 0, sizeof(uint32_t)));
         const uint32_t sum_threads = std::min<uint32_t>(plan.dim, 256);
-        if (not feeder.for_each([&](const float* x, uint64_t, uint64_t rows) {
-                column_sum_kernel<<<kSumSlices, sum_threads>>>(x, rows, plan.dim, d_partial.Get());
-                return cudaGetLastError() == cudaSuccess;
-            })) {
-            return false;
+        const auto row_scales = [&](uint64_t start) {
+            return cosine ? d_inv_norm.Get() + start : nullptr;
+        };
+        if (centred) {
+            if (not feeder.for_each([&](const float* x, uint64_t start, uint64_t rows) {
+                    column_sum_kernel<<<kSumSlices, sum_threads>>>(
+                        x, rows, plan.dim, row_scales(start), d_partial.Get());
+                    return cudaGetLastError() == cudaSuccess;
+                })) {
+                return false;
+            }
+            mean_kernel<<<(plan.dim + 127) / 128, 128>>>(d_partial.Get(),
+                                                         kSumSlices,
+                                                         plan.dim,
+                                                         1.0 / static_cast<double>(count),
+                                                         d_mean.Get());
+            VSAG_CUDA_TRY(cudaGetLastError());
         }
-        mean_kernel<<<(plan.dim + 127) / 128, 128>>>(
-            d_partial.Get(), kSumSlices, plan.dim, 1.0 / static_cast<double>(count), d_mean.Get());
-        VSAG_CUDA_TRY(cudaGetLastError());
-        if (not feeder.for_each([&](const float* x, uint64_t, uint64_t rows) {
+        if (not feeder.for_each([&](const float* x, uint64_t start, uint64_t rows) {
                 abs_max_kernel<<<grid_for(rows * plan.dim), kBlockThreads>>>(
-                    x, rows, plan.dim, d_mean.Get(), d_max.Get());
+                    x, rows, plan.dim, row_scales(start), d_mean.Get(), d_max.Get());
                 return cudaGetLastError() == cudaSuccess;
             })) {
             return false;
@@ -238,6 +305,7 @@ QuantizeRows(const float* vectors,
                     rows,
                     plan.dim,
                     plan.dim_pad,
+                    row_scales(start),
                     d_mean.Get(),
                     scale,
                     sign_seed,
@@ -249,7 +317,22 @@ QuantizeRows(const float* vectors,
         norm_kernel<<<grid_for(count), kBlockThreads>>>(
             d_q.Get(), count, plan.dim_words, d_norms.Get());
         VSAG_CUDA_TRY(cudaGetLastError());
+        if (plan.metric == DistanceType::InnerProduct) {
+            DeviceArray<int32_t> d_top;
+            if (not ws.alloc(d_top, 1)) {
+                return false;
+            }
+            VSAG_CUDA_TRY(cudaMemset(d_top.Get(), 0, sizeof(int32_t)));
+            max_norm_kernel<<<grid_for(count), kBlockThreads>>>(d_norms.Get(), count, d_top.Get());
+            fill_norm_kernel<<<grid_for(count), kBlockThreads>>>(d_norms.Get(), count, d_top.Get());
+            VSAG_CUDA_TRY(cudaGetLastError());
+            VSAG_CUDA_TRY(cudaDeviceSynchronize());
+            ws.credit(sizeof(int32_t));
+        }
         VSAG_CUDA_TRY(cudaDeviceSynchronize());
+        if (cosine) {
+            ws.credit(count * sizeof(float));
+        }
         ws.credit(feeder.bytes());
         ws.credit(static_cast<uint64_t>(kSumSlices) * plan.dim * sizeof(double));
     }
