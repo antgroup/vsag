@@ -112,6 +112,16 @@ public:
           const GraphInterfacePtr& graph_storage = nullptr);
 
     void
+    BuildAlphaCng(const Vector<InnerIdType>& ids,
+                  const Vector<const float*>& rows,
+                  uint64_t dim,
+                  uint32_t max_degree,
+                  float alpha,
+                  float adjust_step,
+                  float tau,
+                  InnerIdType route_entry);
+
+    void
     SaveGraph(std::stringstream& out);
 
     void

@@ -18,7 +18,7 @@ default.
    layers act as navigation aids, the bottom layer connects every data point to its
    nearest neighbours within a `max_degree` budget. The construction algorithm can be
    NSW-style insertion (`graph_type: "nsw"`, the default), ODescent
-   (`graph_type: "odescent"`), or PiPNN (`graph_type: "pipnn"`).
+   (`graph_type: "odescent"`), PiPNN (`graph_type: "pipnn"`), or α-CNG (`graph_type: "alpha_cng"`).
 2. **Quantization.** The base storage is compressed with a configurable quantizer
    (`base_quantization_type` — `fp32`, `fp16`, `bf16`, `sq8`, `sq8_local`, `sq4_local`, `sq4`, `sq8_uniform`, `sq4_uniform`,
    `pq`, `pqfs`, `rabitq`, `saq`, `tq`). Optionally, a second high-precision copy is kept
@@ -88,7 +88,8 @@ records cross-index defaults and the top-level common fields.
 | `max_degree` | int | `64` | Maximum out-degree per graph node |
 | `ef_construction` | int | `400` | Candidate list size during build (higher = better recall, slower build) |
 | `alpha` | float | `1.0` | Final robust-pruning factor; PiPNN requires a finite value at least `1.0`. |
-| `graph_type` | string | `"nsw"` | Graph algorithm: `nsw`, `odescent`, or `pipnn` |
+| `graph_type` | string | `"nsw"` | Graph algorithm: `nsw`, `odescent`, `pipnn`, or `alpha_cng` |
+| `alpha_cng_tau` | float | `0.0` | Nonnegative pruning margin in Euclidean distance units for `alpha_cng`. |
 | `pipnn_max_leaf_size` | int | `1024` | Maximum partition leaf size. Larger leaves increase candidate coverage and leaf distance work. |
 | `pipnn_min_leaf_size` | int | `64` | Target used when merging undersized leaves. |
 | `pipnn_leader_sample_rate` | float | `0.005` | Fraction sampled as partition leaders; each partition uses at least `2` and at most `1000` leaders, bounded by its point count. |
@@ -190,6 +191,22 @@ the reverse adjacency approximately doubles edge storage.
 `label_remap_type` changes the internal label map, not user-visible IDs. `"pg"` is the default;
 `"robin"` selects the alternate robin-map implementation. Benchmark the target ID distribution
 before changing it.
+
+### Alpha-CNG construction
+
+Alpha-CNG builds the bottom layer on dense FP32 L2 data without reranking. It searches an
+unpruned 200-neighbor ODescent seed from the point nearest the centroid (beam width 60, up to
+500 visited candidates per row). Forward selection and overflowing reverse lists use HGraph's
+adaptive α selector with the Alpha-CNG Euclidean margin. The first pass uses `alpha` (default
+1.0). Its accepted and rejected counts determine whether to relax or tighten the threshold using
+`adaptive_pruning_adjust_step` (default 0.06). A zero step uses a single pass.
+Bulk Alpha-CNG applies this policy automatically. The `adaptive_pruning` and
+`adaptive_pruning_apply_to_reverse` flags control subsequent HGraph insertions.
+The builder merges reverse edges before pruning and repairs
+reachability from the HGraph entry. The upper layers and query algorithm are standard HGraph.
+Later incremental inserts use HGraph insertion. Set `alpha_cng_tau` explicitly for the dataset;
+the GIST experiment uses 0.02. Seed iterations and sampling use `graph_iter_turn` and
+`neighbor_sample_rate`.
 
 ### PiPNN build boundary
 

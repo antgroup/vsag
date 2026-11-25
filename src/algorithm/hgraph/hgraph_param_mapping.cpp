@@ -256,6 +256,8 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             inner_json[RESIZE_INCREASE_COUNT_BIT].SetJson(value);
         } else if (key == HGRAPH_GRAPH_TYPE) {
             inner_json[GRAPH_KEY][GRAPH_TYPE_KEY].SetJson(value);
+        } else if (key == ALPHA_CNG_TAU) {
+            inner_json[GRAPH_KEY][ALPHA_CNG_TAU].SetJson(value);
         } else if (key == HGRAPH_GRAPH_STORAGE_TYPE) {
             inner_json[GRAPH_KEY][GRAPH_STORAGE_TYPE_KEY].SetJson(value);
         } else if (key == ODESCENT_PARAMETER_ALPHA) {

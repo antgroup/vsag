@@ -101,20 +101,30 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       support_force_remove_(hgraph_param->support_force_remove),
       odescent_param_(hgraph_param->odescent_param),
       pipnn_param_(hgraph_param->pipnn_param),
+      alpha_cng_tau_(hgraph_param->alpha_cng_tau),
       graph_type_(hgraph_param->graph_type),
       hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param),
       mci_parameters_(hgraph_param->mci_parameters),
       use_old_serial_format_(common_param.use_old_serial_format_),
       use_conjugate_graph_(hgraph_param->use_conjugate_graph) {
-    // No-op unless adaptive pruning is enabled.
-    adaptive_pruning_.Validate(alpha_);
+    auto build_pruning = adaptive_pruning_;
+    build_pruning.enabled = build_pruning.enabled or graph_type_ == GRAPH_TYPE_VALUE_ALPHA_CNG;
+    build_pruning.Validate(alpha_);
     if (adaptive_pruning_.enabled) {
-        CHECK_ARGUMENT(graph_type_ == GRAPH_TYPE_VALUE_NSW,
-                       "adaptive_pruning currently supports only nsw graph construction");
+        CHECK_ARGUMENT(
+            graph_type_ == GRAPH_TYPE_VALUE_NSW or graph_type_ == GRAPH_TYPE_VALUE_ALPHA_CNG,
+            "adaptive_pruning currently supports only nsw or alpha_cng graph construction");
         CHECK_ARGUMENT(common_param.metric_ == MetricType::METRIC_TYPE_L2SQR,
                        "adaptive_pruning currently supports only L2 distance");
     }
     this->support_duplicate_ = hgraph_param->support_duplicate;
+    if (graph_type_ == GRAPH_TYPE_VALUE_ALPHA_CNG) {
+        CHECK_ARGUMENT(common_param.repr_ == RecordRepr::DENSE and
+                           common_param.data_type_ == DataTypes::DATA_TYPE_FLOAT and
+                           common_param.metric_ == MetricType::METRIC_TYPE_L2SQR,
+                       "alpha_cng requires dense float32 vectors and L2 distance");
+        CHECK_ARGUMENT(not support_duplicate_, "alpha_cng does not build duplicate groups");
+    }
     this->deduplicate_storage_ = hgraph_param->deduplicate_storage;
     const bool is_dense_vector = common_param.repr_ == RecordRepr::DENSE &&
                                  common_param.data_type_ != DataTypes::DATA_TYPE_SPARSE;

@@ -52,6 +52,66 @@ MakeBuildDataset(std::vector<int64_t>& ids,
 
 }  // namespace
 
+TEST_CASE("Alpha-CNG builds and reloads an FP32 HGraph", "[ut][hgraph][alpha_cng]") {
+    constexpr int64_t dim = 8;
+    constexpr int64_t count = 73;
+    const std::string params = R"({"dtype":"float32","metric_type":"l2","dim":8,
+        "index_param":{"graph_type":"alpha_cng","alpha_cng_tau":0.02,"max_degree":8,
+        "alpha":1.06,"adaptive_pruning_adjust_step":0.04,
+        "graph_iter_turn":2,"build_thread_count":2,"build_block_size":16}})";
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 100);
+    ids[15] = ids[2];
+    std::vector<float> rows(count * dim);
+    std::mt19937 rng(73);
+    for (auto& value : rows) {
+        value = std::uniform_real_distribution<float>{}(rng);
+    }
+    auto data = MakeBuildDataset(ids, rows, count, dim);
+    auto created = vsag::Factory::CreateIndex("hgraph", params);
+    REQUIRE(created.has_value());
+    auto built = created.value()->Build(data);
+    REQUIRE(built.has_value());
+    REQUIRE(built.value() == std::vector<int64_t>{ids[2]});
+    auto query = MakeBuildDataset(ids, rows, 1, dim);
+    auto search = [&](const auto& index) {
+        auto result = index->KnnSearch(query, count - 1, R"({"hgraph":{"ef_search":100}})");
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == count - 1);
+        REQUIRE(result.value()->GetIds()[0] == ids.front());
+        return std::vector<int64_t>(result.value()->GetIds(),
+                                    result.value()->GetIds() + result.value()->GetDim());
+    };
+    const auto expected = search(created.value());
+    std::stringstream bytes;
+    REQUIRE(created.value()->Serialize(bytes).has_value());
+    auto loaded = vsag::Factory::CreateIndex("hgraph", params).value();
+    REQUIRE(loaded->Deserialize(bytes).has_value());
+    REQUIRE(search(loaded) == expected);
+    auto first_add = vsag::Factory::CreateIndex("hgraph", params).value();
+    REQUIRE(first_add->Add(MakeBuildDataset(ids, rows, 1, dim)).has_value());
+    REQUIRE(first_add->GetNumElements() == 1);
+    auto next = vsag::Dataset::Make()
+                    ->NumElements(1)
+                    ->Dim(dim)
+                    ->Ids(ids.data() + 1)
+                    ->Float32Vectors(rows.data() + dim)
+                    ->Owner(false);
+    REQUIRE(first_add->Add(next).has_value());
+    REQUIRE(first_add->GetNumElements() == 2);
+    for (const auto& [from, to] : std::vector<std::pair<std::string, std::string>>{
+             {"0.02", "-1"},
+             {"0.04", "-0.01"},
+             {"1.06", "0.07"},
+             {"\"l2\"", "\"ip\""},
+             {"\"alpha_cng\"", "\"nsw\""},
+             {"\"max_degree\":8", "\"base_quantization_type\":\"sq8\""}}) {
+        auto invalid = params;
+        invalid.replace(invalid.find(from), from.size(), to);
+        REQUIRE_FALSE(vsag::Factory::CreateIndex("hgraph", invalid).has_value());
+    }
+}
+
 TEST_CASE("HGraph batch build stays searchable without an upper level",
           "[ut][hgraph][build][odescent]") {
     // Upper levels drive the entry point of a batch-built HGraph. The level sampler draws from a

@@ -197,6 +197,8 @@ HGraph::Build(const DatasetPtr& data) {
     this->build_cache_missed_nodes_ = 0;
     std::vector<int64_t> ret;
     const bool using_build_cache = this->has_loaded_cache();
+    CHECK_ARGUMENT(not using_build_cache or graph_type_ != GRAPH_TYPE_VALUE_ALPHA_CNG,
+                   "alpha_cng requires a fresh build without an imported neighbor cache");
     if (using_build_cache and graph_type_ != GRAPH_TYPE_VALUE_PIPNN) {
         CHECK_ARGUMENT(
             not adaptive_pruning_.enabled,
@@ -217,7 +219,8 @@ HGraph::Build(const DatasetPtr& data) {
             ret = std::move(optimized_result.value());
         } else if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
             ret = this->add_impl(data);
-        } else if (graph_type_ == GRAPH_TYPE_VALUE_ODESCENT) {
+        } else if (graph_type_ == GRAPH_TYPE_VALUE_ODESCENT or
+                   graph_type_ == GRAPH_TYPE_VALUE_ALPHA_CNG) {
             ret = this->build_by_odescent(data);
         } else if (graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
             ret = this->build_by_pipnn(data);
@@ -260,6 +263,15 @@ HGraph::FusedBatchCodes::View(uint64_t input_idx) const {
 std::vector<int64_t>
 HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
     std::vector<int64_t> failed_ids;
+    const bool use_alpha_cng = graph_type_ == GRAPH_TYPE_VALUE_ALPHA_CNG;
+    if (use_alpha_cng) {
+        this->validate_add_data(data);
+        if (extra_infos_ != nullptr) {
+            CHECK_ARGUMENT(data->GetExtraInfos() != nullptr and
+                               data->GetExtraInfoSize() == static_cast<int64_t>(extra_info_size_),
+                           "alpha_cng requires extra info with the configured size");
+        }
+    }
 
     auto pipnn_parameter = this->pipnn_param_;
     if (use_pipnn) {
@@ -394,11 +406,11 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         if (temporary_sq8_build_data != nullptr and not temporary_codes_batched) {
             temporary_sq8_build_data->InsertVector(get_data(data, i), inner_id);
         }
-        if (use_pipnn and this->extra_infos_ != nullptr) {
+        if ((use_pipnn or use_alpha_cng) and this->extra_infos_ != nullptr) {
             const auto* extra_info = extra_infos + i * extra_info_size_;
             this->extra_infos_->InsertExtraInfo(extra_info, inner_id);
         }
-        if (use_pipnn and attr_sets != nullptr and this->use_attribute_filter_) {
+        if ((use_pipnn or use_alpha_cng) and attr_sets != nullptr and this->use_attribute_filter_) {
             this->attr_filter_index_->Insert(attr_sets[i], inner_id);
         }
         if (use_pipnn) {
@@ -552,7 +564,25 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
                                      route_graph_id.end());
             }
         }
-    } else {
+    } else if (use_alpha_cng and not inner_ids.empty()) {
+        auto seed_param = std::make_shared<ODescentParameter>(*odescent_param_);
+        seed_param->max_degree = 200;
+        Vector<const float*> rows(allocator_);
+        rows.reserve(valid_indices.size());
+        for (auto i : valid_indices) {
+            rows.push_back(static_cast<const float*>(get_data(data, i)));
+        }
+        ODescent builder(seed_param, build_data, allocator_, thread_pool_.get(), false);
+        builder.BuildAlphaCng(inner_ids,
+                              rows,
+                              dim_,
+                              bottom_graph_->MaximumDegree(),
+                              alpha_,
+                              adaptive_pruning_.adjust_step,
+                              alpha_cng_tau_,
+                              entry_point_id_);
+        builder.SaveGraph(bottom_graph_);
+    } else if (not use_alpha_cng) {
         odescent_param_->max_degree = bottom_graph_->MaximumDegree();
         ODescent odescent_builder(
             odescent_param_, build_data, allocator_, this->thread_pool_.get());
@@ -566,11 +596,12 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
     }
     for (auto& route_graph_id : route_graph_ids) {
         auto current_route_odescent_param =
-            use_pipnn ? std::make_shared<ODescentParameter>(*route_odescent_param)
-                      : route_odescent_param;
+            (use_pipnn or use_alpha_cng)
+                ? std::make_shared<ODescentParameter>(*route_odescent_param)
+                : route_odescent_param;
         current_route_odescent_param->max_degree = bottom_graph_->MaximumDegree() / 2;
-        if (use_pipnn and this->thread_pool_ != nullptr and this->build_thread_count_ > 1 and
-            not route_graph_id.empty()) {
+        if ((use_pipnn or use_alpha_cng) and this->thread_pool_ != nullptr and
+            this->build_thread_count_ > 1 and not route_graph_id.empty()) {
             const uint64_t worker_count =
                 std::min<uint64_t>(this->build_thread_count_, route_graph_id.size());
             current_route_odescent_param->block_size =
@@ -616,7 +647,7 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
 
 std::vector<int64_t>
 HGraph::Add(const DatasetPtr& data) {
-    if (graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
+    if (graph_type_ == GRAPH_TYPE_VALUE_PIPNN or graph_type_ == GRAPH_TYPE_VALUE_ALPHA_CNG) {
         std::unique_lock<std::mutex> initial_build_lock(pipnn_initial_build_mutex_);
         if (this->total_count_.load() == 0) {
             return this->Build(data);

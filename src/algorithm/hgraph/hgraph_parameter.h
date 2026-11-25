@@ -90,6 +90,7 @@ public:
 
     ODescentParameterPtr odescent_param{nullptr};
     PiPNNGraphBuilderParameter pipnn_param{};
+    float alpha_cng_tau{0.0F};
 
     std::string graph_type{GRAPH_TYPE_VALUE_NSW};
 

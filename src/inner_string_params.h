@@ -187,6 +187,8 @@ const char* const EF_CONSTRUCTION_KEY = "ef_construction";
 
 const char* const GRAPH_TYPE_KEY = "graph_type";
 const char* const GRAPH_TYPE_VALUE_ODESCENT = "odescent";
+const char* const GRAPH_TYPE_VALUE_ALPHA_CNG = "alpha_cng";
+const char* const ALPHA_CNG_TAU = "alpha_cng_tau";
 const char* const GRAPH_TYPE_VALUE_PIPNN = "pipnn";
 const char* const GRAPH_TYPE_VALUE_NSW = "nsw";
 

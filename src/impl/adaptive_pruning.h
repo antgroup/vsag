@@ -50,7 +50,8 @@ struct AdaptivePruningStats {
 using PruningCandidate = std::pair<float, InnerIdType>;
 
 // Applies adaptive pruning using the supplied distance function.
-// Requires finite, non-negative squared L2 distances; callers enforce the metric choice.
+// Compares candidate.first against alpha times the pair score. Both scores must be finite
+// and non-negative. NSW supplies squared L2; alpha-CNG supplies margin-adjusted Euclidean scores.
 // Candidates are normalized in place: sorted by distance, deduplicated, and stripped of the
 // center self-edge. The returned list is nearest first.
 // The caller decides whether this policy applies to its graph layer and selection role.

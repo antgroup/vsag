@@ -27,7 +27,7 @@ HGraph 读缓存功能测试继续覆盖使用精排编码构图的路径。
 
 1. **构图。** 向量被组织成层级近邻图：上层作为导航入口，底层连接每个数据点到在
    `max_degree` 预算内的最近邻。构图算法可以是 NSW 风格插入（`graph_type: "nsw"`，默认）、
-   ODescent（`graph_type: "odescent"`）或 PiPNN（`graph_type: "pipnn"`）。
+   ODescent（`graph_type: "odescent"`）、PiPNN（`graph_type: "pipnn"`）或 α-CNG（`graph_type: "alpha_cng"`）。
 2. **量化。** 底层存储使用可配置的量化器进行压缩（`base_quantization_type` —
    `fp32`、`fp16`、`bf16`、`sq8`、`sq8_local`、`sq4_local`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`saq`、`tq`）。
    可选地再保留一份高精度副本（`use_reorder: true` 搭配 `precise_quantization_type`），
@@ -75,7 +75,8 @@ auto result = index->KnnSearch(
 | `max_degree` | int | `64` | 图节点最大出度 |
 | `ef_construction` | int | `400` | 构建阶段的候选集大小（越大召回越高，构建越慢） |
 | `alpha` | float | `1.0` | 最终 robust pruning 的系数；PiPNN 要求有限且不小于 `1.0` |
-| `graph_type` | string | `"nsw"` | 构图算法：`nsw`、`odescent` 或 `pipnn` |
+| `graph_type` | string | `"nsw"` | 构图算法：`nsw`、`odescent`、`pipnn` 或 `alpha_cng` |
+| `alpha_cng_tau` | float | `0.0` | α-CNG 的非负剪枝余量，单位为欧氏距离。 |
 | `pipnn_max_leaf_size` | int | `1024` | 分区叶子的最大点数；越大候选覆盖可能越高，叶内距离计算也越多 |
 | `pipnn_min_leaf_size` | int | `64` | 合并过小叶子时使用的目标规模 |
 | `pipnn_leader_sample_rate` | float | `0.005` | 分区 leader 的采样比率；每个分区最少使用 `2` 个、最多 `1000` 个 leader，且不超过分区点数 |
@@ -173,6 +174,17 @@ auto result = index->KnnSearch(
 
 `label_remap_type` 只改变内部 label map，不改变用户 ID。默认值为 `"pg"`；
 `"robin"` 选择另一种 robin-map 实现，建议针对实际 ID 分布实测后再调整。
+
+### α-CNG 构建
+
+α-CNG 面向不使用重排的稠密 FP32 L2 索引。它从最靠近质心的节点在未剪枝的 200 邻居 ODescent 图上搜索，
+搜索宽度为 60，每个点从已访问节点中取最多 500 个候选。正向选边与反向边超限重剪均采用 HGraph 的动态 α，
+并保留 α-CNG 的欧氏距离余量。首轮使用 `alpha`（默认 1.0），按照接受和拒绝的候选数，以
+`adaptive_pruning_adjust_step`（默认 0.06）为步长放宽或收紧阈值。步长为零时只执行首轮。
+全量构建自动使用该策略，`adaptive_pruning` 和 `adaptive_pruning_apply_to_reverse` 控制后续 HGraph 增量插入。
+批量合并反向边并剪枝后，从 HGraph 入口修复可达性。
+上层路由和查询沿用 HGraph，后续增量插入沿用 HGraph 的插入算法。`alpha_cng_tau` 按数据集设置，
+GIST 实验取 0.02。种子图迭代轮数和采样率由 `graph_iter_turn` 和 `neighbor_sample_rate` 控制。
 
 ### PiPNN 构建边界
 
