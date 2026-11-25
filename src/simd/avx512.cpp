@@ -707,6 +707,34 @@ SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
 #endif
 }
 
+void
+SQ8ComputeCodesL2SqrBatch4(const uint8_t* source,
+                           const uint8_t* const* targets,
+                           const float* lower_bound,
+                           const float* diff,
+                           uint64_t dim,
+                           float* distances) {
+#if defined(ENABLE_AVX512)
+    simd::SQ8ComputeL2SqrBatch4Impl<simd::SQ8Traits<simd::Avx512SQ8Tag>>(
+        source,
+        targets[0],
+        targets[1],
+        targets[2],
+        targets[3],
+        lower_bound,
+        diff,
+        dim,
+        distances[0],
+        distances[1],
+        distances[2],
+        distances[3],
+        &avx2::SQ8ComputeCodesL2Sqr);
+#else
+    for (uint64_t i = 0; i < 4; ++i)
+        distances[i] = avx2::SQ8ComputeCodesL2Sqr(source, targets[i], lower_bound, diff, dim);
+#endif
+}
+
 float
 SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
                      const uint8_t* RESTRICT codes2,

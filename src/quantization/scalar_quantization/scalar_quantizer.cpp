@@ -218,6 +218,17 @@ ScalarQuantizer<metric, bit>::ComputeImpl(const uint8_t* codes1, const uint8_t* 
 
 template <MetricType metric, int bit>
 void
+ScalarQuantizer<metric, bit>::ComputeCodeDistances4(const uint8_t* source,
+                                                    const uint8_t* const* targets,
+                                                    float* distances) const
+    requires(bit == 8 && metric == MetricType::METRIC_TYPE_L2SQR)
+{
+    SQ8ComputeCodesL2SqrBatch4(
+        source, targets, lower_bound_.data(), diff_.data(), this->dim_, distances);
+}
+
+template <MetricType metric, int bit>
+void
 ScalarQuantizer<metric, bit>::ProcessQueryImpl(const float* query,
                                                Computer<ScalarQuantizer>& computer) const {
     try {

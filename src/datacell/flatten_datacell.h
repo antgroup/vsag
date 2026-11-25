@@ -338,6 +338,7 @@ private:
         return computer;
     }
 
+protected:
     MutexArrayPtr external_read_mutex_;
 };
 

@@ -154,6 +154,44 @@ TEST_CASE("FlattenDataCell prefetch stride follows storage type", "[ut][FlattenD
     REQUIRE(file_cell.prefetch_stride_code_ == 1);
 }
 
+TEST_CASE("SQ8 pairwise tiles preserve stored L2 distances", "[ut][FlattenDataCell][sq8_tile]") {
+    auto io = GENERATE("memory_io", "block_memory_io");
+    const uint64_t dim = GENERATE(13, 16, 65, 960);
+    auto json = JsonType::Parse(R"({"io_params":{"type":"memory_io"},
+                                  "quantization_params":{"type":"sq8"}})");
+    json["io_params"]["type"].SetString(io);
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(json);
+    IndexCommonParam common;
+    common.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    common.dim_ = dim;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto cell = FlattenInterface::MakeInstance(param, common);
+    auto* tile = dynamic_cast<FlattenPairwiseDistanceInterface*>(cell.get());
+    REQUIRE(tile != nullptr);
+    constexpr InnerIdType count = 75;
+    auto data = fixtures::generate_vectors(count, dim, 42);
+    cell->Train(data.data(), count);
+    cell->BatchInsertVector(data.data(), count);
+    std::vector<InnerIdType> targets(count);
+    for (InnerIdType i = 0; i < count; ++i) targets[i] = (i * 19) % count;
+    const std::array<InnerIdType, 5> sources{70, 2, 13, 2, 49};
+    for (const auto diagonal : std::array<std::optional<uint64_t>, 3>{std::nullopt, 0, 68}) {
+        std::vector<float> expected(sources.size() * count, -1);
+        auto actual = expected;
+        for (uint64_t row = 0; row < sources.size(); ++row) {
+            const auto end = diagonal ? *diagonal + row : count;
+            for (uint64_t col = 0; col < end; ++col)
+                expected[row * count + col] = cell->ComputePairVectors(sources[row], targets[col]);
+        }
+        REQUIRE(tile->ComputePairwiseTile(sources, targets, actual.data(), diagonal));
+        REQUIRE(std::memcmp(expected.data(), actual.data(), expected.size() * sizeof(float)) == 0);
+    }
+    cell->SetExternalReadMutexArray(std::make_shared<PointsMutex>(count, common.allocator_.get()));
+    std::vector<float> output(sources.size() * count);
+    REQUIRE_FALSE(tile->ComputePairwiseTile(sources, targets, output.data(), 0));
+}
+
 TEST_CASE("FlattenDataCell prefetch defaults follow code size", "[ut][FlattenDataCell]") {
     auto param = std::make_shared<FlattenDataCellParameter>();
     param->FromJson(JsonType::Parse(R"({

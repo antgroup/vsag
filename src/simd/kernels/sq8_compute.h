@@ -15,6 +15,7 @@
 #pragma once
 
 #include <cstdint>
+#include <type_traits>
 
 // SQ8 quantized distance kernels.
 //
@@ -136,10 +137,10 @@ SQ8ComputeL2SqrImpl(const float* query,
     return result;
 }
 
-template <typename T>
+template <typename T, typename Query>
 inline void
 SQ8ComputeL2SqrBatch4Impl(
-    const float* query,
+    const Query* query,
     const uint8_t* codes1,
     const uint8_t* codes2,
     const uint8_t* codes3,
@@ -151,7 +152,7 @@ SQ8ComputeL2SqrBatch4Impl(
     float& dist2,
     float& dist3,
     float& dist4,
-    float (*fallback)(const float*, const uint8_t*, const float*, const float*, uint64_t)) {
+    float (*fallback)(const Query*, const uint8_t*, const float*, const float*, uint64_t)) {
     using V = typename T::FloatVec;
     constexpr uint64_t W = T::Width;
     V sums[4] = {T::zero(), T::zero(), T::zero(), T::zero()};
@@ -160,13 +161,19 @@ SQ8ComputeL2SqrBatch4Impl(
 
     uint64_t i = 0;
     for (; i + W <= dim; i += W) {
-        const V q = T::load(query + i);
         const V lb = T::load(lower_bound + i);
         const V scale = T::load(diff + i);
+        auto decode = [&](const uint8_t* bytes) {
+            return T::fmadd(T::mul(T::load_u8_as_float(bytes + i), inv255), scale, lb);
+        };
+        V q;
+        if constexpr (std::is_same_v<Query, uint8_t>) {
+            q = decode(query);
+        } else {
+            q = T::load(query + i);
+        }
         for (uint64_t j = 0; j < 4; ++j) {
-            const V code = T::load_u8_as_float(codes[j] + i);
-            const V adjusted = T::fmadd(T::mul(code, inv255), scale, lb);
-            const V delta = T::sub(q, adjusted);
+            const V delta = T::sub(q, decode(codes[j]));
             sums[j] = T::fmadd(delta, delta, sums[j]);
         }
     }
