@@ -61,8 +61,12 @@ get_id_recall(const int64_t* neighbors,
     return static_cast<double>(count) / static_cast<double>(top_k);
 }
 
-RecallMonitor::RecallMonitor(uint64_t max_record_counts, bool use_id_based_recall)
-    : Monitor("recall_monitor"), use_id_based_recall_(use_id_based_recall) {
+RecallMonitor::RecallMonitor(uint64_t max_record_counts,
+                             bool use_id_based_recall,
+                             std::optional<double> recall_target)
+    : Monitor("recall_monitor"),
+      use_id_based_recall_(use_id_based_recall),
+      recall_target_(recall_target) {
     if (max_record_counts > 0) {
         this->recall_records_.reserve(max_record_counts);
     }
@@ -80,6 +84,21 @@ RecallMonitor::GetResult() {
     JsonType result;
     for (auto& metric : metrics_) {
         this->cal_and_set_result(metric, result);
+    }
+    if (recall_target_.has_value()) {
+        const double target = recall_target_.value();
+        const auto query_count = static_cast<uint64_t>(recall_records_.size());
+        const auto reached_queries = static_cast<uint64_t>(
+            std::count_if(recall_records_.begin(), recall_records_.end(), [target](double recall) {
+                return recall >= target;
+            }));
+        const double rate = query_count == 0 ? 0.0
+                                             : static_cast<double>(reached_queries) /
+                                                   static_cast<double>(query_count);
+        result["query_coverage"] = {{"recall_target", target},
+                                    {"reached_queries", reached_queries},
+                                    {"query_count", query_count},
+                                    {"rate", rate}};
     }
     return result;
 }
