@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <sstream>
@@ -1712,4 +1713,32 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     REQUIRE(result.value()->GetDim() == 0);
     REQUIRE_FALSE(result.value()->GetReasoning().empty());
     REQUIRE(result.value()->GetReasoning().find("missed_targets") != std::string::npos);
+}
+
+TEST_CASE("IVF Analyze Single Candidate", "[ft][ivf][analyze]") {
+    using namespace fixtures;
+    // Regression test: when only one candidate survives per query (topk == 1),
+    // the inversion count denominator search_count * (search_count - 1) / 2 is zero.
+    // The rate must be reported as a finite 0 instead of NaN (serialized as JSON null).
+    auto dim = 32;
+    auto metric = "l2";
+    auto param = IVFTestIndex::GenerateIVFBuildParametersString(metric, dim, "fp32,fp32", 4);
+    auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
+    auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(dim, 20, metric);
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    vsag::SearchRequest request;
+    request.topk_ = 1;
+    request.params_str_ = fmt::format(fixtures::search_param_tmp, 4);
+    request.query_ = dataset->query_;
+    auto raw_num = dataset->query_->GetNumElements();
+    dataset->query_->NumElements(3);
+    auto stats = vsag::JsonType::Parse(index->AnalyzeIndexBySearch(request));
+    dataset->query_->NumElements(raw_num);
+
+    REQUIRE(stats.Contains("quantization_inversion_count_rate"));
+    auto rate = stats["quantization_inversion_count_rate"];
+    REQUIRE(rate.IsNumber());
+    REQUIRE(std::isfinite(rate.GetFloat()));
+    REQUIRE(rate.GetFloat() == 0.0F);
 }
