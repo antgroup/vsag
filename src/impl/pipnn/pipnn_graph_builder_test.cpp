@@ -36,6 +36,7 @@
 #include <tuple>
 #include <vector>
 
+#include "datacell/flatten_interface.h"
 #include "datacell/graph_interface.h"
 #include "datacell/graph_interface_parameter.h"
 #include "half_vector.h"
@@ -2194,6 +2195,58 @@ TEST_CASE("PiPNN parallel Add preserves routes across overlapping and replaced l
     REQUIRE(std::any_of(final_memberships.begin(), final_memberships.end(), [](const auto& hits) {
         return hits.size() > 1;
     }));
+}
+
+TEST_CASE("PiPNN split row tasks match serial ranked distances and ordered graph edges",
+          "[ut][pipnn][add][split_rows]") {
+    constexpr uint32_t base = 257, dim = 65, count = base + 1;
+    const bool coded = GENERATE(false, true);
+    const auto common = MakeCommonParam(dim);
+    auto* alloc = common.allocator_.get();
+    auto param = vsag::PiPNNGraphBuilderParameter();
+    param.max_leaf_size = base;
+    param.min_leaf_size = 2;
+    param.leader_sample_rate = 0.005F;
+    param.fanout = {1};
+    auto pool = vsag::SafeThreadPool::FactoryDefaultThreadPool();
+    pool->SetPoolSize(4);
+    auto values = MakeVectors(count, dim);
+    auto code_params = std::make_shared<vsag::FlattenDataCellParameter>();
+    code_params->FromJson(vsag::JsonType::Parse(R"({"io_params":{"type":"memory_io"},
+                                            "quantization_params":{"type":"sq8"}})"));
+    auto codes = vsag::FlattenInterface::MakeInstance(code_params, common);
+    codes->Train(values.data(), count);
+    codes->BatchInsertVector(values.data(), count);
+
+    auto run = [&](uint64_t threads) {
+        vsag::PiPNNGraphBuilder builder(param, dim, common.metric_, alloc, pool.get(), threads);
+        vsag::PiPNNIncrementalState state;
+        auto graph = MakeGraph(common, count, 8);
+        for (const auto end : {base, count}) {
+            vsag::Vector<vsag::InnerIdType> ids(alloc);
+            for (uint32_t i = state.ids.size(); i < end; ++i) ids.push_back(i);
+            const auto rows = MakeRows(values, ids, dim, alloc);
+            if (coded)
+                builder.UpdateWithCodes(graph, ids, rows, state, *codes);
+            else
+                builder.Update(graph, ids, rows, state);
+        }
+        REQUIRE(state.leaves.size() == 3);
+        REQUIRE(std::max(state.leaves[1].points.size(), state.leaves[2].points.size()) > 64);
+        std::stringstream bytes;
+        vsag::IOStreamWriter writer(bytes);
+        state.Serialize(writer);
+        return std::make_pair(bytes.str(), graph);
+    };
+    const auto serial = run(1);
+    const auto parallel = run(4);
+    REQUIRE(serial.first == parallel.first);
+    vsag::Vector<vsag::InnerIdType> a(alloc), b(alloc);
+    for (uint32_t id = 0; id < count; ++id) {
+        serial.second->GetNeighbors(id, a);
+        parallel.second->GetNeighbors(id, b);
+        REQUIRE(a == b);
+    }
 }
 
 TEST_CASE("PiPNN Add groups both directions by local ID for singleton and bulk batches",
