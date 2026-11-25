@@ -109,8 +109,8 @@ KNN 搜索参数支持在 JSON 顶层设置可选的 `threshold`：
 设置后，结果至多返回 `k` 个邻居，并且每个返回距离都小于或等于 `threshold`。
 边界值会被包含，结果仍按距离升序排列，因此可能返回少于 `k` 个结果，甚至没有结果。
 不设置该字段时，KNN 行为保持不变。阈值使用索引返回的距离语义：`l2` 为 L2 平方距离，
-`ip` 为 `1 - inner_product`，`cosine` 为 `1 - cosine_similarity`。因此 `ip` 可以使用负阈值；
-阈值必须是有限的 JSON 数字。
+`ip` 为 `1 - inner_product`，`cosine` 为 `1 - cosine_similarity`，`hamming` 为取值不同的 bit 数
+（见[二进制向量](binary_vectors.md)）。因此 `ip` 可以使用负阈值；阈值必须是有限的 JSON 数字。
 
 通过统一请求接口时，BruteForce、HGraph 和 IVF 支持使用 `SearchRequest::threshold_`；
 Pyramid、SINDI 和 SIMQ 通过 KNN JSON 参数支持该选项。这六种索引是本功能支持的仍在维护的索引。

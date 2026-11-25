@@ -234,6 +234,15 @@ private:
     void
     add_one(const void* data, InnerIdType inner_id);
 
+    /// Bytes of one stored dense row for memory estimates: ceil(dim / 8) for binary indexes,
+    /// dim float32 values otherwise.
+    uint64_t
+    dense_row_bytes() const;
+
+    /// Distance between a query in the index dtype and the vector stored under label @p id.
+    float
+    calc_native_distance_by_id(const void* query, int64_t id) const;
+
     /**
      * @brief Recalculate and cache the memory-usage counter.
      *

@@ -39,6 +39,7 @@ extern const char* const FLOAT32_VECTORS;
 extern const char* const FLOAT16_VECTORS;
 extern const char* const SPARSE_VECTORS;
 extern const char* const INT8_VECTORS;
+extern const char* const BINARY_VECTORS;
 extern const char* const ATTRIBUTE_SETS;
 extern const char* const DATASET_PATHS;
 extern const char* const EXTRA_INFOS;
@@ -53,11 +54,13 @@ extern const char* const SIMPLEFLAT_IDS;
 extern const char* const METRIC_L2;
 extern const char* const METRIC_COSINE;
 extern const char* const METRIC_IP;
+extern const char* const METRIC_HAMMING;
 extern const char* const DATATYPE_FLOAT32;
 extern const char* const DATATYPE_FLOAT16;
 extern const char* const DATATYPE_BFLOAT16;
 extern const char* const DATATYPE_INT8;
 extern const char* const DATATYPE_SPARSE;
+extern const char* const DATATYPE_BINARY;
 extern const char* const BLANK_INDEX;
 
 // environment-level-parameters

@@ -40,6 +40,7 @@ struct vsag_dataset {
     const float* float32_vectors{nullptr};
     const uint16_t* float16_vectors{nullptr};
     const int8_t* int8_vectors{nullptr};
+    const uint8_t* binary_vectors{nullptr};
     const uint32_t* index_pointers{nullptr};
     const uint32_t* indices{nullptr};
     const float* values{nullptr};
@@ -132,7 +133,8 @@ make_view(const vsag_dataset_t* handle, bool single_query) {
     }
     const bool is_sparse = handle->index_pointers != nullptr;
     const bool is_dense = handle->float32_vectors != nullptr or
-                          handle->float16_vectors != nullptr or handle->int8_vectors != nullptr;
+                          handle->float16_vectors != nullptr or handle->int8_vectors != nullptr or
+                          handle->binary_vectors != nullptr;
     if (not is_sparse and not is_dense) {
         throw std::invalid_argument("dataset has no vectors");
     }
@@ -157,6 +159,9 @@ make_view(const vsag_dataset_t* handle, bool single_query) {
     }
     if (handle->int8_vectors != nullptr) {
         view.dataset->Int8Vectors(handle->int8_vectors);
+    }
+    if (handle->binary_vectors != nullptr) {
+        view.dataset->BinaryVectors(handle->binary_vectors);
     }
     if (is_sparse) {
         const auto* pointers = handle->index_pointers;

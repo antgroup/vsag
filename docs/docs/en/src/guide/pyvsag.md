@@ -164,13 +164,16 @@ For the available index types and parameters, see [Create an Index](create_index
 | `float32` | `numpy.float32` |
 | `float16` | `numpy.float16` |
 | `bfloat16` | `numpy.uint16` array holding the raw bfloat16 bit patterns |
+| `binary` | `numpy.uint8` array of bit-packed vectors: `dim` counts bits, each vector takes `ceil(dim / 8)` bytes, packed MSB-first like `numpy.packbits` (see [Binary Vectors](binary_vectors.md)) |
 | `sparse` | CSR arrays: `index_pointers` (`uint32`), `indices` (`uint32`), `values` (`float32`) |
 
 `pyvsag` never converts or copies dense vectors, which keeps the call zero-copy; input that does not
 match is rejected with `ValueError`:
 
 - dense arrays must have exactly the dtype above, in native byte order, and be C-contiguous (a 2D
-  matrix must be row-major, and its row length must equal `dim`);
+  matrix must be row-major, and its row length must equal `dim`, or `ceil(dim / 8)` bytes for
+  `binary`);
+- a single `binary` query is a 1D array of exactly `ceil(dim / 8)` bytes;
 - ID arrays and sparse `index_pointers` / `indices` must be integer arrays whose values fit the
   target type (`int64` and `uint32`); floating-point IDs and out-of-range values are rejected instead
   of being truncated;
@@ -260,8 +263,10 @@ remains index-dependent.
 `calc_distances_by_id` takes one 1D float32 query whose length equals the index dimension and a 1D
 ID array. Queries of the wrong length and empty queries are rejected with `RuntimeError`, not
 treated as missing IDs. Other NumPy inputs are converted to contiguous float32 / int64 arrays, so
-views with positive or negative strides keep their logical order. It does not support sparse,
-multi-vector or multi-query input.
+views with positive or negative strides keep their logical order. A `binary` index instead takes
+a contiguous `numpy.uint8` query of exactly `ceil(dim / 8)` bytes, which is never converted, and
+rejects anything else with `ValueError`. It does not support sparse, multi-vector or multi-query
+input.
 
 ## Error Handling
 

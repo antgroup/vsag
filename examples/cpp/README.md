@@ -59,6 +59,7 @@ together when the directory is listed:
 | [`109_index_sindi.cpp`](109_index_sindi.cpp) | SINDI | Sparse vector index (text / inverted retrieval). |
 | [`110_index_warp.cpp`](110_index_warp.cpp) | Warp | Hybrid index. |
 | [`111_index_lazy_hgraph.cpp`](111_index_lazy_hgraph.cpp) | LazyHGraph | Starts as exact BruteForce for small data, then converts to HGraph after a threshold. |
+| [`115_index_binary_hamming.cpp`](115_index_binary_hamming.cpp) | BruteForce / HGraph + binary | Bit-packed binary vectors with the Hamming distance; verifies every returned distance. |
 | [`316_index_int8_hgraph.cpp`](316_index_int8_hgraph.cpp) | HGraph + INT8 | HGraph with INT8-quantized vectors. |
 | [`321_index_fp16_hgraph.cpp`](321_index_fp16_hgraph.cpp) | HGraph + FP16 | HGraph with FP16-quantized vectors. |
 

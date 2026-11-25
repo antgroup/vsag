@@ -59,6 +59,8 @@ dataset 是对调用方内存的视图，既可描述底库数据，也可描述
 
 - `vsag_dataset_set_float32_vectors`、`vsag_dataset_set_float16_vectors`（bfloat16 也使用它，
   传入原始 `uint16` 位）和 `vsag_dataset_set_int8_vectors`，并配合 `vsag_dataset_set_dim`。
+- `vsag_dataset_set_binary_vectors`：`dtype: "binary"` 索引的按位压缩向量，`vsag_dataset_set_dim`
+  给出 bit 数，每个向量占 `ceil(dim / 8)` 字节（见[二进制向量](binary_vectors.md)）。
 - `vsag_dataset_set_sparse_vectors`：CSR 行，第 `i` 行拥有
   `indices[index_pointers[i] .. index_pointers[i + 1])` 及对应的值。
 
