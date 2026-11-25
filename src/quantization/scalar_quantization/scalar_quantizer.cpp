@@ -44,7 +44,7 @@ ScalarQuantizer<metric, bit>::ScalarQuantizer(
     const IndexCommonParam& common_param)
     : ScalarQuantizer<metric, bit>(common_param.dim_, common_param.allocator_.get()) {
     if constexpr (bit == 8) {
-        encoding_bias_ = param->round_to_nearest_ ? 0.5F : 0.0F;
+        encoding_bias_ = param != nullptr && param->round_to_nearest_ ? 0.5F : 0.0F;
     }
 }
 
