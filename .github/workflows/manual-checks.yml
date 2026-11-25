@@ -85,7 +85,7 @@ jobs:
       contents: read
       actions: read
     if: ${{ inputs.check == 'performance' || inputs.check == 'build-performance' }}
-    uses: ./.github/workflows/daily_test.yml
+    uses: ./.github/workflows/nightly-performance.yml
     with:
       profile: ${{ inputs.check }}
       ref: ${{ inputs.ref }}

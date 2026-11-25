@@ -11,7 +11,7 @@ class NightlyCoverageBadgeTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
-        self.event_path = root / "event.json"
+        self.run_path = root / "run.json"
         self.report_path = root / "job-report.json"
         self.output = root / "badge"
         self.output.mkdir()
@@ -35,9 +35,9 @@ class NightlyCoverageBadgeTests(unittest.TestCase):
         }
 
     def publish(self):
-        self.event_path.write_text(json.dumps({"workflow_run": self.run}))
+        self.run_path.write_text(json.dumps(self.run))
         self.report_path.write_text(json.dumps(self.report))
-        return write_badge(self.event_path, self.report_path, self.output)
+        return write_badge(self.run_path, self.report_path, self.output)
 
     def snapshot(self):
         return {path.name: path.read_bytes() for path in self.output.iterdir()}
@@ -106,7 +106,7 @@ class NightlyCoverageBadgeTests(unittest.TestCase):
                 self.assertEqual(self.snapshot(), {})
 
     def test_missing_report_does_not_publish(self):
-        self.event_path.write_text(json.dumps({"workflow_run": self.run}))
+        self.run_path.write_text(json.dumps(self.run))
         with self.assertRaises(FileNotFoundError):
-            write_badge(self.event_path, self.report_path, self.output)
+            write_badge(self.run_path, self.report_path, self.output)
         self.assertEqual(self.snapshot(), {})

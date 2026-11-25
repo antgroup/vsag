@@ -11,6 +11,8 @@ work, not enabled here.
 The workflow filename `daily_test.yml`, helper names, `VSAG_DAILY_*` variables,
 `[daily]` test tags and artifact identifiers stay unchanged for compatibility.
 The Actions entry is **Nightly CI**, with one final **Nightly Summary**.
+The same run updates the README coverage badge after Summary when its Coverage
+job succeeds. Publication only runs for the upstream main regression schedule.
 GitHub may delay scheduled dispatch: 22:00–08:00 is the intended operating window,
 not a guaranteed local-clock finish. The enforced ten-hour allowance starts at the
 actual attempt start; a delayed dispatch can therefore finish after 08:00.

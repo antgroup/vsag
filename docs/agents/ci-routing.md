@@ -196,7 +196,7 @@ The image upgrade can land on main ahead of the C++20 migration. Copy the follow
 - `docker/Dockerfile.aarch64.base`
 - `scripts/deps/install_toolchain_ubuntu.sh`
 - `.github/workflows/update-ci-image.yml`
-- the `performance` profile in `.github/workflows/daily_test.yml` (use a virtual environment with the CI image Python)
+- the `performance` profile in `.github/workflows/nightly-performance.yml` (use a virtual environment with the CI image Python)
 
 These changes build independently of the CMake, source, formatter configuration and release-package changes in the toolchain PR. The existing x86 MKL/OpenBLAS and aarch64 OpenBLAS Dockerfiles inherit the upgraded bases without edits. The manylinux `Dockerfile.dist_*` changes belong to the toolchain/release migration and are not required for this image-only PR.
 
@@ -476,8 +476,9 @@ job runners, dependencies, selection and permissions. No workflow generator is n
   selected jobs appear inside that manual run, not a separately dispatched run.
 - Nightly CI runs complete regression on upstream main at 22:00 Asia/Shanghai daily
   (`0 14 * * *` UTC), including supplemental x86 work and the final Nightly Summary.
-  The workflow filename remains `daily_test.yml`; manual/reusable regression is
-  still available. The weekday runtime-performance schedule is removed; runtime
+  The workflow filename remains `daily_test.yml`; manual regression is available
+  through that entry. The two performance jobs also support the read-only
+  `nightly-performance.yml` reusable workflow used by Manual Checks. Runtime
   performance remains manual. The weekly build-performance schedule is unchanged
   and never selects regression. No compiler-cache or package-publishing schedule changes.
 - Maintenance preserves docs-only push filtering for docs synchronization and

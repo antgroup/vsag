@@ -205,7 +205,7 @@ class EntryTests(unittest.TestCase):
 
     def test_exact_workflow_files_and_local_workflow_targets_exist(self):
         expected = {'pr-ci.yml', 'pr-ci-team.yml', 'pr-ci-community.yml', 'pr-issue-link.yml',
-                    'main-ci.yml', 'daily_test.yml', 'nightly-coverage-badge.yml', 'manual-checks.yml', 'release.yml',
+                    'main-ci.yml', 'daily_test.yml', 'nightly-performance.yml', 'manual-checks.yml', 'release.yml',
                     'maintenance.yml', 'update-ci-image.yml', 'pyvsag-testpypi.yml'}
         files = list((ROOT / '.github/workflows').glob('*.y*ml'))
         self.assertEqual({p.name for p in files}, expected)
@@ -343,12 +343,12 @@ class EntryTests(unittest.TestCase):
         self.assertEqual(re.findall(r"(?m)^    - cron: ['\"]([^'\"]+)", text),
                          ['0 14 * * *', '23 3 * * 1'])
         names = re.findall(r'(?m)^  ([\w-]+):$', text.split('jobs:\n', 1)[1])
-        benchmarks = {'performance-performance', 'build-performance-benchmark-x86'}
+        benchmarks = {'performance-benchmarks'}
         regression = set(names) - benchmarks
         aggregate = re.search(r'(?m)^  VSAG_DAILY_AGGREGATE: (.+)$', text)[1]
         for cron, repo, ref, selected in (
             ('0 14 * * *', 'antgroup/vsag', 'refs/heads/main', regression),
-            ('23 3 * * 1', 'antgroup/vsag', 'refs/heads/main', {'build-performance-benchmark-x86'}),
+            ('23 3 * * 1', 'antgroup/vsag', 'refs/heads/main', benchmarks),
             ('01 08 * * 1-5', 'antgroup/vsag', 'refs/heads/main', set()),
             ('0 15 * * *', 'antgroup/vsag', 'refs/heads/main', set()),
             ('0 14 * * *', 'contributor/vsag', 'refs/heads/main', set()),
@@ -389,13 +389,12 @@ class EntryTests(unittest.TestCase):
     def test_nightly_manual_and_reusable_profiles_keep_their_scope(self):
         text = (ROOT / '.github/workflows/daily_test.yml').read_text()
         names = re.findall(r'(?m)^  ([\w-]+):$', text.split('jobs:\n', 1)[1])
-        benchmarks = {'performance-performance', 'build-performance-benchmark-x86'}
+        benchmarks = {'performance-benchmarks'}
         for event in ('workflow_dispatch', 'push'):
             for profile in ('', 'regression', 'performance', 'build-performance'):
                 with self.subTest(event=event, profile=profile):
-                    selected = (set(names) - benchmarks if profile in ('', 'regression') else
-                                {'performance-performance' if profile == 'performance' else
-                                 'build-performance-benchmark-x86'})
+                    selected = (set(names) - benchmarks - {'publish-coverage-badge'}
+                                if profile in ('', 'regression') else benchmarks)
                     values = {'github.event_name': event, 'inputs.profile': profile,
                               'github.repository': 'antgroup/vsag', 'github.ref': 'refs/heads/main',
                               'needs.full-coverage-changes.outputs.non_markdown': 'true'}
@@ -406,7 +405,42 @@ class EntryTests(unittest.TestCase):
         values.update({'github.event_name': 'workflow_dispatch', 'inputs.profile': 'regression',
                        'github.ref': 'refs/heads/validation'})
         for name in names:
-            self.assertEqual(condition('daily_test.yml', name, values), name not in benchmarks, name)
+            self.assertEqual(condition('daily_test.yml', name, values), name not in benchmarks | {'publish-coverage-badge'}, name)
+
+    def test_weekly_nightly_passes_the_build_benchmark_profile(self):
+        body = job('daily_test.yml', 'performance-benchmarks')
+        profile = re.search(r'(?m)^      profile: (.+)$', body)[1]
+        self.assertEqual(expression(profile, {}), 'build-performance')
+        for manual in ('performance', 'build-performance'):
+            self.assertEqual(expression(profile, {'inputs.profile': manual}), manual)
+
+    def test_inline_badge_requires_successful_coverage_and_trusted_schedule(self):
+        name = 'publish-coverage-badge'
+        body = job('daily_test.yml', name)
+        self.assertIn('needs: [daily-summary, full-coverage-coverage]', body)
+        self.assertIn('continue-on-error: true', body)
+        self.assertIn('        run: |\n          set -euo pipefail\n', body)
+        self.assertIn('contents: write', body)
+        self.assertIn('name: daily-job-full-coverage-coverage-0-${{ github.run_id }}', body)
+        self.assertNotIn('workflow_run', body)
+        trusted = {
+            'github.event_name': 'schedule', 'github.event.schedule': '0 14 * * *',
+            'github.repository': 'antgroup/vsag', 'github.ref': 'refs/heads/main',
+        }
+        for summary in ('success', 'failure'):
+            for coverage in ('success', 'failure', 'cancelled', 'skipped'):
+                values = {**trusted, 'needs.daily-summary.result': summary,
+                          'needs.full-coverage-coverage.result': coverage}
+                self.assertEqual(condition('daily_test.yml', name, values), coverage == 'success')
+        trusted['needs.full-coverage-coverage.result'] = 'success'
+        for key, value in (
+            ('github.event_name', 'workflow_dispatch'),
+            ('github.event.schedule', '23 3 * * 1'),
+            ('github.repository', 'fork/vsag'),
+            ('github.ref', 'refs/heads/feature'),
+            ('cancelled()', True),
+        ):
+            self.assertFalse(condition('daily_test.yml', name, {**trusted, key: value}), key)
 
     def test_nightly_summary_is_selected_even_after_upstream_failure(self):
         values = {'github.event_name': 'schedule', 'github.event.schedule': '0 14 * * *',
@@ -458,7 +492,7 @@ class EntryTests(unittest.TestCase):
             self.assertFalse(validate(results, required))
 
     def test_benchmark_uses_call_input_even_when_event_ref_differs(self):
-        body = job('daily_test.yml', 'build-performance-benchmark-x86')
+        body = job('nightly-performance.yml', 'build-performance-benchmark-x86')
         requested = re.search(r'(?m)^          REQUESTED_REF: (.+)$', body)[1]
         sha = 'a' * 40
         for event_ref in ('', 'main', 'b' * 40):
@@ -478,11 +512,11 @@ class EntryTests(unittest.TestCase):
                               'github.repository': repo, 'inputs.profile': 'performance',
                               'github.event.schedule': '01 08 * * 1-5'}
                     expected = event in ('workflow_dispatch', 'push') and ref == 'refs/heads/main' and repo == 'antgroup/vsag'
-                    self.assertEqual(condition('daily_test.yml', 'performance-performance', values), expected)
+                    self.assertEqual(condition('nightly-performance.yml', 'performance-performance', values), expected)
 
     def test_runtime_benchmark_uses_shared_ref_validation_and_independent_runs(self):
-        runtime = job('daily_test.yml', 'performance-performance')
-        build = job('daily_test.yml', 'build-performance-benchmark-x86')
+        runtime = job('nightly-performance.yml', 'performance-performance')
+        build = job('nightly-performance.yml', 'build-performance-benchmark-x86')
         self.assertIn('run: &approved-benchmark-ref |', runtime)
         self.assertIn('run: *approved-benchmark-ref', build)
         for body in (runtime, build):

@@ -74,7 +74,7 @@ class DependencyWorkflowTest(unittest.TestCase):
         self.assertIn("uses: actions/cache/restore@v5", pr_ci)
         self.assertNotIn("uses: actions/cache@v5", pr_ci)
         self.assertNotIn("uses: actions/cache/save@v5", pr_ci)
-        benchmark = (ROOT / ".github/workflows/daily_test.yml").read_text(encoding="utf-8")
+        benchmark = (ROOT / ".github/workflows/nightly-performance.yml").read_text(encoding="utf-8")
         self.assertIn("dependency-cache-write-policy restore-only", benchmark)
 
     def test_archive_directory_is_exported_for_the_entire_metrics_job(self) -> None:

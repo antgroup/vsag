@@ -78,8 +78,9 @@ class DailyWorkflowTests(unittest.TestCase):
                 self.assertIn("job-summary: ${{ env.VSAG_DAILY_AGGREGATE != '1'", text, str(p))
         self.assertIn('name: Nightly Summary', job_text(WORKFLOW,'daily-summary'))
         self.assertIn('name: Coverage — C++ lines and branches',job_text(WORKFLOW,'full-coverage-coverage'))
+        benchmark = ROOT / ".github/workflows/nightly-performance.yml"
         for name in ('performance-performance', 'build-performance-benchmark-x86'):
-            self.assertNotIn('daily-job-report', job_text(WORKFLOW, name))
+            self.assertNotIn('daily-job-report', job_text(benchmark, name))
         readme=(ROOT/'README.md').read_text()
         self.assertIn('Nightly-10h%20regression',readme)
         self.assertNotIn('img.shields.io/circleci/',readme)
@@ -225,6 +226,12 @@ class DailyWorkflowTests(unittest.TestCase):
         self.assertIn("contents: read", caller)
         self.assertNotIn("actions: write", WORKFLOW.read_text())
         self.assertNotIn("actions: write", caller)
+        self.assertNotIn("contents: write", caller)
+        self.assertIn("uses: ./.github/workflows/nightly-performance.yml", caller)
+        benchmark = (ROOT / ".github/workflows/nightly-performance.yml").read_text()
+        self.assertIn("  workflow_call:", benchmark)
+        self.assertNotIn("contents: write", benchmark)
+        self.assertNotIn("workflow_call:", WORKFLOW.read_text())
 
     def test_suppressions_survive_isolated_working_directories(self):
         sources = [WORKFLOW] + [ROOT / f".github/actions/asan-build-and-test-test-asan-{arch}/action.yml"

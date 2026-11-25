@@ -13,13 +13,13 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 PR = (ROOT / '.github/workflows/pr-ci-community.yml').read_text(encoding='utf-8')
-BENCH = (ROOT / '.github/workflows/daily_test.yml').read_text(encoding='utf-8')
+BENCH = (ROOT / '.github/workflows/nightly-performance.yml').read_text(encoding='utf-8')
 
 
 def block(workflow, header, description):
     """Extract our block-style YAML subset, stopping at the next peer/ancestor."""
     match = re.search(r'^( *)' + header + r'[ \t]*(?:#.*)?$', workflow, re.MULTILINE)
-    workflow_name = 'pr-ci-community.yml' if workflow == PR else 'daily_test.yml' if workflow == BENCH else 'provided workflow'
+    workflow_name = 'pr-ci-community.yml' if workflow == PR else 'nightly-performance.yml' if workflow == BENCH else 'provided workflow'
     if match is None:
         raise AssertionError(f'Missing {description} in {workflow_name}; check its name and block formatting')
     lines = []
@@ -164,7 +164,9 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertNotIn('secrets.', benchmark)
         self.assertNotIn('pull_request:', BENCH)
         self.assertNotIn('pull_request_target', BENCH)
-        self.assertIn("cron: '23 3 * * 1'", BENCH)
+        nightly = (ROOT / '.github/workflows/daily_test.yml').read_text(encoding='utf-8')
+        self.assertIn("cron: '23 3 * * 1'", nightly)
+        self.assertIn('uses: ./.github/workflows/nightly-performance.yml', nightly)
         self.assertIn('runs-on: ubuntu-24.04', BENCH)
         self.assertIn('timeout-minutes: 180', BENCH)
         self.assertIn('group: build-performance-', BENCH)
