@@ -168,7 +168,8 @@ export class Index {
      *
      * @param query - Float32Array representing the query vector
      * @param ids - BigInt64Array of IDs to calculate distances for
-     * @returns Float32Array of distances corresponding to each ID
+     * @returns Float32Array of distances corresponding to each ID; missing or removed IDs
+     *          yield NaN, and a failed call throws an Error
      */
     calDistanceById(query: Float32Array, ids: BigInt64Array): Float32Array {
         return this._native.calDistanceById(query, ids);

@@ -1851,9 +1851,14 @@ SINDI::CalDistanceById(const DatasetPtr& query,
                        int64_t count,
                        bool calculate_precise_distance) const {
     auto result = Dataset::Make();
+    result->NumElements(1)->Dim(count);
     result->Owner(true, allocator_);
+    // An empty request has nothing to compute; allocating zero bytes may legitimately fail.
+    if (count <= 0) {
+        return result;
+    }
     auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
-    if (count > 0 and distances == nullptr) {
+    if (distances == nullptr) {
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate distance buffer");
     }
     std::fill_n(distances, count, std::numeric_limits<float>::quiet_NaN());

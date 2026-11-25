@@ -1376,8 +1376,16 @@ IVF::CalDistanceById(const float* query,
         return this->cal_distance_by_id(query, ids, count, this->reorder_codes_);
     }
     auto result = Dataset::Make();
+    result->NumElements(1)->Dim(count);
     result->Owner(true, allocator_);
+    // An empty request has nothing to compute; allocating zero bytes may legitimately fail.
+    if (count <= 0) {
+        return result;
+    }
     auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
+    if (distances == nullptr) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate distance buffer");
+    }
     result->Distances(distances);
     std::vector<bool> validity(count, false);
     auto computer = this->bucket_->FactoryComputer(query);

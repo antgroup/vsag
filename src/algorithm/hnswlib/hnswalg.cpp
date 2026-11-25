@@ -256,15 +256,25 @@ HierarchicalNSW::getBatchDistanceByLabel(const int64_t* ids,
     int64_t valid_cnt = 0;
     auto result = vsag::Dataset::Make();
     result->Owner(true, allocator_);
+    // NumElements(count) is kept for backward compatibility; Dim(1) makes the shape
+    // NumElements() * Dim() == count, matching the other indexes' batch distance results.
+    result->NumElements(count)->Dim(1);
+    // An empty request has nothing to compute; allocating zero bytes may legitimately fail.
+    if (count <= 0) {
+        return std::move(result);
+    }
     auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+    if (distances == nullptr) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate distance buffer");
+    }
     result->Distances(distances);
     // Missing ids carry a NaN distance and a false entry in the validity mask.
-    bool* valids = nullptr;
-    if (count > 0) {
-        valids = static_cast<bool*>(allocator_->Allocate(sizeof(bool) * count));
-        std::fill(valids, valids + count, false);
-        result->Valids(valids);
+    auto* valids = static_cast<bool*>(allocator_->Allocate(sizeof(bool) * count));
+    if (valids == nullptr) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate valids buffer");
     }
+    std::fill(valids, valids + count, false);
+    result->Valids(valids);
     std::shared_ptr<float[]> normalize_query;
     normalizeVector(data_point, normalize_query);
     for (int i = 0; i < count; i++) {

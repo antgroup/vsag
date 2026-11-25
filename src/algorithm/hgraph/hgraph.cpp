@@ -788,16 +788,25 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
             }
 
             float neighbor_dist = 0;
+            int64_t neighbor_label = 0;
             try {
-                int64_t neighbor_label;
                 {
                     std::shared_lock label_lock(this->label_lookup_mutex_);
                     neighbor_label = this->label_table_->GetLabelById(neighbor_inner_id);
                 }
                 neighbor_dist =
                     this->CalcDistanceById(static_cast<float*>(new_base_vec), neighbor_label);
-            } catch (const std::runtime_error& e) {
-                // incase that neighbor has been deleted
+            } catch (const VsagException& e) {
+                // A removed neighbor keeps its graph slot but loses its label, so computing its
+                // distance fails with INVALID_ARGUMENT. Skip exactly that case and rethrow the
+                // rest (e.g. allocation failures).
+                if (e.error_.type != ErrorType::INVALID_ARGUMENT) {
+                    throw;
+                }
+                std::shared_lock label_lock(this->label_lookup_mutex_);
+                if (this->label_table_->CheckLabel(neighbor_label)) {
+                    throw;
+                }
                 continue;
             }
             if (neighbor_dist < self_dist) {

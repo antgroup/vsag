@@ -47,8 +47,9 @@ query_ds->NumElements(1)->SparseVectors(/* ... */);
 auto r = index->CalDistanceById(query_ds, ids, count, /*calculate_precise_distance=*/true);
 ```
 
-结果 `Dataset` 中 `GetDistances()` 持有 `count` 个距离。若某个 id 无效（不在索引中），对应位置
-返回 `-1.0F`。
+结果 `Dataset` 中 `GetDistances()` 持有 `count` 个距离，并会填充 `NumElements()` 与 `Dim()`，
+满足 `NumElements() * Dim() == count`。若某个 id 不存在或已被删除，对应位置返回 `NaN`，且
+`GetValids()` 掩码中对应项为 `false`（掩码长度与 `GetDistances()` 相同）。
 
 ### `calculate_precise_distance`
 

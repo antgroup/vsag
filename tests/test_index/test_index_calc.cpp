@@ -16,6 +16,19 @@
 
 namespace fixtures {
 
+namespace {
+
+/// Batch distance results must describe their shape so callers can index the flat
+/// Distances()/Valids() arrays: NumElements() * Dim() == count.
+void
+RequireBatchDistanceShape(const vsag::DatasetPtr& result, int64_t count) {
+    REQUIRE(result->GetNumElements() > 0);
+    REQUIRE(result->GetDim() > 0);
+    REQUIRE(result->GetNumElements() * result->GetDim() == count);
+}
+
+}  // namespace
+
 void
 TestIndex::TestCalcDistanceById(const IndexPtr& index,
                                 const TestDatasetPtr& dataset,
@@ -106,6 +119,8 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
         if (not expected_success) {
             return;
         }
+        REQUIRE(result.has_value());
+        RequireBatchDistanceShape(result.value(), gt_topK);
         for (auto j = 0; j < gt_topK; ++j) {
             REQUIRE(std::abs(gts->GetDistances()[i * gt_topK + j] -
                              result.value()->GetDistances()[j]) < error);
@@ -126,6 +141,7 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
                 index->CalDistanceById(queries->GetFloat32Vectors(), no_exist_ids.data(), test_num);
         }
         REQUIRE(result.has_value());
+        RequireBatchDistanceShape(result.value(), test_num);
         const auto* valids = result.value()->GetValids();
         REQUIRE(valids != nullptr);
         for (int i = 0; i < test_num; ++i) {
@@ -151,6 +167,7 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
             result = index->CalDistanceById(query->GetFloat32Vectors(), mixed_ids.data(), count);
         }
         REQUIRE(result.has_value());
+        RequireBatchDistanceShape(result.value(), count);
         const auto* valids = result.value()->GetValids();
         const auto* dists = result.value()->GetDistances();
         REQUIRE(valids != nullptr);
@@ -170,12 +187,66 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
             result = index->CalDistanceById(query->GetFloat32Vectors(), gts->GetIds(), gt_topK);
         }
         REQUIRE(result.has_value());
+        RequireBatchDistanceShape(result.value(), gt_topK);
         const auto* valids = result.value()->GetValids();
         REQUIRE(valids != nullptr);
         for (int64_t i = 0; i < gt_topK; ++i) {
             REQUIRE(valids[i]);
             REQUIRE(std::isfinite(result.value()->GetDistances()[i]));
         }
+    }
+}
+
+void
+TestIndex::TestCalcDistanceByIdRemovedLabel(const IndexPtr& index,
+                                            const TestDatasetPtr& dataset,
+                                            bool is_sparse) {
+    if (not index->CheckFeature(vsag::SUPPORT_CAL_DISTANCE_BY_ID)) {
+        return;
+    }
+    const auto base_count = dataset->base_->GetNumElements();
+    REQUIRE(base_count > 1);
+    const auto* base_ids = dataset->base_->GetIds();
+    const int64_t removed_id = base_ids[0];
+    const int64_t existing_id = base_ids[base_count - 1];
+    REQUIRE(removed_id != existing_id);
+
+    auto remove_result = index->Remove(removed_id, vsag::RemoveMode::MARK_REMOVE);
+    REQUIRE(remove_result.has_value());
+    REQUIRE(remove_result.value() == 1);
+
+    auto query = get_one_query(dataset->query_, 0);
+    {
+        INFO("single-ID distance of a removed label must fail as a missing label");
+        tl::expected<float, vsag::Error> result;
+        if (is_sparse) {
+            result = index->CalcDistanceById(query, removed_id);
+        } else {
+            result = index->CalcDistanceById(query->GetFloat32Vectors(), removed_id);
+        }
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    }
+    {
+        INFO("batch distance marks the removed label invalid instead of failing");
+        std::vector<int64_t> batch_ids = {removed_id, existing_id};
+        const auto count = static_cast<int64_t>(batch_ids.size());
+        tl::expected<DatasetPtr, vsag::Error> result;
+        if (is_sparse) {
+            result = index->CalDistanceById(query, batch_ids.data(), count);
+        } else {
+            result = index->CalDistanceById(query->GetFloat32Vectors(), batch_ids.data(), count);
+        }
+        REQUIRE(result.has_value());
+        RequireBatchDistanceShape(result.value(), count);
+        const auto* dists = result.value()->GetDistances();
+        const auto* valids = result.value()->GetValids();
+        REQUIRE(dists != nullptr);
+        REQUIRE(valids != nullptr);
+        REQUIRE_FALSE(valids[0]);
+        REQUIRE(std::isnan(dists[0]));
+        REQUIRE(valids[1]);
+        REQUIRE(std::isfinite(dists[1]));
     }
 }
 

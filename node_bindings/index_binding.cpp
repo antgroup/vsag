@@ -352,7 +352,9 @@ private:
     CalDistanceById(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
 
-        if (info.Length() < 2) {
+        if (info.Length() < 2 || !info[0].IsTypedArray() || !info[1].IsTypedArray() ||
+            info[0].As<Napi::TypedArray>().TypedArrayType() != napi_float32_array ||
+            info[1].As<Napi::TypedArray>().TypedArrayType() != napi_bigint64_array) {
             Napi::TypeError::New(env, "Expected (query: Float32Array, ids: BigInt64Array)")
                 .ThrowAsJavaScriptException();
             return env.Undefined();
@@ -362,17 +364,23 @@ private:
         auto ids = info[1].As<Napi::BigInt64Array>();
         int64_t count = static_cast<int64_t>(ids.ElementLength());
 
-        auto distances = Napi::Float32Array::New(env, count);
-        for (int64_t i = 0; i < count; ++i) {
-            distances[i] = -1.0F;
+        auto result = index_->CalDistanceById(query.Data(), ids.Data(), count);
+        if (!result.has_value()) {
+            Napi::Error::New(env, "calDistanceById failed: " + result.error().message)
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
         }
 
-        auto result = index_->CalDistanceById(query.Data(), ids.Data(), count);
-        if (result.has_value()) {
-            const auto* dist_data = result.value()->GetDistances();
-            for (int64_t i = 0; i < count; ++i) {
-                distances[i] = dist_data[i];
-            }
+        // Missing or removed ids carry a quiet-NaN distance in the returned array.
+        auto distances = Napi::Float32Array::New(env, count);
+        const auto* dist_data = result.value()->GetDistances();
+        if (count > 0 && dist_data == nullptr) {
+            Napi::Error::New(env, "calDistanceById failed: result carries no distances")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+        for (int64_t i = 0; i < count; ++i) {
+            distances.Data()[i] = dist_data[i];
         }
 
         return distances;

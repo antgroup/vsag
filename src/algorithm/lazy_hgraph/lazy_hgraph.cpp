@@ -256,6 +256,26 @@ LazyHGraph::CalcDistanceById(const float* query,
     return ActiveIndex()->CalcDistanceById(query, id, calculate_precise_distance);
 }
 
+DatasetPtr
+LazyHGraph::CalDistanceById(const float* query,
+                            const int64_t* ids,
+                            int64_t count,
+                            bool calculate_precise_distance) const {
+    // Delegate to the active sub-index: the wrapper's own label table is empty, so the inherited
+    // batch implementation would report every id as missing.
+    std::shared_lock lock(this->phase_mutex_);
+    return ActiveIndex()->CalDistanceById(query, ids, count, calculate_precise_distance);
+}
+
+DatasetPtr
+LazyHGraph::CalDistanceById(const DatasetPtr& query,
+                            const int64_t* ids,
+                            int64_t count,
+                            bool calculate_precise_distance) const {
+    std::shared_lock lock(this->phase_mutex_);
+    return ActiveIndex()->CalDistanceById(query, ids, count, calculate_precise_distance);
+}
+
 bool
 LazyHGraph::CheckIdExist(int64_t id) const {
     std::shared_lock lock(this->phase_mutex_);
