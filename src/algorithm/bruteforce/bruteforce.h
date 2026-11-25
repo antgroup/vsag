@@ -105,6 +105,9 @@ public:
     }
 
     void
+    GetFloat32VectorByInnerId(InnerIdType inner_id, float* data) const override;
+
+    void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
 
     void
@@ -151,6 +154,13 @@ public:
 
     uint64_t
     GetMemoryUsage() const override;
+
+private:
+    friend class LazyHGraph;
+
+    // Native typed export for LazyHGraph phase replay (not a public float API).
+    DatasetPtr
+    GetNativeDataByIds(const int64_t* ids, int64_t count) const;
 
 private:
     enum class StreamingLoadTarget {
@@ -227,7 +237,7 @@ private:
     shrink_to_fit();
 
     void
-    add_one(const float* data, InnerIdType inner_id);
+    add_one(const void* data, InnerIdType inner_id);
 
     /**
      * @brief Recalculate and cache the memory-usage counter.

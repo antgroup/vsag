@@ -24,6 +24,16 @@ namespace fixtures {
 #pragma warning(disable : 4996)
 #endif
 
+namespace {
+
+bool
+use_dataset_query(const vsag::DatasetPtr& queries, bool is_sparse) {
+    return is_sparse || queries->GetSparseVectors() != nullptr ||
+           queries->GetInt8Vectors() != nullptr || queries->GetFloat16Vectors() != nullptr;
+}
+
+}  // namespace
+
 // General index suites include lossy storage without retained FP32 vectors. Compare the
 // formal single/batch APIs at both precision settings; exact FP32-oracle checks remain in
 // dedicated distance tests rather than assuming every quantizer reconstructs originals.
@@ -84,6 +94,23 @@ TestIndex::TestCalcDistanceById(const IndexPtr& index,
             REQUIRE(std::abs(dist - estimate_dist) < error);
         }
     }
+    if (not expected_success) {
+        return;
+    }
+    {
+        INFO("single-ID distance of a missing label must fail");
+        auto query = get_one_query(queries, 0);
+        for (int64_t missing_id : {int64_t{-1}, int64_t{-12345}, int64_t{1} << 40}) {
+            tl::expected<float, vsag::Error> result;
+            if (use_dataset_query(queries, is_sparse)) {
+                result = index->CalcDistanceById(query, missing_id);
+            } else {
+                result = index->CalcDistanceById(query->GetFloat32Vectors(), missing_id);
+            }
+            REQUIRE_FALSE(result.has_value());
+            REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+        }
+    }
 }
 
 void
@@ -135,9 +162,72 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
             result =
                 index->CalcDistancesById(query->GetFloat32Vectors(), no_exist_ids.data(), test_num);
         }
+        REQUIRE(result.has_value());
+        const auto* valids = result.value()->GetValids();
+        REQUIRE(valids != nullptr);
         for (int i = 0; i < test_num; ++i) {
-            fixtures::dist_t dist = result.value()->GetDistances()[i];
-            REQUIRE(dist == -1);
+            REQUIRE(std::isnan(result.value()->GetDistances()[i]));
+            REQUIRE_FALSE(valids[i]);
+        }
+    }
+
+    {
+        INFO("test mixed valid and missing ids");
+        auto query = get_one_query(queries, 0);
+        const auto* gt_ids = gts->GetIds();
+        const int64_t valid_a = gt_ids[0];
+        const int64_t valid_b = gt_ids[gt_topK > 1 ? 1 : 0];
+        // Layout: missing, valid, missing, valid, missing.
+        std::vector<int64_t> mixed_ids = {-101, valid_a, -102, valid_b, -103};
+        const auto count = static_cast<int64_t>(mixed_ids.size());
+        const std::vector<bool> expected_valid = {false, true, false, true, false};
+        auto calc = [&](int64_t topk) {
+            if (use_dataset_query(queries, is_sparse)) {
+                return index->CalcDistancesById(query, mixed_ids.data(), count, true, topk);
+            }
+            return index->CalcDistancesById(
+                query->GetFloat32Vectors(), mixed_ids.data(), count, true, topk);
+        };
+        {
+            auto all = calc(-1);
+            REQUIRE(all.has_value());
+            REQUIRE(all.value()->GetDim() == count);
+            const auto* valids = all.value()->GetValids();
+            const auto* dists = all.value()->GetDistances();
+            REQUIRE(valids != nullptr);
+            for (int64_t i = 0; i < count; ++i) {
+                REQUIRE(valids[i] == expected_valid[i]);
+                REQUIRE(std::isnan(dists[i]) == not expected_valid[i]);
+            }
+            REQUIRE(std::abs(dists[1] - gts->GetDistances()[0]) < error);
+        }
+        if (not index->CheckFeature(vsag::SUPPORT_BATCH_CALC_DISTANCE_BY_ID)) {
+            return;
+        }
+        {
+            // Fewer valid entries (2) than topk (4): valid entries first, invalid ranked last
+            // with NaN distance; Valids is aligned with the output order.
+            auto top = calc(4);
+            REQUIRE(top.has_value());
+            REQUIRE(top.value()->GetDim() == 4);
+            const auto* valids = top.value()->GetValids();
+            const auto* dists = top.value()->GetDistances();
+            const auto* out_ids = top.value()->GetIds();
+            REQUIRE(valids != nullptr);
+            REQUIRE(out_ids != nullptr);
+            REQUIRE(valids[0]);
+            REQUIRE(valids[1]);
+            REQUIRE_FALSE(valids[2]);
+            REQUIRE_FALSE(valids[3]);
+            REQUIRE(std::isfinite(dists[0]));
+            REQUIRE(std::isfinite(dists[1]));
+            REQUIRE(dists[0] <= dists[1]);
+            REQUIRE(std::isnan(dists[2]));
+            REQUIRE(std::isnan(dists[3]));
+            REQUIRE(((out_ids[0] == valid_a and out_ids[1] == valid_b) or
+                     (out_ids[0] == valid_b and out_ids[1] == valid_a)));
+            REQUIRE(out_ids[2] < 0);
+            REQUIRE(out_ids[3] < 0);
         }
     }
 
@@ -161,8 +251,12 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
             REQUIRE(result.has_value());
             REQUIRE(result.value()->GetDim() == topk);
             REQUIRE(result.value()->GetIds() != nullptr);
+            REQUIRE(result.value()->GetValids() != nullptr);
             auto* topk_dists = result.value()->GetDistances();
             auto* topk_ids = result.value()->GetIds();
+            for (int64_t j = 0; j < topk; ++j) {
+                REQUIRE(result.value()->GetValids()[j]);
+            }
             for (int64_t j = 0; j < topk - 1; ++j) {
                 REQUIRE(topk_dists[j] <= topk_dists[j + 1]);
             }
@@ -180,6 +274,40 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
             }
         }
     }
+}
+
+void
+TestIndex::TestCalcDistanceByIdAfterRemove(const IndexPtr& index, const TestDatasetPtr& dataset) {
+    REQUIRE(index->CheckFeature(vsag::SUPPORT_CAL_DISTANCE_BY_ID));
+    REQUIRE(index->CheckFeature(vsag::SUPPORT_BATCH_CALC_DISTANCE_BY_ID));
+    REQUIRE(dataset->base_ != nullptr);
+    REQUIRE(dataset->base_->GetNumElements() >= 2);
+    const auto* base_ids = dataset->base_->GetIds();
+    const int64_t removed_id = base_ids[0];
+    const int64_t kept_id = base_ids[1];
+
+    auto remove_result = index->Remove(removed_id, vsag::RemoveMode::MARK_REMOVE);
+    REQUIRE(remove_result.has_value());
+    REQUIRE(remove_result.value() == 1);
+
+    auto query = get_one_query(dataset->query_, 0);
+    auto single = index->CalcDistanceById(query, removed_id);
+    REQUIRE_FALSE(single.has_value());
+    REQUIRE(single.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    // The tombstoned label is reported as invalid in the batch path, while its live neighbour keeps
+    // its distance.
+    const int64_t batch_ids[2] = {removed_id, kept_id};
+    auto batch = index->CalcDistancesById(query, batch_ids, 2);
+    REQUIRE(batch.has_value());
+    const auto* valids = batch.value()->GetValids();
+    const auto* dists = batch.value()->GetDistances();
+    REQUIRE(valids != nullptr);
+    REQUIRE(dists != nullptr);
+    REQUIRE_FALSE(valids[0]);
+    REQUIRE(std::isnan(dists[0]));
+    REQUIRE(valids[1]);
+    REQUIRE(std::isfinite(dists[1]));
 }
 
 void
@@ -213,7 +341,8 @@ TestIndex::TestMultiQueryBatchCalcDistanceById(const IndexPtr& index,
         auto* distances = multi_result.value()->GetDistances();
         for (int64_t q = 0; q < num_queries; ++q) {
             for (int64_t j = 0; j < gt_topK; ++j) {
-                REQUIRE(distances[q * gt_topK + j] == -1);
+                REQUIRE(std::isnan(distances[q * gt_topK + j]));
+                REQUIRE_FALSE(multi_result.value()->GetValids()[q * gt_topK + j]);
             }
         }
         return;
@@ -248,11 +377,13 @@ TestIndex::TestMultiQueryBatchCalcDistanceById(const IndexPtr& index,
         auto r2 = index->CalcDistancesById(queries, mixed_ids.data(), test_num);
         REQUIRE(r2.has_value());
         auto* d2 = r2.value()->GetDistances();
+        const auto* v2 = r2.value()->GetValids();
+        REQUIRE(v2 != nullptr);
         for (int64_t q = 0; q < num_queries; ++q) {
             for (int64_t i = 0; i < test_num; ++i) {
-                if (i % 2 != 0) {
-                    REQUIRE(d2[q * test_num + i] == -1);
-                }
+                const bool expect_valid = i % 2 == 0;
+                REQUIRE(v2[q * test_num + i] == expect_valid);
+                REQUIRE(std::isnan(d2[q * test_num + i]) == not expect_valid);
             }
         }
 
@@ -260,10 +391,31 @@ TestIndex::TestMultiQueryBatchCalcDistanceById(const IndexPtr& index,
         REQUIRE(topk_result.has_value());
         auto* topk_dists = topk_result.value()->GetDistances();
         auto* topk_ids = topk_result.value()->GetIds();
+        const auto* topk_valids = topk_result.value()->GetValids();
+        REQUIRE(topk_valids != nullptr);
         for (int64_t q = 0; q < num_queries; ++q) {
             for (int64_t i = 0; i < 3; ++i) {
                 REQUIRE(topk_ids[q * 3 + i] >= 0);
-                REQUIRE(topk_dists[q * 3 + i] != -1.0F);
+                REQUIRE(topk_valids[q * 3 + i]);
+                REQUIRE(std::isfinite(topk_dists[q * 3 + i]));
+            }
+        }
+
+        // topk larger than the number of valid entries: invalid entries are ranked last per
+        // row and the output-aligned Valids propagate through the multi-query adapter.
+        const int64_t wide_topk = test_num;
+        auto wide_result =
+            index->CalcDistancesById(queries, mixed_ids.data(), test_num, true, wide_topk);
+        REQUIRE(wide_result.has_value());
+        const auto* wide_valids = wide_result.value()->GetValids();
+        const auto* wide_dists = wide_result.value()->GetDistances();
+        REQUIRE(wide_valids != nullptr);
+        const int64_t valid_per_row = (test_num + 1) / 2;
+        for (int64_t q = 0; q < num_queries; ++q) {
+            for (int64_t i = 0; i < test_num; ++i) {
+                const bool expect_valid = i < valid_per_row;
+                REQUIRE(wide_valids[q * test_num + i] == expect_valid);
+                REQUIRE(std::isnan(wide_dists[q * test_num + i]) == not expect_valid);
             }
         }
     }
@@ -327,6 +479,11 @@ TestIndex::TestMultiQueryBatchCalcDistanceById(const IndexPtr& index,
         REQUIRE(default_result.has_value());
         REQUIRE(default_result.value()->GetIds() == nullptr);
         REQUIRE(default_result.value()->GetDim() == gt_topK);
+        const auto* default_valids = default_result.value()->GetValids();
+        REQUIRE(default_valids != nullptr);
+        for (int64_t i = 0; i < num_queries * gt_topK; ++i) {
+            REQUIRE(default_valids[i]);
+        }
     }
 }
 

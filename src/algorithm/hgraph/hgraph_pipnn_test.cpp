@@ -388,6 +388,51 @@ TEST_CASE("HGraph PiPNN keeps duplicate-label and entry-point semantics", "[ut][
     REQUIRE(search_result.value()->GetDim() == 1);
 }
 
+TEST_CASE("HGraph PiPNN threshold groups survive serialization", "[ut][pipnn][hgraph][duplicate]") {
+    constexpr int64_t dimensions = 4;
+    const bool share_storage = GENERATE(false, true);
+    auto parameter = MakePiPNNHGraphParam();
+    parameter["support_duplicate"].SetBool(true);
+    parameter["deduplicate_storage"].SetBool(share_storage);
+    parameter["duplicate_distance_threshold"].SetFloat(0.25F);
+    auto common = MakePiPNNCommonParam(dimensions);
+    auto index = MakePiPNNIndex(parameter, common);
+    std::vector<float> vectors{0, 0, 0, 0, 0.5F, 0, 0, 0, 5, 0, 0, 0};
+    std::vector<int64_t> labels{10, 20, 30};
+    const auto built = index->Build(MakeDataset(vectors, labels, dimensions, labels.size()));
+    REQUIRE(built.has_value());
+    REQUIRE(built->empty());
+    const auto check_search = [&](const auto& candidate) {
+        REQUIRE(candidate->GetNumElements() == 3);
+        if (share_storage) {
+            const auto graph = std::static_pointer_cast<vsag::HGraph>(candidate->GetInnerIndex());
+            REQUIRE(graph->GetCodeStorageCounts().second == 2);
+        }
+        const auto query = vsag::Dataset::Make()
+                               ->NumElements(1)
+                               ->Dim(dimensions)
+                               ->Float32Vectors(vectors.data())
+                               ->Owner(false);
+        const auto result = candidate->KnnSearch(query, 3, R"({"hgraph": {"ef_search": 16}})");
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 3);
+        auto ids = result.value()->GetIds();
+        REQUIRE(std::min(ids[0], ids[1]) == 10);
+        REQUIRE(std::max(ids[0], ids[1]) == 20);
+        REQUIRE(ids[2] == 30);
+        if (share_storage) {
+            REQUIRE(result.value()->GetDistances()[0] == 0.0F);
+            REQUIRE(result.value()->GetDistances()[1] == 0.0F);
+        }
+    };
+    check_search(index);
+    const auto serialized = index->Serialize();
+    REQUIRE(serialized.has_value());
+    auto restored = MakePiPNNIndex(parameter, common);
+    REQUIRE(restored->Deserialize(serialized.value()).has_value());
+    check_search(restored);
+}
+
 TEST_CASE("HGraph validates PiPNN graph type and data boundary", "[ut][pipnn][hgraph]") {
     constexpr int64_t dimensions = 4;
     auto common_param = MakePiPNNCommonParam(dimensions);
@@ -803,6 +848,87 @@ TEST_CASE("HGraph PiPNN fused half input handles non-power-of-two dimensions",
     REQUIRE(restored->Deserialize(binary.value()).has_value());
     REQUIRE(restored->GetNumElements() == count);
     check(restored);
+}
+
+TEST_CASE("HGraph split-codes half input default UpdateVector stays in bounds",
+          "[ut][pipnn][hgraph][half_input][rabitq_split][update_vector]") {
+    // Regression: UpdateVector's non-force self-distance check used to size its decode
+    // scratch from get_vectors()' native stride (dim*sizeof(uint16_t) for half). A RaBitQ
+    // split cell decodes through a float* ABI and writes dim FP32 words, so a split-codes
+    // index with a half dtype overran that scratch. The public FP32 row must be read
+    // instead. The fused variant is covered above; this keeps store_raw_vector=false and
+    // rabitq_fused_datacell=false so basic_flatten_codes_ is the RaBitQSplitDataCell.
+    constexpr int64_t dim = 33;
+    constexpr int64_t count = 64;
+    const bool bf16 = GENERATE(false, true);
+    const auto metric =
+        GENERATE(vsag::MetricType::METRIC_TYPE_L2SQR, vsag::MetricType::METRIC_TYPE_IP);
+    CAPTURE(bf16, metric);
+    auto common = MakePiPNNCommonParam(dim, metric);
+    common.data_type_ = bf16 ? vsag::DataTypes::DATA_TYPE_BF16 : vsag::DataTypes::DATA_TYPE_FP16;
+    auto parameter = MakePiPNNHGraphParam();
+    parameter["base_quantization_type"].SetString("rabitq");
+    parameter["precise_quantization_type"].SetString("rabitq");
+    parameter["rabitq_bits_per_dim_base"].SetInt(3);
+    parameter["rabitq_bits_per_dim_precise"].SetInt(5);
+    parameter["rabitq_bits_per_dim_query"].SetInt(32);
+    parameter["use_reorder"].SetBool(true);
+    parameter["use_mci"].SetBool(false);
+    parameter["store_raw_vector"].SetBool(false);
+    // Leave the fused datacell unset so basic_flatten_codes_ stays a RaBitQSplitDataCell.
+    REQUIRE_FALSE(parameter.Contains("rabitq_fused_datacell"));
+    auto index = MakePiPNNIndex(parameter, common);
+    auto halves = MakeHalfFusedSafetyVectors(bf16, dim, count);
+    std::vector<int64_t> ids(count);
+    for (int64_t row = 0; row < count; ++row) {
+        ids[row] = 4000 + row * 3;
+    }
+    auto base = vsag::Dataset::Make()
+                    ->NumElements(count)
+                    ->Dim(dim)
+                    ->Ids(ids.data())
+                    ->Float16Vectors(halves.data())
+                    ->Owner(false);
+    auto built = index->Build(base);
+    REQUIRE(built.has_value());
+    REQUIRE(built.value().empty());
+    REQUIRE(index->GetNumElements() == count);
+    std::vector<uint16_t> updated(dim);
+    for (int64_t d = 0; d < dim; ++d) {
+        const auto value =
+            bf16 ? vsag::generic::BF16ToFloat(halves[d]) : vsag::generic::FP16ToFloat(halves[d]);
+        updated[d] = bf16 ? vsag::generic::FloatToBF16(value * 1.125F)
+                          : vsag::generic::FloatToFP16(value * 1.125F);
+    }
+    auto update = vsag::Dataset::Make()
+                      ->NumElements(1)
+                      ->Dim(dim)
+                      ->Float16Vectors(updated.data())
+                      ->Owner(false);
+    const auto before = index->CalcDistanceById(update, ids.front());
+    REQUIRE(before.has_value());
+    // Omit force_update so the self-distance comparison decodes the stored row.
+    auto accepted = index->UpdateVector(ids.front(), update);
+    REQUIRE(accepted.has_value());
+    REQUIRE(accepted.value());
+    const auto after = index->CalcDistanceById(update, ids.front());
+    REQUIRE(after.has_value());
+    REQUIRE(after.value() < before.value());
+    auto result = index->KnnSearch(update, 1, R"({"hgraph":{"ef_search":128}})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 1);
+    REQUIRE(result.value()->GetIds()[0] == ids.front());
+    REQUIRE(std::isfinite(result.value()->GetDistances()[0]));
+    auto binary = index->Serialize();
+    REQUIRE(binary.has_value());
+    auto restored = MakePiPNNIndex(parameter, common);
+    REQUIRE(restored->Deserialize(binary.value()).has_value());
+    REQUIRE(restored->GetNumElements() == count);
+    const auto persisted = restored->CalcDistanceById(update, ids.front());
+    REQUIRE(persisted.has_value());
+    REQUIRE(std::abs(persisted.value() - after.value()) < 1e-5F);
+    auto accepted_after_reload = restored->UpdateVector(ids.front(), update);
+    REQUIRE(accepted_after_reload.has_value());
 }
 
 TEST_CASE("HGraph fused half input default UpdateVector preserves connectivity and reload",

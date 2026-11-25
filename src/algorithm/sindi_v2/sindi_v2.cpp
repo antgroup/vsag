@@ -2232,7 +2232,7 @@ SINDIV2::CalcDistanceById(const DatasetPtr& vector,
 
     auto [success, inner_id] = this->label_table_->TryGetIdByLabel(id);
     if (not success) {
-        return -1.0F;
+        ThrowLabelNotFound(id);
     }
 
     if (use_reorder_ && calculate_precise_distance) {
@@ -2289,7 +2289,10 @@ SINDIV2::CalcDistancesById(const DatasetPtr& query,
     }
     auto* distances =
         static_cast<float*>(allocator_->Allocate(sizeof(float) * num_queries_size * count_size));
-    CHECK_ARGUMENT(distances != nullptr, "Failed to allocate SINDIV2 multi-query distance buffer");
+    if (distances == nullptr) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                            "Failed to allocate SINDIV2 multi-query distance buffer");
+    }
     result->Distances(distances);
 
     std::shared_lock rlock(this->global_mutex_);
@@ -2306,7 +2309,7 @@ SINDIV2::CalcDistancesById(const DatasetPtr& query,
                 const auto [success, inner_id] =
                     this->label_table_->TryGetIdByLabel(row_ids[index]);
                 if (not success) {
-                    row_distances[index] = -1.0F;
+                    row_distances[index] = std::numeric_limits<float>::quiet_NaN();
                     continue;
                 }
                 validity[validity_offset + static_cast<uint64_t>(index)] = true;
@@ -2331,7 +2334,7 @@ SINDIV2::CalcDistancesById(const DatasetPtr& query,
         for (int64_t index = 0; index < count; ++index) {
             const auto [success, inner_id] = this->label_table_->TryGetIdByLabel(row_ids[index]);
             if (not success) {
-                row_distances[index] = -1.0F;
+                row_distances[index] = std::numeric_limits<float>::quiet_NaN();
                 continue;
             }
             validity[validity_offset + static_cast<uint64_t>(index)] = true;
@@ -2341,6 +2344,7 @@ SINDIV2::CalcDistancesById(const DatasetPtr& query,
     }
 
     if (topk == -1) {
+        AttachValids(result, validity, allocator_);
         return result;
     }
     return ApplyTopkWithValidity(distances, ids, count, num_queries, topk, validity, allocator_);

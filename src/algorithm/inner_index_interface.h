@@ -17,6 +17,7 @@
 
 #include <atomic>
 #include <functional>
+#include <limits>
 #include <shared_mutex>
 #include <unordered_map>
 #include <vector>
@@ -46,9 +47,20 @@
 
 namespace vsag {
 
+// Copies `validity` into an owned bool buffer allocated with `allocator` and attaches it to
+// `dataset` through Dataset::Valids(). Does nothing for an empty mask.
+void
+AttachValids(const DatasetPtr& dataset, const std::vector<bool>& validity, Allocator* allocator);
+
+// Throws VsagException(INVALID_ARGUMENT) reporting that `label` is missing or removed. Used by the
+// single-ID CalcDistanceById implementations.
+[[noreturn]] void
+ThrowLabelNotFound(int64_t label);
+
 // Apply top-k selection with structural validity mask per row.
 // validity has num_rows * per_row_count entries, row-major.
-// Invalid distances are ranked last.
+// Invalid entries are ranked last and reported with NaN distance. The returned dataset carries an
+// output-aligned Valids buffer.
 DatasetPtr
 ApplyTopkWithValidity(const float* distances,
                       const int64_t* ids,
@@ -105,7 +117,8 @@ public:
      * @param id The unique identifier of the vector in the index.
      * @param calculate_precise_distance If true, use high-precision vectors for computation.
      * @return The distance between the query and the vector of the given ID.
-     * @throws VsagException If the index doesn't support calculate distance by id.
+     * @throws VsagException If the index doesn't support calculate distance by id, or with
+     *         ErrorType::INVALID_ARGUMENT if the label does not exist or is removed.
      */
     virtual float
     CalcDistanceById(const DatasetPtr& vector,
@@ -153,7 +166,8 @@ public:
      * @param ids Array of unique identifiers of vectors to be calculated.
      * @param count Number of IDs in the array.
      * @param calculate_precise_distance If true, use high-precision vectors for computation.
-     * @return DatasetPtr containing distances. '-1' indicates an invalid ID.
+     * @return DatasetPtr containing distances. Missing or removed IDs have a quiet-NaN distance
+     *         and a false entry in GetValids() (label existence at lookup time).
      */
     virtual DatasetPtr
     CalcDistancesById(const float* query,
@@ -176,7 +190,7 @@ public:
      * Both the input IDs and result distances use row-major layout with count IDs
      * per query: ids[i * count + j] is the j-th ID for query i, and
      * distances[i * count + j] is the distance from query i to that ID.
-     * '-1' indicates an invalid ID.
+     * Missing or removed IDs have a quiet-NaN distance and a false entry in GetValids().
      *
      * Default implementation loops through queries and IDs calling CalcDistanceById (single-ID).
      * Sparse indexes must override for proper sparse vector handling.
@@ -188,7 +202,7 @@ public:
      * @param calculate_precise_distance If true, use high-precision vectors.
      * @return DatasetPtr containing distances. Single query: size is count.
      *         Multi-query (NumElements=N): size is N * count, row-major layout.
-     *         '-1' indicates an invalid ID.
+     *         Missing or removed IDs have a quiet-NaN distance and a false entry in GetValids().
      */
     virtual DatasetPtr
     CalcDistancesById(const DatasetPtr& query,
@@ -353,6 +367,10 @@ public:
 
     [[nodiscard]] virtual std::string
     GetStats() const;
+
+    // Public FP32 export bridge; GetVectorByInnerId retains its native dtype contract.
+    virtual void
+    GetFloat32VectorByInnerId(InnerIdType inner_id, float* data) const;
 
     virtual void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const {
@@ -581,6 +599,9 @@ public:
     }
 
 protected:
+    void
+    expand_native_half_row(const void* native_data, float* data) const;
+
     DatasetPtr
     get_data_by_ids_with_flag(const int64_t* ids,
                               int64_t count,
@@ -624,7 +645,7 @@ protected:
         auto set_missing_distance = [&](int64_t index) -> bool {
             std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
             if (not this->label_table_->TryGetIdByLabel(ids[index]).first) {
-                distances[index] = -1.0F;
+                distances[index] = std::numeric_limits<float>::quiet_NaN();
                 return true;
             }
             if (validity != nullptr) {

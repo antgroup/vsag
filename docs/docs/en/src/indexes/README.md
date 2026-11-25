@@ -16,9 +16,12 @@ The pages in this section cover the actively developed indexes:
 | `simq` | [SIMQ](simq.md) | ColBERT-style multi-vector retrieval (MaxSim) |
 | `sindi_v2` | [SINDI_V2](sindi_v2.md) | Sparse vectors (BM25 / learned sparse) on inner-product; supports both in-memory and disk-based I/O |
 | `pyramid` | [Pyramid](pyramid.md) | Multi-tenant or tag-partitioned corpora with hierarchical paths |
+| `warp` | [WARP](warp.md) | Multi-vector (ColBERT-style) documents scored with MaxSim, exact search |
 
 `brute_force` is also available as an exact-search baseline (see
 [Creating an Index](../guide/create_index.md) and `examples/cpp/105_index_brute_force.cpp`).
+WARP is the multi-vector variant of `brute_force`: same exhaustive scan, but each document is a
+set of token vectors.
 
 ## Parameter conventions
 

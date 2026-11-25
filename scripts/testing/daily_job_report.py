@@ -14,12 +14,14 @@ def cache_statistics(text):
         parts = line.split()
         if len(parts) == 2 and parts[1].isdigit():
             values[parts[0]] = int(parts[1])
-    required = ("cache_hit_direct", "cache_hit_preprocessed", "cache_miss")
-    if not all(k in values for k in required):
+    direct_hits = values.get("direct_cache_hit", values.get("cache_hit_direct"))
+    preprocessed_hits = values.get("preprocessed_cache_hit", values.get("cache_hit_preprocessed"))
+    misses = values.get("cache_miss")
+    if direct_hits is None or preprocessed_hits is None or misses is None:
         return {"available": False, "reason": "Missing ccache counters"}
-    hits = values[required[0]] + values[required[1]]
-    calls = hits + values[required[2]]
-    return {"available": True, "hits": hits, "misses": values[required[2]],
+    hits = direct_hits + preprocessed_hits
+    calls = hits + misses
+    return {"available": True, "hits": hits, "misses": misses,
             "cacheable_calls": calls, "hit_percent": 100 * hits / calls if calls else None,
             "counters": values}
 

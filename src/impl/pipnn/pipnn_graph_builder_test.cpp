@@ -38,6 +38,7 @@
 #include "impl/allocator/safe_allocator.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index_common_param.h"
+#include "pipnn_build_cache.h"
 #include "simd/bf16_simd.h"
 #include "unittest.h"
 #include "utils/half_input.h"
@@ -433,6 +434,43 @@ TEST_CASE("PiPNN registers exact duplicate rows instead of building duplicate ve
     REQUIRE(graph->TotalCount() == 4);
 }
 
+TEST_CASE("PiPNN L2 threshold groups against final representatives before building edges",
+          "[ut][pipnn][duplicate]") {
+    constexpr uint64_t dimensions = 2;
+    const bool enabled = GENERATE(false, true);
+    const float threshold = GENERATE(0.0F, 0.25F);
+    const auto metric =
+        GENERATE(vsag::MetricType::METRIC_TYPE_L2SQR, vsag::MetricType::METRIC_TYPE_IP);
+    const bool near =
+        enabled and threshold > 0.0F and metric == vsag::MetricType::METRIC_TYPE_L2SQR;
+    auto common = MakeCommonParam(dimensions);
+    auto* allocator = common.allocator_.get();
+    // Keep the first coordinate constant and large to exercise cancellation in the
+    // norm-dot formula. IDs 2 and 3 are exact copies; 1--2--4 is a threshold chain.
+    std::vector<float> vectors{10000, 8, 10000, 0, 10000, 0.5, 10000, 0.5, 10000, 1};
+    vsag::Vector<vsag::InnerIdType> ids({3, 4, 1, 2, 0}, allocator);
+    auto rows = MakeRows(vectors, ids, dimensions, allocator);
+    auto graph = MakeGraph(common, vectors.size() / dimensions, 4, enabled);
+    vsag::PiPNNGraphBuilderParameter parameter;
+    parameter.duplicate_distance_threshold = threshold;
+    vsag::PiPNNGraphBuilder(parameter, dimensions, metric, allocator).Build(graph, ids, rows);
+
+    // TotalCount is the high-water mark, not the number of populated rows.
+    REQUIRE(graph->GetDuplicateIds(1).size() == (near ? 2 : 0));
+    REQUIRE(graph->GetGroupId(4) == 4);
+    if (enabled) {
+        REQUIRE(graph->GetGroupId(2) == (near ? 1 : 2));
+        REQUIRE(graph->GetGroupId(3) == (near ? 1 : 2));
+    }
+    if (near) {
+        vsag::Vector<vsag::InnerIdType> neighbors(allocator);
+        graph->GetNeighbors(4, neighbors);
+        REQUIRE(std::find(neighbors.begin(), neighbors.end(), 1) != neighbors.end());
+        REQUIRE(std::find(neighbors.begin(), neighbors.end(), 2) == neighbors.end());
+        REQUIRE(std::find(neighbors.begin(), neighbors.end(), 3) == neighbors.end());
+    }
+}
+
 TEST_CASE("PiPNN graph builder validates structural parameters", "[ut][pipnn]") {
     vsag::PiPNNGraphBuilderParameter parameter;
     REQUIRE_NOTHROW(parameter.Validate(32));
@@ -596,8 +634,10 @@ TEST_CASE("PiPNN pruning scratch does not retain neighbors from another source",
 TEST_CASE("PiPNN small leaf candidates match exhaustive directed selection", "[ut][pipnn]") {
     const auto metric =
         GENERATE(vsag::MetricType::METRIC_TYPE_L2SQR, vsag::MetricType::METRIC_TYPE_IP);
-    const uint64_t count = GENERATE(2, 6, 7, 17, 18, 63, 64, 65, 96, 127, 128, 129);
-    const uint64_t requested = GENERATE(1, 5, 16, 17);
+    // Exercise partial/full 32-candidate prefilter blocks, including the K=5 seed offset.
+    const uint64_t count =
+        GENERATE(2, 6, 7, 17, 18, 31, 32, 33, 36, 37, 38, 63, 64, 65, 96, 127, 128, 129);
+    const uint64_t requested = GENERATE(1, 2, 3, 4, 5, 10, 15, 16, 17);
     const bool coincident = GENERATE(false, true);
     CAPTURE(metric, count, requested, coincident);
     auto common = MakeCommonParam(1, metric);
@@ -1246,6 +1286,38 @@ TEST_CASE("PiPNN half arithmetic decodes finite subnormal operands in vector and
     require_close(vsag::pipnn_half::Preparation(a.data(), plane.data(), dim, format));
 }
 
+TEST_CASE("PiPNN L2 threshold groups native FP16 and BF16 rows", "[ut][pipnn][duplicate]") {
+    using Format = vsag::pipnn_half::Format;
+    const auto format = GENERATE(Format::FP16, Format::BF16);
+    CAPTURE(format);
+    constexpr uint64_t dim = 2;
+    auto common = MakeCommonParam(dim);
+    common.data_type_ =
+        format == Format::FP16 ? vsag::DataTypes::DATA_TYPE_FP16 : vsag::DataTypes::DATA_TYPE_BF16;
+    auto* allocator = common.allocator_.get();
+    vsag::Vector<vsag::InnerIdType> ids({2, 0, 1, 3}, allocator);
+    // ID 1 is exactly at the squared threshold from ID 0. ID 2 is only within
+    // the threshold of ID 1, and ID 3 falls outside the first-coordinate window.
+    const std::array<float, 8> values{8, -1, 8, -2, 8, -1.5F, 9, -2};
+    std::array<uint16_t, values.size()> codes{};
+    std::transform(values.begin(), values.end(), codes.begin(), [&](float value) {
+        return EncodeHalf(value, format);
+    });
+    vsag::Vector<const uint16_t*> rows(allocator);
+    for (size_t i = 0; i < ids.size(); ++i) {
+        rows.push_back(codes.data() + i * dim);
+    }
+    auto graph = MakeGraph(common, ids.size(), 3, true);
+    vsag::PiPNNGraphBuilderParameter param;
+    param.duplicate_distance_threshold = 0.25F;
+    vsag::PiPNNGraphBuilder(param, dim, common.metric_, allocator)
+        .Build(graph, ids, rows, common.data_type_);
+    REQUIRE(graph->GetDuplicateIds(0).size() == 1);
+    REQUIRE(graph->GetGroupId(1) == 0);
+    REQUIRE(graph->GetGroupId(2) == 2);
+    REQUIRE(graph->GetGroupId(3) == 3);
+}
+
 TEST_CASE("PiPNN typed Build validation parity", "[ut][pipnn][typed_build]") {
     const auto dtype = GENERATE(vsag::DataTypes::DATA_TYPE_FLOAT,
                                 vsag::DataTypes::DATA_TYPE_FP16,
@@ -1367,4 +1439,88 @@ TEST_CASE("PiPNN half Build rejects unsupported dtype before graph validation",
                 std::string::npos);
     }
     REQUIRE(threw);
+}
+
+TEST_CASE("PiPNN final graph reuse matches full pruning with stable graph IDs",
+          "[ut][pipnn_cache]") {
+    const auto mode = GENERATE(0, 1, 2, 3);
+    const auto metric = mode == 1   ? vsag::MetricType::METRIC_TYPE_IP
+                        : mode == 2 ? vsag::MetricType::METRIC_TYPE_COSINE
+                                    : vsag::MetricType::METRIC_TYPE_L2SQR;
+    auto common = MakeCommonParam(8, metric);
+    auto* allocator = common.allocator_.get();
+    auto vectors = MakeVectors(160, 8);
+    std::mt19937 generator(42);
+    std::normal_distribution<float> distribution;
+    for (auto& value : vectors) {
+        value = distribution(generator);
+    }
+    vsag::Vector<vsag::InnerIdType> original_ids(allocator);
+    std::vector<std::string> original_sources;
+    for (uint32_t id = 0; id < 128; ++id) {
+        original_ids.push_back(id);
+        original_sources.push_back("source-" + std::to_string(id));
+    }
+    auto original_rows = MakeRows(vectors, original_ids, 8, allocator);
+    vsag::PiPNNGraphBuilderParameter parameter;
+    parameter.adaptive_pruning = mode == 3;
+    parameter.reservoir_size = 32;
+    parameter.leaf_neighbor_count = 16;
+    parameter.min_leaf_size = 1;
+    vsag::PiPNNGraphBuilder builder(parameter, 8, metric, allocator);
+    auto original = MakeGraph(common, 160, 8);
+    std::shared_ptr<vsag::PiPNNBuildCache> snapshot;
+    builder.Build(original, original_ids, original_rows, &original_sources, nullptr, &snapshot);
+    REQUIRE(snapshot != nullptr);
+    REQUIRE(snapshot->targets.get_allocator().allocator_ == allocator);
+    REQUIRE(snapshot->distances.get_allocator().allocator_ == allocator);
+    REQUIRE(snapshot->fingerprints.get_allocator().allocator_ == allocator);
+    REQUIRE(snapshot->source_ids.get_allocator().allocator_ == allocator);
+    vsag::Vector<vsag::InnerIdType> ids(allocator);
+    std::vector<std::string> sources;
+    for (uint32_t id = 0; id < 128; ++id) {
+        if (id % 20 != 0) {
+            ids.push_back(id);
+        }
+    }
+    for (uint32_t id = 128; ids.size() < 128; ++id) {
+        ids.push_back(id);
+    }
+    for (const auto id : ids) {
+        sources.push_back("source-" + std::to_string(id));
+    }
+    auto rows = MakeRows(vectors, ids, 8, allocator);
+    auto reused = MakeGraph(common, 160, 8);
+    auto reference = MakeGraph(common, 160, 8);
+    std::shared_ptr<vsag::PiPNNBuildCache> result;
+    builder.Build(reused, ids, rows, &sources, snapshot.get(), &result);
+    if (parameter.adaptive_pruning) {
+        REQUIRE(result->reused_graph_rows == 0);
+    } else {
+        REQUIRE(result->reused_graph_rows > 0);
+    }
+    snapshot->reuse_final_graph = false;
+    builder.Build(reference, ids, rows, &sources, snapshot.get());
+    for (const auto id : ids) {
+        vsag::Vector<vsag::InnerIdType> actual(allocator), expected(allocator);
+        reused->GetNeighbors(id, actual);
+        reference->GetNeighbors(id, expected);
+        REQUIRE(actual == expected);
+    }
+    vsag::Vector<vsag::InnerIdType> remapped(allocator);
+    for (uint32_t i = 0; i < ids.size(); ++i) {
+        remapped.push_back(static_cast<uint32_t>(ids.size()) - i - 1);
+    }
+    auto remapped_graph = MakeGraph(common, 160, 8);
+    auto remapped_reference = MakeGraph(common, 160, 8);
+    std::shared_ptr<vsag::PiPNNBuildCache> third;
+    builder.Build(remapped_graph, remapped, rows, &sources, result.get(), &third);
+    result->reuse_final_graph = false;
+    builder.Build(remapped_reference, remapped, rows, &sources, result.get());
+    for (const auto id : remapped) {
+        vsag::Vector<vsag::InnerIdType> actual(allocator), expected(allocator);
+        remapped_graph->GetNeighbors(id, actual);
+        remapped_reference->GetNeighbors(id, expected);
+        REQUIRE(actual == expected);
+    }
 }

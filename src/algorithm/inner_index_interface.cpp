@@ -40,6 +40,7 @@
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
 #include "storage/tlv_section.h"
+#include "utils/half_input.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
@@ -483,12 +484,16 @@ InnerIndexInterface::CalcDistancesById(const float* query,
     std::unique_ptr<float, decltype(release_distance_buffer)> all_distances_guard(
         static_cast<float*>(allocator_->Allocate(sizeof(float) * count)), release_distance_buffer);
     auto* all_distances = all_distances_guard.get();
+    if (all_distances == nullptr) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate distance buffer");
+    }
     auto calc_fn = [this, query, calculate_precise_distance](int64_t id) -> float {
         return this->CalcDistanceById(query, id, calculate_precise_distance);
     };
     std::vector<bool> validity;
     this->compute_distances_for_ids(calc_fn, ids, count, all_distances, &validity);
     if (topk == -1) {
+        AttachValids(result, validity, allocator_);
         result->Distances(all_distances_guard.release());
         return result;
     }
@@ -545,13 +550,18 @@ InnerIndexInterface::CalcDistancesById(const DatasetPtr& query,
         std::unique_ptr<float, decltype(release_distance_buffer)> out_dists_guard(
             static_cast<float*>(allocator_->Allocate(sizeof(float) * total_result)),
             release_distance_buffer);
-        CHECK_ARGUMENT(out_dists_guard.get() != nullptr, "Failed to allocate distance buffer");
+        if (not out_dists_guard) {
+            throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "Failed to allocate distance buffer");
+        }
         std::unique_ptr<int64_t, decltype(release_id_buffer)> out_ids_guard(
             static_cast<int64_t*>(allocator_->Allocate(sizeof(int64_t) * total_result)),
             release_id_buffer);
-        CHECK_ARGUMENT(out_ids_guard.get() != nullptr, "Failed to allocate ID buffer");
+        if (not out_ids_guard) {
+            throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "Failed to allocate ID buffer");
+        }
         auto* out_dists = out_dists_guard.get();
         auto* out_ids = out_ids_guard.get();
+        std::vector<bool> out_validity(total_result, false);
         for (int64_t q = 0; q < num_queries; ++q) {
             const int64_t* row_ids = ids + q * count;
             const float* query_ptr = query->GetFloat32Vectors() + q * query->GetDim();
@@ -562,19 +572,24 @@ InnerIndexInterface::CalcDistancesById(const DatasetPtr& query,
                         sizeof(float) * result_count);
             std::memcpy(
                 out_ids + q * result_count, row_result->GetIds(), sizeof(int64_t) * result_count);
+            const auto* row_valids = row_result->GetValids();
+            CHECK_ARGUMENT(row_valids != nullptr, "CalcDistancesById row result lacks valids");
+            for (int64_t i = 0; i < result_count; ++i) {
+                out_validity[static_cast<uint64_t>(q * result_count + i)] = row_valids[i];
+            }
         }
+        AttachValids(result, out_validity, allocator_);
         result->Ids(out_ids_guard.release())->Distances(out_dists_guard.release());
         return result;
     }
     std::unique_ptr<float, decltype(release_distance_buffer)> all_distances_guard(
         static_cast<float*>(allocator_->Allocate(sizeof(float) * num_queries_size * count_size)),
         release_distance_buffer);
-    CHECK_ARGUMENT(all_distances_guard.get() != nullptr, "Failed to allocate distance buffer");
-    auto* all_distances = all_distances_guard.get();
-    std::vector<bool> validity;
-    if (topk != -1) {
-        validity.assign(num_queries_size * count_size, false);
+    if (not all_distances_guard) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "Failed to allocate distance buffer");
     }
+    auto* all_distances = all_distances_guard.get();
+    std::vector<bool> validity(num_queries_size * count_size, false);
     DatasetPtr sub;
     if (!is_float_query) {
         sub = Dataset::Make();
@@ -588,6 +603,12 @@ InnerIndexInterface::CalcDistancesById(const DatasetPtr& query,
             auto row_result =
                 this->CalcDistancesById(query_ptr, row_ids, count, calculate_precise_distance, -1);
             std::memcpy(row, row_result->GetDistances(), sizeof(float) * count);
+            const auto* row_valids = row_result->GetValids();
+            CHECK_ARGUMENT(row_valids != nullptr, "CalcDistancesById row result lacks valids");
+            for (int64_t i = 0; i < count; ++i) {
+                validity[static_cast<uint64_t>(q) * count_size + static_cast<uint64_t>(i)] =
+                    row_valids[i];
+            }
         } else {
             sub->NumElements(1)->Dim(query->GetDim())->Owner(false);
             // Keep every supplied representation: the concrete single-ID adapter chooses the
@@ -616,20 +637,41 @@ InnerIndexInterface::CalcDistancesById(const DatasetPtr& query,
             };
             std::vector<bool> row_validity;
             this->compute_distances_for_ids(calc_fn, row_ids, count, row, &row_validity);
-            if (topk != -1) {
-                for (int64_t i = 0; i < count; ++i) {
-                    validity[static_cast<uint64_t>(q) * count_size + static_cast<uint64_t>(i)] =
-                        row_validity[i];
-                }
+            for (int64_t i = 0; i < count; ++i) {
+                validity[static_cast<uint64_t>(q) * count_size + static_cast<uint64_t>(i)] =
+                    row_validity[i];
             }
         }
     }
     if (topk == -1) {
+        AttachValids(result, validity, allocator_);
         result->Distances(all_distances_guard.release());
         return result;
     }
     return ApplyTopkWithValidity(
         all_distances, ids, count, num_queries, topk, validity, allocator_);
+}
+
+void
+ThrowLabelNotFound(int64_t label) {
+    throw VsagException(ErrorType::INVALID_ARGUMENT,
+                        fmt::format("label {} does not exist or is removed", label));
+}
+
+void
+AttachValids(const DatasetPtr& dataset, const std::vector<bool>& validity, Allocator* allocator) {
+    if (validity.empty()) {
+        return;
+    }
+    auto* valids = static_cast<bool*>(allocator->Allocate(sizeof(bool) * validity.size()));
+    if (valids == nullptr) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                            "CalcDistancesById valids allocation failed");
+    }
+    for (uint64_t i = 0; i < validity.size(); ++i) {
+        valids[i] = validity[i];
+    }
+    dataset->Valids(valids);
 }
 
 DatasetPtr
@@ -654,15 +696,20 @@ ApplyTopkWithValidity(const float* distances,
     std::unique_ptr<float, decltype(release_distance_buffer)> out_dists_guard(
         static_cast<float*>(allocator->Allocate(sizeof(float) * total_result)),
         release_distance_buffer);
-    CHECK_ARGUMENT(out_dists_guard.get() != nullptr,
-                   "CalcDistancesById topk output distances allocation failed");
+    if (not out_dists_guard) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                            "CalcDistancesById topk output distances allocation failed");
+    }
     std::unique_ptr<int64_t, decltype(release_id_buffer)> out_ids_guard(
         static_cast<int64_t*>(allocator->Allocate(sizeof(int64_t) * total_result)),
         release_id_buffer);
-    CHECK_ARGUMENT(out_ids_guard.get() != nullptr,
-                   "CalcDistancesById topk output IDs allocation failed");
+    if (not out_ids_guard) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                            "CalcDistancesById topk output IDs allocation failed");
+    }
     auto* out_dists = out_dists_guard.get();
     auto* out_ids = out_ids_guard.get();
+    std::vector<bool> out_validity(static_cast<uint64_t>(total_result), false);
     std::vector<int64_t> idx(per_row_count);
     for (int64_t q = 0; q < num_rows; ++q) {
         const int64_t* row_ids = ids + q * per_row_count;
@@ -690,9 +737,12 @@ ApplyTopkWithValidity(const float* distances,
             });
         for (int64_t i = 0; i < result_count; ++i) {
             id_row[i] = row_ids[idx[i]];
-            out_row[i] = row_dists[idx[i]];
+            const bool valid = validity[row_valid_offset + idx[i]];
+            out_validity[static_cast<uint64_t>(q * result_count + i)] = valid;
+            out_row[i] = valid ? row_dists[idx[i]] : std::numeric_limits<float>::quiet_NaN();
         }
     }
+    AttachValids(result, out_validity, allocator);
     result->Ids(out_ids_guard.release())->Distances(out_dists_guard.release());
     return result;
 }
@@ -799,7 +849,11 @@ InnerIndexInterface::GetVectorByIds(const int64_t* ids,
         ->Owner(/*auto release=*/not has_specified_allocator, allocator);
     for (int i = 0; i < count; ++i) {
         InnerIdType inner_id = this->label_table_->GetIdByLabel(ids[i]);
-        this->GetVectorByInnerId(inner_id, float_vectors + i * dim_);
+        if (data_type_ == DataTypes::DATA_TYPE_FP16 or data_type_ == DataTypes::DATA_TYPE_BF16) {
+            this->GetFloat32VectorByInnerId(inner_id, float_vectors + i * dim_);
+        } else {
+            this->GetVectorByInnerId(inner_id, float_vectors + i * dim_);
+        }
     }
     return vectors;
 }
@@ -846,6 +900,37 @@ InnerIndexInterface::GetDataByIdsWithFlag(const int64_t* ids,
     return this->get_data_by_ids_with_flag(ids, count, selected_data_flag, inner_ids);
 }
 
+void
+InnerIndexInterface::GetFloat32VectorByInnerId(InnerIdType inner_id, float* data) const {
+    if (data_type_ != DataTypes::DATA_TYPE_FP16 and data_type_ != DataTypes::DATA_TYPE_BF16) {
+        this->GetVectorByInnerId(inner_id, data);
+        return;
+    }
+    // Native Decode writes packed half values through its float* ABI. Keep that
+    // internal contract unchanged and expand only at the public FP32 boundary.
+    Vector<float> native_row(dim_, allocator_);
+    this->GetVectorByInnerId(inner_id, native_row.data());
+    this->expand_native_half_row(native_row.data(), data);
+}
+
+void
+InnerIndexInterface::expand_native_half_row(const void* native_data, float* data) const {
+    const bool supported_dtype =
+        data_type_ == DataTypes::DATA_TYPE_FP16 or data_type_ == DataTypes::DATA_TYPE_BF16;
+    CHECK_ARGUMENT(supported_dtype, "native half expansion requires float16 or bfloat16");
+    const auto* bytes = static_cast<const uint8_t*>(native_data);
+    for (int64_t j = 0; j < dim_; ++j) {
+        uint16_t value;
+        std::memcpy(&value, bytes + j * sizeof(value), sizeof(value));
+        if (data_type_ == DataTypes::DATA_TYPE_FP16) {
+            data[j] = half_input::FP16ToFloat(value);
+        } else {
+            const uint32_t bits = static_cast<uint32_t>(value) << 16;
+            std::memcpy(data + j, &bits, sizeof(bits));
+        }
+    }
+}
+
 DatasetPtr
 InnerIndexInterface::get_data_by_ids_with_flag(const int64_t* ids,
                                                int64_t count,
@@ -885,7 +970,7 @@ InnerIndexInterface::get_data_by_ids_with_flag(const int64_t* ids,
         dataset->Float32Vectors(fp32_data);
         auto get_vec_func = [&](int64_t begin, int64_t end) {
             for (int64_t i = begin; i < end; ++i) {
-                this->GetVectorByInnerId(inner_ids[i], fp32_data + i * this->dim_);
+                this->GetFloat32VectorByInnerId(inner_ids[i], fp32_data + i * this->dim_);
             }
         };
         if (this->thread_pool_ != nullptr and thread_count > 1) {
@@ -1045,14 +1130,30 @@ InnerIndexInterface::analyze_quantizer(JsonType& stats,
             auto distance_result = this->CalcDistancesById(
                 query_data, search_result->GetIds(), search_result->GetDim());
             const auto* ground_distances = distance_result->GetDistances();
+            const auto* ground_valids = distance_result->GetValids();
             const auto* approximate_distances = search_result->GetDistances();
-            const auto result_count = search_result->GetDim();
-            CHECK_ARGUMENT(result_count > 0,
+            const auto searched_count = search_result->GetDim();
+            CHECK_ARGUMENT(searched_count > 0,
                            "analysis search returned no candidates for a non-empty index");
+            CHECK_ARGUMENT(ground_valids != nullptr,
+                           "analysis distance result must carry validity flags");
+            // Skip candidates removed concurrently: their ground distance is NaN.
+            std::vector<int64_t> kept;
+            kept.reserve(searched_count);
+            for (int64_t j = 0; j < searched_count; ++j) {
+                if (ground_valids[j]) {
+                    kept.push_back(j);
+                }
+            }
+            if (kept.empty()) {
+                continue;
+            }
+            const auto result_count = static_cast<int64_t>(kept.size());
             for (int64_t j = 0; j < result_count; ++j) {
-                if (ground_distances[j] > 0) {
-                    tmp_bias_ratio += std::abs(approximate_distances[j] - ground_distances[j]) /
-                                      ground_distances[j];
+                const auto pos = kept[j];
+                if (ground_distances[pos] > 0) {
+                    tmp_bias_ratio += std::abs(approximate_distances[pos] - ground_distances[pos]) /
+                                      ground_distances[pos];
                 }
             }
             tmp_bias_ratio /= static_cast<float>(result_count);
@@ -1061,7 +1162,7 @@ InnerIndexInterface::analyze_quantizer(JsonType& stats,
             int64_t inversion_count = 0;
             for (int64_t j = 0; j < result_count - 1; ++j) {
                 for (int64_t k = j + 1; k < result_count; ++k) {
-                    if (ground_distances[j] > ground_distances[k]) {
+                    if (ground_distances[kept[j]] > ground_distances[kept[k]]) {
                         inversion_count++;
                     }
                 }
@@ -1115,7 +1216,11 @@ float
 InnerIndexInterface::calc_distance_by_id(const float* query,
                                          int64_t id,
                                          const FlattenInterfacePtr& data) const {
-    auto result = calc_distance_by_id(query, &id, 1, data);
+    std::vector<bool> validity;
+    auto result = calc_distance_by_id(query, &id, 1, data, &validity);
+    if (validity.empty() or not validity[0]) {
+        ThrowLabelNotFound(id);
+    }
     return result->GetDistances()[0];
 }
 
@@ -1141,10 +1246,13 @@ InnerIndexInterface::calc_distance_by_id(const float* query,
     if (count == 0) {
         return result;
     }
+    std::vector<bool> local_validity(count, false);
     auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
-    CHECK_ARGUMENT(distances != nullptr, "failed to allocate distance buffer");
+    if (distances == nullptr) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate distance buffer");
+    }
     result->Distances(distances);
-    std::fill(distances, distances + count, -1.0F);
+    std::fill(distances, distances + count, std::numeric_limits<float>::quiet_NaN());
     Vector<InnerIdType> inner_ids(allocator_);
     Vector<int64_t> positions(allocator_);
     {
@@ -1154,9 +1262,7 @@ InnerIndexInterface::calc_distance_by_id(const float* query,
             if (success) {
                 inner_ids.push_back(inner_id);
                 positions.push_back(i);
-                if (validity != nullptr) {
-                    (*validity)[i] = true;
-                }
+                local_validity[i] = true;
             }
         }
     }
@@ -1168,6 +1274,10 @@ InnerIndexInterface::calc_distance_by_id(const float* query,
         for (uint64_t i = 0; i < positions.size(); ++i) {
             distances[positions[i]] = valid_distances[i];
         }
+    }
+    AttachValids(result, local_validity, allocator_);
+    if (validity != nullptr) {
+        *validity = std::move(local_validity);
     }
     return result;
 }

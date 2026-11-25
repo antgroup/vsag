@@ -22,6 +22,7 @@
 #include "ivf_partition_strategy.h"
 #include "ivf_partition_strategy_parameter.h"
 #include "query_context.h"
+#include "utils/training_rows.h"
 #include "vsag/index.h"
 namespace vsag {
 
@@ -32,6 +33,9 @@ public:
 
     void
     Train(const DatasetPtr dataset) override;
+
+    void
+    TrainRows(const TrainingRows& input);
 
     Vector<BucketIdType>
     ClassifyDatas(const void* datas,

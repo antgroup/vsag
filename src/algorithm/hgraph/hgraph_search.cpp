@@ -701,6 +701,42 @@ HGraph::search_range_with_request(const SearchRequest& request,
 [[nodiscard]] DatasetPtr
 HGraph::SearchWithRequest(const SearchRequest& request) const {
     ValidateSearchThreshold(request.threshold_);
+
+    // Iterator search: delegate to the iterator-aware KnnSearch overload.
+    if (request.enable_iterator_search_) {
+        CHECK_ARGUMENT(request.query_ != nullptr, "iterator search requires a query");
+        CHECK_ARGUMENT(request.query_->GetNumElements() == 1,
+                       "iterator-based search only supports single query (NumElements=1)");
+        CHECK_ARGUMENT(request.p_iter_ctx_ != nullptr,
+                       "p_iter_ctx_ must be non-null when enable_iterator_search_ is true");
+        CHECK_ARGUMENT(request.mode_ != SearchMode::RANGE_SEARCH,
+                       "iterator search only supports KNN, not range search");
+        CHECK_ARGUMENT(request.distance_batch_func_ == nullptr,
+                       "iterator search does not support custom query scoring");
+        CHECK_ARGUMENT(not request.enable_attribute_filter_,
+                       "iterator search does not support attribute filters");
+        CHECK_ARGUMENT(request.expected_labels_.empty(),
+                       "iterator search does not support reasoning (expected_labels_)");
+
+        // Match the non-iterator path: request.threshold_ is the sole source of
+        // distance bounding.  Erase any "threshold" key from the params JSON so
+        // that the delegated overload sees only the value we explicitly forward.
+        JsonType iterator_params =
+            JsonType::Parse(request.params_str_.empty() ? "{}" : request.params_str_, true);
+        iterator_params.Erase("threshold");
+        if (request.threshold_.has_value()) {
+            iterator_params["threshold"].SetDouble(static_cast<double>(request.threshold_.value()));
+        }
+
+        return this->KnnSearch(request.query_,
+                               request.topk_,
+                               iterator_params.Dump(),
+                               request.filter_,
+                               request.search_allocator_,
+                               *request.p_iter_ctx_,
+                               request.is_last_search_);
+    }
+
     SearchStatistics stats;
     QueryContext ctx{.alloc = this->allocator_, .stats = &stats};
     if (request.search_allocator_ != nullptr) {

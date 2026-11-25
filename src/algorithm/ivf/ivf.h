@@ -91,6 +91,11 @@ public:
                       int64_t topk = -1) const override;
 
     float
+    CalcDistanceById(const DatasetPtr& query,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override;
+
+    float
     CalcDistanceById(const float* query,
                      int64_t id,
                      bool calculate_precise_distance = true) const override;
@@ -167,6 +172,15 @@ public:
     void
     Train(const DatasetPtr& data) override;
 
+protected:
+    // Explicit subclass-only experimental seam; public constructor and factory
+    // retain their FLOAT-only checks. No runtime/environment bypass.
+    struct PrivateTrainingRowsPilot {};
+    IVF(const IVFParameterPtr& param,
+        const IndexCommonParam& common_param,
+        PrivateTrainingRowsPilot);
+
+public:
     void
     UpdateAttribute(int64_t id, const AttributeSet& new_attrs) override;
 
@@ -179,9 +193,13 @@ public:
     GetMemoryUsage() const override;
 
 private:
-    // Collect into caller-owned statistics without attaching JSON to internal child results.
+    // Collect into caller-owned statistics without JSON on internal children.
     DatasetPtr
-    search_with_request(const SearchRequest& request, SearchStatistics& stats) const;
+    search_with_request(const SearchRequest& request,
+                        SearchStatistics& stats,
+                        DataTypes query_type) const;
+    DatasetPtr
+    search_float_request(const SearchRequest& request, DataTypes query_type) const;
 
     std::vector<int64_t>
     add(const DatasetPtr& base, bool try_optimized_build);
@@ -196,7 +214,8 @@ private:
     DatasetPtr
     route_buckets_only(const DatasetPtr& query,
                        const InnerSearchParam& param,
-                       QueryContext& ctx) const;
+                       QueryContext& ctx,
+                       DataTypes query_type) const;
 
     /**
      * @brief Scan the selected buckets and return a distance heap.

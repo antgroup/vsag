@@ -118,7 +118,7 @@ FP16 或 BF16 的单向量存储码占 `2 * dim` 字节，FP32 则占 `4 * dim` 
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `base_quantization_type` | string | — | 底层量化类型（`fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_local`、`sq4_local`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`saq`、`tq`）。各量化器细节见[量化章节](../quantization/)。 |
+| `base_quantization_type` | string | `"fp32"` | 底层量化类型（`fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_local`、`sq4_local`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`saq`、`tq`）。各量化器细节见[量化章节](../quantization/)。 |
 | `tq_chain` | string | — | `base_quantization_type` 为 `tq` 时使用的变换链，例如 `"mrle, rabitq"`。 |
 | `mrle_dim` | int | `0` | MRLE 保留的前缀维度；`0` 表示保持输入维度。 |
 | `max_degree` | int | `64` | 子图内节点的最大出度 |
@@ -249,13 +249,20 @@ Pyramid 使用 split code 的 code-code 距离完成增量 FLAT→GRAPH 晋升�
 
 ## 构建缓存
 
-`ExportCache` 保存每个层级、每个节点的 NSW 图种子，`ImportCache` 可在后续 `Build` 中复用。缓存使用索引缓存 payload 格式，而非 streaming 索引序列化格式。需要复用缓存的索引通过 footer 序列化前应设置 `persist_source_id: true`，两次构建中的每个向量都须提供唯一的 `Dataset::SourceID` 和外部标签。缓存预热仅适用于 `graph_type: "nsw"`；ODescent、缺少 source ID、source ID 或标签重复时回退到普通冷构建（保留普通构建拒绝重复标签的行为）。`ef_construction` 不作为准入条件。输入 source ID 至少 80% 须与缓存重合。未命中成员按正常流程构建；single-layer root 命中成员执行出边修复，multi-layer 节点重建未缓存的 routing overlay。
+`ExportCache` 保存每个层级、每个节点的 NSW 图种子，`ImportCache` 可在后续 `Build` 中复用。缓存使用索引缓存 payload 格式，而非 streaming 索引序列化格式。需要复用缓存的索引通过 footer 序列化前应设置 `persist_source_id: true`，两次构建中的每个向量都须提供唯一的 `Dataset::SourceID` 和外部标签。以下 NSW 缓存预热规则适用于 `graph_type: "nsw"`；ODescent、缺少 source ID、source ID 或标签重复时回退到普通冷构建（保留普通构建拒绝重复标签的行为）。`ef_construction` 不作为准入条件。输入 source ID 至少 80% 须与缓存重合。未命中成员按正常流程构建；single-layer root 命中成员执行出边修复，multi-layer 节点重建未缓存的 routing overlay。
 
 启用 `support_duplicate: true` 时，Pyramid 显式保存每个图的组成员及实际邻接行代表，而不是最小标签或内部 ID。预热构建重映射 SourceID，并验证当前图成员关系和构建编码等价性。代表缺失或迁移、组等价性变化、组缓存行不可用时，仅将受影响的组转为 miss，其他合法组仍可复用。仅删除别名不会使其组失效。编码新合并的组保守重建。按哈希组织的有序索引通过比较完整构建编码字节处理冲突，不将哈希相同视为向量相等。每图至少 80% 的成员关系须保持可复用；缺少组元数据（含旧缓存）或复用比例不足时，整个图回退冷构建。缺少有效缓存邻接的全相同向量图仍冷构建。先恢复代表邻接再关联别名，过滤指向失效组的边；别名只计入成员关系，不增加恢复边或路由条目。
 
 并发插入使用临时的图级精确编码代表登记表，仅在相应的准入分片锁内完成代表发布。登记表引用已有构建编码，不复制完整向量；加载索引后在需要时重建。启用 duplicate 的 NSW `Build` 在冷构建和预热修整结束后，既检查从每个底层图入口出发的正向可达性，也检查各代表返回该入口的可达性。必要时补充有界、按几何距离选择的连接，同时保护正向遍历树边并保持最大度数。这两项检查共同确保图内物理代表之间的强连通性，也适用于路由下降为不同查询选择的底层入口。返回路径检查采用 CSR 反向邻接结构，对于 R 个代表和 E 条边需要 O(R + E) 临时内存，逐图处理并释放。这是 Build 阶段的不变量，不保证任意后续 `Add` 操作后的连通性。有限搜索预算的近似查询仍可能漏召回整个向量组，不承诺通用的召回率或构建加速。 反序列化后，稀疏图的显式空邻接行仍保留物理代表身份。旧版稠密或压缩存储可能丢失孤立空重复组的历史代表身份；准入初始化优先保留可由邻接行、入边或路由观察到的代表，然后为仍不可观察的已持久化重复组规范化一个成员作为代表，而不改变组内标签。这不等于恢复历史代表身份，也不保证任意增量图的连通性。此一次性旧索引准入扫描需要 O(H + A + E) 遍历工作和 O(H) 访问标记内存，其中 H 为已存储 ID 的高水位，A 为访问的重复成员数，E 为遍历的边数；精确编码有序索引操作另计通常的比较开销。
 
-带重复组的缓存使用 Pyramid 专用版本化格式；新读取器兼容旧普通缓存，旧读取器不能读取新重复组 payload。不含组元数据的普通缓存保留旧格式。HGraph 缓存及索引序列化格式不变。`GetStats()` 区分向量、图成员关系的命中/未命中计数和恢复边数；图回退计为未命中，不计为已恢复组。
+带重复组的缓存使用 Pyramid 专用版本化格式；新读取器兼容旧普通缓存，旧读取器不能读取新重复组 payload。不含组元数据的普通缓存保留旧格式。旧版 NSW 缓存及索引序列化格式不变。`GetStats()` 区分向量、图成员关系的命中/未命中计数和恢复边数；图回退计为未命中，不计为已恢复组。
+
+### PiPNN reservoir 缓存
+
+`graph_type: "pipnn"` 可通过同一缓存 API 导出和导入带版本的 reservoir。
+通过 Source ID 和原始 FP32 内容指纹识别可复用行；不兼容、旧版快照以及重复组图走冷构建。
+Pyramid 按层级名称和节点路径隔离缓存。生命周期、兼容性、内存开销、近似质量和诊断字段见
+[PiPNN reservoir 缓存](../advanced/build_cache.md#pipnn-reservoir-缓存)。
 
 ## 检索参数
 
@@ -263,7 +270,7 @@ Pyramid 使用 split code 的 code-code 距离完成增量 FLAT→GRAPH 晋升�
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `ef_search` | int | `100` | 叶子层子图检索的候选集大小 |
+| `ef_search` | int | —（必填） | 叶子层子图检索的候选集大小。省略该键会解析失败；`KnnSearch` 还要求取值位于 `[1, max(100 * topk, 1000)]`。参数结构体中的 `100` 不是可省略的默认值 |
 | `factor` | float | 未设置 | KNN 重排候选倍率。值 `<= 1` 时不增加限制；值大于 `1` 时，Pyramid 保持各子图原有搜索行为，先合并子图结果，再将至多 `min(max(ef_search, topk), floor(topk * factor))` 个主图候选送入重排。与 HGraph 一致，RaBitQ lower-bound 安全候选可在该限制后额外并入，`reorder_candidate_count` 记录实际合并数量。参数必须为有限正数；范围检索或关闭重排时不生效。 |
 | `hops_limit` | int | 不限 | 根节点底图及每个非根 GRAPH 的逐图 KNN 跳数上限；不大于 `ef_search` 时忽略。根节点的稀疏路由层不受限制，FLAT 扫描与范围检索不受影响。 |
 | `subindex_ef_search` | int | `50` | 沿路径向下遍历中间子图时的候选集大小 |

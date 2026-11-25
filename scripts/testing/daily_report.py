@@ -25,6 +25,7 @@ def summarize(results, allow_incomplete=False):
     identities = set()
     totals = {b: 0.0 for b in dp.BUCKETS}
     failures = []
+    rotation_timeouts = []
     incomplete = []
     unknown = 0
     slowest = []
@@ -96,11 +97,17 @@ def summarize(results, allow_incomplete=False):
                 architecture = "x86" if env.endswith("/linux/x86_64") else "arm" if env.endswith(("/linux/aarch64", "/linux/arm64")) else None
                 if architecture:
                     expansion_seconds[architecture] += seconds
-            slowest.append({"lane": result["lane"], "key": record["key"], "seconds": seconds,
-                            "name": unit.get("tests", [{}])[0].get("name", result["lane"]),
-                            "mode": unit.get("mode", "core"), "status": record["status"]})
-            if record["status"] != "passed":
-                failures.append(record["key"] + ": " + record["status"])
+            execution = {"lane": result["lane"], "key": record["key"], "seconds": seconds,
+                         "name": unit.get("tests", [{}])[0].get("name", result["lane"]),
+                         "mode": unit.get("mode", "core"), "status": record["status"]}
+            slowest.append(execution)
+            if dp.advisory_rotation_timeout(plan, result["lane"], unit, record):
+                rotation_timeouts.append(execution)
+            elif record["status"] != "passed":
+                failure = record["key"] + ": " + record["status"]
+                if record["status"] == "timeout" and record.get("error"):
+                    failure += " (" + record["error"] + ")"
+                failures.append(failure)
         incomplete.extend(result.get("coverage_gaps", []))
     for shards in shard_sets.values():
         count = shards[0]["count"]
@@ -117,7 +124,9 @@ def summarize(results, allow_incomplete=False):
             "quarantines": quarantines,
             "exclusions": exclusions, "failures": failures, "coverage_gaps": incomplete, "unknown_timings": unknown, "weekly": weekly,
             "slowest": sorted(slowest, key=lambda row: -row["seconds"])[:20],
-            "status": "failed" if failures or incomplete else "passed"}
+            "rotation_timeouts": sorted(rotation_timeouts, key=lambda row: (row["lane"], row["key"])),
+            "status": ("failed" if failures or incomplete else
+                       "passed_with_warnings" if rotation_timeouts else "passed")}
 
 
 def extra_markdown(extra, blocked=False):
@@ -169,7 +178,18 @@ def markdown(report):
               "Unknown estimates are not evidence that the budget will fit.",
               "", "<details><summary>Failures and coverage gaps</summary>", ""]
     lines.extend("- " + x for x in report["failures"] + report["coverage_gaps"])
-    lines += ["", "</details>", "", "### Architecture scope", "",
+    lines += ["", "</details>", ""]
+    if report.get("rotation_timeouts"):
+        lines += ["### Rotation timeouts (warning)", "",
+                  "These configurations count as failed and their coverage remains unvalidated. "
+                  "A single-case timeout counts as a case failure. For grouped cases, "
+                  "the timed-out execution leaves each case without an attributable result pending.", "",
+                  "| Lane / case | Configuration key | Seconds |", "| --- | --- | ---: |"]
+        for row in report["rotation_timeouts"]:
+            name = (row["lane"] + " / " + row["name"]).replace("|", "\\|").replace("\n", " ")
+            lines.append(f"| {name} | `{row['key']}` | {row['seconds']:.2f} |")
+        lines.append("")
+    lines += ["### Architecture scope", "",
               "x86 rotates the effective inventory over seven days, excluding recorded quarantines. ARM runs per-source core smoke plus "
               "approximately 10% of extensions per week; complete matrices require release validation."]
     expansion = report.get("expansion_seconds", {"x86": 0, "arm": 0})
@@ -344,7 +364,7 @@ def main():
     for b, seconds in report["seconds"].items():
         if seconds > report["budgets_minutes"][b] * 60:
             print(f"::warning::Nightly {b} exceeded its legacy cumulative reference")
-    return 0 if report["status"] == "passed" else 1
+    return 0 if report["status"] in ("passed", "passed_with_warnings") else 1
 
 
 if __name__ == "__main__":

@@ -309,6 +309,10 @@ Search-time parameters live under the `ivf` sub-object:
 | `parallelism` | int | `1` | Threads used to scan buckets in parallel for a single query. Needs an internal thread pool; falls back to single-threaded when no pool is available. |
 | `timeout_ms` | int | no limit | Soft time bound in milliseconds for per-bucket scan. Setting to `0` causes an immediate timeout; omit the key to disable. |
 
+The root-level `threshold` key (sibling of `ivf`, not a member of it) is also honoured: a
+finite numeric value discards KNN candidates whose distance exceeds it. It is parsed before the
+`ivf` object.
+
 ```cpp
 auto result = index->KnnSearch(
     query, topk,

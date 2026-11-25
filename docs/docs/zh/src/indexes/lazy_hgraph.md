@@ -73,6 +73,16 @@ LazyHGraph 只支持顶层 `dtype: "float32"`。flat 阶段固定使用 FP32 Bru
 在 flat 阶段，搜索是精确的；进入 graph 阶段后，内部 HGraph 会使用传入的 HGraph
 搜索参数，例如 `ef_search`。
 
+`hgraph` 继承 HGraph 的全部构建键，只有一个例外：`precise_io_type: "user_defined_io"` 在外层和
+`hgraph` 内部都会被拒绝，因为临时的 flat 与 graph 实例会共用同一对 Reader/Writer 并截断底层存储。
+包装层本身只识别 `transition_threshold` 与 `hgraph`；放在顶层的其他 HGraph 风格键（例如顶层的
+`max_degree`）会被忽略，必须写进 `hgraph`。
+
+两个阶段在检索时的行为不同。flat 阶段由 BruteForce 参数解析器处理，它在 `hgraph` 对象里只认识
+`parallelism`、`factor`、`enable_reorder`、`timeout_ms`、`use_extra_info_filter`，实际只消费
+`parallelism`、`use_extra_info_filter` 与根级 `threshold`，且**不要求** `ef_search`。graph 阶段
+使用完整的 HGraph 解析器，`ef_search` 为必填。
+
 ## 生命周期说明
 
 - `Build` 会根据输入规模选择初始阶段：小于 `transition_threshold` 保持 flat；

@@ -36,7 +36,7 @@ The token-path prerequisite check detects the standard ServiceAccount token moun
 
 ## Team execution contract
 
-The caller serializes the complete team reusable-workflow invocation with `concurrency.queue: max` and `cancel-in-progress: false`. Different PRs wait for the shared team execution capacity; four test jobs and the independent compatibility job within the admitted run may execute concurrently when execution capacity permits. The outer per-PR concurrency rule still cancels an older run when that PR is updated. Runner cleanup must finish before shared storage can be reused; GitHub concurrency alone does not establish this condition.
+By default, the caller serializes the complete team reusable-workflow invocation with `concurrency.queue: max` and `cancel-in-progress: false`. Different PRs wait for the shared team execution capacity; four test jobs and the independent compatibility job within the admitted run may execute concurrently when execution capacity permits. The outer per-PR concurrency rule still cancels an older run when that PR is updated. Runner cleanup must finish before shared storage can be reused; GitHub concurrency alone does not establish this condition.
 
 For relevant C++ and CI changes, the workflow follows this sequence:
 
@@ -61,6 +61,19 @@ Compatibility inputs have a different contract: the complete release snapshot an
 The deployment must provide capacity for four test consumers plus the independent compatibility consumer to overlap, with adequate resources, run-scoped artifact storage, a writable build mount followed by read-only consumer mounts, and private writable work and temporary directories. It must authenticate each mount's association with the admitted run, stop all artifact writers before allowing consumers, prevent access to other runs and trusted publishers, and clean up after success, failure and cancellation. Checkout credentials must not persist in the worktree. Workflow consistency checks do not replace these deployment controls.
 
 Use **Re-run all jobs** after a failed or cancelled team run. A new attempt must rebuild and republish its own artifacts and plan. Re-running only failed jobs can leave successful build jobs in an older attempt; consumers then reject that stale identity or missing artifact directory. Do not reuse another attempt's files or let individual shards rebuild independently. Verify cancellation, cleanup and a full rerun against the deployed runner before enabling this workflow for PRs.
+
+### Team slot dispatch pilot
+
+Canonical main may specify `team_slots` in `.github/ci-routing.json`. The policy contains the trusted GitHub App `app_id` and `pilot_prs` for the selected main-targeted PRs. A null `pilot_prs` applies to all eligible main-targeted Team PRs after rollout. With the policy absent, Team uses the original runner and caller concurrency group.
+
+A hosted job waits only when the Team path requires internal execution and the PR is selected by this policy. It reads an allocation Check Run on the tested merge SHA using a read-only token. The job validates the App, repository, PR, head, tested SHA, run, attempt and expiry. Build, four test shards and index compatibility use one returned runner label. The Team manager independently verifies the assignment, workflow trust and resource ownership before issuing a grant. The waiter is bounded to one hour and reports a failure if the dispatcher does not supply a valid allocation. A full rerun provides a fresh attempt identity.
+
+The dispatcher reports a confirmed workflow digest mismatch before assigning a slot. The
+hosted waiter fails the current attempt and names `@wxyucs` as the reviewer who must
+approve the workflow changes and append the trusted digest. Select **Re-run all jobs**
+after approval. A temporary GitHub API error is retried without a workflow review failure.
+
+Deploy and validate the dispatcher, the GitHub App, the isolated runner pool and its admission policy before enabling the pilot. Keep existing PR cancellation and Gate rules through the transition.
 
 ## Required checks and rollback
 

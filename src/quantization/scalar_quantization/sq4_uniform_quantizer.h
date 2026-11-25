@@ -14,11 +14,11 @@
 // limitations under the License.
 
 #pragma once
-
 #include "inner_string_params.h"
 #include "metric_type.h"
 #include "quantization/quantizer.h"
 #include "utils/pointer_define.h"
+#include "utils/training_rows.h"
 
 namespace vsag {
 
@@ -41,6 +41,16 @@ public:
 
     bool
     TrainImpl(const float* data, uint64_t count);
+
+    bool
+    ReTrainHalf(const uint16_t* data, uint64_t count, bool bf16);
+    bool
+    ReTrainRows(const TrainingRows& input);
+    static constexpr bool TRAINING_ROWS_SUPPORTED = true;
+    bool
+    TrainRowsImpl(const TrainingRows& input) {
+        return ReTrainRows(input);
+    }
 
     bool
     EncodeOneImpl(const float* data, uint8_t* codes) const;

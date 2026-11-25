@@ -69,11 +69,11 @@ auto result = index->KnnSearch(
 
 ## 构建参数
 
-构建参数放在 `index_param` 下。
+构建参数放在 `index_param` 下。`dim` 是**顶层**字段，不属于 `index_param`：稀疏数据可以
+省略，省略后取默认值 `4096`（`MAX_DIM_SPARSE`）。
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `dim` | int | 必填 | 单条稀疏向量允许的最大非零项数量，不是词表大小。 |
 | `term_id_limit` | int | `1000000` | term ID 上界，最高为 50 000 000。 |
 | `window_size` | int | `50000` | 每个 window 的文档数，范围为 10 000 到 60 000。 |
 | `doc_prune_ratio` | float | `0.0` | 构建时丢弃最低权重文档 term 的比例，范围为 `[0.0, 1.0)`。 |
@@ -99,7 +99,12 @@ auto result = index->KnnSearch(
 选项。`rerank_layout > 0` 要求 `use_reorder: true`。`rerank_type: "dmq8"` 要求
 `rerank_layout: 0`，并使用默认的 `block_memory_io` 重排后端。
 
-### Host 过滤
+继承自 `IndexSearchParameter` 的字段中只有 `timeout_ms` 生效，作为 posting 扫描的软超时；
+`parallelism`、`factor`、`enable_reorder` 虽被接受但对 SINDI_V2 无效果（`enable_reorder`
+取自构建时的 `use_reorder`）。根级 `threshold` 键（与 `sindi_v2` 平级）同样生效：取有限数值时，
+距离超过该值的 KNN 候选会被丢弃。
+
+### Host filtering
 
 SINDI_V2 支持与 [SINDI](sindi.md#host-过滤) 相同的字符串 `host` 构建数据和 KNN 查询
 metadata 约定。mutable 与 immutable 索引均支持该功能。两者共用 host 分组与路由组件，同时

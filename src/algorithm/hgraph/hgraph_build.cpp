@@ -197,11 +197,7 @@ HGraph::Build(const DatasetPtr& data) {
     this->build_cache_missed_nodes_ = 0;
     std::vector<int64_t> ret;
     const bool using_build_cache = this->has_loaded_cache();
-    if (using_build_cache and graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
-        throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            "HGraph PiPNN does not support build_with_cache");
-    }
-    if (using_build_cache) {
+    if (using_build_cache and graph_type_ != GRAPH_TYPE_VALUE_PIPNN) {
         CHECK_ARGUMENT(
             not adaptive_pruning_.enabled,
             "adaptive_pruning does not yet support building from imported cache; disable "
@@ -268,6 +264,7 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
     auto pipnn_parameter = this->pipnn_param_;
     if (use_pipnn) {
         pipnn_parameter.alpha = this->alpha_;
+        pipnn_parameter.duplicate_distance_threshold = this->duplicate_distance_threshold_;
         pipnn_parameter.Validate(bottom_graph_->MaximumDegree());
     }
     auto total = data->GetNumElements();
@@ -503,9 +500,43 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
                                         this->thread_pool_.get(),
                                         this->build_thread_count_);
         if (half_input) {
+            // Reservoir caches only cover FP32 input; half input always builds cold.
             pipnn_builder.Build(bottom_graph_, inner_ids, pipnn_half_vectors, data_type_);
         } else {
-            pipnn_builder.Build(bottom_graph_, inner_ids, pipnn_f32_vectors);
+            std::vector<std::string> pipnn_sources;
+            if (source_id != nullptr) {
+                pipnn_sources.reserve(valid_indices.size());
+                for (const auto index : valid_indices) {
+                    pipnn_sources.emplace_back(source_id[index]);
+                }
+            }
+            const auto imported_snapshot = cache_->pipnn;
+            auto refresh_cache_memory = [&]() {
+                pipnn_cache_memory_.store(
+                    cache_->pipnn == nullptr ? 0 : cache_->pipnn->GetMemoryUsage(),
+                    std::memory_order_release);
+                mark_memory_usage_dirty();
+            };
+            try {
+                pipnn_builder.Build(bottom_graph_,
+                                    inner_ids,
+                                    pipnn_f32_vectors,
+                                    source_id == nullptr ? nullptr : &pipnn_sources,
+                                    imported_snapshot.get(),
+                                    &cache_->pipnn);
+            } catch (...) {
+                refresh_cache_memory();
+                throw;
+            }
+            refresh_cache_memory();
+            if (imported_snapshot != nullptr) {
+                build_cache_hit_nodes_ = cache_->pipnn == nullptr ? 0 : cache_->pipnn->reused_rows;
+                build_cache_missed_nodes_ = inner_ids.size() - build_cache_hit_nodes_;
+                build_cache_hit_rate_ = inner_ids.empty()
+                                            ? 0.0F
+                                            : static_cast<float>(build_cache_hit_nodes_) /
+                                                  static_cast<float>(inner_ids.size());
+            }
         }
         if (this->using_dedup_storage() and not defer_persistent_codes) {
             materialize_storage();
@@ -1661,6 +1692,9 @@ HGraph::ImportCache(std::istream& in_stream) {
     this->check_fused_mutation_supported("ImportCache");
     IOStreamReader reader(in_stream);
     this->cache_->Deserialize(reader);
+    pipnn_cache_memory_.store(cache_->pipnn == nullptr ? 0 : cache_->pipnn->GetMemoryUsage(),
+                              std::memory_order_release);
+    mark_memory_usage_dirty();
 }
 
 void
@@ -2012,7 +2046,7 @@ HGraph::refine_nodes_two_phase(
             std::vector<std::future<void>> futures;
             futures.reserve((ids_to_refine.size() + block_size - 1) / block_size);
             for (size_t i = 0; i < ids_to_refine.size(); i += block_size) {
-                const auto end = std::min(i + block_size, ids_to_refine.size());
+                const auto end = std::min<uint64_t>(i + block_size, ids_to_refine.size());
                 futures.emplace_back(this->thread_pool_->GeneralEnqueue(
                     [&refine_one_node, &ids_to_refine, i, end]() {
                         for (size_t idx = i; idx < end; ++idx) {

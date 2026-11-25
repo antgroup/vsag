@@ -105,7 +105,7 @@ SIMQ 专属构建参数放在 `index_param` 下；通用字段保留在顶层。
 
 ### `index_param` 下的字段
 
-下表列出全部 15 个 SIMQ 公开构建字段；`index_param` 下的其他键会被拒绝。
+下表列出全部 16 个 SIMQ 公开构建字段；`index_param` 下的其他键会被拒绝。
 
 | 参数 | 类型 | 默认值 | 约束与作用 |
 |------|------|--------|------------|
@@ -115,6 +115,7 @@ SIMQ 专属构建参数放在 `index_param` 下；通用字段保留在顶层。
 | `base_cache_total_size` | unsigned int | `268435456`（256 MiB） | 缓存字节预算，必须为非负整数；容量按 128 KiB 页向下取整，小于一页（含 `0`）时即使开启也不缓存。作用于文档编码 IO 实例，不是代表图缓存。 |
 | `quantization_type` | string | `"fp32"` | 工厂支持的文档/图存储类型：`fp32`、`fp16`、`bf16`、`sq8_uniform`、`int8`；注意下方 `int8` 限制，不改变 FP32 输入要求。 |
 | `build_thread_count` | unsigned int | `1` | 共享解析器接受非负整数，SIMQ 无额外正数检查；建议使用 `>= 1`。控制构建图、代表图与聚类工作，不是每次查询的并行度开关；聚类至少使用一个 worker。 |
+| `enable_build_centroid_updates` | bool | `false` | 在初次 Build 时支持并行插入 token，随插入更新簇中心，最终用簇均值构建代表图。默认使用固定种子中心聚类，为每个簇选择一个代表 token。 |
 | `init_cluster_ratio` | float | `0.2` | 范围 `(0, 1]`；初始种子 token 的采样比例。较小值通常产生更少、更大的分区。 |
 | `max_cluster_size` | int | `64` | 必须 `> 1`；触发分区切分的 token 数阈值，不是文档数上限。 |
 | `split_start_idx` | int | `32` | 范围 `(1, max_cluster_size)`；溢出分区按距离排序后，新分区的起始位置。 |

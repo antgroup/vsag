@@ -27,6 +27,7 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/query_computer_pool.h"
 #include "impl/searcher/searcher_utils.h"
+#include "utils/cpu_relax.h"
 #include "utils/filter_search_skip_strategy.h"
 #include "utils/spsc_queue.h"
 #include "vsag_exception.h"
@@ -244,6 +245,8 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                     flatten->Query(distances, worker_computer, ids, count, ctx);
                 }
                 num_points.fetch_add(count, std::memory_order_release);
+            } else {
+                CpuRelax();
             }
         }
     };
@@ -349,6 +352,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         // A relaxed observation of the count does not publish those buffers on ARM.
         while (num_points.load(std::memory_order_acquire) < count_no_visited) {
             if (offset >= count_no_visited) {
+                CpuRelax();
                 continue;
             }
             const auto remaining_work = count_no_visited - offset;

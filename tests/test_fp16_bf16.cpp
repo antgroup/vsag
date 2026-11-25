@@ -222,9 +222,14 @@ TEST_CASE("HGraph typed native distance contract", "[ft][hgraph][distance_contra
             REQUIRE(batch.has_value());
             REQUIRE(batch.value()->GetNumElements() == 2);
             REQUIRE(batch.value()->GetDistances()[0] == 0);
-            REQUIRE(batch.value()->GetDistances()[1] == -1);
+            REQUIRE(std::isnan(batch.value()->GetDistances()[1]));
             REQUIRE(batch.value()->GetDistances()[2] == 0);
-            REQUIRE(batch.value()->GetDistances()[3] == -1);
+            REQUIRE(std::isnan(batch.value()->GetDistances()[3]));
+            REQUIRE(batch.value()->GetValids() != nullptr);
+            REQUIRE(batch.value()->GetValids()[0]);
+            REQUIRE_FALSE(batch.value()->GetValids()[1]);
+            REQUIRE(batch.value()->GetValids()[2]);
+            REQUIRE_FALSE(batch.value()->GetValids()[3]);
         }
     }
 }
