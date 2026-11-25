@@ -25,3 +25,13 @@ TEST_CASE("Prefetch Basic Test", "[ut][Prefetch]") {
         vsag::PrefetchLines(data.data(), i * 61);
     }
 }
+
+TEST_CASE("Prefetch accepts unaligned long ranges", "[ut][Prefetch]") {
+    // Ranges of 256 to 1024 bytes are fetched from both ends, whatever their alignment.
+    std::vector<uint8_t> data(16384);
+    for (uint64_t offset = 0; offset < 64; offset += 7) {
+        for (const uint64_t size : {255ULL, 256ULL, 257ULL, 768ULL, 960ULL, 1024ULL, 1025ULL}) {
+            vsag::PrefetchLines(data.data() + offset, size);
+        }
+    }
+}
