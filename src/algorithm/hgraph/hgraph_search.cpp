@@ -981,7 +981,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     base_search_param.rerank_topk = k;
     base_search_param.rabitq_rerank_candidates = params.rabitq_rerank_candidates;
     base_search_param.min_results = k;
-    const float early_stop_alpha = params.DistanceEarlyStopAlpha(k);
+    const float early_stop_alpha = params.DistanceEarlyStopAlpha(base_search_param.ef, k);
     if (params.topk_factor > 1.0F) {
         base_search_param.topk =
             std::min(base_search_param.topk,
@@ -1262,6 +1262,17 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                 if (mci_result.route == "mci") {
                     search_result = std::move(mci_result.result);
                 } else {
+                    if (params.early_stop and early_stop_alpha == 0.0F) {
+                        std::call_once(this->early_stop_skip_warned_, [&]() {
+                            logger::warn(fmt::format(
+                                "hgraph: early_stop is skipped while the search width (ef_search, "
+                                "at least k) is at most {} * k (first seen: ef_search {}, k {}); "
+                                "logged once per index",
+                                HGraphSearchParameters::DISTANCE_EARLY_STOP_MIN_EF_TO_K,
+                                params.ef_search,
+                                k));
+                        });
+                    }
                     // Only the bottom-graph traversal runs the distance early stop.
                     ctx.distance_early_stop_alpha = early_stop_alpha;
                     search_result = this->search_one_graph(raw_query,

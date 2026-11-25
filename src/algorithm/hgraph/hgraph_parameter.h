@@ -129,15 +129,20 @@ public:
     FromParsedJson(const JsonType& params);
 
 public:
-    // Alpha of the distance early stop for a search with k results: the explicit alpha, or
-    // DefaultDistanceEarlyStopAlpha(k) when it is omitted; 0 when early_stop is off.
+    // Alpha of the distance early stop for a bottom-graph search of width ef: the explicit alpha,
+    // or DefaultDistanceEarlyStopAlpha(k) when it is omitted; 0 when early_stop is off or ef is at
+    // most DISTANCE_EARLY_STOP_MIN_EF_TO_K * k.
     [[nodiscard]] float
-    DistanceEarlyStopAlpha(int64_t k) const;
+    DistanceEarlyStopAlpha(uint64_t ef, int64_t k) const;
 
     // 1.85 at k = 1, 1.5 at k = 10 and 1.15 for k >= 100, linear in log10(k) in between. A larger
     // k puts the k-th distance farther out, so the same ratio stops later.
     static float
     DefaultDistanceEarlyStopAlpha(int64_t k);
+
+    // With ef this close to k the rule seldom ends a search early, while its own top-k state still
+    // costs time, so such searches run without it.
+    static constexpr double DISTANCE_EARLY_STOP_MIN_EF_TO_K = 1.25;
 
     int64_t ef_search{30};
     uint32_t hops_limit{std::numeric_limits<uint32_t>::max()};

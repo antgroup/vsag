@@ -903,9 +903,15 @@ TEST_CASE("HGraphSearchParameters picks the early-stop alpha for a search",
         R"({"hgraph":{"ef_search":64,"early_stop":{"type":"distance","alpha":1.25}}})");
     const auto omitted = HGraphSearchParameters::FromJson(
         R"({"hgraph":{"ef_search":64,"early_stop":{"type":"distance"}}})");
-    REQUIRE(off.DistanceEarlyStopAlpha(100) == 0.0F);
-    REQUIRE(given.DistanceEarlyStopAlpha(100) == 1.25F);
-    REQUIRE(omitted.DistanceEarlyStopAlpha(100) == 1.15F);
+    REQUIRE(off.DistanceEarlyStopAlpha(126, 100) == 0.0F);
+    REQUIRE(given.DistanceEarlyStopAlpha(126, 100) == 1.25F);
+    REQUIRE(omitted.DistanceEarlyStopAlpha(126, 100) == 1.15F);
+    // A search width of at most 1.25 k skips the rule.
+    for (const auto& [ef, k] :
+         std::vector<std::pair<uint64_t, int64_t>>{{125, 100}, {10, 8}, {1, 1}}) {
+        REQUIRE(given.DistanceEarlyStopAlpha(ef, k) == 0.0F);
+        REQUIRE(given.DistanceEarlyStopAlpha(ef + 1, k) == 1.25F);
+    }
 }
 
 TEST_CASE("HGraphSearchParameters parses brute_force_threshold",

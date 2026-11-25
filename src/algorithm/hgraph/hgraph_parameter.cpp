@@ -394,8 +394,9 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
 }
 
 float
-HGraphSearchParameters::DistanceEarlyStopAlpha(int64_t k) const {
-    if (not early_stop) {
+HGraphSearchParameters::DistanceEarlyStopAlpha(uint64_t ef, int64_t k) const {
+    if (not early_stop or
+        static_cast<double>(ef) <= DISTANCE_EARLY_STOP_MIN_EF_TO_K * static_cast<double>(k)) {
         return 0.0F;
     }
     return early_stop_alpha > 0.0F ? early_stop_alpha : DefaultDistanceEarlyStopAlpha(k);

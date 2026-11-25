@@ -24,6 +24,7 @@
 #include <numeric>
 
 #include "hgraph_parameter.h"
+#include "impl/logger/capturing_logger_test.h"
 #include "json_wrapper.h"
 #include "unittest.h"
 
@@ -77,6 +78,8 @@ origin_query() {
 // candidate is at 9: alpha 1.1 stops it there, and no candidate is ever 1e30 times as far.
 const std::string kTightAlpha = R"({"type":"distance","alpha":1.1})";
 const std::string kUnreachableAlpha = R"({"type":"distance","alpha":1e30})";
+// alpha 1 is the tightest rule there is: wherever it runs, it ends the search from the origin.
+const std::string kTightestAlpha = R"({"type":"distance","alpha":1.0})";
 
 // Search parameters with the given early_stop object, or without the option when it is empty.
 std::string
@@ -323,4 +326,36 @@ TEST_CASE("HGraph distance early stop picks alpha from k when alpha is omitted",
         stopped += std::stoull(stat(omitted, "early_stop_count"));
     }
     REQUIRE(stopped > 0);
+}
+
+TEST_CASE("HGraph distance early stop is skipped when ef_search is at most 1.25 k",
+          "[ut][HGraph][distance_early_stop]") {
+    testing::CapturingLogger capture;
+    const testing::ScopedLogger installed(&capture);
+    auto skip_warnings = [&capture]() {
+        return std::count_if(
+            capture.lines.begin(), capture.lines.end(), [](const std::string& line) {
+                return line.find("early_stop is skipped") != std::string::npos;
+            });
+    };
+    auto index = build_line_index(64);
+    constexpr int64_t k = 8;
+    const std::vector<std::string> keys{"dist_cmp", "hops", "early_stop_count"};
+    // 10 <= 1.25 * 8: the search runs as if early_stop were absent and reports no count.
+    for (const int64_t ef_search : {4, 8, 10}) {
+        CAPTURE(ef_search);
+        const auto fixed = knn_search(index, origin_query(), k, search_params(ef_search));
+        const auto skipped =
+            knn_search(index, origin_query(), k, search_params(ef_search, kTightestAlpha));
+        REQUIRE(stat(skipped, "early_stop_count").empty());
+        REQUIRE(skipped->GetStatistics(keys) == fixed->GetStatistics(keys));
+        REQUIRE(labels(skipped) == labels(fixed));
+    }
+    // 11 > 1.25 * 8: the rule runs.
+    const auto applied = knn_search(index, origin_query(), k, search_params(11, kTightestAlpha));
+    REQUIRE(stat(applied, "early_stop_count") == "1");
+    // The index warned once; a second index warns for itself.
+    REQUIRE(skip_warnings() == 1);
+    knn_search(build_line_index(64), origin_query(), k, search_params(10, kTightestAlpha));
+    REQUIRE(skip_warnings() == 2);
 }
