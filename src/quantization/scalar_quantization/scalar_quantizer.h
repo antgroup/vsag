@@ -123,6 +123,7 @@ private:
 
     std::vector<float> lower_bound_{};
     std::vector<float> diff_{};
+    float encoding_bias_{0.0F};
 };
 
 template <MetricType metric>

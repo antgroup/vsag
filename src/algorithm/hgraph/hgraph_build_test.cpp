@@ -112,6 +112,51 @@ TEST_CASE("Alpha-CNG builds and reloads an FP32 HGraph", "[ut][hgraph][alpha_cng
     }
 }
 
+TEST_CASE("Alpha-CNG reloads RaBitQ indexes after bulk build and after tuning FP32",
+          "[ut][hgraph][alpha_cng][sq8_reorder]") {
+    const bool split = GENERATE(false, true);
+    const bool tune = GENERATE(false, true);
+    constexpr int64_t count = 80;
+    constexpr int64_t dim = 64;
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 100);
+    std::mt19937 engine(735);
+    std::uniform_real_distribution<float> sample(-1.0F, 1.0F);
+    std::vector<float> rows(count * dim);
+    std::generate(rows.begin(), rows.end(), [&]() { return sample(engine); });
+    auto data = MakeBuildDataset(ids, rows, count, dim);
+    const std::string start = R"({"dtype":"float32","metric_type":"l2","dim":64,"index_param":{)";
+    const std::string graph = R"("graph_type":"alpha_cng","alpha_cng_tau":0.02,"max_degree":12,)";
+    const std::string codes =
+        std::string(
+            R"("base_quantization_type":"rabitq","use_reorder":true,"rabitq_bits_per_dim_base":3,)") +
+        (split ? R"("precise_quantization_type":"rabitq","rabitq_bits_per_dim_precise":5)"
+               : R"("precise_quantization_type":"sq8")");
+    const std::string quantized = start + graph + codes + "}}";
+    const auto original = tune ? start + graph + R"("base_quantization_type":"fp32"}})" : quantized;
+    auto index = vsag::Factory::CreateIndex("hgraph", original).value();
+    REQUIRE(index->Build(data).has_value());
+    if (tune) {
+        auto result = index->Tune(quantized, true);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value());
+    }
+    const auto query = MakeBuildDataset(ids, rows, 1, dim);
+    const std::string search = split ? R"({"hgraph":{"ef_search":80,"rabitq_one_bit_search":true}})"
+                                     : R"({"hgraph":{"ef_search":80}})";
+    const auto before = index->KnnSearch(query, 10, search).value();
+    REQUIRE(before->GetDim() == 10);
+    REQUIRE(before->GetIds()[0] == ids.front());
+    std::stringstream storage;
+    REQUIRE(index->Serialize(storage).has_value());
+    auto restored = vsag::Factory::CreateIndex("hgraph", quantized).value();
+    REQUIRE(restored->Deserialize(storage).has_value());
+    const auto after = restored->KnnSearch(query, 10, search).value();
+    REQUIRE(after->GetDim() == before->GetDim());
+    REQUIRE(std::equal(before->GetIds(), before->GetIds() + 10, after->GetIds()));
+    REQUIRE(std::equal(before->GetDistances(), before->GetDistances() + 10, after->GetDistances()));
+}
+
 TEST_CASE("HGraph batch build stays searchable without an upper level",
           "[ut][hgraph][build][odescent]") {
     // Upper levels drive the entry point of a batch-built HGraph. The level sampler draws from a

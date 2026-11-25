@@ -103,7 +103,7 @@ records cross-index defaults and the top-level common fields.
 | `label_remap_type` | string | `"pg"` | Label-to-inner-ID map implementation: `"pg"` or `"robin"`. Keep the same value when restoring or combining compatible indexes. |
 | `use_reorder` | bool | `false` | Keep a high-precision copy and re-rank after the coarse search |
 | `reorder_source` | string | `"precise"` | Reorder from `"precise"` codes or directly from `"base"` codes. RaBitQ x+y split, including `tq_chain: "mrle, rabitq"`, sets `"base"` automatically. |
-| `precise_quantization_type` | string | `"fp32"` | Quantizer used for reordering (takes effect only with `use_reorder: true`) |
+| `precise_quantization_type` | string | `"fp32"` | Quantizer used for reordering (takes effect only with `use_reorder: true`). With a RaBitQ base and a separate SQ8 reranker, new SQ8 codes use the nearest reconstruction level. Rebuild or re-encode from FP32 to apply this to existing vectors. |
 | `base_pq_dim` | int | `1` | Number of PQ subspaces. When using `pq` / `pqfs`, set this explicitly instead of relying on the default. Must not exceed `dim` in a way the quantizer rejects. |
 | `mrle_dim` | int | `0` | Output dimension for an MRLE transform in `tq_chain`; allowed range `[0, dim]`, where `0` means the input dimension. |
 | `fast_encode_rabitq` | bool | `true` | Use the fast multi-bit RaBitQ encoder; set to `false` for the previous exact encoder. |
@@ -194,7 +194,9 @@ before changing it.
 
 ### Alpha-CNG construction
 
-Alpha-CNG builds the bottom layer on dense FP32 L2 data without reranking. It searches an
+Alpha-CNG builds the bottom layer from dense FP32 L2 input. It supports FP32 storage, ordinary
+RaBitQ split with reranking, and a RaBitQ base with a separate SQ8 reranker. Candidate collection
+and Euclidean pruning use the original input vectors. It searches an
 unpruned 200-neighbor ODescent seed from the point nearest the centroid (beam width 60, up to
 500 visited candidates per row). Forward selection and overflowing reverse lists use HGraph's
 adaptive α selector with the Alpha-CNG Euclidean margin. The first pass uses `alpha` (default

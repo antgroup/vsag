@@ -189,10 +189,15 @@ HGraphParameter::FromJson(const JsonType& json) {
                        "alpha_cng_tau must be finite and nonnegative");
     }
     if (graph_type == GRAPH_TYPE_VALUE_ALPHA_CNG) {
-        CHECK_ARGUMENT(
-            base_codes_param->quantizer_parameter->GetTypeName() == QUANTIZATION_TYPE_VALUE_FP32 and
-                not use_reorder,
-            "alpha_cng requires FP32 base codes without reranking");
+        const auto& base = base_codes_param->quantizer_parameter->GetTypeName();
+        const bool sq8_rerank =
+            reorder_source != HGRAPH_REORDER_SOURCE_BASE and precise_codes_param != nullptr and
+            precise_codes_param->quantizer_parameter->GetTypeName() == QUANTIZATION_TYPE_VALUE_SQ8;
+        const bool rabitq_reorder =
+            base == QUANTIZATION_TYPE_VALUE_RABITQ and use_reorder and not rabitq_fused_datacell and
+            (base_codes_param->name == RABITQ_SPLIT_DATA_CELL or sq8_rerank);
+        CHECK_ARGUMENT((base == QUANTIZATION_TYPE_VALUE_FP32 and not use_reorder) or rabitq_reorder,
+                       "alpha_cng supports FP32, RaBitQ split, or RaBitQ with SQ8 reranking");
         CHECK_ARGUMENT(
             odescent_param->turn > 0 and odescent_param->block_size > 0 and
                 odescent_param->sample_rate > 0 and odescent_param->sample_rate <= 1,

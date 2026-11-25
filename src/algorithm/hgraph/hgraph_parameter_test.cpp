@@ -24,7 +24,29 @@
 #include "index_common_param.h"
 #include "inner_string_params.h"
 #include "parameter_test.h"
+#include "quantization/scalar_quantization/scalar_quantizer_parameter.h"
 #include "unittest.h"
+
+TEST_CASE("HGraph maps RaBitQ with a separate SQ8 reranker to nearest encoding",
+          "[ut][hgraph][sq8_reorder]") {
+    vsag::IndexCommonParam common;
+    common.dim_ = 128;
+    common.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    const std::string base = GENERATE("rabitq", "sq8", "fp32");
+    auto config =
+        vsag::JsonType::Parse(R"({"use_reorder":true,"precise_quantization_type":"sq8"})");
+    config["base_quantization_type"].SetString(base);
+    const auto mapped = vsag::HGraph::CheckAndMappingExternalParam(config, common);
+    auto param = std::dynamic_pointer_cast<vsag::HGraphParameter>(mapped);
+    REQUIRE(param != nullptr);
+    auto sq8 = std::dynamic_pointer_cast<vsag::ScalarQuantizerParameter<8>>(
+        param->precise_codes_param->quantizer_parameter);
+    REQUIRE(sq8 != nullptr);
+    REQUIRE(sq8->round_to_nearest_ == (base == "rabitq"));
+    REQUIRE_FALSE(param->base_codes_param->quantizer_parameter->ToJson().Contains(
+        vsag::SQ8_ROUND_TO_NEAREST_KEY));
+}
 
 #define TEST_COMPATIBILITY_CASE(section_name, param_member, val1, val2, expect_compatible) \
     SECTION(section_name) {                                                                \

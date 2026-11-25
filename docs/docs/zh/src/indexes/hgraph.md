@@ -90,7 +90,7 @@ auto result = index->KnnSearch(
 | `label_remap_type` | string | `"pg"` | label 到内部 ID 的 map 实现：`"pg"` 或 `"robin"`；恢复或组合兼容索引时应保持一致 |
 | `use_reorder` | bool | `false` | 是否额外保留一份高精度副本用于精排 |
 | `reorder_source` | string | `"precise"` | 从 `"precise"` 编码或直接从 `"base"` 编码重排；RaBitQ x+y split（包括 `tq_chain: "mrle, rabitq"`）会自动设置为 `"base"` |
-| `precise_quantization_type` | string | `"fp32"` | 精排使用的量化类型（仅在 `use_reorder: true` 时生效） |
+| `precise_quantization_type` | string | `"fp32"` | 精排使用的量化类型（仅在 `use_reorder: true` 时生效）。RaBitQ 粗排配独立 SQ8 精排时，新编码会选择距离最近的重建值。已有向量需从 FP32 重建或重新编码才能应用此改动。 |
 | `base_pq_dim` | int | `1` | PQ 子空间数。使用 `pq` / `pqfs` 时应显式设置，不要依赖默认值；取值须通过量化器的维度校验 |
 | `mrle_dim` | int | `0` | `tq_chain` 中 MRLE 的输出维度，范围 `[0, dim]`；`0` 表示输入维度 |
 | `fast_encode_rabitq` | bool | `true` | 使用多 bit RaBitQ 快速编码；设为 `false` 使用原有精确编码器 |
@@ -177,7 +177,8 @@ auto result = index->KnnSearch(
 
 ### α-CNG 构建
 
-α-CNG 面向不使用重排的稠密 FP32 L2 索引。它从最靠近质心的节点在未剪枝的 200 邻居 ODescent 图上搜索，
+α-CNG 使用稠密 FP32 L2 输入，支持 FP32 存储、普通 RaBitQ split 重排，以及 RaBitQ 粗排配独立 SQ8 精排。
+候选收集和欧氏剪枝均使用原始输入向量。它从最靠近质心的节点在未剪枝的 200 邻居 ODescent 图上搜索，
 搜索宽度为 60，每个点从已访问节点中取最多 500 个候选。正向选边与反向边超限重剪均采用 HGraph 的动态 α，
 并保留 α-CNG 的欧氏距离余量。首轮使用 `alpha`（默认 1.0），按照接受和拒绝的候选数，以
 `adaptive_pruning_adjust_step`（默认 0.06）为步长放宽或收紧阈值。步长为零时只执行首轮。

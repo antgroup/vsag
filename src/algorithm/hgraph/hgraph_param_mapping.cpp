@@ -23,6 +23,7 @@
 #include "hgraph_parameter.h"
 #include "impl/logger/logger.h"
 #include "io/common/io_parameter.h"
+#include "quantization/scalar_quantization/scalar_quantizer_parameter.h"
 #include "quantization/transform_quantization/transform_quantizer_parameter.h"
 
 namespace vsag {
@@ -133,6 +134,10 @@ build_default_hgraph_inner_param(const JsonType& external_json) {
         build_default_flatten_param(base_quantization_type, base_io_type, tq_chain));
     json[PRECISE_CODES_KEY].SetJson(
         build_default_flatten_param(precise_quantization_type, precise_io_type));
+    if (base_quantization_type == QUANTIZATION_TYPE_VALUE_RABITQ &&
+        precise_quantization_type == QUANTIZATION_TYPE_VALUE_SQ8) {
+        json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][SQ8_ROUND_TO_NEAREST_KEY].SetBool(true);
+    }
     if (uses_user_defined_io) {
         json[PRECISE_CODES_KEY][IO_PARAMS_KEY][IO_USER_DEFINED_IO_KEY].SetJson(
             external_json[HGRAPH_PRECISE_USER_DEFINED_IO]);

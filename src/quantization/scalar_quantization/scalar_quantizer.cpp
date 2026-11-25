@@ -42,7 +42,11 @@ template <MetricType metric, int bit>
 ScalarQuantizer<metric, bit>::ScalarQuantizer(
     const std::shared_ptr<ScalarQuantizerParameter<bit>>& param,
     const IndexCommonParam& common_param)
-    : ScalarQuantizer<metric, bit>(common_param.dim_, common_param.allocator_.get()){};
+    : ScalarQuantizer<metric, bit>(common_param.dim_, common_param.allocator_.get()) {
+    if constexpr (bit == 8) {
+        encoding_bias_ = param->round_to_nearest_ ? 0.5F : 0.0F;
+    }
+}
 
 template <MetricType metric, int bit>
 ScalarQuantizer<metric, bit>::ScalarQuantizer(const QuantizerParamPtr& param,
@@ -169,7 +173,8 @@ ScalarQuantizer<metric, bit>::encode_one_with_scratch(const float* data,
             delta = 1.0F * (cur[d] - lower_bound_[d]) / diff_[d];
         }
         delta = ClampScalarQuantizationDelta(delta);
-        scaled = static_cast<uint8_t>(static_cast<float>(MAX_CODE_PER_DIM - 1) * delta);
+        scaled =
+            static_cast<uint8_t>(static_cast<float>(MAX_CODE_PER_DIM - 1) * delta + encoding_bias_);
         fill_codes(codes, scaled, BIT_PER_DIM, d);
     }
 

@@ -19,6 +19,8 @@
 #include "quantization/quantizer_parameter.h"
 #include "utils/pointer_define.h"
 namespace vsag {
+inline constexpr char SQ8_ROUND_TO_NEAREST_KEY[] = "round_to_nearest";
+
 template <int bit = 8>
 class ScalarQuantizerParameter : public QuantizerParameter {
 public:
@@ -31,6 +33,8 @@ public:
 
     JsonType
     ToJson() const override;
+
+    bool round_to_nearest_{false};
 };
 
 template <int bit>
@@ -47,6 +51,10 @@ ScalarQuantizerParameter<bit>::ScalarQuantizerParameter()
 template <int bit>
 void
 ScalarQuantizerParameter<bit>::FromJson(const JsonType& json) {
+    if constexpr (bit == 8) {
+        round_to_nearest_ =
+            json.Contains(SQ8_ROUND_TO_NEAREST_KEY) && json[SQ8_ROUND_TO_NEAREST_KEY].GetBool();
+    }
 }
 
 template <int bit>
@@ -54,6 +62,11 @@ JsonType
 ScalarQuantizerParameter<bit>::ToJson() const {
     JsonType json;
     json[TYPE_KEY].SetString(this->GetTypeName());
+    if constexpr (bit == 8) {
+        if (round_to_nearest_) {
+            json[SQ8_ROUND_TO_NEAREST_KEY].SetBool(true);
+        }
+    }
     return json;
 }
 
