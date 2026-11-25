@@ -120,23 +120,28 @@ struct DatasetView {
 };
 
 inline DatasetView
-make_view(const vsag_dataset_t* handle, bool single_query) {
+make_view(const vsag_dataset_t* handle, bool single_query, bool allow_empty = false) {
     if (handle == nullptr) {
         throw std::invalid_argument("dataset is NULL");
     }
-    if (handle->num_elements <= 0) {
+    if (handle->num_elements < 0 or (handle->num_elements == 0 and not allow_empty)) {
         throw std::invalid_argument("dataset num_elements must be positive");
     }
     if (single_query and handle->num_elements != 1) {
         throw std::invalid_argument("dataset must hold exactly one vector");
     }
+    if (handle->num_elements == 0) {
+        DatasetView empty;
+        empty.dataset = vsag::Dataset::Make()->Owner(false)->NumElements(0)->Dim(handle->dim);
+        return empty;
+    }
     const bool is_sparse = handle->index_pointers != nullptr;
     const bool is_dense = handle->float32_vectors != nullptr or
                           handle->float16_vectors != nullptr or handle->int8_vectors != nullptr;
-    if (not is_sparse and not is_dense) {
+    if (not is_sparse and not is_dense and not(single_query and handle->dim == 0)) {
         throw std::invalid_argument("dataset has no vectors");
     }
-    if (is_dense and handle->dim <= 0) {
+    if (is_dense and (handle->dim < 0 or (handle->dim == 0 and not single_query))) {
         throw std::invalid_argument("dataset dim must be positive");
     }
 
@@ -175,8 +180,10 @@ make_view(const vsag_dataset_t* handle, bool single_query) {
             }
             auto& row = view.sparse_vectors[i];
             row.len_ = end - begin;
-            row.ids_ = const_cast<uint32_t*>(handle->indices) + begin;
-            row.vals_ = const_cast<float*>(handle->values) + begin;
+            row.ids_ = handle->indices == nullptr ? nullptr
+                                                  : const_cast<uint32_t*>(handle->indices) + begin;
+            row.vals_ =
+                handle->values == nullptr ? nullptr : const_cast<float*>(handle->values) + begin;
         }
         view.dataset->SparseVectors(view.sparse_vectors.data());
     }
