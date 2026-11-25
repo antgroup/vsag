@@ -639,6 +639,9 @@ IVF::CalcDistancesById(const float* query,
                        bool calculate_precise_distance,
                        int64_t topk) const {
     CHECK_ARGUMENT(count >= 0, "CalcDistancesById count must be non-negative");
+    CHECK_ARGUMENT(
+        static_cast<uint64_t>(count) <= std::numeric_limits<uint64_t>::max() / sizeof(float),
+        "CalcDistancesById distance buffer size overflows");
     const bool invalid_topk = topk != -1 && topk <= 0;
     CHECK_ARGUMENT(not invalid_topk, "CalcDistancesById topk must be -1 or positive");
     if (count > 0) {
