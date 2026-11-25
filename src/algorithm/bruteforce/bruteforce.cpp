@@ -1571,6 +1571,10 @@ BruteForce::GetFloat32VectorByInnerId(InnerIdType inner_id, float* data) const {
         this->GetVectorByInnerId(inner_id, data);
         return;
     }
+    if (data_type_ == DataTypes::DATA_TYPE_BINARY) {
+        InnerIndexInterface::GetFloat32VectorByInnerId(inner_id, data);
+        return;
+    }
     Vector<uint8_t> codes(inner_codes_->code_size_, allocator_);
     inner_codes_->GetCodesById(inner_id, codes.data());
     if (data_type_ == DataTypes::DATA_TYPE_FP16 or data_type_ == DataTypes::DATA_TYPE_BF16) {

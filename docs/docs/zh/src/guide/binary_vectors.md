@@ -56,6 +56,7 @@ hamming(a, b) = popcount(a XOR b)
 | 删除（`MARK_REMOVE`、`FORCE_REMOVE`） | 支持 | 支持（`FORCE_REMOVE` 需要 `"support_force_remove": true` 与 `"use_reverse_edges": true`） |
 | 以 Dataset 作为查询的 `CalcDistanceById` / `CalcDistancesById` | 支持 | 支持 |
 | `GetRawVectorByIds` | 返回打包后的 bit | 返回打包后的 bit |
+| `GetDataByIds`（float32 向量） | 每个 bit 一个 `0.0` / `1.0`，不含填充位 | 设置 `"store_raw_vector": true` 时同左；不保存原始向量时不返回向量，与其它 dtype 一致 |
 | `UpdateVector` | 支持 | 支持（不带 `force_update` 时，若新向量离某个邻居比离原位置更近则拒绝更新） |
 | `GetStats` / `AnalyzeIndexBySearch` | BruteForce 不提供 | 支持（分析用的查询使用二进制向量） |
 | 序列化 / 反序列化 | 支持 | 支持 |

@@ -71,6 +71,7 @@ These combinations are rejected with an `INVALID_ARGUMENT` error:
 | Remove (`MARK_REMOVE`, `FORCE_REMOVE`) | yes | yes (`FORCE_REMOVE` needs `"support_force_remove": true` and `"use_reverse_edges": true`) |
 | `CalcDistanceById` / `CalcDistancesById` with a Dataset query | yes | yes |
 | `GetRawVectorByIds` | returns the packed bits | returns the packed bits |
+| `GetDataByIds` (float32 vectors) | one `0.0` / `1.0` value per bit, padding left out | the same with `"store_raw_vector": true`; without raw vectors no vectors are returned, as for every dtype |
 | `UpdateVector` | yes | yes (without `force_update`, rejects a vector that moves closer to a neighbor than to its old position) |
 | `GetStats` / `AnalyzeIndexBySearch` | not provided by BruteForce | yes (analysis queries carry binary vectors) |
 | Serialize / Deserialize | yes | yes |

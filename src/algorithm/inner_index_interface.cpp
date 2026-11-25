@@ -928,6 +928,14 @@ InnerIndexInterface::GetDataByIdsWithFlag(const int64_t* ids,
 
 void
 InnerIndexInterface::GetFloat32VectorByInnerId(InnerIdType inner_id, float* data) const {
+    if (data_type_ == DataTypes::DATA_TYPE_BINARY) {
+        // Native Decode writes the packed bytes through its float* ABI as well; the public FP32
+        // boundary exports each bit as 0.0 or 1.0.
+        Vector<uint8_t> packed(BinaryVectorBytes(static_cast<uint64_t>(dim_)), allocator_);
+        this->GetVectorByInnerId(inner_id, reinterpret_cast<float*>(packed.data()));
+        this->expand_binary_row(packed.data(), data);
+        return;
+    }
     if (data_type_ != DataTypes::DATA_TYPE_FP16 and data_type_ != DataTypes::DATA_TYPE_BF16) {
         this->GetVectorByInnerId(inner_id, data);
         return;
@@ -937,6 +945,14 @@ InnerIndexInterface::GetFloat32VectorByInnerId(InnerIdType inner_id, float* data
     Vector<float> native_row(dim_, allocator_);
     this->GetVectorByInnerId(inner_id, native_row.data());
     this->expand_native_half_row(native_row.data(), data);
+}
+
+void
+InnerIndexInterface::expand_binary_row(const uint8_t* packed, float* data) const {
+    CHECK_ARGUMENT(data_type_ == DataTypes::DATA_TYPE_BINARY, "binary expansion requires binary");
+    for (int64_t j = 0; j < dim_; ++j) {
+        data[j] = static_cast<float>((packed[j / 8] >> (7 - j % 8)) & 1U);
+    }
 }
 
 void

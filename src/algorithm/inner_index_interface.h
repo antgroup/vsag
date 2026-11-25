@@ -602,6 +602,10 @@ protected:
     void
     expand_native_half_row(const void* native_data, float* data) const;
 
+    // Writes the dim_ bits of a packed binary row as 0.0 / 1.0 float32 values.
+    void
+    expand_binary_row(const uint8_t* packed, float* data) const;
+
     DatasetPtr
     get_data_by_ids_with_flag(const int64_t* ids,
                               int64_t count,

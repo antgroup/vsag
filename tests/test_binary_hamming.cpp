@@ -236,6 +236,34 @@ serialize_round_trip(const vsag::IndexPtr& index,
     return restored;
 }
 
+// GetDataByIds exports float32 vectors from an index that keeps raw vectors (BruteForce, or HGraph
+// with store_raw_vector): a binary row becomes dim values of 0.0 or 1.0, so the padding bits are
+// left out. HGraph without raw vectors exports none, as for the other dtypes.
+void
+check_float32_export(const vsag::IndexPtr& index,
+                     int64_t dim,
+                     const std::vector<int64_t>& ids,
+                     const std::vector<const uint8_t*>& rows,
+                     bool keeps_raw_vectors) {
+    auto exported = index->GetDataByIds(ids.data(), static_cast<int64_t>(ids.size()));
+    REQUIRE(exported.has_value());
+    const auto* floats = exported.value()->GetFloat32Vectors();
+    if (not keeps_raw_vectors) {
+        REQUIRE(floats == nullptr);
+        return;
+    }
+    REQUIRE(floats != nullptr);
+    REQUIRE(exported.value()->GetDim() == dim);
+    REQUIRE(rows.size() == ids.size());
+    const auto bits = static_cast<uint64_t>(dim);
+    for (uint64_t r = 0; r < rows.size(); ++r) {
+        for (uint64_t b = 0; b < bits; ++b) {
+            const auto bit = static_cast<float>((rows[r][b / 8] >> (7 - b % 8)) & 1U);
+            REQUIRE(floats[r * bits + b] == bit);
+        }
+    }
+}
+
 // A removed id follows the CalcDistanceById contract: the single-ID form fails with
 // INVALID_ARGUMENT, and the batch form reports NaN with a false validity flag next to a live id.
 void
@@ -388,6 +416,7 @@ TEST_CASE("Binary BruteForce returns exact Hamming results", "[ft][binary][brute
     auto no_memory = index->GetRawVectorByIds(wanted.data(), 2, &failing);
     REQUIRE_FALSE(no_memory.has_value());
     REQUIRE(no_memory.error().type == vsag::ErrorType::NO_ENOUGH_MEMORY);
+    check_float32_export(index, dim, wanted, {data.row(3), data.row(count - 2)}, true);
 }
 
 TEST_CASE("Binary BruteForce adds and scans with several threads",
@@ -499,6 +528,13 @@ TEST_CASE("Binary indexes update vectors", "[ft][binary]") {
     auto restored_distance = restored->CalcDistanceById(query_dataset(data.row(row), dim), target);
     REQUIRE(restored_distance.has_value());
     REQUIRE(restored_distance.value() == reference_hamming(data.row(row), replacement.data(), dim));
+
+    // GetDataByIds exports the new bits as float32 values where the index keeps raw vectors.
+    const bool keeps_raw_vectors = name == "brute_force" or store_raw_vector;
+    const std::vector<int64_t> exported_ids = {target, data.ids[0]};
+    const std::vector<const uint8_t*> exported_rows = {replacement.data(), data.row(0)};
+    check_float32_export(index, dim, exported_ids, exported_rows, keeps_raw_vectors);
+    check_float32_export(restored, dim, exported_ids, exported_rows, keeps_raw_vectors);
 
     // Updates must carry binary vectors of the index dimension.
     std::vector<float> floats(static_cast<uint64_t>(dim), 0.0F);
@@ -663,6 +699,7 @@ TEST_CASE("Binary HGraph build, add, remove, search and serialization", "[ft][bi
     auto raw = restored->GetRawVectorByIds(wanted.data(), 2);
     REQUIRE(raw.has_value());
     REQUIRE(reference_hamming(raw.value()->GetBinaryVectors(), data.row(2), dim) == 0.0F);
+    check_float32_export(restored, dim, wanted, {}, false);  // no store_raw_vector
 }
 
 TEST_CASE("Binary vectors reject invalid configurations and inputs", "[ft][binary]") {
