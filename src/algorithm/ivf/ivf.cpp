@@ -639,6 +639,9 @@ IVF::CalcDistancesById(const float* query,
                        bool calculate_precise_distance,
                        int64_t topk) const {
     CHECK_ARGUMENT(count >= 0, "CalcDistancesById count must be non-negative");
+    CHECK_ARGUMENT(
+        static_cast<uint64_t>(count) <= std::numeric_limits<uint64_t>::max() / sizeof(float),
+        "CalcDistancesById distance buffer size overflows");
     const bool invalid_topk = topk != -1 && topk <= 0;
     CHECK_ARGUMENT(not invalid_topk, "CalcDistancesById topk must be -1 or positive");
     if (count > 0) {
@@ -652,6 +655,9 @@ IVF::CalcDistancesById(const float* query,
         return result;
     }
     auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
+    if (distances == nullptr) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate distance buffer");
+    }
     result->Distances(distances);
     Vector<InnerIdType> inner_ids(count, 0, allocator_);
     std::vector<bool> validity(count, false);

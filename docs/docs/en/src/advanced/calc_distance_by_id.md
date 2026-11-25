@@ -240,7 +240,10 @@ Indexes that do not implement the API surface for a given overload return an
 - The query dimension (for dense overloads) must match the index dimension.
 - The batch overload has a default implementation that loops over single-ID calls;
   some indexes override it for batch-level optimization.
-- Binding surfaces (Python, Node.js, C API) keep their existing signatures: batch calls report
-  missing IDs as `NaN` distances, and single-ID calls on a missing ID return an error.
+- The Python and Node.js bindings expose only the batch form (`calc_distances_by_id` /
+  `calcDistancesById`); they return distances without the validity flags, so a missing or removed
+  ID surfaces as a `NaN` distance (test with `numpy.isnan` / `Number.isNaN`) instead of an error.
+  Errors are reserved for invalid calls, such as a mismatched query length or an unsupported index
+  type.
 - Like all VSAG read-only APIs, these methods are safe to call concurrently with other
   read-only operations (e.g. `KnnSearch`).

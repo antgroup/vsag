@@ -20,13 +20,28 @@ const index = new addon.Index("hgraph", JSON.stringify({
 }));
 index.build(new Float32Array([1, 2, 3, 4, 4, 3, 2, 1]), new BigInt64Array([10n, 20n]), 2, 4);
 
+// Missing or removed labels yield a NaN distance, so compare slot by slot: assert.deepEqual
+// would not distinguish NaN from a numeric expectation.
+function assertDistances(actual, expected) {
+    assert(actual instanceof Float32Array);
+    const values = Array.from(actual);
+    assert.equal(values.length, expected.length);
+    values.forEach((value, i) => {
+        if (Number.isNaN(expected[i])) {
+            assert(Number.isNaN(value), `slot ${i}: expected NaN, got ${value}`);
+        } else {
+            assert.equal(value, expected[i], `slot ${i}`);
+        }
+    });
+}
+
 for (const name of ["calcDistancesById", "calDistanceById"]) {
     const distance = (...args) => index[name](...args);
     const query = new Float32Array([1, 2, 3, 4]);
     const ids = new BigInt64Array([10n, 999n, 20n, 10n]);
     const actual = distance(query, ids);
     assert(actual instanceof Float32Array);
-    assert.deepEqual(Array.from(actual), [0, -1, 20, 0]);
+    assertDistances(actual, [0, NaN, 20, 0]);
     const empty = distance(query, new BigInt64Array());
     assert(empty instanceof Float32Array);
     assert.equal(empty.length, 0);
@@ -53,7 +68,7 @@ for (const name of ["calcDistancesById", "calDistanceById"]) {
     // Nonzero typed-array byte offsets must still address the selected elements.
     const offsetQuery = new Float32Array([99, 1, 2, 3, 4, 99]).subarray(1, 5);
     const offsetIds = new BigInt64Array([888n, 10n, 999n, 20n, 10n, 888n]).subarray(1, 5);
-    assert.deepEqual(Array.from(distance(offsetQuery, offsetIds)), [0, -1, 20, 0]);
+    assertDistances(distance(offsetQuery, offsetIds), [0, NaN, 20, 0]);
 
     // This dense-only API cannot supply SINDI's required sparse representation.
     const sparse = new addon.Index("sindi", JSON.stringify({
