@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,159 +12,148 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "./eval_config.h"
+#include "eval_config.h"
 
-#include "./common.h"
+#include <limits>
+#include <stdexcept>
 
 namespace vsag::eval {
 
-template <class T = std::string>
-void
-check_and_get_value(const YAML::Node& node, const std::string& key, T& value) {
-    if (node[key].IsDefined()) {
-        value = node[key].as<T>();
-    }
-};
+namespace {
 
-EvalConfig
-EvalConfig::Load(argparse::ArgumentParser& parser) {
-    EvalConfig config;
-    config.dataset_path = parser.get("--datapath");
-    config.action_type = parser.get("--type");
-    config.build_param = parser.get("--create_params");
-    config.index_name = parser.get("--index_name");
-    config.index_path = parser.get("--index_path");
-
-    config.search_param = parser.get("--search_params");
-    config.search_mode = parser.get("--search_mode");
-
-    config.top_k = parser.get<int>("--topk");
-    config.radius = parser.get<float>("--range");
-    config.search_query_count = parser.get<uint64_t>("--search-query-count");
-
-    config.delete_index_after_search = parser.get<bool>("--delete-index-after-search");
-
-    if (parser.get<bool>("--disable_recall")) {
-        config.enable_recall = false;
-    }
-    if (parser.get<bool>("--disable_percent_recall")) {
-        config.enable_percent_recall = false;
-    }
-    if (parser.get<bool>("--disable_memory")) {
-        config.enable_memory = false;
-    }
-    if (parser.get<bool>("--disable_latency")) {
-        config.enable_latency = false;
-    }
-    if (parser.get<bool>("--disable_qps")) {
-        config.enable_qps = false;
-    }
-    if (parser.get<bool>("--disable_tps")) {
-        config.enable_tps = false;
-    }
-    if (parser.get<bool>("--disable_percent_latency")) {
-        config.enable_percent_latency = false;
-    }
-
-    return config;
-}
-
-EvalConfig
-EvalConfig::Load(YAML::Node& yaml_node, const EvalJob& global_options) {
-    EvalConfig config;
-
-    // set global options at first
-    if (global_options.num_threads_building.has_value()) {
-        config.num_threads_building = global_options.num_threads_building.value();
-    }
-    if (global_options.num_threads_searching.has_value()) {
-        config.num_threads_searching = global_options.num_threads_searching.value();
-    }
-
-    // set options by case
-    config.dataset_path = yaml_node["datapath"].as<std::string>();
-    config.action_type = yaml_node["type"].as<std::string>();
-    config.build_param = yaml_node["create_params"].as<std::string>();
-    config.index_name = yaml_node["index_name"].as<std::string>();
-    check_and_get_value<>(yaml_node, "search_mode", config.search_mode);
-    check_and_get_value<>(yaml_node, "search_params", config.search_param);
-
-    check_and_get_value<>(yaml_node, "index_path", config.index_path);
-    check_and_get_value<int>(yaml_node, "topk", config.top_k);
-    check_and_get_value<float>(yaml_node, "range", config.radius);
-    check_and_get_value<uint64_t>(yaml_node, "search_query_count", config.search_query_count);
-
-    check_and_get_value<bool>(
-        yaml_node, "delete_index_after_search", config.delete_index_after_search);
-
-    check_and_get_value<int>(yaml_node, "num_threads_building", config.num_threads_building);
-    check_and_get_value<int>(yaml_node, "num_threads_searching", config.num_threads_searching);
-
-    bool disable = false;
-    check_and_get_value<bool>(yaml_node, "disable_recall", disable);
-    if (disable == true) {
-        config.enable_recall = false;
-        disable = false;
-    }
-    check_and_get_value<bool>(yaml_node, "disable_recall", disable);
-    if (disable == true) {
-        config.enable_recall = false;
-        disable = false;
-    }
-    check_and_get_value<bool>(yaml_node, "disable_percent_recall", disable);
-    if (disable == true) {
-        config.enable_percent_recall = false;
-        disable = false;
-    }
-    check_and_get_value<bool>(yaml_node, "disable_qps", disable);
-    if (disable == true) {
-        config.enable_qps = false;
-        disable = false;
-    }
-    check_and_get_value<bool>(yaml_node, "disable_tps", disable);
-    if (disable == true) {
-        config.enable_tps = false;
-        disable = false;
-    }
-    check_and_get_value<bool>(yaml_node, "disable_memory", disable);
-    if (disable == true) {
-        config.enable_memory = false;
-        disable = false;
-    }
-    check_and_get_value<bool>(yaml_node, "disable_latency", disable);
-    if (disable == true) {
-        config.enable_latency = false;
-        disable = false;
-    }
-    check_and_get_value<bool>(yaml_node, "disable_percent_latency", disable);
-    if (disable == true) {
-        config.enable_percent_latency = false;
-        disable = false;
-    }
-
-    return config;
+[[noreturn]] void
+invalid_field(const std::string& key, const char* expected) {
+    throw std::invalid_argument("eval config field '" + key + "' must be " + expected);
 }
 
 void
-EvalConfig::CheckKeyAndType(YAML::Node& yaml_node) {
-    check_exist_and_get_value<>(yaml_node, "datapath");
-    check_exist_and_get_value<>(yaml_node, "index_name");
-    check_exist_and_get_value<>(yaml_node, "create_params");
-    auto action = check_exist_and_get_value<>(yaml_node, "type");
-    if (action == "search") {
-        check_exist_and_get_value<>(yaml_node, "search_params");
+read_string(const nlohmann::json& json, const std::string& key, std::string& value) {
+    if (not json.contains(key)) {
+        return;
     }
-    check_and_get_value<>(yaml_node, "search_mode");
-    check_and_get_value<>(yaml_node, "index_path");
-    check_and_get_value<int>(yaml_node, "topk");
-    check_and_get_value<float>(yaml_node, "range");
-    check_and_get_value<bool>(yaml_node, "disable_recall");
-    check_and_get_value<bool>(yaml_node, "disable_percent_recall");
-    check_and_get_value<bool>(yaml_node, "disable_qps");
-    check_and_get_value<bool>(yaml_node, "disable_tps");
-    check_and_get_value<bool>(yaml_node, "disable_memory");
-    check_and_get_value<bool>(yaml_node, "disable_latency");
-    check_and_get_value<bool>(yaml_node, "disable_percent_latency");
+    const auto& field = json.at(key);
+    if (field.is_string()) {
+        value = field.get<std::string>();
+    } else if (field.is_object()) {
+        value = field.dump();
+    } else {
+        invalid_field(key, "a string or a JSON object");
+    }
+}
+
+void
+read_bool(const nlohmann::json& json, const std::string& key, bool& value) {
+    if (not json.contains(key)) {
+        return;
+    }
+    const auto& field = json.at(key);
+    if (not field.is_boolean()) {
+        invalid_field(key, "a boolean");
+    }
+    value = field.get<bool>();
+}
+
+void
+read_int32(const nlohmann::json& json, const std::string& key, int32_t& value) {
+    if (not json.contains(key)) {
+        return;
+    }
+    const auto& field = json.at(key);
+    if (not field.is_number_integer() ||
+        field.get<int64_t>() < std::numeric_limits<int32_t>::min() ||
+        field.get<int64_t>() > std::numeric_limits<int32_t>::max()) {
+        invalid_field(key, "a 32-bit integer");
+    }
+    value = static_cast<int32_t>(field.get<int64_t>());
+}
+
+void
+read_float(const nlohmann::json& json, const std::string& key, float& value) {
+    if (not json.contains(key)) {
+        return;
+    }
+    const auto& field = json.at(key);
+    if (not field.is_number()) {
+        invalid_field(key, "a number");
+    }
+    value = field.get<float>();
+}
+
+void
+read_uint64(const nlohmann::json& json, const std::string& key, uint64_t& value) {
+    if (not json.contains(key)) {
+        return;
+    }
+    const auto& field = json.at(key);
+    if (not field.is_number_unsigned() &&
+        not(field.is_number_integer() && field.get<int64_t>() >= 0)) {
+        invalid_field(key, "a non-negative integer");
+    }
+    value = field.get<uint64_t>();
+}
+
+}  // namespace
+
+EvalConfig
+EvalConfig::FromJson(const nlohmann::json& json) {
+    if (not json.is_object()) {
+        throw std::invalid_argument("eval config must be a JSON object");
+    }
+
+    static const char* const known_keys[] = {"dataset_path",
+                                             "action_type",
+                                             "index_name",
+                                             "build_param",
+                                             "index_path",
+                                             "search_param",
+                                             "search_mode",
+                                             "top_k",
+                                             "radius",
+                                             "search_query_count",
+                                             "delete_index_after_search",
+                                             "num_threads_building",
+                                             "num_threads_searching",
+                                             "enable_recall",
+                                             "enable_percent_recall",
+                                             "enable_qps",
+                                             "enable_tps",
+                                             "enable_memory",
+                                             "enable_latency",
+                                             "enable_percent_latency",
+                                             "use_id_based_recall"};
+    for (const auto& item : json.items()) {
+        bool known = false;
+        for (const auto* key : known_keys) {
+            known = known || item.key() == key;
+        }
+        if (not known) {
+            throw std::invalid_argument("unknown eval config field '" + item.key() + "'");
+        }
+    }
+
+    EvalConfig config;
+    read_string(json, "dataset_path", config.dataset_path);
+    read_string(json, "action_type", config.action_type);
+    read_string(json, "index_name", config.index_name);
+    read_string(json, "build_param", config.build_param);
+    read_string(json, "index_path", config.index_path);
+    read_string(json, "search_param", config.search_param);
+    read_string(json, "search_mode", config.search_mode);
+    read_int32(json, "top_k", config.top_k);
+    read_float(json, "radius", config.radius);
+    read_uint64(json, "search_query_count", config.search_query_count);
+    read_bool(json, "delete_index_after_search", config.delete_index_after_search);
+    read_int32(json, "num_threads_building", config.num_threads_building);
+    read_int32(json, "num_threads_searching", config.num_threads_searching);
+    read_bool(json, "enable_recall", config.enable_recall);
+    read_bool(json, "enable_percent_recall", config.enable_percent_recall);
+    read_bool(json, "enable_qps", config.enable_qps);
+    read_bool(json, "enable_tps", config.enable_tps);
+    read_bool(json, "enable_memory", config.enable_memory);
+    read_bool(json, "enable_latency", config.enable_latency);
+    read_bool(json, "enable_percent_latency", config.enable_percent_latency);
+    read_bool(json, "use_id_based_recall", config.use_id_based_recall);
+    return config;
 }
 
 }  // namespace vsag::eval

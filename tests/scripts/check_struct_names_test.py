@@ -43,7 +43,8 @@ class CheckStructNamesTest(unittest.TestCase):
         self.assertTrue(names, "public C API opaque declarations must be discovered")
         self.assertEqual(len(names), len(set(names)), "opaque tags must be unique")
         source = "\n".join(f"struct {name} {{}};" for name in names)
-        for filename in ("src/vsag_c_api.cpp", "include/vsag/vsag_c_api.h"):
+        for filename in ("src/vsag_c_api.cpp", "src/vsag_c_api_internal.h",
+                         "include/vsag/vsag_c_api.h"):
             with self.subTest(filename=filename):
                 result = self.run_checker(source, filename)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

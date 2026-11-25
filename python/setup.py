@@ -111,6 +111,10 @@ class CMakeBuild(build_ext):
             os.path.join(src_dir, "include", "vsag", "vsag_c_api.h"),
             os.path.join(extdir, "_vsag_c_api.h"),
         )
+        shutil.copy(
+            os.path.join(src_dir, "include", "vsag", "vsag_eval_c_api.h"),
+            os.path.join(extdir, "_vsag_eval_c_api.h"),
+        )
 
 
 class BinaryDistribution(Distribution):

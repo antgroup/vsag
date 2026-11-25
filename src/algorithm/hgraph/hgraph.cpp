@@ -127,6 +127,11 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         if (pipnn_param_.add_use_codes)
             CHECK_ARGUMENT(!support_duplicate_, "coded PiPNN requires unique graph IDs");
         if (pipnn_param_.incremental_add) {
+            CHECK_ARGUMENT(
+                !(support_duplicate_ && common_param.metric_ == MetricType::METRIC_TYPE_L2SQR &&
+                  duplicate_distance_threshold_ > 0.0F),
+                "incremental PiPNN with L2 duplicate detection requires "
+                "duplicate_distance_threshold = 0");
             CHECK_ARGUMENT(common_param.data_type_ == DataTypes::DATA_TYPE_FLOAT &&
                                !support_force_remove_ && !mci_parameters_.enabled &&
                                !use_conjugate_graph_ && !hgraph_param->rabitq_fused_datacell,

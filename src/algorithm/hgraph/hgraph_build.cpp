@@ -307,6 +307,7 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
     auto pipnn_parameter = this->pipnn_param_;
     if (use_pipnn) {
         pipnn_parameter.alpha = this->alpha_;
+        pipnn_parameter.duplicate_distance_threshold = this->duplicate_distance_threshold_;
         pipnn_parameter.Validate(bottom_graph_->MaximumDegree());
     }
     auto total = data->GetNumElements();
@@ -1830,9 +1831,15 @@ HGraph::elp_optimize() {
     param.is_inner_id_allowed = nullptr;
     searcher_->SetMockParameters(bottom_graph_, basic_flatten_codes_, pool_, param, dim_);
     // TODO(ZXY): optimize PREFETCH_DEPTH_CODE and add default value for the others
+    const auto stride = static_cast<float>(basic_flatten_codes_->prefetch_stride_code_);
+    if (stride > 1) {
+        // Start at the current stride so an unsuccessful sweep restores it.
+        optimizer_->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_CODE, stride, 1, -1));
+    } else {
+        optimizer_->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_CODE, 1, 10, 1));
+    }
     // PREFETCH_STRIDE_VISIT is not swept: the unfiltered search measured here prefetches all
     // visited tags upfront, so every candidate value would run the same code.
-    optimizer_->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_CODE, 1, 10, 1));
     optimizer_->Optimize(searcher_);
 }
 

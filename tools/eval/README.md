@@ -19,3 +19,4 @@ The canonical documentation for `eval_performance` lives in the website source t
 - Website: <https://vsag.io/docs/resources/eval.html>
 - Chinese website: <https://vsag.io/docs/zh/resources/eval.html>
 - Config template: [eval_template.yaml](eval_template.yaml)
+- Python usage (`pyvsag.eval`, `pyvsag-eval`): see the "Python Usage" section of the English docs above

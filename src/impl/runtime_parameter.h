@@ -26,6 +26,8 @@
 #include <variant>
 #include <vector>
 
+#include "vsag_exception.h"
+
 namespace vsag {
 
 struct RuntimeParameter {
@@ -36,6 +38,11 @@ public:
         if (std::abs(step_) <= 1e-5) {
             step_ = (max_ - min_) / 10.0;
         }
+        // A descending sweep starts at min and ends at max, so the bounds must follow the step.
+        if ((step_ > 0 and min_ > max_) or (step_ < 0 and min_ < max_)) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "RuntimeParameter " + name_ + ": range does not match step sign");
+        }
     }
 
     float
@@ -45,7 +52,7 @@ public:
         }
         float prev = cur_;
         cur_ += step_;
-        if (cur_ > max_) {
+        if ((step_ > 0 and cur_ > max_) or (step_ < 0 and cur_ < max_)) {
             cur_ = min_;
             is_end_ = true;
         }

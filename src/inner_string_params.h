@@ -66,6 +66,15 @@ const char* const PYRAMID_PERSIST_SOURCE_ID_KEY = "persist_source_id";
 const char* const PYRAMID_STORE_PATHS_KEY = "store_paths";
 const char* const HGRAPH_MCI_DELETE_CLIQUE_SIZE_THRESHOLD_KEY = "mci_delete_clique_size_threshold";
 const char* const HGRAPH_MCI_DELETE_NODE_MCT_THRESHOLD_KEY = "mci_delete_node_mct_threshold";
+
+// hgraph search param keys
+const char* const SEARCH_NO_LOCK_KEY = "search_no_lock";
+const char* const MCI_PACKED_FILTER_KEY = "mci_packed_filter";
+const char* const MCI_BATCH_DISTANCE_KEY = "mci_batch_distance";
+const char* const MCI_ACTIVATION_CAP_KEY = "mci_activation_cap";
+const char* const MCI_HOPS_LIMIT_KEY = "mci_hops_limit";
+const char* const MCI_EXPANSION_IDLE_WINDOW_KEY = "mci_expansion_idle_window";
+
 const char* const LABEL_REMAP_TYPE_VALUE_ROBIN = "robin";
 const char* const LABEL_REMAP_TYPE_VALUE_PG = "pg";
 const char* const GRAPH_KEY = "graph";

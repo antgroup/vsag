@@ -15,12 +15,13 @@
 
 #pragma once
 
+#include <functional>
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 
-#include "H5Cpp.h"
-#include "common.h"
+#include "eval_constants.h"
 #include "nlohmann/json.hpp"
 #include "simd/basic_func.h"
 #include "vsag/constants.h"
@@ -40,8 +41,18 @@ public:
     EvalDataset&
     operator=(EvalDataset&&) = delete;
 
+    // Loads an on-disk dataset through the registered loader. The HDF5 loader lives in
+    // eval_dataset_hdf5.cpp, which is not part of the dependency-free evaluation core.
     static EvalDatasetPtr
     Load(const std::string& filename);
+
+    using Loader = std::function<EvalDatasetPtr(const std::string&)>;
+
+    static void
+    RegisterLoader(Loader loader);
+
+    static EvalDatasetPtr
+    LoadHdf5(const std::string& filename);
 
     static EvalDatasetPtr
     FromDatasets(const vsag::DatasetPtr& base,
@@ -315,42 +326,6 @@ private:
     InitializeTrainIds(const int64_t* ids);
 
     using shape_t = std::pair<int64_t, int64_t>;
-    static std::unordered_set<std::string>
-    get_datasets(const H5::H5File& file) {
-        std::unordered_set<std::string> datasets;
-        H5::Group root = file.openGroup("/");
-        hsize_t numObj = root.getNumObjs();
-        for (unsigned i = 0; i < numObj; ++i) {
-            std::string objname = root.getObjnameByIdx(i);
-            H5O_info_t objinfo;
-            root.getObjinfo(objname, objinfo);
-            if (objinfo.type == H5O_type_t::H5O_TYPE_DATASET) {
-                datasets.insert(objname);
-            }
-        }
-        return datasets;
-    }
-
-    static shape_t
-    get_shape(const H5::H5File& file, const std::string& dataset_name) {
-        H5::DataSet dataset = file.openDataSet(dataset_name);
-        H5::DataSpace dataspace = dataset.getSpace();
-        const int ndims = dataspace.getSimpleExtentNdims();
-        if (ndims != 1 && ndims != 2) {
-            throw std::runtime_error("unsupported dataset rank: " + std::to_string(ndims));
-        }
-        hsize_t dims_out[2] = {0, 0};
-        dataspace.getSimpleExtentDims(dims_out, NULL);
-        if (ndims == 1) {
-            return std::make_pair<int64_t, int64_t>(dims_out[0], 0);
-        }
-        return std::make_pair<int64_t, int64_t>(dims_out[0], dims_out[1]);
-    }
-
-    static std::string
-    to_string(const shape_t& shape) {
-        return "[" + std::to_string(shape.first) + "," + std::to_string(shape.second) + "]";
-    }
 
 private:
     vsag::DistanceFuncType distance_func_;

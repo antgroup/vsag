@@ -14,6 +14,9 @@
 // limitations under the License.
 
 #include "prefetch.h"
+
+#include <cstdint>
+
 namespace vsag {
 
 #define PREFETCH_LINE(X)       \
@@ -25,8 +28,45 @@ template <>
 void
 PrefetchImpl<0>(const void* data) {};
 
+namespace {
+
+constexpr uint64_t CACHE_LINE_SIZE = 64;
+// Ranges of 4 to 16 cache lines are fetched whole, from both ends towards the middle. Longer
+// ranges keep the capped ascending prefetch below.
+constexpr uint64_t TWO_ENDED_PREFETCH_MIN_SIZE = 4 * CACHE_LINE_SIZE;
+constexpr uint64_t TWO_ENDED_PREFETCH_MAX_SIZE = 16 * CACHE_LINE_SIZE;
+
+// Prefetches every cache line that [data, data + size) touches, alternating between the two ends.
+// The requests then do not form one ascending run, which the hardware stream prefetcher would
+// continue past the end of the range.
+void
+prefetch_from_both_ends(const void* data, uint64_t size) {
+    const auto* begin = static_cast<const char*>(data);
+    const uint64_t offset_in_line = reinterpret_cast<uintptr_t>(begin) % CACHE_LINE_SIZE;
+    const char* low = begin - offset_in_line;
+    const char* high = low + (offset_in_line + size - 1) / CACHE_LINE_SIZE * CACHE_LINE_SIZE;
+    while (low <= high) {
+        __builtin_prefetch(low, 0, 3);
+        low += CACHE_LINE_SIZE;
+        if (low <= high) {
+            __builtin_prefetch(high, 0, 3);
+            high -= CACHE_LINE_SIZE;
+        }
+    }
+}
+
+}  // namespace
+
 void
 PrefetchLines(const void* data, uint64_t size) {
+    if (size >= 64 and size < 128) {
+        PrefetchImpl<1>(data);
+        return;
+    }
+    if (size >= TWO_ENDED_PREFETCH_MIN_SIZE and size <= TWO_ENDED_PREFETCH_MAX_SIZE) {
+        prefetch_from_both_ends(data, size);
+        return;
+    }
     uint64_t n = std::min<uint64_t>(size / 64, 63ULL);
     switch (n) {
         PREFETCH_LINE(0);

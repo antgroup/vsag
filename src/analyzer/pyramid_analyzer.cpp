@@ -973,11 +973,19 @@ PyramidAnalyzer::get_search_recall(
             bool is_hit = gt_set.find(label) != gt_set.end();
             if (not is_hit) {
                 try {
-                    const auto distance = pyramid_->CalcDistanceById(
+                    // Samples are stored in the native data type; the public float* overload
+                    // rejects non-float32 indexes.
+                    const auto distance = pyramid_->calc_native_distance_by_id(
                         sample_datas.data() + static_cast<uint64_t>(i) * dim_, label, true);
                     is_hit = distance <= distance_threshold + tie_tolerance;
-                } catch (const VsagException&) {
-                    // A label returned by search that is no longer present cannot be a hit.
+                } catch (const VsagException& e) {
+                    // Only a label that is genuinely absent is a miss; a concurrent removal is
+                    // expected here, but allocation or internal failures must surface instead of
+                    // silently lowering the measured recall.
+                    if (e.error_.type != ErrorType::INVALID_ARGUMENT or
+                        pyramid_->label_table_->CheckLabel(label)) {
+                        throw;
+                    }
                     is_hit = false;
                 }
             }

@@ -203,7 +203,7 @@ PiPNN，并通过查询验证每一份生成的图。
 
 如需用量化码计算 Add 距离，在 Build 前设置 `pipnn_add_use_codes: true`，加载快照时使用相同配置。首次 Build 使用输入 FP32，并保存叶内 top-k 和哈希投影。Add 的新距离计算（含叶分裂和 RobustPrune）使用已存储的编码，RaBitQ 3+5 同时使用两段码。设置 `store_raw_vector: false` 可同时省去独立的原始向量存储。所选量化器须支持码与码之间的对称距离。
 
-HGraph 的底图使用 PiPNN，上层使用 HGraph 的路由插入逻辑。支持存储去重的配置会将跨批的相同向量映射到同一物理码槽。增量模式暂不支持 fused RaBitQ 存储。
+HGraph 的底图使用 PiPNN，上层使用 HGraph 的路由插入逻辑。开启 L2 向量去重时，增量 PiPNN 要求 `duplicate_distance_threshold: 0`，按 FP32 行的字节内容跨批分组。设置 `deduplicate_storage: true` 后，同组向量共用一个物理码槽。增量模式暂不支持 fused RaBitQ 存储。
 
 ### 实验性 PiPNN 动态 alpha
 
@@ -221,10 +221,18 @@ HGraph 的底图使用 PiPNN，上层使用 HGraph 的路由插入逻辑。支�
 同一个物理编码槽位，但仍保留各自的标签。该选项支持使用 `graph_type: "nsw"` 或 `"pipnn"` 的
 稠密向量 HGraph 索引；`graph_type: "odescent"` 不支持。
 
-PiPNN 初始 `Build` 按 FP32 原始输入行的字节相等关系分组，每个代表向量只编码一次，
-各 label 的属性和 extra_info 仍独立保存，也可同时启用动态 alpha。
-`duplicate_distance_threshold` 不参与 PiPNN 批量分组；后续增量 `Add` 沿用现有的
-距离阈值或编码判重规则。量化器仍使用原有训练样本进行训练。
+启用 `support_duplicate: true` 时，PiPNN 初始 `Build` 会合并原始输入字节完全相同的向量。
+使用 L2（`l2`）且 `duplicate_distance_threshold` 为正时，还会合并同叶近重复点：在共享叶子且
+**平方 L2** 距离不超过阈值的现有代表点中，选择内部 ID 最小的一个。分组是贪心且非传递的：组内
+成员不能将超出代表点距离阈值的其他点拉进组。始终不同叶的近邻可能漏判。阈值为零或使用非 L2
+度量时，初始 `Build` 仍仅按输入字节分组。后续增量 `Add` 沿用现有规则，包括非 L2 度量下
+正阈值仍按距离判重。
+
+L2 下使用正阈值会在构图前增加一次候选扫描。同叶点较多时，如果阈值较宽或第一维的差异较小，
+需要验证的候选点对会增多，可能延长构建时间。
+
+各标签、属性和 extra_info 仍独立保存。近重复点可能复用代表点的距离，包括范围检索的边界。
+开启存储去重后，每个代表点只编码一次，不再保存成员自己的编码；量化器仍使用原有训练样本。
 
 启用存储去重后，暂不支持以下操作和配置：
 

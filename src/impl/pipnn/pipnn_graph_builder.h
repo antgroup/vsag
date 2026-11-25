@@ -49,6 +49,8 @@ struct PiPNNGraphBuilderParameter {
     bool incremental_add{false};
     // Use symmetric distances between stored codes during Add. Build borrows its FP32 input.
     bool add_use_codes{false};
+    // Supplied by the owning index, not by the PiPNN tuning JSON.
+    float duplicate_distance_threshold{0.0F};
     bool adaptive_pruning{false};
     float adaptive_pruning_adjust_step{0.06F};
 

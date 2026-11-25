@@ -388,6 +388,51 @@ TEST_CASE("HGraph PiPNN keeps duplicate-label and entry-point semantics", "[ut][
     REQUIRE(search_result.value()->GetDim() == 1);
 }
 
+TEST_CASE("HGraph PiPNN threshold groups survive serialization", "[ut][pipnn][hgraph][duplicate]") {
+    constexpr int64_t dimensions = 4;
+    const bool share_storage = GENERATE(false, true);
+    auto parameter = MakePiPNNHGraphParam();
+    parameter["support_duplicate"].SetBool(true);
+    parameter["deduplicate_storage"].SetBool(share_storage);
+    parameter["duplicate_distance_threshold"].SetFloat(0.25F);
+    auto common = MakePiPNNCommonParam(dimensions);
+    auto index = MakePiPNNIndex(parameter, common);
+    std::vector<float> vectors{0, 0, 0, 0, 0.5F, 0, 0, 0, 5, 0, 0, 0};
+    std::vector<int64_t> labels{10, 20, 30};
+    const auto built = index->Build(MakeDataset(vectors, labels, dimensions, labels.size()));
+    REQUIRE(built.has_value());
+    REQUIRE(built->empty());
+    const auto check_search = [&](const auto& candidate) {
+        REQUIRE(candidate->GetNumElements() == 3);
+        if (share_storage) {
+            const auto graph = std::static_pointer_cast<vsag::HGraph>(candidate->GetInnerIndex());
+            REQUIRE(graph->GetCodeStorageCounts().second == 2);
+        }
+        const auto query = vsag::Dataset::Make()
+                               ->NumElements(1)
+                               ->Dim(dimensions)
+                               ->Float32Vectors(vectors.data())
+                               ->Owner(false);
+        const auto result = candidate->KnnSearch(query, 3, R"({"hgraph": {"ef_search": 16}})");
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 3);
+        auto ids = result.value()->GetIds();
+        REQUIRE(std::min(ids[0], ids[1]) == 10);
+        REQUIRE(std::max(ids[0], ids[1]) == 20);
+        REQUIRE(ids[2] == 30);
+        if (share_storage) {
+            REQUIRE(result.value()->GetDistances()[0] == 0.0F);
+            REQUIRE(result.value()->GetDistances()[1] == 0.0F);
+        }
+    };
+    check_search(index);
+    const auto serialized = index->Serialize();
+    REQUIRE(serialized.has_value());
+    auto restored = MakePiPNNIndex(parameter, common);
+    REQUIRE(restored->Deserialize(serialized.value()).has_value());
+    check_search(restored);
+}
+
 TEST_CASE("HGraph validates PiPNN graph type and data boundary", "[ut][pipnn][hgraph]") {
     constexpr int64_t dimensions = 4;
     auto common_param = MakePiPNNCommonParam(dimensions);
@@ -409,6 +454,18 @@ TEST_CASE("HGraph validates PiPNN graph type and data boundary", "[ut][pipnn][hg
         auto parameter = MakePiPNNHGraphParam();
         parameter["support_duplicate"].SetBool(true);
         parameter["deduplicate_storage"].SetBool(true);
+        REQUIRE_NOTHROW(MakePiPNNIndex(parameter, common_param));
+    }
+    SECTION("incremental L2 duplicate detection requires exact rows") {
+        auto parameter = MakePiPNNHGraphParam();
+        parameter["pipnn_incremental_add"].SetBool(true);
+        parameter["support_duplicate"].SetBool(true);
+        REQUIRE_NOTHROW(MakePiPNNIndex(parameter, common_param));
+
+        parameter["duplicate_distance_threshold"].SetFloat(0.25F);
+        REQUIRE_THROWS_AS(MakePiPNNIndex(parameter, common_param), vsag::VsagException);
+
+        parameter["pipnn_incremental_add"].SetBool(false);
         REQUIRE_NOTHROW(MakePiPNNIndex(parameter, common_param));
     }
     SECTION("non-fp32 base codes") {

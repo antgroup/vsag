@@ -805,6 +805,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
         TestCalcDistanceById(index, dataset, 1e-5, true);
         TestMultiQueryBatchCalcDistanceById(index, dataset, 1e-5, true);
+        TestIndex::TestCalcDistanceByIdAfterRemove(index, dataset);
     }
 }
 
