@@ -62,8 +62,7 @@ TestIndex::TestCalcDistanceById(const IndexPtr& index,
             REQUIRE(std::abs(dist - estimate_dist) < error);
         }
     }
-    if (not expected_success or index->GetIndexType() == vsag::IndexType::DISKANN) {
-        // DiskANN is a legacy index whose single-ID lookup of a missing tag is not validated.
+    if (not expected_success) {
         return;
     }
     {
