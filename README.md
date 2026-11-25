@@ -495,17 +495,17 @@ VSAG draws on the following works for graph construction, vector quantization, f
                 </a>
             </td>
             <td align="center">
-                <a href="https://github.com/misaka0714">
-                    <img src="https://avatars.githubusercontent.com/u/129934985?v=4" width="100" alt="misaka0714"/>
-                    <br />
-                    <sub><b>baoyuan</b></sub>
-                </a>
-            </td>
-            <td align="center">
                 <a href="https://github.com/159753a52">
                     <img src="https://avatars.githubusercontent.com/u/137481623?v=4" width="100" alt="159753a52"/>
                     <br />
                     <sub><b>Zelong Fang</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/misaka0714">
+                    <img src="https://avatars.githubusercontent.com/u/129934985?v=4" width="100" alt="misaka0714"/>
+                    <br />
+                    <sub><b>baoyuan</b></sub>
                 </a>
             </td>
             <td align="center">
