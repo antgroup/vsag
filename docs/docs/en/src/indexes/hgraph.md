@@ -454,6 +454,7 @@ Search-time parameters live under the `hgraph` sub-object:
 | `hops_limit` | int | unlimited | Cap on the number of hops the beam search performs before returning the current frontier. A value that is **not greater** than `ef_search` is not applied: the parser logs a warning and restores the unlimited default, so the hop cap only takes effect above `ef_search`. |
 | `skip_ratio` | float | `0.2` | Performance tuning parameter for filtered search. Controls the ratio of invalid points to skip, in range `[0.0, 1.0]`. `skip_ratio=0.2` means skip 20% of invalid points and only check 80%. Higher values improve performance but may reduce recall. Only applies to searches with filters. See [Filter Skip Strategy](#filter-skip-strategy-skip_ratio-and-skip_strategy) below. |
 | `skip_strategy` | string | `"deterministic_accumulative"` | Strategy for filter skipping. Options: `"random"` (random skipping) or `"deterministic_accumulative"` (deterministic cumulative skipping). See [Filter Skip Strategy](#filter-skip-strategy-skip_ratio-and-skip_strategy) below. |
+| `early_stop` | object | absent (off) | Distance-based early termination: `{"type": "distance", "alpha": <float>}`. `alpha` is at least 1 and optional; when omitted it is chosen from `k`. See [Distance-based early termination](#distance-based-early-termination). |
 | `brute_force_threshold` | float | `0.0` | Selectivity-aware brute-force fallback. When `> 0` and the supplied filter's `ValidRatio()` is `≤ brute_force_threshold`, the search **bypasses the graph traversal entirely** and runs an exact scan over the valid ids using the best available flatten codes (see the section below). Must lie in `[0.0, 1.0]`; the default `0.0` disables the feature and preserves legacy behavior. |
 | `rabitq_one_bit_search` | bool | `false` | Enables the RaBitQ filter/lower-bound path. On an x+y split index it uses all x filter bits; see [RaBitQ x+y Split](../quantization/rabitq_split.md). |
 | `rabitq_rerank_candidates` | integer | unset | Optional hard cap on distinct full-code evaluations for external supplements. Must be at least k. By default the kth full distance and candidate lower bounds determine when reranking stops. |
@@ -487,6 +488,129 @@ finite numeric value discards KNN candidates whose distance exceeds it. It is re
 auto result = index->KnnSearch(
     query, topk, R"({"hgraph": {"ef_search": 200}})").value();
 ```
+
+### Distance-based early termination
+
+For most queries to reach a recall target, a fixed `ef_search` has to be set for the harder
+ones among them. An optional `early_stop` object lets a query finish before the fixed-width
+search would end, once the remaining candidates are clearly farther than the results it already
+holds.
+
+#### Turning It On
+
+Keep the `ef_search` you already use and add `early_stop` with `type` set to `"distance"`
+inside the `hgraph` search parameters. The simplest form omits `alpha` and uses a default
+chosen from `k`:
+
+```json
+{"hgraph":{"ef_search":600,"early_stop":{"type":"distance"}}}
+```
+
+To set `alpha` yourself, give it inside `early_stop`:
+
+```json
+{"hgraph":{"ef_search":600,"early_stop":{"type":"distance","alpha":1.1}}}
+```
+
+`alpha` must be finite and at least 1; other keys inside `early_stop` are rejected.
+
+#### Expected Effect
+
+With `early_stop`, a search can only end earlier than it would under the same `ef_search`.
+With FP32 base codes, no reordering and no conjugate graph, a query returns either the same
+results as before or misses some of the neighbours it found before.
+
+The gain in throughput follows the share of distance computations saved, which is large where
+the fixed `ef_search` is far above what most queries need. On ten public datasets, with
+`ef_search` calibrated so that 99% of calibration queries reach the recall target and `alpha`
+calibrated as described below, QPS with 1 or 8 query threads rose by 10% or more at a mean
+recall loss of at most 0.5 points at two or more recall targets on eight of them; the
+measurements are in [#3149](https://github.com/antgroup/vsag/pull/3149). The rule did not help
+when text queries searched image vectors (COCO-T2I), seldom helped on SIFT, and gained little
+where `ef_search` was close to `k`. The default `alpha` saves much less than a calibrated one.
+
+The slowest queries seldom meet the stopping condition, so P99 latency usually changes
+little. Do not count on the rule to lower P99.
+
+#### Choosing `alpha`
+
+When `alpha` is omitted, it is chosen from `k`: `1.5` at `k = 10`, `1.15` for `k >= 100`,
+linear in `log10(k)` in between and rising to `1.85` at `k = 1`. A larger `k` puts the kth
+distance farther out, so the same ratio stops later; this is why the default `alpha` falls as
+`k` grows.
+
+The default is conservative. In the measurements above (`ef_search` calibrated for 99% of
+queries), values calibrated per configuration ranged from 1.06 to 1.52 at `k = 10` and from
+1.02 to 1.21 at `k = 100`; most were below the default and saved more work. To calibrate
+`alpha` on your own data, use separate queries for calibration and for the check, as those
+measurements did (see #2941):
+
+1. Prepare two disjoint sets of queries with ground truth, one for calibration and one for the
+   check.
+2. With `early_stop` off, find the smallest `ef_search` your search over widths finds at which
+   the required share of calibration queries reaches the recall target.
+3. Keep that `ef_search`, turn `early_stop` on and try `alpha` on a grid. Keep the values for
+   which that value and every larger one on the grid still reach the required share and keep
+   the mean recall loss plus two standard errors within your tolerance (0.5 points in our
+   measurements). Among them, take the one with the fewest distance computations, which is
+   usually the smallest.
+4. Check recall, query coverage and end-to-end time (or QPS) on the other set.
+
+How well this transfers to new queries depends on the number of calibration queries. With
+about 5000 calibration queries (six datasets), the `alpha` chosen this way passed at every
+configuration. With 398 to 1270 calibration queries (DBpedia, Cohere, LAION), it failed at
+3 of the 15 configurations where the fixed search passed. Enlarging `alpha - 1` by 25% as a
+margin repaired all three, and lowered the distance computations saved over those 15
+configurations from 38.6% to 27.9%. With few calibration queries, add such a margin.
+
+For the same `ef_search`, a larger `alpha` follows the same traversal and stops later, so with
+FP32 base codes, no reordering and no conjugate graph it never returns worse results. With
+quantized base codes the rule compares the traversal's approximate distances, and with
+reordering or a conjugate graph the later stage receives a different set of candidates, so
+recall need not be monotone in `alpha`. Calibrate it separately for each of these settings.
+
+#### Where It Applies
+
+- **Supported**: KNN search on `l2` or `cosine` with any base quantization, reordering (the
+  rule acts on the traversal's base-code distances and the reorder stage then rescores the
+  candidates it kept), conjugate graph search, `parallelism`, filters, batched queries and
+  concurrent requests.
+- **Rejected with an error**: the inner-product metric (its distances can be negative, so the
+  ratio has no meaning; for normalized embeddings, `cosine` gives the same ranking), custom
+  distance callbacks, range search, iterator search, search sessions and fused RaBitQ split
+  storage.
+- **Unaffected**: when an MCI, hybrid-traversal or brute-force route answers the query, the
+  rule does not run and the search proceeds as before.
+
+The rule is also skipped when the search width (`ef_search`, raised to at least `k`) is at most
+1.25 times `k`: the search runs as if `early_stop` were absent, and the index logs a warning
+the first time this happens. That close to `k` the rule rarely ends a search early, while its
+own top-k state still costs time.
+
+#### Checking That It Runs
+
+A search that runs the rule reports `early_stop_count` in its statistics: 1 if the rule ended
+it and 0 if not; a batch reports how many of its queries the rule ended. The count is absent
+when the rule did not run: not requested, skipped near `k`, or answered by a route other than
+the graph traversal. In the search reasoning report, a search the rule ended gives
+`distance_early_stop` as its termination reason.
+
+#### The Stopping Rule
+
+Once the search holds `k` eligible results, it stops when the nearest candidate still
+waiting to be expanded is at least `alpha` times as far as the current kth result.
+Candidate admission and the normal fixed-ef termination are unchanged, so a query that never
+meets this condition follows the same traversal and returns the same results as without
+`early_stop`; keeping the stop state up to date still costs some time. A distance
+`threshold`, if set, still filters the selected results afterwards and may return fewer than `k`.
+
+Distances are VSAG scores: squared distance for `l2` and `1 - cosine` for `cosine`. For
+normalized vectors `1 - cosine` is half the squared L2 distance, so an `alpha` means the same
+for both metrics.
+
+The rule is adapted from [Distance Adaptive Beam Search, Algorithm 2](https://arxiv.org/html/2505.15636v1#A2).
+This implementation keeps VSAG's fixed-width traversal and distance scores, so the paper's
+guarantee for metric spaces and navigable graphs does not carry over.
 
 ### Brute-force fallback under highly selective filters (`brute_force_threshold`)
 
