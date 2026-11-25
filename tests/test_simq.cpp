@@ -1142,8 +1142,8 @@ TEST_CASE("SIMQ collects each candidate once across zero coarse scores",
         auto check_result = [&](const DatasetPtr& result) {
             // PiPNN can form fewer cluster centers than docs on tiny fp16/bf16 datasets
             // (undersized-leaf policy). fp32/sq8 maintain full coverage on this dataset.
-            bool relaxed = (std::string(quantization) == "fp16" ||
-                            std::string(quantization) == "bf16");
+            bool relaxed =
+                (std::string(quantization) == "fp16" || std::string(quantization) == "bf16");
             REQUIRE(result->GetDim() > 0);
             if (relaxed) {
                 REQUIRE(result->GetDim() <= docs);
@@ -1161,7 +1161,8 @@ TEST_CASE("SIMQ collects each candidate once across zero coarse scores",
                 REQUIRE(std::find(labels.begin(), labels.end(), ids[i]) != labels.end());
                 auto distance = current->CalcDistanceById(query, ids[i]);
                 REQUIRE(distance.has_value());
-                all_distances_match &= (std::abs(distance.value() - result->GetDistances()[i]) < 1e-5F);
+                all_distances_match &=
+                    (std::abs(distance.value() - result->GetDistances()[i]) < 1e-5F);
             }
             REQUIRE(all_distances_match);
         };
