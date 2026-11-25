@@ -69,7 +69,7 @@ EvalConfig::AddCliArguments(argparse::ArgumentParser& parser) {
         .help("The range value for range search or range_filter search")
         .scan<'f', float>();
     parser.add_argument("--search-query-count")
-        .default_value(100000)
+        .default_value(uint64_t{100'000})
         .help("The number of queries to run for search performance evaluation")
         .scan<'i', uint64_t>();
 

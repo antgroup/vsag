@@ -89,6 +89,11 @@ RequireCoverage(const Monitor::JsonType& result,
 
 TEST_CASE("Search evaluation parses recall targets and the query count",
           "[ut][eval][query_coverage]") {
+    // Omitting --search-query-count used to abort with std::bad_any_cast.
+    const auto defaults = LoadCliConfig({});
+    REQUIRE(defaults.search_query_count == 100'000);
+    REQUIRE_FALSE(defaults.recall_target.has_value());
+
     const auto cli = LoadCliConfig({"--recall_target", "0.9", "--search-query-count", "1"});
     REQUIRE(cli.recall_target.value() == Catch::Approx(0.9));
     REQUIRE(cli.search_query_count == 1);
