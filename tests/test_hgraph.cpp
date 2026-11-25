@@ -1413,6 +1413,102 @@ TEST_CASE("(PR) HGraph CalcDistanceById Removed Label", "[ft][hgraph][pr]") {
     auto index = fixtures::TestIndex::TestFactory(fixtures::HGraphTestIndex::name, param, true);
     auto dataset = fixtures::HGraphTestIndex::pool.GetDatasetAndCreate(dim, 100, "l2");
     fixtures::TestIndex::TestCalcDistanceByIdRemovedLabel(index, dataset);
+    // An empty id list must keep the (NumElements, Dim) shape contract without allocating.
+    const int64_t empty_id = dataset->base_->GetIds()[0];
+    auto empty_result = index->CalDistanceById(dataset->base_->GetFloat32Vectors(), &empty_id, 0);
+    REQUIRE(empty_result.has_value());
+    REQUIRE(empty_result.value()->GetNumElements() * empty_result.value()->GetDim() == 0);
+    REQUIRE(empty_result.value()->GetNumElements() == 1);
+    REQUIRE(empty_result.value()->GetDim() == 0);
+    vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
+TEST_CASE("HGraph Update Vector With Removed Neighbor", "[ft][hgraph][pr]") {
+    // Regression for #3416: a graph neighbor whose label is missing or removed used to abort
+    // UpdateVector with INVALID_ARGUMENT. Such a neighbor must simply be skipped, while other
+    // errors keep propagating.
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    vsag::Options::Instance().set_block_size_limit(1024 * 1024 * 2);
+
+    constexpr int64_t dim = 8;
+    constexpr int64_t count = 48;
+    fixtures::HGraphTestIndex::HGraphBuildParam build_param("l2", dim, "fp32");
+    build_param.support_remove = true;
+    auto param = fixtures::HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = fixtures::TestIndex::TestFactory(fixtures::HGraphTestIndex::name, param, true);
+
+    // deterministic pseudo-random base vectors so every node is distinct
+    uint64_t state = 0x9E3779B97F4A7C15ULL;
+    auto next_value = [&state]() -> float {
+        state = state * 6364136223846793005ULL + 1442695040888963407ULL;
+        return static_cast<float>((state >> 33) % 10000) / 10000.0F;
+    };
+    std::vector<int64_t> ids(count);
+    std::vector<float> base(static_cast<uint64_t>(count) * static_cast<uint64_t>(dim));
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = i;
+        for (int64_t d = 0; d < dim; ++d) {
+            base[static_cast<uint64_t>(i * dim + d)] = next_value();
+        }
+    }
+    auto base_dataset = vsag::Dataset::Make();
+    base_dataset->NumElements(count)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(base.data())
+        ->Owner(false);
+    REQUIRE(index->Build(base_dataset).has_value());
+
+    int64_t updated = 0;
+    // Updates `id` with a perturbed copy of its vector and force_update = false, so the
+    // neighborhood loop runs. The perturbation is large enough that the cheap "vectors are same"
+    // shortcut (|old_self_dist - self_dist| < 1e-3) is not taken.
+    auto update_and_verify = [&](int64_t id, float perturbation) {
+        std::vector<float> new_vector(base.begin() + id * dim, base.begin() + (id + 1) * dim);
+        new_vector[0] += perturbation;
+        auto new_dataset = vsag::Dataset::Make();
+        new_dataset->NumElements(1)->Dim(dim)->Float32Vectors(new_vector.data())->Owner(false);
+
+        auto update_res = index->UpdateVector(id, new_dataset, false);
+        INFO(fmt::format("update vector without force failed for id {}", id));
+        REQUIRE(update_res.has_value());
+        if (not update_res.value()) {
+            return;
+        }
+        ++updated;
+        auto new_dist = index->CalcDistanceById(new_vector.data(), id);
+        REQUIRE(new_dist.has_value());
+        REQUIRE(new_dist.value() < 1e-6F);
+    };
+
+    // A label removed through the public API.
+    REQUIRE(index->Remove(0).has_value());
+    REQUIRE(index->GetNumberRemoved() == 1);
+    REQUIRE_FALSE(index->CalcDistanceById(base.data(), 0).has_value());
+    for (int64_t i = 1; i < count; ++i) {
+        update_and_verify(i, 0.1F);
+    }
+    REQUIRE(updated > 0);
+
+    // The same state for a label that is only dropped from the label table, so the graph keeps
+    // returning it as a neighbor unconditionally. That is exactly the neighbor the removed-label
+    // branch of UpdateVector has to tolerate.
+    {
+        auto impl = std::dynamic_pointer_cast<vsag::IndexImpl<vsag::HGraph>>(index);
+        REQUIRE(impl != nullptr);
+        auto hgraph = std::dynamic_pointer_cast<vsag::HGraph>(impl->GetInnerIndex());
+        REQUIRE(hgraph != nullptr);
+        std::unique_lock<std::shared_mutex> label_lock(hgraph->label_lookup_mutex_);
+        hgraph->label_table_->Remove(1);
+    }
+    REQUIRE_FALSE(index->CalcDistanceById(base.data() + dim, 1).has_value());
+    const int64_t updated_before = updated;
+    for (int64_t i = 2; i < count; ++i) {
+        // a different perturbation, so the "vectors are same" shortcut is not taken again
+        update_and_verify(i, 0.25F);
+    }
+    REQUIRE(updated > updated_before);
+
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 

@@ -245,7 +245,15 @@ HierarchicalNSW::getBatchDistanceByLabel(const int64_t* ids,
     int64_t valid_cnt = 0;
     auto result = vsag::Dataset::Make();
     result->Owner(true, allocator_);
+    result->NumElements(count)->Dim(1);
+    if (count <= 0) {
+        return std::move(result);
+    }
     auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+    if (distances == nullptr) {
+        throw vsag::VsagException(vsag::ErrorType::NO_ENOUGH_MEMORY,
+                                  "failed to allocate distance buffer");
+    }
     result->Distances(distances);
     std::vector<bool> validity(count, false);
     std::shared_ptr<float[]> normalize_query;
@@ -263,7 +271,6 @@ HierarchicalNSW::getBatchDistanceByLabel(const int64_t* ids,
             valid_cnt++;
         }
     }
-    result->NumElements(count);
     if (count > 0) {
         auto* valids = static_cast<bool*>(allocator_->Allocate(sizeof(bool) * count));
         if (valids == nullptr) {

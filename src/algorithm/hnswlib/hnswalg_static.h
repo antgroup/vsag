@@ -273,10 +273,17 @@ public:
     tl::expected<vsag::DatasetPtr, vsag::Error>
     getBatchDistanceByLabel(const int64_t* ids, const void* data_point, int64_t count) override {
         std::unique_lock<std::mutex> lock_table(label_lookup_lock);
-        int64_t valid_cnt = 0;
         auto result = vsag::Dataset::Make();
         result->Owner(true, allocator_);
+        result->NumElements(count)->Dim(1);
+        if (count <= 0) {
+            return std::move(result);
+        }
         auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+        if (distances == nullptr) {
+            throw vsag::VsagException(vsag::ErrorType::NO_ENOUGH_MEMORY,
+                                      "failed to allocate distance buffer");
+        }
         result->Distances(distances);
         std::vector<bool> validity(count, false);
         for (int i = 0; i < count; i++) {
@@ -289,10 +296,8 @@ public:
                 float dist =
                     fstdistfunc_(data_point, getDataByInternalId(internal_id), dist_func_param_);
                 distances[i] = dist;
-                valid_cnt++;
             }
         }
-        result->NumElements(valid_cnt);
         if (count > 0) {
             auto* valids = static_cast<bool*>(allocator_->Allocate(sizeof(bool) * count));
             if (valids == nullptr) {

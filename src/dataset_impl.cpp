@@ -312,7 +312,7 @@ DatasetImpl::Append(const DatasetPtr& other) {
 
     APPEND_DATA(IDS, int64_t*, Ids, 1);
     APPEND_DATA(DISTS, float*, Distances, dim);
-    if (this->GetValids() != nullptr) {
+    if (this->GetValids() != nullptr and new_num_elements * dim > 0) {
         auto* valids = const_cast<bool*>(this->GetValids());
         this->Valids(allocate_and_copy(other->GetValids(),
                                        new_num_elements * dim,

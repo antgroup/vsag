@@ -433,6 +433,38 @@ TEST_CASE("Dataset Valids Test", "[ut][dataset]") {
         }
     }
 
+    SECTION("Append of a zero-element dataset keeps valids intact") {
+        auto first = vsag::Dataset::Make();
+        auto* original_valids = new bool[2]{true, false};
+        first->NumElements(1)->Dim(2)->Valids(original_valids)->Owner(true);
+        auto empty = vsag::Dataset::Make();
+        empty->NumElements(0)->Dim(2)->Valids(new bool[0])->Owner(true);
+
+        first->Append(empty);
+
+        REQUIRE(first->GetNumElements() == 1);
+        REQUIRE(first->GetDim() == 2);
+        REQUIRE(first->GetValids() == original_valids);
+        REQUIRE(first->GetValids()[0]);
+        REQUIRE_FALSE(first->GetValids()[1]);
+    }
+
+    SECTION("DeepCopy keeps batch CalDistanceById shaped valids") {
+        auto* distances = new float[5]{0.0F, 1.0F, 2.0F, 3.0F, 4.0F};
+        auto* valids = new bool[5]{true, true, false, true, false};
+        auto batch_result = vsag::Dataset::Make();
+        batch_result->NumElements(1)->Dim(5)->Distances(distances)->Valids(valids)->Owner(true);
+        auto copy = batch_result->DeepCopy();
+        REQUIRE(copy->GetNumElements() == 1);
+        REQUIRE(copy->GetDim() == 5);
+        REQUIRE(copy->GetDistances() != nullptr);
+        REQUIRE(copy->GetValids() != nullptr);
+        for (int i = 0; i < 5; ++i) {
+            REQUIRE(copy->GetDistances()[i] == distances[i]);
+            REQUIRE(copy->GetValids()[i] == valids[i]);
+        }
+    }
+
     SECTION("Append with valids on only one side throws before mutating") {
         auto with_valids = vsag::Dataset::Make();
         with_valids->NumElements(1)
