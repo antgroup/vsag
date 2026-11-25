@@ -84,7 +84,7 @@ new_index.load("index.bin")
 | `get_min_max_id()` | `(min_id, max_id)` | 操作失败时返回 `(-1, -1)` |
 | `add(vectors, ids, num_elements, dim)` | `None` | 添加连续的稠密向量矩阵；dtype 必须与索引一致 |
 | `remove(ids)` | `int` | 删除一维 `int64` ID 数组；没有 ID 被删除和底层操作失败时都会返回 `0` |
-| `calc_distances_by_id(query, ids)` / `cal_distance_by_id(query, ids)`（旧别名） | `numpy.ndarray` | 以一维 float32 数组按 ID 顺序返回距离；缺失 ID 为 `-1`，底层参数无效或操作不受支持时抛出包含 C++ 错误信息的 `RuntimeError` |
+| `calc_distances_by_id(query, ids)` / `cal_distance_by_id(query, ids)`（旧别名） | `numpy.ndarray` | 以一维 float32 数组按 ID 顺序返回距离；缺失或已删除的 ID 为 `NaN`（可用 `numpy.isnan` 判断），底层参数无效或操作不受支持时抛出包含 C++ 错误信息的 `RuntimeError` |
 
 ```python
 # 添加两条稠密向量
@@ -114,7 +114,7 @@ removed = index.remove(candidate_ids)
 
 `calc_distances_by_id` 及其旧别名接受一个长度等于索引维度的一维稠密 query 和一维 ID 数组。过短、过长及空 query 由 C++ Dataset 校验拒绝，不会被当作缺失 ID。NumPy 输入按需转为连续的 float32 / int64 数组，正负步长的 query 和 ID 视图均保持逻辑顺序。这不为绑定新增稀疏、多向量或多 query 支持。
 
-Node.js 对应的 `calcDistancesById(query, ids)` 和旧别名 `calDistanceById(query, ids)` 仍返回一维 `Float32Array`。query 必须为 `Float32Array`，ID 必须为 `BigInt64Array`，其他数组类型抛出 `TypeError`；实际 query 长度通过 C++ Dataset API 校验，底层操作失败时抛出包含 C++ 信息的 `Error`。缺失 ID 仍返回 `-1`，不属于操作失败。
+Node.js 对应的 `calcDistancesById(query, ids)` 和旧别名 `calDistanceById(query, ids)` 仍返回一维 `Float32Array`。query 必须为 `Float32Array`，ID 必须为 `BigInt64Array`，其他数组类型抛出 `TypeError`；实际 query 长度通过 C++ Dataset API 校验，底层操作失败时抛出包含 C++ 信息的 `Error`。缺失或已删除的 ID 返回 `NaN`（可用 `Number.isNaN` 判断），不属于操作失败。绑定层只提供批量接口，因此单个缺失 ID 以 `NaN` 体现，不会报错。
 
 ## 与 C++ 库的关系
 

@@ -971,14 +971,23 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
                 continue;
             }
 
+            const auto neighbor_label = this->label_table_->GetLabelById(neighbor_inner_id);
+            if (not this->label_table_->CheckLabel(neighbor_label)) {
+                // skip the neighbor that has already been removed
+                continue;
+            }
+
             float neighbor_dist = 0;
             try {
                 neighbor_dist =
-                    this->CalcDistanceById(static_cast<float*>(new_base_vec),
-                                           this->label_table_->GetLabelById(neighbor_inner_id));
-            } catch (const std::runtime_error& e) {
-                // incase that neighbor has been deleted
-                continue;
+                    this->CalcDistanceById(static_cast<float*>(new_base_vec), neighbor_label);
+            } catch (const VsagException& e) {
+                // the neighbor may be removed concurrently; skip only in that case
+                if (e.error_.type == ErrorType::INVALID_ARGUMENT and
+                    not this->label_table_->CheckLabel(neighbor_label)) {
+                    continue;
+                }
+                throw;
             }
             if (neighbor_dist < self_dist) {
                 return false;

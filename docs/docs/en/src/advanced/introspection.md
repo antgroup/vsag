@@ -53,9 +53,9 @@ auto r = index->CalcDistancesById(query_ds, ids, count, /*calculate_precise_dist
 
 The raw-pointer overload returns one row of `count` distances. The `DatasetPtr` overload can
 process several queries on indexes that advertise `SUPPORT_BATCH_CALC_DISTANCE_BY_ID`: candidate
-IDs and distances then form `NumElements() * count` row-major matrices. A value of `-1.0F` means
-the corresponding ID was invalid. A positive `topk` returns the nearest candidates per row,
-sorted by distance, together with their IDs. See
+IDs and distances then form `NumElements() * count` row-major matrices. A missing or removed ID
+gets a `NaN` distance together with a `false` entry in `Dataset::GetValids()`. A positive `topk`
+returns the nearest candidates per row, sorted by distance, together with their IDs. See
 [Calculate Distance by ID](calc_distance_by_id.md) for the layout and support matrix.
 
 ### `calculate_precise_distance`
