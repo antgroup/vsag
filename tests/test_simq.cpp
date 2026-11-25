@@ -1623,7 +1623,7 @@ TEST_CASE("SIMQ Add completes cluster splitting with a bounded shared pool",
     const auto param = fmt::format(R"({{
         "dtype":"float32", "metric_type":"ip", "dim":{},
         "index_param":{{"base_io_type":"memory_io", "init_cluster_ratio":0.05,
-            "max_cluster_size":4, "split_start_idx":2, "build_thread_count":1}}
+            "max_cluster_size":4, "split_start_idx":2, "build_thread_count":2}}
     }})",
                                    dim);
     auto created = engine.CreateIndex("simq", param);
