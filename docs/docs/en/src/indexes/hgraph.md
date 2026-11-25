@@ -112,7 +112,7 @@ records cross-index defaults and the top-level common fields.
 | `saq_random_rotation` | bool | `true` | Apply an independent orthogonal rotation inside each SAQ segment. |
 | `rabitq_fused_datacell` | bool | `false` | Fuse the bottom HGraph node and RaBitQ split codes into one in-memory record. Requires L2/IP, flat in-memory graph storage, RaBitQ x+y split codes with x in `[1, 4]`, and the other constraints described in [RaBitQ x+y split](../quantization/rabitq_split.md). |
 | `train_sample_count` | int | `65536` | Maximum number of vectors sampled for quantizer training; must be at least `512` when set explicitly. |
-| `build_thread_count` | int | `100` | Threads used to parallelise build |
+| `build_thread_count` | int | `100` | Threads used to parallelise build. With `1`, `Add` and NSW `Build` insert vectors one at a time, even when the index has a thread pool from its `Resource` |
 | `support_duplicate` | bool | `false` | Group duplicate vectors while retaining their individual labels |
 | `deduplicate_storage` | bool | `false` | Share vector storage between duplicates; requires `support_duplicate: true` |
 | `duplicate_distance_threshold` | float | `0.0` | Duplicate-detection distance threshold. When greater than `0`, deduplicate by the nearest candidate distance; when `0`, compare codes with the nearest candidate first, then check the remaining returned build candidates until a match is found |

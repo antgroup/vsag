@@ -99,7 +99,7 @@ auto result = index->KnnSearch(
 | `saq_random_rotation` | bool | `true` | 在每个 SAQ 分段内使用独立正交旋转 |
 | `rabitq_fused_datacell` | bool | `false` | 将底层 HGraph 节点与 RaBitQ split 编码融合到一条内存记录中；要求 L2/IP、flat 内存图、x 在 `[1, 4]` 的 RaBitQ x+y split 编码，并满足 [RaBitQ x+y split](../quantization/rabitq_split.md) 中的其他约束 |
 | `train_sample_count` | int | `65536` | 量化器训练的最大采样向量数；显式配置时最小为 `512` |
-| `build_thread_count` | int | `100` | 构建阶段并发线程数 |
+| `build_thread_count` | int | `100` | 构建阶段并发线程数。设为 `1` 时，`Add` 和 NSW 图的 `Build` 逐条插入向量，即使索引持有 `Resource` 提供的线程池 |
 | `support_duplicate` | bool | `false` | 合并重复向量的图节点，并保留各自的标签 |
 | `deduplicate_storage` | bool | `false` | 让重复向量共享存储；需同时设置 `support_duplicate: true` |
 | `duplicate_distance_threshold` | float | `0.0` | 重复判定距离阈值。大于 `0` 时按最近候选的距离判重；等于 `0` 时先比较最近候选的编码，不匹配则继续检查构建搜索返回的其余候选，直到找到匹配 |

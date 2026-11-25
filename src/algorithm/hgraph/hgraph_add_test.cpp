@@ -485,7 +485,7 @@ TEST_CASE("HGraph Tune requires a complete source after Add",
         "base_quantization_type": "sq8",
         "max_degree": 8,
         "ef_construction": 32,
-        "build_thread_count": 1,
+        "build_thread_count": 2,
         "store_raw_vector": true
     })");
     if (source == "precise") {
@@ -592,6 +592,38 @@ TEST_CASE("HGraph Tune requires a complete source after Add",
     }
 }
 
+TEST_CASE("HGraph build_thread_count 1 inserts serially even with an attached pool",
+          "[ut][hgraph][add]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t count = 64;
+    std::vector<float> vectors(count * dim);
+    std::vector<int64_t> ids(count);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = 1000 + i;
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[i * dim + d] = std::sin(static_cast<float>(i * dim + d));
+        }
+    }
+    // The pool is attached the way an Engine Resource attaches one; any submission fails.
+    auto pool = std::make_shared<ArmableRejectingThreadPool>();
+    auto pooled_common = MakeCommonParam(dim);
+    pooled_common.thread_pool_ = std::make_shared<vsag::SafeThreadPool>(pool);
+    auto pooled = MakeHGraphIndex(MakeFp32HGraphJson(false), pooled_common);
+    auto unpooled = MakeHGraphIndex(MakeFp32HGraphJson(false), MakeCommonParam(dim));
+    pool->SetRejectSubmissions(true);
+    std::vector<std::string> serialized;
+    for (const auto& index : {pooled, unpooled}) {
+        auto added = index->Add(MakeFloatDataset(vectors, ids, dim, count));
+        REQUIRE(added.has_value());
+        REQUIRE(added.value().empty());
+        std::stringstream stream;
+        REQUIRE(index->Serialize(stream).has_value());
+        serialized.push_back(stream.str());
+    }
+    // Serial insertion with the seeded level generator gives the same graph as no pool.
+    REQUIRE(serialized[0] == serialized[1]);
+}
+
 TEST_CASE("HGraph restore preserves unfinished reservations before a later Add",
           "[ut][hgraph][add][hgraph_tune_incomplete_source][hgraph_restore_reservation]") {
     const auto restore_mode =
@@ -600,7 +632,7 @@ TEST_CASE("HGraph restore preserves unfinished reservations before a later Add",
     auto pool = std::make_shared<ArmableRejectingThreadPool>();
     auto common = MakeCommonParam(4);
     common.thread_pool_ = std::make_shared<vsag::SafeThreadPool>(pool);
-    auto parameters = MakeFp32HGraphJson(false);
+    auto parameters = MakeFp32HGraphJson(false, 2);
     auto index = MakeHGraphIndex(parameters, common);
     std::vector<float> vectors{0, 0, 0, 0, 1, 1, 1, 1};
     std::vector<int64_t> labels{10, 20};
@@ -699,7 +731,7 @@ TEST_CASE("HGraph Tune coverage follows code compaction",
     auto pool = std::make_shared<ArmableRejectingThreadPool>();
     auto common_param = MakeCommonParam(dim);
     common_param.thread_pool_ = std::make_shared<vsag::SafeThreadPool>(pool);
-    auto parameters = MakeFp32HGraphJson(false);
+    auto parameters = MakeFp32HGraphJson(false, 2);
     parameters["support_force_remove"].SetBool(true);
     auto index = MakeHGraphIndex(parameters, common_param);
     std::vector<float> vectors{0, 0, 0, 0, 1, 1, 1, 1};
@@ -2571,7 +2603,7 @@ TEST_CASE("HGraph Merge rejects unfinished inputs before copying any unit",
     auto pool = std::make_shared<ArmableRejectingThreadPool>();
     auto common = MakeCommonParam(4);
     common.thread_pool_ = std::make_shared<vsag::SafeThreadPool>(pool);
-    auto param = MakeFp32HGraphJson(false);
+    auto param = MakeFp32HGraphJson(false, 2);
     auto source = MakeHGraphIndex(param, common);
     std::vector<float> vectors{0, 0, 0, 0, 1, 1, 1, 1};
     std::vector<int64_t> labels{10, 20};

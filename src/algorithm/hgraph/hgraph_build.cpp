@@ -764,7 +764,9 @@ HGraph::prepare_add_context(const DatasetPtr& data) {
     AddContext context;
     context.use_dedup_storage = this->using_dedup_storage();
     context.need_temporary_sq8_build_data = this->need_temporary_sq8_build_data_for_add();
-    context.use_parallel_add = this->thread_pool_ != nullptr;
+    // A pool can come from the Resource even when build_thread_count is 1. Gate on the
+    // count like the other build steps, so that 1 keeps insertion order deterministic.
+    context.use_parallel_add = this->thread_pool_ != nullptr and this->build_thread_count_ > 1;
 
     if (context.need_temporary_sq8_build_data and this->total_count_ != 0 and
         raw_vector_ == nullptr) {
