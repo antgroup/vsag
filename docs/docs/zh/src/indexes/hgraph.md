@@ -235,7 +235,7 @@ PiPNN 构建（采用 [GPiPNN](https://arxiv.org/abs/2611.05690) 的全流程驻
 - Pyramid 会把这四个设置转发给它构建的每个 PiPNN 子图；低于工作量阈值的子图仍在 CPU 上构建。
 
 **回退** 以下情况会静默回到 CPU 构建，结果与以往一致：库没有 CUDA 后端、没有可用设备、显存不足
-（受 `pipnn_gpu_memory_budget` 约束）、工作量低于 `pipnn_gpu_min_work_threshold`，或输入超出上述范围。
+（受 `pipnn_gpu_memory_budget` 约束）、工作量低于 `pipnn_gpu_min_work_threshold`，或输入超出上述范围。复用构建缓存（`ImportCache()`，或设置了 `Dataset::SourceID` 以便导出缓存）以及带近似重复点分组的构建同样留在 CPU 上。
 GPU 图与 CPU 图并不逐位一致（划分和打分方式不同），请在相同 `ef_search` 下比较召回，而不是比较邻接表。
 
 在一块 RTX 2080 Ti 上，SIFT-1M（128 维，`max_degree` 32，`alpha` 1.2）约 2.2 秒完成构建，

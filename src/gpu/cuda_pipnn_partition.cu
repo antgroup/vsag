@@ -228,6 +228,8 @@ PartitionLeaves(Workspace& ws,
             args.cand_off = d_cand_off1.Get();
             args.tile_seg = d_tile_seg.Get();
             args.tile_row0 = d_tile_row0.Get();
+            // out_k never exceeds the candidate count of a segment (f1 <= m1), so the assignment
+            // holds no kNoValue; the radix sort on the assignment keys relies on that.
             args.out_k = f1;
             args.out_assign = d_assign1.Get();
             if (not launch_score<false>(args, static_cast<uint32_t>(tiles.seg.size()))) {
@@ -307,6 +309,7 @@ PartitionLeaves(Workspace& ws,
             args.cand_off = d_cand_off2.Get();
             args.tile_seg = d_tile_seg2.Get();
             args.tile_row0 = d_tile_row02.Get();
+            // Likewise f2 < the sub-leader count of every big bucket (max_leaf_size > fanout_l2).
             args.out_k = f2;
             args.out_assign = d_assign2.Get();
             if (not launch_score<false>(args, static_cast<uint32_t>(tiles.seg.size()))) {

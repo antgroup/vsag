@@ -264,7 +264,8 @@ point with a lock-free sort-and-merge. Only the final adjacency lists return to 
 **Fallback.** The build silently stays on the CPU, with the same result as before, when the library
 has no CUDA backend, no usable device or too little device memory for `pipnn_gpu_memory_budget`;
 when the build is below `pipnn_gpu_min_work_threshold`; or when its inputs are outside the scope
-above. The GPU graph is not bit-identical to the CPU graph (the partition and the scoring differ),
+above. A build that reuses a build cache (`ImportCache()`, or `Dataset::SourceID` set so a cache can
+be exported), and a build with near-duplicate grouping, also stays on the CPU. The GPU graph is not bit-identical to the CPU graph (the partition and the scoring differ),
 so compare recall at matched `ef_search` rather than adjacency.
 
 The GPU graph is built from a different partition and from quantized scores, so recall can differ

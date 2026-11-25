@@ -526,9 +526,14 @@ void
 PiPNNPipeline::Build(const Vector<InnerIdType>& ids_sequence, DuplicatePairs* duplicates) {
     using Clock = std::chrono::steady_clock;
     std::array<double, 6> phase_seconds{};
-    // Duplicate grouping and the build cache are host-only features, so they keep the CPU path.
+    // Duplicate grouping and cache reuse are host-only features, so they keep the CPU path. The
+    // exported-cache slot is always handed over by HGraph and Pyramid; the device build leaves it
+    // empty like the CPU path does when no source IDs are present.
     if (duplicates == nullptr and source_ids_ == nullptr and imported_cache_ == nullptr and
-        exported_cache_ == nullptr and build_graph_on_device(ids_sequence)) {
+        build_graph_on_device(ids_sequence)) {
+        if (exported_cache_ != nullptr) {
+            exported_cache_->reset();
+        }
         return;
     }
     auto start = Clock::now();

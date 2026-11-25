@@ -34,6 +34,7 @@
 
 #include "datacell/graph_interface.h"
 #include "datacell/graph_interface_parameter.h"
+#include "gpu/cuda_backend.h"
 #include "half_vector.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/thread_pool/safe_thread_pool.h"
@@ -406,6 +407,53 @@ TEST_CASE("PiPNN GPU build yields a valid graph for every metric", "[ut][pipnn][
         MakeGpuParameter(), dimensions, metric, common_param.allocator_.get(), nullptr, 1)
         .Build(graph, ids, rows);
     RequireGraphInvariants(graph, ids, max_degree, common_param.allocator_.get());
+}
+
+// HGraph and Pyramid always hand over an empty exported-cache slot; it must not keep the build
+// on the CPU. The GPU graph differs from the CPU graph, so a difference proves the device ran.
+TEST_CASE("PiPNN GPU build engages when an exported cache slot is supplied", "[ut][pipnn]") {
+    if (not vsag::gpu::CudaAvailable()) {
+        SKIP("no CUDA device");
+    }
+    constexpr uint64_t dimensions = 24;
+    constexpr uint64_t count = 3000;
+    constexpr uint64_t max_degree = 16;
+    auto common_param = MakeCommonParam(dimensions, vsag::MetricType::METRIC_TYPE_L2SQR);
+    auto vectors = MakeVectors(count, dimensions);
+    vsag::Vector<vsag::InnerIdType> ids(common_param.allocator_.get());
+    for (uint64_t id = 0; id < count; ++id) {
+        ids.emplace_back(static_cast<vsag::InnerIdType>(id));
+    }
+    auto rows = MakeRows(vectors, ids, dimensions, common_param.allocator_.get());
+
+    auto build = [&](bool gpu_enabled) {
+        auto parameter = MakeGpuParameter();
+        parameter.enable_gpu_build = gpu_enabled;
+        auto graph = MakeGraph(common_param, count, max_degree);
+        std::shared_ptr<vsag::PiPNNBuildCache> exported;
+        vsag::PiPNNGraphBuilder(parameter,
+                                dimensions,
+                                vsag::MetricType::METRIC_TYPE_L2SQR,
+                                common_param.allocator_.get(),
+                                nullptr,
+                                1)
+            .Build(graph, ids, rows, nullptr, nullptr, &exported);
+        REQUIRE(exported == nullptr);
+        return graph;
+    };
+    auto gpu_graph = build(true);
+    auto cpu_graph = build(false);
+    RequireGraphInvariants(gpu_graph, ids, max_degree, common_param.allocator_.get());
+
+    bool differs = false;
+    vsag::Vector<vsag::InnerIdType> gpu_neighbors(common_param.allocator_.get());
+    vsag::Vector<vsag::InnerIdType> cpu_neighbors(common_param.allocator_.get());
+    for (uint64_t id = 0; id < count and not differs; ++id) {
+        gpu_graph->GetNeighbors(static_cast<vsag::InnerIdType>(id), gpu_neighbors);
+        cpu_graph->GetNeighbors(static_cast<vsag::InnerIdType>(id), cpu_neighbors);
+        differs = gpu_neighbors != cpu_neighbors;
+    }
+    REQUIRE(differs);
 }
 
 TEST_CASE("PiPNN GPU build falls back when it cannot serve the request", "[ut][pipnn]") {

@@ -335,6 +335,7 @@ QuantizeRows(const float* vectors,
         }
         ws.credit(feeder.bytes());
         ws.credit(static_cast<uint64_t>(kSumSlices) * plan.dim * sizeof(double));
+        ws.credit(static_cast<uint64_t>(plan.dim) * sizeof(float) + sizeof(uint32_t));
     }
     return true;
 }
