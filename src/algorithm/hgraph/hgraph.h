@@ -668,12 +668,14 @@ private:
     void
     incremental_update_mci_clique(InnerIdType node_id,
                                   const void* vector,
-                                  uint64_t visible_total = 0);
+                                  uint64_t visible_total = 0,
+                                  bool maximal = false);
 
     void
     incremental_update_mci_clique(InnerIdType node_id,
                                   const Vector<InnerIdType>& knn_ids,
-                                  uint64_t visible_total);
+                                  uint64_t visible_total,
+                                  bool maximal = false);
 
     /// Apply deletion to MCI only, retiring small cliques and repairing under-covered survivors.
     /// Uses unchanged inner IDs; does not remove vectors, remap graph IDs or shrink storage.
@@ -705,6 +707,13 @@ private:
                         const Vector<InnerIdType>& knn_ids,
                         uint64_t degree_target,
                         UnorderedSet<InnerIdType>& neighbors);
+
+    void
+    build_maximal_mci_cliques(InnerIdType seed,
+                              const Vector<InnerIdType>& knn_ids,
+                              uint64_t visible_total,
+                              uint64_t degree_target,
+                              UnorderedSet<InnerIdType>& neighbors);
 
     void
     build_incremental_mci_clique(InnerIdType new_inner_id,

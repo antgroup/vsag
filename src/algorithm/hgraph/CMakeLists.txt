@@ -12,3 +12,4 @@ set(HGRAPH_SRCS
 
 add_library(hgraph OBJECT ${HGRAPH_SRCS})
 target_link_libraries(hgraph PRIVATE coverage_config vsag_src_common)
+maybe_add_dependencies (hgraph boost)

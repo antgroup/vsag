@@ -51,7 +51,7 @@ MCI 会直接基于已存储向量构建专用 KNN 图。若内部配置了外�
 ### 增量维护参数
 
 以下参数仍放在 `index_param` 下，控制 ADD 以及删除后存活点的修复。
-删除修复复用 ADD 的加入已有团和新建团逻辑，不会将已有向量重新插入 HGraph。
+删除修复读取已有点的向量，优先尝试加入已有团。
 
 这里的度数是覆盖当前点的所有有效团中，其他存活成员的去重并集大小，
 不等于 HGraph 出度，也不等于当前点所属的团数。度数停止目标为：
@@ -87,7 +87,7 @@ MCS 除数默认 `2`，是为了在应用度数下限之前，将自适应项限
 | `mci_incremental_degree_min` | 默认 `50`；正整数。 | 度数目标公式中的下限，最终仍受 `N-1` 限制。例如 `N=10000、mcs=200` 时，默认目标为 `50`；将本参数改为 `70`，目标变为 `70`。但 `N≈3m、mcs=200` 时，下限为 `50` 或 `70`，目标都是 `100`。低度数点较多时可尝试提高下限，验证 recall 是否改善；降低下限可减少达到目标所需的维护工作，但可能减少搜索连接。调参前应先确认本参数是否实际决定目标。 |
 | `mci_incremental_degree_n_divisor` | 默认 `10000`；正整数。 | 控制规模项 `N / divisor`。例如 `N=800000、mcs=200、degree_min=50` 时，默认目标为 `80`；将除数改为 `20000`，规模项变为 `40`，最终目标受下限约束，为 `50`。减小除数会提高规模项，增大除数会降低规模项，适合调整目标随数据规模增长的速度；效果仍受度数下限和 MCS 项限制，被其他项限制时可能没有变化。 |
 | `mci_incremental_degree_mcs_divisor` | 默认 `2`；正整数。 | 控制候选规模项 `mcs / divisor`，与规模项取较小值后，再应用度数下限。例如 `N≈3m、mcs=200、degree_min=50` 时，除数为 `2`，目标为 `100`；改为 `4`，目标为 `50`。减小除数可以提高目标，增大除数可以降低目标，但仍受规模项和下限限制。本参数不改变 KNN 候选数量；要改变候选规模，应调整 `mci_mcs`。 |
-| `mci_incremental_clique_max` | 默认 `50`；整数且不小于 `2`。 | 同时限制增量新建团的大小和向已有团追加成员后的大小。例如设为 `50` 时，49 人团可以追加到 50 人；已有 50 人团不会再接受新点。因此，全量构建得到的满 50 人团在默认设置下不能直接追加。实际新建团可能小于上限。提高上限可让部分原本已满的团继续追加，并允许更大的新团；降低上限可能需要更多团补足度数。应结合 `mci_clique_max`、成员关系总量和查询开销一起评估。 |
+| `mci_incremental_clique_max` | 默认 `50`，整数且不小于 `2`。 | 限制加入已有团后的总人数，也限制多行 Add 和删除修复中新建团的大小。单条 Add 用它设置新团的初始构团门槛，人数包含新点。找到初始团后继续在完整候选池内按当前距离半径扩团。例如 `mci_mcs=400` 时，新团最多可包含 401 个点。 |
 | `mci_delete_clique_size_threshold` | 默认 `30`；正整数。 | 对本批删除影响到的团，统计整批删除后剩余的有效成员数，严格小于阈值才废弃整个团：默认剩 29 个成员时废弃，剩 30 个时保留。废弃的是团及其成员关系，不是剩余存活向量；也不会扫描废弃无关的小团。这不是构建团大小上限。提高阈值会扩大废弃范围，可能增加修复成本和结构变化；降低阈值会保留更多小团。可围绕 `30` 按 `10` 小步增减，对比废弃团数、修复点数、删除耗时和 recall，不假定越大越好。若构建团大小上限低于此阈值，删除触及的这类团都会被废弃，应配套评估。 |
 | `mci_delete_node_mct_threshold` | 默认 `3`；正整数。 | 从被废弃团的存活成员中，筛选预计有效覆盖团数严格小于阈值的点作为修复候选。统计时扣除本批即将废弃的团，并对候选点去重。例如默认剩余覆盖团数为 0、1、2 时进入候选，为 3 时不进入；这里统计的是团数，不是邻居度数。提高阈值会扩大候选范围，降低阈值会缩小范围；设为 `1` 时只选择预计失去全部团覆盖的候选点。可按 `3 → 4 → 5 → 6` 比较修复成本和查询质量。实际修复前会再次检查覆盖情况，进入候选不代表一定新建团。 |
 
@@ -188,7 +188,7 @@ MCI 挂件依赖过滤器提供合理的 `ValidRatio()`。bitset 和函数过滤
 | `src/algorithm/hgraph/hgraph_build.cpp` | `Add` → `add_impl`：先插入 HGraph，再维护成功插入点的 MCI |
 | `src/algorithm/hgraph/hgraph_mci.cpp` | 全量构团；`search_mci_knn`、`incremental_update_mci_clique`、`repair_mci_clique`、`force_remove_with_mci`、`maybe_compact_mci` |
 | `src/algorithm/hgraph/hgraph_modify.cpp` | Remove 模式分流、图边修补、尾部 ID 搬移、存储缩容 |
-| `src/datacell/clique_datacell.{h,cpp}` | 两向 CSR、三种 delta、删除快照、团废弃、节点重映射和 Flush |
+| `src/datacell/clique_datacell.{h,cpp}` | 两向 CSR、delta、内存容量记账、团废弃、节点重映射和 Flush |
 | `src/impl/searcher/mci_searcher.cpp` | `search_clique_view`：统一遍历 base CSR + delta + 删除标记 |
 | `src/impl/label_table/label_table.{h,cpp}` | 外部标签映射、删除集合、一次查询固定删除集合的读视图 |
 | `src/algorithm/hgraph/hgraph_parameter.{h,cpp}`、`hgraph_param_mapping.cpp` | 参数默认值、校验和外部 JSON 映射 |
@@ -207,22 +207,21 @@ MCI 挂件依赖过滤器提供合理的 `ValidRatio()`。bitset 和函数过滤
 
 节点删除标记、团废弃标记独立维护。Flush 清空 delta 并重建两向 CSR；它不会改变向量 inner ID，
 但可能重新编号团。FORCE_REMOVE 会移动向量 inner ID，因此还必须同步重映射 MCI。
+团存储在底层缓冲区容量变化时更新字节总数，`CliqueDataCell::GetMemoryUsage()` 直接读取该值。
 
-### 1.2 ADD 与删除修复的共用流程
+### 1.2 ADD 与删除修复流程
 
-1. ADD 先完成 HGraph 插入，再按插入顺序逐行维护成功插入点的 MCI：每行立即更新挂件，
-   然后才处理下一行（每行仍按下面 2–3 步的规则处理）。候选来自 `search_mci_knn`，内部调用
-   HGraph `KnnSearch`，显式设置 `use_mci=false`；不是通过 MCI 搜候选。
-2. 目标邻居数为 `min(mci_mcs, visible_total - 1)`。内部检索 ef 为 `max(query_k, 100)`；
-   剔除自身、删除点及可见范围外点，不足时可扩大请求数量。这里不使用性能测试的 ef=320。
-3. 优先加入满足 `|KNN ∩ C| / |C| >= join_ratio` 且未达到增量大小上限的已有团，
-   以去重邻居度数而非团数作为停止条件。度数不足时，使用尚未相邻的 KNN 候选，调用与全量 Build 共用的
-   `MCILocalCliqueBuilder::Build`（`src/algorithm/mci/mci_local_builder.h`），使用增量团大小上限，
-   把当前点视为需要覆盖的点，重复直到目标达到、候选耗尽或度数无进展。
-   不再以团大小达到 2 作为 alpha 扩张的停止条件。没有候选时创建单点团。
+1. 先把本批向量插入 HGraph，再按顺序为每个成功插入的点更新 MCI。
+2. 收集至多 `min(mci_mcs, visible_total - 1)` 个互不相同的有效旧点。单条 Add 使用内存 FP32
+   平方 L2、普通向量存储、关闭重复向量处理和重排，且 `ef_construction >= mci_mcs` 时，
+   MCI 可复用 HGraph 底层插入时裁边前的候选，按距离选取最近的有效点，同距时按 ID 选择。
+   候选堆不可用或去重后的有效点不足时，调用常规 HGraph 搜索（`use_mci=false`）。
+3. 优先加入满足重叠率要求且仍有容量的已有团。若去重邻居度数仍不足，单条 Add 先用新点与尚未覆盖的
+   近邻构团，再遍历完整候选池扩团，包括先前的团已覆盖的点。扩团结束时，在所选半径下，每个剩余候选
+   都无法通过与新点或某个团成员的距离检查。多行 Add 和删除修复使用有大小上限的增量构团路径。
 4. 删除只废弃受影响且删除后大小 **小于** `delete_size` 的团；从这些团中收集预计有效覆盖团数
    **小于** `delete_mct` 的存活点。修复前再次检查覆盖数，避免已经恢复覆盖的点重复修复。
-5. 纯 FP32 修复从存储中取得或解码该点向量，然后进入第 1–3 步的共用维护流程。
+5. 纯 FP32 修复从存储中取得或解码该点向量，搜索候选、加入已有团并按需创建有大小上限的新团。
    不再次调用公共 ADD 插入已有向量，也不产生新的向量标签。ADD 的候选可见范围是插入前缀；
    修复已有点时可见范围是当前整张 HGraph。
 
@@ -288,7 +287,7 @@ MCI FORCE_REMOVE 要求 flat 图存储，会自动启用反向边，并拒绝不
 | `mci_incremental_degree_min` | 50 | 度数目标下限，正整数，随索引参数序列化 |
 | `mci_incremental_degree_n_divisor` | 10000 | 度数目标中的存活点数除数，正整数 |
 | `mci_incremental_degree_mcs_divisor` | 2 | 度数目标中的 MCS 除数，正整数 |
-| `mci_incremental_clique_max` | 50 | `--mci-incremental-clique-max`；至少 2；基准不指定时跟随全量上限 |
+| `mci_incremental_clique_max` | 50 | `--mci-incremental-clique-max`；至少 2；基准未指定时继承 `mci_clique_max` |
 | `mci_delete_clique_size_threshold` | 30 | 正整数；默认废弃剩余有效成员数小于 30 的受影响团，恰好为 30 时保留 |
 | `mci_delete_node_mct_threshold` | 3 | `--mci-delete-node-mct-threshold`；正整数，严格小于才修复 |
 
@@ -367,10 +366,9 @@ Remove 使用外部标签，不接受把内部槽位当成标签；物理删除�
 建议先用 `Build()` 构建初始索引，再通过增量添加路径追加向量。
 空索引上的 `Add()` 可以触发构建，但不建议用大量小批 Add 替代全量 Build。
 
-ADD 需要新建团时，与全量 `BuildMCICliques` 共用局部图构建、极大团枚举和选择核心。
-增量团大小上限参与决定构团门槛，不再以两个成员作为 alpha 扩张的停止标准。
-JOIN 与构团使用上述增量维护参数计算去重邻居度数停止目标；达到目标、候选耗尽或
-构团无进展时停止。高 alpha 回退仍可能生成较小的团。
+单条 Add 创建新团时，先从度数缺口、未覆盖候选数和 `mci_incremental_clique_max - 1` 三者中
+取最小值，作为初始需要补充的近邻数。找到初始团后再扩展为局部极大团，因此最终人数可以超过初始门槛，
+新增邻居也可以超过度数缺口。孤立点没有可用邻居时会得到单点团。
 
 `MARK_REMOVE` 会同步更新 MCI 挂件。删除一个点后，若受影响团剩余的有效成员数
 不小于 `mci_delete_clique_size_threshold`，该团会被保留；只有更小的团才会被废弃。

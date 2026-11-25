@@ -32,6 +32,7 @@
 #include "algorithm/mci/mci_coverage.h"
 #include "algorithm/mci/mci_local_builder.h"
 #include "algorithm/mci/mci_runner.h"
+#include "algorithm/mci/mci_seed_clique.h"
 #include "analyzer/hgraph_analyzer.h"
 #include "datacell/clique_datacell.h"
 #include "hgraph.h"
@@ -1231,7 +1232,15 @@ TEST_CASE("HGraph FP32 MCI deletion repairs use the complete Add candidate pipel
 
     index.candidate_searches = 0;
     REQUIRE(index.Add(dataset(total, 1)).empty());
-    REQUIRE(index.candidate_searches > 0);
+    if (mode == vsag::RemoveMode::FORCE_REMOVE) {
+        // Physical compaction leaves 15 live slots; all 15 candidates were captured
+        // during insertion and the MCI update needs no second KNN traversal.
+        REQUIRE(index.candidate_searches == 0);
+    } else {
+        // The 16-slot prefix still contains a tombstone. After filtering only
+        // 15 valid candidates remain, so the short capture uses the KNN fallback.
+        REQUIRE(index.candidate_searches > 0);
+    }
     REQUIRE(index.GetNumElements() == total);
     auto result = index.KnnSearch(
         dataset(0, 1), total + 1, R"({"hgraph":{"ef_search":100,"use_mci":false}})", nullptr);
@@ -2481,12 +2490,67 @@ TEST_CASE("HGraph Add uses the full-build local clique size threshold",
     REQUIRE(index.value()->Add(make_dataset(ids, vectors, 3, 1, dim)).has_value());
     auto after = vsag::JsonType::Parse(index.value()->GetStats());
     REQUIRE(after["mci_covered_nodes"].GetInt() == 4);
-    // The shared builder first emits three members, then adds the remaining neighbor in
-    // a two-member clique to reach min(50, N-1)=3 distinct neighbors.
+    // The first radius admits two neighbors. The residual witness selects the third
+    // at a wider radius and then extends over all previously covered candidates.
     REQUIRE(after["mci_delta_clique_count"].GetInt() == 2);
-    REQUIRE(after["mci_delta_clique_membership_count"].GetInt() == 5);
+    REQUIRE(after["mci_delta_clique_membership_count"].GetInt() == 7);
     vsag::DefaultAllocator allocator;
     REQUIRE(snapshot_degree(read_mci_snapshot(index.value(), &allocator), 3) == 3);
+}
+
+TEST_CASE("Single HGraph Add extends a 50-member witness over its full candidate pool",
+          "[ut][hgraph][mci][degree_add]") {
+    constexpr int64_t count = 64;
+    constexpr int64_t dim = 4;
+    auto config = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
+    auto params = config["index_param"];
+    params["graph_type"].SetString("nsw");
+    params["build_thread_count"].SetInt(1);
+    params["max_degree"].SetInt(64);
+    params["ef_construction"].SetInt(128);
+    params["mci_mcs"].SetInt(count);
+    params["mci_incremental_clique_max"].SetInt(50);
+    params["mci_alpha"].SetFloat(2.0F);
+
+    std::vector<int64_t> labels(count + 1);
+    std::iota(labels.begin(), labels.end(), 1000);
+    std::vector<float> vectors((count + 1) * dim, 0.0F);
+    const bool identical = GENERATE(false, true);
+    if (not identical) {
+        for (int64_t i = 0; i < count; ++i) {
+            vectors[i * dim] = 1.0F + static_cast<float>(i) / 1024.0F;
+        }
+    }
+    const auto json = config.Dump();
+    auto built = vsag::Factory::CreateIndex("hgraph", json).value();
+    REQUIRE(built->Build(make_dataset(labels, vectors, 0, count, dim)).has_value());
+    std::vector<vsag::InnerIdType> existing(count);
+    std::iota(existing.begin(), existing.end(), 0);
+    // The old clique is full for JOIN. All candidates satisfy the seed and pair
+    // bounds at the first radius, so the sole maximal result has 65 members.
+    auto index = with_mci_fixture(built, json, {existing});
+    REQUIRE(index->Add(make_dataset(labels, vectors, count, 1, dim)).has_value());
+    auto stats = vsag::JsonType::Parse(index->GetStats());
+    REQUIRE(stats["mci_delta_clique_count"].GetInt() == 1);
+    REQUIRE(stats["mci_delta_clique_membership_count"].GetInt() == 65);
+    vsag::DefaultAllocator allocator;
+    REQUIRE(snapshot_degree(read_mci_snapshot(index, &allocator), count) == count);
+}
+
+TEST_CASE("MCI seeded witness fallback extends over the full radius graph",
+          "[ut][hgraph][mci][degree_add]") {
+    const std::vector<vsag::InnerIdType> order{0, 1, 2, 3, 4, 5};
+    const std::vector<uint8_t> preferred{1, 1, 1, 1, 0, 0};
+    const std::vector<float> seed_distances{1, 1, 1, 1, 1, 3};
+    // Greedy chooses the isolated first vertex. The exact witness is {1,2,3}.
+    // Vertex 4 is already covered and must extend it. Vertex 5 is on the strict
+    // seed boundary and must be excluded even though its pair distances fit.
+    auto distance = [](auto a, auto b) { return a == 0 or b == 0 ? 4.0F : 3.0F; };
+    auto result =
+        vsag::mci::FindMaximalSeedNeighbors(order, preferred, seed_distances, 3, 3, distance);
+    std::sort(result.begin(), result.end());
+    const std::vector<vsag::InnerIdType> expected{1, 2, 3, 4};
+    REQUIRE(result == expected);
 }
 
 TEST_CASE("MCI Add stops at unique degree rather than clique count",
@@ -2559,9 +2623,12 @@ TEST_CASE("MCI Add stops at unique degree rather than clique count",
     } else if (scenario == "mixed") {
         REQUIRE(stats["mci_delta_extra_membership_count"].GetInt() == 1);
         REQUIRE(stats["mci_delta_clique_count"].GetInt() > 0);
-    } else if (scenario == "build") {
+    } else if (scenario == "build" or scenario == "exhausted") {
+        // Even when all candidates hit the coverage cap, one geometric clique
+        // covers the seed at the first radius admitting every pair.
         REQUIRE(stats["mci_delta_extra_membership_count"].GetInt() == 0);
-        REQUIRE(stats["mci_delta_clique_count"].GetInt() >= 5);
+        REQUIRE(stats["mci_delta_clique_count"].GetInt() == 1);
+        REQUIRE(stats["mci_delta_clique_membership_count"].GetInt() == total + 1);
     } else if (scenario == "default") {
         REQUIRE(stats["mci_delta_extra_membership_count"].GetInt() == 49);
         REQUIRE(stats["mci_delta_clique_count"].GetInt() == 0);
@@ -2574,16 +2641,12 @@ TEST_CASE("MCI Add stops at unique degree rather than clique count",
         REQUIRE(index->GetNumElements() == total);
         REQUIRE(stats["mci_delta_extra_membership_count"].GetInt() == 7);
         REQUIRE(stats["mci_delta_clique_count"].GetInt() == 0);
-    } else {
-        REQUIRE(stats["mci_delta_clique_count"].GetInt() == 1);
-        REQUIRE(stats["mci_delta_clique_membership_count"].GetInt() == 1);
     }
     vsag::DefaultAllocator allocator;
     auto snapshot = read_mci_snapshot(index, &allocator);
     REQUIRE(snapshot.labels[total] == ids[total]);
     const uint64_t expected = scenario == "default"      ? 50
                               : scenario == "configured" ? 100
-                              : scenario == "exhausted"  ? 0
                               : scenario == "marked"     ? total - 1
                                                          : total;
     REQUIRE(snapshot_degree(snapshot, total) == expected);

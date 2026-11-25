@@ -18,6 +18,7 @@
 #include <functional>
 #include <future>
 #include <initializer_list>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -31,10 +32,36 @@
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index/index_impl.h"
 #include "index_common_param.h"
+#include "mci_add_candidates.h"
 #include "simd/bf16_simd.h"
 #include "simd/fp16_simd.h"
 #include "unittest.h"
 #include "vsag/options.h"
+
+TEST_CASE("HGraph single Add selects distinct live MCI candidates", "[hgraph][mci]") {
+    const auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    vsag::Vector<vsag::DistanceHeap::DistanceRecord> scores(
+        {{2, 2}, {1, 3}, {7, 2}, {0, 4}, {1, 1}, {9, 0}, {0, 5}}, allocator.get());
+    vsag::Vector<vsag::InnerIdType> ids(allocator.get());
+    const auto removed = [](vsag::InnerIdType id) { return id == 4; };
+    SECTION("nearest live IDs with deterministic distance ties") {
+        REQUIRE(vsag::SelectMciAddCandidates(scores, 5, 1, removed, ids));
+        REQUIRE(ids == vsag::Vector<vsag::InnerIdType>({1}, allocator.get()));
+    }
+    SECTION("return IDs in canonical order") {
+        REQUIRE(vsag::SelectMciAddCandidates(scores, 5, 3, removed, ids));
+        REQUIRE(ids == vsag::Vector<vsag::InnerIdType>({1, 2, 3}, allocator.get()));
+    }
+    SECTION("fall back when the distinct live set is too small") {
+        REQUIRE_FALSE(vsag::SelectMciAddCandidates(scores, 5, 5, removed, ids));
+        REQUIRE(ids.empty());
+    }
+    SECTION("fall back on a nonfinite distance") {
+        scores.front().first = std::numeric_limits<float>::quiet_NaN();
+        REQUIRE_FALSE(vsag::SelectMciAddCandidates(scores, 5, 1, removed, ids));
+        REQUIRE(ids.empty());
+    }
+}
 
 namespace {
 

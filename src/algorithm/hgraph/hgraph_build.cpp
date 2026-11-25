@@ -36,6 +36,7 @@
 #include "impl/pruning_strategy.h"
 #include "impl/searcher/basic_searcher.h"
 #include "io/memory_io/memory_io_parameter.h"
+#include "mci_add_candidates.h"
 #include "pipnn_storage_build.h"
 #include "quantization/scalar_quantization/scalar_quantizer_parameter.h"
 #include "storage/stream_reader.h"
@@ -143,6 +144,7 @@ private:
         bool use_parallel_add{false};
         DatasetPtr train_data{nullptr};
         FlattenInterfacePtr graph_read_codes{nullptr};
+        Vector<DistanceHeap::DistanceRecord>* mci_candidate_scores{nullptr};
     };
 
     struct add_row {
@@ -726,6 +728,24 @@ HGraph::AddImpl::Run(const DatasetPtr& data) {
     this->validate_add_data(data);
     auto context = this->prepare_add_context(data);
     this->prepare_graph_read_codes(data, context);
+    const bool single_add = data->GetNumElements() == 1;
+    Vector<DistanceHeap::DistanceRecord> scores(index_.allocator_);
+    Vector<InnerIdType> candidate_ids(index_.allocator_);
+    if (single_add and had_mci_clique_index and not context.use_dedup_storage and
+        not index_.support_duplicate_ and not index_.has_precise_reorder() and
+        index_.data_type_ == DataTypes::DATA_TYPE_FLOAT and
+        index_.metric_ == MetricType::METRIC_TYPE_L2SQR and context.graph_read_codes->InMemory() and
+        context.graph_read_codes->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32 and
+        index_.ef_construct_ >= index_.mci_parameters_.mcs) {
+        // Allocate before insertion. The worker borrows the buffers until insert_add_batch joins.
+        try {
+            scores.reserve(index_.ef_construct_);
+            candidate_ids.reserve(std::min<uint64_t>(mci_start_total, index_.mci_parameters_.mcs));
+            context.mci_candidate_scores = &scores;
+        } catch (const std::bad_alloc&) {
+            // Candidate reuse is optional. The ordinary MCI search can still serve this Add.
+        }
+    }
     if (had_mci_clique_index) {
         index_.mci_cliques_->MarkUnavailable();
     }
@@ -740,8 +760,26 @@ HGraph::AddImpl::Run(const DatasetPtr& data) {
         if (had_mci_clique_index) {
             logger::info("hgraph mci incremental add started, added={}", batch.rows.size());
             for (const auto& row : batch.rows) {
-                index_.incremental_update_mci_clique(row.inner_id,
-                                                     index_.get_data(data, row.input_idx));
+                bool reuse = false;
+                if (context.mci_candidate_scores and row.inner_id == mci_start_total) {
+                    const auto k = std::min<uint64_t>(mci_start_total, index_.mci_parameters_.mcs);
+                    auto label_lock = std::shared_lock(index_.label_lookup_mutex_);
+                    reuse = SelectMciAddCandidates(
+                        scores,
+                        row.inner_id,
+                        k,
+                        [&](InnerIdType id) { return index_.label_table_->IsRemoved(id); },
+                        candidate_ids);
+                }
+                if (reuse) {
+                    index_.incremental_update_mci_clique(row.inner_id,
+                                                         candidate_ids,
+                                                         static_cast<uint64_t>(row.inner_id) + 1,
+                                                         single_add);
+                } else {
+                    index_.incremental_update_mci_clique(
+                        row.inner_id, index_.get_data(data, row.input_idx), 0, single_add);
+                }
                 index_.maybe_compact_mci(1);
             }
             index_.mci_cliques_->MarkAvailable(index_.total_count_.load());
@@ -900,6 +938,9 @@ HGraph::AddImpl::insert_add_batch(const DatasetPtr& data,
                                   const add_context& context,
                                   const add_batch& batch) {
     std::vector<std::future<void>> futures;
+    if (context.use_parallel_add and context.mci_candidate_scores != nullptr) {
+        futures.reserve(1);
+    }
     const auto* extra_infos = data->GetExtraInfos();
     const auto* attr_sets = data->GetAttributeSets();
 
@@ -1002,6 +1043,12 @@ HGraph::AddImpl::insert_one_logical_point(const void* data,
 
     auto param = make_search_param();
     auto probe = this->probe_graph_for_add(data, level, inner_id, param, context.graph_read_codes);
+    if (context.mci_candidate_scores != nullptr and probe.neighbors != nullptr and
+        not probe.neighbors->Empty() and
+        probe.neighbors->Size() <= context.mci_candidate_scores->capacity()) {
+        const auto* records = probe.neighbors->GetData();
+        context.mci_candidate_scores->assign(records, records + probe.neighbors->Size());
+    }
     if (this->publish_duplicate_if_found(probe, inner_id, context)) {
         return false;
     }
