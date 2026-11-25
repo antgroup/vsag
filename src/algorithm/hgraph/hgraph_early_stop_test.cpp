@@ -23,6 +23,7 @@
 #include <future>
 #include <numeric>
 
+#include "hgraph_parameter.h"
 #include "json_wrapper.h"
 #include "unittest.h"
 
@@ -301,4 +302,25 @@ TEST_CASE("HGraph distance early stop is named in the reasoning report",
     REQUIRE(stat(result.value(), "parallel_search_fallback_count") == "0");
     const auto report = JsonType::Parse(result.value()->GetReasoning());
     REQUIRE(report["meta"]["termination_reason"].GetString() == "distance_early_stop");
+}
+
+TEST_CASE("HGraph distance early stop picks alpha from k when alpha is omitted",
+          "[ut][HGraph][distance_early_stop]") {
+    auto index = build_line_index(64);
+    const std::vector<std::string> keys{"dist_cmp", "hops", "early_stop_count"};
+    uint64_t stopped = 0;
+    for (const int64_t k : {2, 10, 40}) {
+        CAPTURE(k);
+        auto with_alpha = JsonType::Parse(R"({"type":"distance"})");
+        with_alpha["alpha"].SetFloat(HGraphSearchParameters::DefaultDistanceEarlyStopAlpha(k));
+        const auto omitted =
+            knn_search(index, origin_query(), k, search_params(64, R"({"type":"distance"})"));
+        const auto given =
+            knn_search(index, origin_query(), k, search_params(64, with_alpha.Dump()));
+        REQUIRE(omitted->GetStatistics(keys) == given->GetStatistics(keys));
+        REQUIRE(labels(omitted) == labels(given));
+        REQUIRE(distances(omitted) == distances(given));
+        stopped += std::stoull(stat(omitted, "early_stop_count"));
+    }
+    REQUIRE(stopped > 0);
 }

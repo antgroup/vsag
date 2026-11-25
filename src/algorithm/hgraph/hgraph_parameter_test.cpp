@@ -889,14 +889,23 @@ TEST_CASE("HGraphSearchParameters rejects invalid distance early stop settings",
 TEST_CASE("HGraphSearchParameters picks the early-stop alpha for a search",
           "[ut][HGraphSearchParameters][distance_early_stop]") {
     using vsag::HGraphSearchParameters;
+    // The documented defaults, written as literals so that a change to the constants fails here.
+    REQUIRE(HGraphSearchParameters::DefaultDistanceEarlyStopAlpha(0) == Catch::Approx(1.85));
+    REQUIRE(HGraphSearchParameters::DefaultDistanceEarlyStopAlpha(1) == Catch::Approx(1.85));
+    REQUIRE(HGraphSearchParameters::DefaultDistanceEarlyStopAlpha(10) == 1.5F);
+    REQUIRE(HGraphSearchParameters::DefaultDistanceEarlyStopAlpha(30) ==
+            Catch::Approx(1.5 - 0.35 * std::log10(3.0)));
+    REQUIRE(HGraphSearchParameters::DefaultDistanceEarlyStopAlpha(100) == 1.15F);
+    REQUIRE(HGraphSearchParameters::DefaultDistanceEarlyStopAlpha(1000) == 1.15F);
+
     const auto off = HGraphSearchParameters::FromJson(R"({"hgraph":{"ef_search":64}})");
     const auto given = HGraphSearchParameters::FromJson(
         R"({"hgraph":{"ef_search":64,"early_stop":{"type":"distance","alpha":1.25}}})");
     const auto omitted = HGraphSearchParameters::FromJson(
         R"({"hgraph":{"ef_search":64,"early_stop":{"type":"distance"}}})");
-    REQUIRE(off.DistanceEarlyStopAlpha() == 0.0F);
-    REQUIRE(given.DistanceEarlyStopAlpha() == 1.25F);
-    REQUIRE(omitted.DistanceEarlyStopAlpha() == 1.5F);
+    REQUIRE(off.DistanceEarlyStopAlpha(100) == 0.0F);
+    REQUIRE(given.DistanceEarlyStopAlpha(100) == 1.25F);
+    REQUIRE(omitted.DistanceEarlyStopAlpha(100) == 1.15F);
 }
 
 TEST_CASE("HGraphSearchParameters parses brute_force_threshold",

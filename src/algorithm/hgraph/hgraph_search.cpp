@@ -981,7 +981,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     base_search_param.rerank_topk = k;
     base_search_param.rabitq_rerank_candidates = params.rabitq_rerank_candidates;
     base_search_param.min_results = k;
-    const float early_stop_alpha = params.DistanceEarlyStopAlpha();
+    const float early_stop_alpha = params.DistanceEarlyStopAlpha(k);
     if (params.topk_factor > 1.0F) {
         base_search_param.topk =
             std::min(base_search_param.topk,

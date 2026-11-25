@@ -394,11 +394,24 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
 }
 
 float
-HGraphSearchParameters::DistanceEarlyStopAlpha() const {
+HGraphSearchParameters::DistanceEarlyStopAlpha(int64_t k) const {
     if (not early_stop) {
         return 0.0F;
     }
-    return early_stop_alpha > 0.0F ? early_stop_alpha : DEFAULT_DISTANCE_EARLY_STOP_ALPHA;
+    return early_stop_alpha > 0.0F ? early_stop_alpha : DefaultDistanceEarlyStopAlpha(k);
+}
+
+float
+HGraphSearchParameters::DefaultDistanceEarlyStopAlpha(int64_t k) {
+    // The line through the values at k = 10 and k = 100 (as floats), clamped to its values at
+    // k = 100 and at k = 1, the smallest k.
+    constexpr double at_k10 = 1.5F;
+    constexpr double at_k100 = 1.15F;
+    constexpr double at_k1 = at_k10 + (at_k10 - at_k100);
+    static_assert(at_k100 <= at_k10, "the default early-stop alpha must not grow with k");
+    const double decades = std::log10(static_cast<double>(std::max<int64_t>(k, 1)) / 10.0);
+    const double alpha = at_k10 - (at_k10 - at_k100) * decades;
+    return static_cast<float>(std::clamp(alpha, at_k100, at_k1));
 }
 
 namespace {
