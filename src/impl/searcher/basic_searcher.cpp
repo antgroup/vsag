@@ -20,12 +20,14 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <optional>
 
 #include "datacell/flatten_interface.h"
 #include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/query_computer_pool.h"
 #include "impl/reasoning/reasoning_context.h"
+#include "impl/searcher/distance_early_stop.h"
 #include "impl/searcher/searcher_utils.h"
 #include "utils/filter_search_skip_strategy.h"
 #include "vsag/allocator.h"
@@ -625,6 +627,16 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     StandardHeap<true, false> candidate_set_storage(alloc, -1);
     auto* candidate_set = &candidate_set_storage;
 
+    // Without an alpha from the caller the traversal is the plain fixed-ef search.
+    std::optional<DistanceEarlyStop> early_stopper;
+    if (ctx != nullptr and ctx->distance_early_stop_alpha > 0.0F) {
+        if (ctx->stats != nullptr) {
+            ctx->stats->early_stop_armed.store(true, std::memory_order_relaxed);
+        }
+        early_stopper.emplace(
+            alloc, inner_search_param.rerank_topk, ctx->distance_early_stop_alpha);
+    }
+
     const bool use_custom_distance = inner_search_param.distance_batch_func != nullptr;
     if (not graph or (not flatten and not use_custom_distance)) {
         return top_candidates;
@@ -764,6 +776,9 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     ++dist_cmp;
     if (check_func(ep) and is_result_distance_eligible<mode>(dist, inner_search_param)) {
         top_candidates->Push(dist, ep);
+        if (early_stopper) {
+            early_stopper->Record(dist);
+        }
     }
     // The entry point is marked visited before its neighbours are expanded, so its own duplicate
     // labels are never reached by the traversal loop. Expand them here whether the seed distance is
@@ -773,6 +788,9 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         for (const auto duplicate_id : graph->GetDuplicateIds(ep)) {
             if (check_func(duplicate_id)) {
                 top_candidates->Push(dist, duplicate_id);
+                if (early_stopper) {
+                    early_stopper->Record(dist);
+                }
             }
         }
         if constexpr (mode == KNN_SEARCH) {
@@ -858,6 +876,15 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 }
                 break;
             }
+        }
+        if (early_stopper and early_stopper->ShouldStop(-current_node_pair.first)) {
+            if (ctx->stats != nullptr) {
+                ctx->stats->early_stop_count.fetch_add(1, std::memory_order_relaxed);
+            }
+            if (reasoning != nullptr) {
+                reasoning->SetTermination(ReasoningTermination::kDistanceEarlyStop);  // [reasoning]
+            }
+            break;
         }
         candidate_set->Pop();
 
@@ -953,6 +980,9 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 //                flatten->Prefetch(candidate_set->Top().second);
                 if (check_func(cur_id)) {
                     top_candidates->Push(dist, cur_id);
+                    if (early_stopper) {
+                        early_stopper->Record(dist);
+                    }
                 } else if (reasoning != nullptr) {
                     reasoning->RecordFilterReject(cur_id);  // [reasoning]
                 }
@@ -961,6 +991,9 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                     for (const auto& item : duplicate_ids) {
                         if (check_func(item)) {
                             top_candidates->Push(dist, item);
+                            if (early_stopper) {
+                                early_stopper->Record(dist);
+                            }
                         }
                     }
                 }

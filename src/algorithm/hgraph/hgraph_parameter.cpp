@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <nlohmann/json.hpp>
 #include <string_view>
 
 #include "datacell/extra_info_datacell_parameter.h"
@@ -31,6 +32,7 @@
 #include "impl/odescent/odescent_graph_parameter.h"
 #include "inner_string_params.h"
 #include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
+#include "utils/float_utils.h"
 #include "utils/param_compat_macros.h"
 #include "vsag/constants.h"
 
@@ -391,6 +393,14 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
     return FromParsedJson(JsonType::Parse(json_string));
 }
 
+float
+HGraphSearchParameters::DistanceEarlyStopAlpha() const {
+    if (not early_stop) {
+        return 0.0F;
+    }
+    return early_stop_alpha > 0.0F ? early_stop_alpha : DEFAULT_DISTANCE_EARLY_STOP_ALPHA;
+}
+
 namespace {
 
 // Presence-guarded readers for optional search parameters.
@@ -502,6 +512,29 @@ HGraphSearchParameters::FromParsedJson(const JsonType& params) {
     // From here on every parameter is optional and goes through the same presence-guarded reader,
     // so the only per-key code left is the range rule that applies to that one field.
     const auto& hgraph = params[INDEX_TYPE_HGRAPH];
+
+    if (hgraph.Contains(HGRAPH_PARAMETER_EARLY_STOP)) {
+        const auto& early_stop = hgraph[HGRAPH_PARAMETER_EARLY_STOP];
+        CHECK_ARGUMENT(early_stop.IsObject(), "hgraph early_stop must be an object");
+        // A misspelt key must not silently fall back to the default.
+        for (const auto& item : early_stop.GetInnerJson()->items()) {
+            CHECK_ARGUMENT(item.key() == HGRAPH_PARAMETER_EARLY_STOP_TYPE or
+                               item.key() == HGRAPH_PARAMETER_EARLY_STOP_ALPHA,
+                           fmt::format("hgraph early_stop has unknown key {}", item.key()));
+        }
+        CHECK_ARGUMENT(early_stop.Contains(HGRAPH_PARAMETER_EARLY_STOP_TYPE) and
+                           early_stop[HGRAPH_PARAMETER_EARLY_STOP_TYPE].IsString() and
+                           early_stop[HGRAPH_PARAMETER_EARLY_STOP_TYPE].GetString() ==
+                               HGRAPH_PARAMETER_EARLY_STOP_TYPE_DISTANCE,
+                       "hgraph early_stop type must be distance");
+        obj.early_stop = true;
+        if (read_optional_float(
+                early_stop, HGRAPH_PARAMETER_EARLY_STOP_ALPHA, obj.early_stop_alpha)) {
+            const bool valid_alpha =
+                IsFiniteFloatBits(obj.early_stop_alpha) and obj.early_stop_alpha >= 1.0F;
+            CHECK_ARGUMENT(valid_alpha, "hgraph early_stop alpha must be finite and at least 1");
+        }
+    }
 
     read_optional_uint32(hgraph, HGRAPH_PARAMETER_HOPS_LIMIT, obj.hops_limit);
     read_optional_bool(hgraph, HGRAPH_USE_EXTRA_INFO_FILTER, obj.use_extra_info_filter);

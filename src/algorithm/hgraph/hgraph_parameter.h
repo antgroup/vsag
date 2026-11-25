@@ -129,8 +129,17 @@ public:
     FromParsedJson(const JsonType& params);
 
 public:
+    // Alpha of the distance early stop: the explicit alpha, or DEFAULT_DISTANCE_EARLY_STOP_ALPHA
+    // when it is omitted; 0 when early_stop is off.
+    [[nodiscard]] float
+    DistanceEarlyStopAlpha() const;
+
+    static constexpr float DEFAULT_DISTANCE_EARLY_STOP_ALPHA = 1.5F;
+
     int64_t ef_search{30};
     uint32_t hops_limit{std::numeric_limits<uint32_t>::max()};
+    bool early_stop{false};
+    float early_stop_alpha{0.0F};  // 0 when early_stop omits alpha
     bool use_reorder{false};
     bool use_extra_info_filter{false};
     bool rabitq_one_bit_search{false};

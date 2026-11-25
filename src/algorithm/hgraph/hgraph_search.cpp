@@ -145,6 +145,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     const bool external =
         rabitq_fused_datacell_ != nullptr and rabitq_fused_datacell_->HasExternalSupplement();
     CHECK_ARGUMENT(not external, "external_supplement does not support iterator search");
+    CHECK_ARGUMENT(not params.early_stop, "distance early stop does not support iterator search");
     const SearchLockScope search_lock_scope(params.search_no_lock);
     const auto threshold = ParseSearchThreshold(parameters);
     ctx.rabitq_error_rate = params.rabitq_error_rate;
@@ -815,6 +816,18 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     ctx.rabitq_error_rate = params.rabitq_error_rate;
     ctx.enable_rabitq_reorder = params.enable_reorder;
 
+    if (params.early_stop) {
+        const bool supported_mode = not is_range and not use_custom_distance;
+        CHECK_ARGUMENT(supported_mode, "distance early stop requires built-in KNN distance");
+        // The rule compares distances by ratio, which needs non-negative distances; inner-product
+        // distances of unnormalized vectors can be negative.
+        const bool supported_metric =
+            metric_ == MetricType::METRIC_TYPE_L2SQR or metric_ == MetricType::METRIC_TYPE_COSINE;
+        CHECK_ARGUMENT(supported_metric, "distance early stop requires l2 or cosine");
+        CHECK_ARGUMENT(rabitq_fused_datacell_ == nullptr,
+                       "distance early stop does not support fused RaBitQ split storage");
+    }
+
     if (use_custom_distance) {
         CHECK_ARGUMENT(params.parallel_search_thread_count == 1,
                        "HGraph custom query distance does not support parallel search");
@@ -968,6 +981,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     base_search_param.rerank_topk = k;
     base_search_param.rabitq_rerank_candidates = params.rabitq_rerank_candidates;
     base_search_param.min_results = k;
+    const float early_stop_alpha = params.DistanceEarlyStopAlpha();
     if (params.topk_factor > 1.0F) {
         base_search_param.topk =
             std::min(base_search_param.topk,
@@ -1248,6 +1262,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                 if (mci_result.route == "mci") {
                     search_result = std::move(mci_result.result);
                 } else {
+                    // Only the bottom-graph traversal runs the distance early stop.
+                    ctx.distance_early_stop_alpha = early_stop_alpha;
                     search_result = this->search_one_graph(raw_query,
                                                            this->bottom_graph_,
                                                            this->basic_flatten_codes_,
@@ -1256,6 +1272,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                                                            &ctx,
                                                            rabitq_candidates_ptr,
                                                            &fused_search_finalized);
+                    ctx.distance_early_stop_alpha = 0.0F;
                 }
             }
         } else {
