@@ -34,6 +34,8 @@
 #include "utils/timer.h"
 
 namespace vsag {
+class MemoryIO;
+class MemoryBlockIO;
 /*
 * thread unsafe
 */
@@ -184,6 +186,12 @@ public:
 
     [[nodiscard]] bool
     InMemory() const override;
+
+    bool
+    CanBorrowRowsUntilResize() const override {
+        using IO = typename LayoutTmpl::IOType;
+        return std::is_same_v<IO, MemoryIO> || std::is_same_v<IO, MemoryBlockIO>;
+    }
 
     bool
     HoldMolds() const override;

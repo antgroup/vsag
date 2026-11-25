@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "pipnn_incremental.h"
 
+#include <array>
 #include <cstring>
 
 #include "common.h"
@@ -52,48 +53,63 @@ read_route(StreamReader& r,
 }
 }  // namespace
 
-PiPNNLeafTopK::PiPNNLeafTopK(uint32_t rows, std::vector<PiPNNLocalNeighbor>&& packed)
-    : base_rows_(rows),
-      rows_(rows),
-      width_(rows ? packed.size() / rows : 0),
-      base_(std::move(packed)) {
-    CHECK_ARGUMENT(uint64_t{rows} * width_ == base_.size(), "bad PiPNN top-k shape");
+PiPNNLeafTopK::PiPNNLeafTopK(uint32_t rows, uint32_t width)
+    : base_rows_(rows), rows_(rows), width_(width), stride_(entry_size(rows)) {
+    const auto entries = uint64_t{rows} * width;
+    CHECK_ARGUMENT(entries <= SIZE_MAX / stride_, "bad PiPNN top-k shape");
+    if (entries)
+        base_ = std::make_unique_for_overwrite<uint8_t[]>(entries * stride_);
 }
 
 void
 PiPNNLeafTopK::AppendRows(uint32_t count) {
     const uint64_t end = uint64_t{rows_} + count;
     CHECK_ARGUMENT(end <= UINT32_MAX, "too many PiPNN leaf rows");
+    if (width_ && entry_size(end) != stride_) {
+        PiPNNLeafTopK wider(end, width_);
+        for (uint32_t row = 0; row < rows_; ++row) {
+            const auto old = Row(row);
+            const auto next = wider.Row(row);
+            for (uint32_t j = 0; j < width_; ++j) next.Set(j, old.Get(j));
+        }
+        *this = std::move(wider);
+        return;
+    }
     const uint64_t needed = (end - base_rows_ + BLOCK_ROWS - 1) / BLOCK_ROWS;
     while (width_ && blocks_.size() < needed) {
-        blocks_.emplace_back(std::make_unique<PiPNNLocalNeighbor[]>(uint64_t{BLOCK_ROWS} * width_));
+        blocks_.emplace_back(
+            std::make_unique_for_overwrite<uint8_t[]>(uint64_t{BLOCK_ROWS} * width_ * stride_));
     }
     rows_ = end;
 }
 
 uint64_t
 PiPNNLeafTopK::MemoryUsage() const {
-    return (base_.capacity() + blocks_.size() * uint64_t{BLOCK_ROWS} * width_) *
-               sizeof(PiPNNLocalNeighbor) +
+    return (base_rows_ + blocks_.size() * uint64_t{BLOCK_ROWS}) * width_ * stride_ +
            blocks_.capacity() * sizeof(blocks_.front());
 }
 
 void
-PiPNNLeafTopK::Write(StreamWriter& writer) const {
-    // Keep the flat vector wire format, omitting unused slots in the final block.
+PiPNNLeafTopK::Write(StreamWriter& writer, std::span<const uint32_t> points) const {
+    // All snapshot versions use pipeline-local IDs and the original full FP32 distance.
     StreamWriter::WriteObj(writer, uint64_t{rows_} * width_);
-    if (width_ == 0) {
+    if (!width_)
         return;
+    std::array<PiPNNLocalNeighbor, 512> buffer;
+    size_t used = 0;
+    for (uint32_t row = 0; row < rows_; ++row) {
+        const auto ranks = Row(row);
+        for (uint32_t rank = 0; rank < width_; ++rank) {
+            const auto neighbor = ranks.Get(rank);
+            buffer[used++] = {points[neighbor.target], neighbor.distance};
+            if (used == buffer.size()) {
+                writer.Write(reinterpret_cast<const char*>(buffer.data()), sizeof(buffer));
+                used = 0;
+            }
+        }
     }
-    if (!base_.empty()) {
-        writer.Write(reinterpret_cast<const char*>(base_.data()),
-                     base_.size() * sizeof(base_.front()));
-    }
-    for (uint64_t row = base_rows_; row < rows_; row += BLOCK_ROWS) {
-        const auto count = std::min<uint64_t>(BLOCK_ROWS, rows_ - row) * width_;
-        writer.Write(reinterpret_cast<const char*>(Row(row).data()),
-                     count * sizeof(PiPNNLocalNeighbor));
-    }
+    if (used)
+        writer.Write(reinterpret_cast<const char*>(buffer.data()), used * sizeof(buffer.front()));
 }
 
 void
@@ -235,8 +251,7 @@ PiPNNIncrementalState::MemoryUsage() const {
         projections.MemoryUsage() + norms.MemoryUsage() + bytes(row_pointers_) +
         sparse_ids_.bucket_count() * sizeof(void*) +
         sparse_ids_.size() * (sizeof(decltype(sparse_ids_)::value_type) + sizeof(void*)) +
-        bytes(memberships) + bytes(leaves) + tree(tree, root) + bytes(root_leader_vectors);
-    for (const auto& v : memberships) result += bytes(v);
+        bytes(leaves) + tree(tree, root) + bytes(root_leader_vectors);
     for (const auto& leaf : leaves)
         result += bytes(leaf.points) + leaf.nearest.MemoryUsage() + tree(tree, leaf.replacement);
     return result;
@@ -272,7 +287,7 @@ PiPNNIncrementalState::Serialize(StreamWriter& w, bool with_vectors) const {
     write_route(w, root);
     for (auto& leaf : leaves) {
         StreamWriter::WriteVector(w, leaf.points);
-        leaf.nearest.Write(w);
+        leaf.nearest.Write(w, leaf.points);
         write_route(w, leaf.replacement);
     }
 }
@@ -283,7 +298,8 @@ PiPNNIncrementalState::Deserialize(StreamReader& r,
                                    uint64_t h,
                                    uint64_t graph_capacity,
                                    Allocator* allocator,
-                                   bool with_vectors) {
+                                   PiPNNVectorPayload vectors,
+                                   const std::function<void(StreamReader&)>& consume_vectors) {
     root_leader_vectors.clear();
     std::vector<uint32_t> loaded_ids;
     read_array(r, loaded_ids, std::min<uint64_t>(count, UINT32_MAX));
@@ -300,13 +316,22 @@ PiPNNIncrementalState::Deserialize(StreamReader& r,
         required_capacity_ = std::max(required_capacity_, uint64_t{id} + 1);
     }
     count = ids.size();
-    if (with_vectors) {
+    if (vectors != PiPNNVectorPayload::Absent) {
         uint64_t elements;
         StreamReader::ReadObj(r, elements);
         CHECK_ARGUMENT(dim && count <= UINT64_MAX / dim && elements == count * dim,
                        "bad PiPNN vector array");
-        ReserveVectors(count, dim, allocator);
-        vectors_->ReadRecords(r, count);
+        const auto first = r.GetCursor();
+        CHECK_ARGUMENT(elements <= (UINT64_MAX - first) / sizeof(float),
+                       "bad PiPNN vector byte count");
+        if (consume_vectors) {
+            consume_vectors(r);
+        } else if (vectors == PiPNNVectorPayload::Skip) {
+            r.Seek(first + elements * sizeof(float));
+        } else {
+            ReserveVectors(count, dim, allocator);
+            vectors_->ReadRecords(r, count);
+        }
     }
     ReadSketches(r, count, dim, h, allocator);
     uint64_t n;
@@ -314,19 +339,32 @@ PiPNNIncrementalState::Deserialize(StreamReader& r,
     CHECK_ARGUMENT(n && n < UINT32_MAX, "bad PiPNN leaf count");
     leaves.resize(n);
     read_route(r, root, count, n, 0);
-    memberships.assign(count, {});
+    std::vector<uint32_t> positions(count);
     for (auto& leaf : leaves) {
         leaf.depth = UINT64_MAX;
         read_array(r, leaf.points, count);
         const uint64_t m = leaf.points.size();
         std::vector<PiPNNLocalNeighbor> packed;
         read_array(r, packed, m * m);
-        for (auto p : leaf.points) {
-            CHECK_ARGUMENT(p < count, "bad cached point");
-            memberships[p].push_back(&leaf - leaves.data());
+        for (uint32_t pos = 0; pos < m; ++pos) {
+            const auto id = leaf.points[pos];
+            CHECK_ARGUMENT(id < count, "bad cached point");
+            positions[id] = pos;
         }
-        for (auto e : packed) CHECK_ARGUMENT(e.target < count, "bad cached neighbor");
-        leaf.nearest = PiPNNLeafTopK(m, std::move(packed));
+        const auto width = m ? packed.size() / m : 0;
+        CHECK_ARGUMENT(width <= UINT32_MAX && m * width == packed.size(), "bad PiPNN top-k shape");
+        leaf.nearest = PiPNNLeafTopK(m, width);
+        for (uint32_t row = 0; row < m; ++row) {
+            const auto ranks = leaf.nearest.Row(row);
+            for (uint32_t rank = 0; rank < width; ++rank) {
+                auto neighbor = packed[uint64_t{row} * width + rank];
+                CHECK_ARGUMENT(neighbor.target < count && positions[neighbor.target] < m &&
+                                   leaf.points[positions[neighbor.target]] == neighbor.target,
+                               "bad cached neighbor");
+                neighbor.target = positions[neighbor.target];
+                ranks.Set(rank, neighbor);
+            }
+        }
         read_route(r, leaf.replacement, count, n, 0, 1 + (&leaf - leaves.data()), true);
     }
     UpdateLeafDepths(root, 0);

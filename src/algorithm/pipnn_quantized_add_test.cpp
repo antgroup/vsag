@@ -8,7 +8,9 @@
 #include <thread>
 
 #include "algorithm/hgraph/hgraph.h"
+#include "algorithm/hgraph/hgraph_pipnn_rows.h"
 #include "algorithm/pyramid/pyramid.h"
+#include "framework/test_reader.h"
 #include "impl/pipnn/pipnn_incremental.h"
 #include "index/index_impl.h"
 #include "unittest.h"
@@ -35,8 +37,32 @@ struct PiPNNQuantizedAddTestAccess {
         return std::dynamic_pointer_cast<HGraph>(impl->GetInnerIndex());
     }
 
+    static int64_t
+    fp32_version(const IndexPtr& index) {
+        return hgraph(index)->pipnn_snapshot_version();
+    }
+
+    static void
+    own_fp32(const IndexPtr& index) {
+        auto graph = hgraph(index);
+        REQUIRE(graph->pipnn_exact_rows_);
+        graph->pipnn_exact_rows_->Materialize(
+            *graph->pipnn_add_state_, graph->dim_, graph->allocator_);
+        graph->pipnn_exact_rows_.reset();
+    }
+
+    static void
+    grow_hgraph(const IndexPtr& index) {
+        auto graph = hgraph(index);
+        graph->resize(graph->max_capacity_.load() + 1);
+    }
+
     static auto
-    raw(const IndexPtr& index) {
+    raw(const IndexPtr& index, bool pyramid = false) {
+        if (pyramid) {
+            auto impl = std::dynamic_pointer_cast<IndexImpl<Pyramid>>(index);
+            return std::dynamic_pointer_cast<Pyramid>(impl->GetInnerIndex())->raw_vector_;
+        }
         return hgraph(index)->raw_vector_;
     }
 
@@ -84,11 +110,21 @@ struct PiPNNQuantizedAddTestAccess {
         auto impl = std::dynamic_pointer_cast<IndexImpl<Pyramid>>(index);
         auto p = std::dynamic_pointer_cast<Pyramid>(impl->GetInnerIndex());
         REQUIRE(p->pipnn_exact_rows_.Size() == 0);
+        REQUIRE(p->pipnn_exact_rows_.MemoryUsage() == 0);
         REQUIRE(p->pipnn_projections_.projections.Size() ==
                 static_cast<uint64_t>(index->GetNumElements()));
         std::vector<std::shared_ptr<PiPNNIncrementalState>> states;
         for (const auto& [graph, state] : p->pipnn_graph_states_) states.push_back(state);
         return states;
+    }
+    static void
+    flip_first_pyramid_plane(const IndexPtr& index, uint64_t dim) {
+        auto impl = std::dynamic_pointer_cast<IndexImpl<Pyramid>>(index);
+        auto p = std::dynamic_pointer_cast<Pyramid>(impl->GetInnerIndex());
+        for (auto& [graph, state] : p->pipnn_graph_states_) {
+            for (uint64_t d = 0; d < dim; ++d) state->planes[d] *= -1.0F;
+            for (uint64_t i = 0; i < state->ids.size(); ++i) state->projections.Row(i)[0] *= -1.0F;
+        }
     }
     static std::vector<FlattenInterfacePtr>
     codes(const IndexPtr& index, bool pyramid) {
@@ -110,6 +146,104 @@ struct PiPNNQuantizedAddTestAccess {
     }
 };
 }  // namespace vsag
+
+TEST_CASE("HGraph shares exact incremental rows across resize, Tune and legacy reload",
+          "[ut][pipnn][add][exact_row_storage]") {
+    using Access = vsag::PiPNNQuantizedAddTestAccess;
+    const std::string source = GENERATE("base", "precise", "raw");
+    CAPTURE(source);
+    constexpr int dim = 32, initial = 98, total = 104;
+    std::vector<float> vectors(total * dim);
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 500);
+    std::mt19937 rng(1241);
+    for (auto& value : vectors) value = std::generate_canonical<float, 24>(rng);
+    auto data = [&](int begin, int count) {
+        return vsag::Dataset::Make()
+            ->Dim(dim)
+            ->NumElements(count)
+            ->Float32Vectors(vectors.data() + begin * dim)
+            ->Ids(ids.data() + begin)
+            ->Owner(false);
+    };
+    auto config = vsag::JsonType::Parse(
+        R"({"dtype":"float32","dim":32,"metric_type":"l2","index_param":{"graph_type":"pipnn","pipnn_incremental_add":true,"max_degree":16,"ef_construction":100,"pipnn_max_leaf_size":32,"pipnn_min_leaf_size":8,"build_thread_count":1}})");
+    auto setting = config["index_param"];
+    setting["base_quantization_type"].SetString(source == "base" ? "fp32" : "sq8");
+    setting["store_raw_vector"].SetBool(source == "raw");
+    if (source == "precise") {
+        setting["use_reorder"].SetBool(true);
+        setting["precise_quantization_type"].SetString("fp32");
+    }
+    config["index_param"].SetJson(setting);
+    auto create = [&]() {
+        auto result = vsag::Factory::CreateIndex("hgraph", config.Dump());
+        REQUIRE(result.has_value());
+        return result.value();
+    };
+    auto owned = create();
+    REQUIRE(owned->Build(data(0, initial)).has_value());
+    REQUIRE(Access::fp32_version(owned) == 3);
+    REQUIRE(Access::states(owned, false).front()->Rows().empty());
+    std::stringstream compact;
+    REQUIRE(owned->Serialize(compact).has_value());
+    if (source == "base") {
+        auto saved = owned->Serialize();
+        REQUIRE(saved.has_value());
+        vsag::ReaderSet readers;
+        for (const auto& key : saved.value().GetKeys())
+            readers.Set(key, std::make_shared<fixtures::TestReader>(saved.value().Get(key)));
+        auto file_params = vsag::JsonType::Parse(config.Dump());
+        file_params["index_param"]["base_io_type"].SetString("reader_io");
+        auto disk = vsag::Factory::CreateIndex("hgraph", file_params.Dump()).value();
+        REQUIRE(disk->Deserialize(readers).has_value());
+        REQUIRE(Access::fp32_version(disk) == 3);
+        auto result = disk->KnnSearch(data(8, 1), 1, R"({"hgraph":{"ef_search":100}})");
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetIds()[0] == ids[8]);
+    }
+    Access::own_fp32(owned);
+    std::stringstream legacy;
+    REQUIRE(owned->Serialize(legacy).has_value());
+    CHECK(legacy.str().size() > compact.str().size() + (initial - 1) * dim * sizeof(float));
+    auto restored = create();
+    REQUIRE(restored->Deserialize(legacy).has_value());
+    auto shared = create();
+    REQUIRE(shared->Deserialize(compact).has_value());
+    for (int begin = initial; begin < total; begin += 2) {
+        if (begin == initial + 2)
+            Access::grow_hgraph(shared);
+        for (const auto& index : {shared, restored}) {
+            REQUIRE(Access::fp32_version(index) == 3);
+            REQUIRE(Access::states(index, false).front()->Rows().empty());
+        }
+        for (const auto& index : {owned, restored, shared})
+            REQUIRE(index->Add(data(begin, 2)).has_value());
+        auto target = Access::topology(owned, false);
+        REQUIRE(Access::topology(restored, false) == target);
+        REQUIRE(Access::topology(shared, false) == target);
+    }
+    if (source == "raw") {
+        auto tuned = shared->Tune(R"({"index_param":{"base_quantization_type":"sq8"}})", true);
+        REQUIRE(tuned.has_value());
+        REQUIRE(tuned.value());
+        REQUIRE_FALSE(Access::raw(shared));
+        REQUIRE(Access::fp32_version(shared) == 1);
+        REQUIRE(std::memcmp(Access::states(shared, false).front()->GetVector(0),
+                            vectors.data(),
+                            dim * sizeof(float)) == 0);
+    }
+    // A previously tuned legacy backing may differ. Keep its serialized historical inputs.
+    Access::states(owned, false).front()->SetVector(initial - 1, vectors.data());
+    std::stringstream distinct;
+    REQUIRE(owned->Serialize(distinct).has_value());
+    auto historical = create();
+    REQUIRE(historical->Deserialize(distinct).has_value());
+    REQUIRE(Access::fp32_version(historical) == 1);
+    REQUIRE(std::memcmp(Access::states(historical, false).front()->GetVector(initial - 1),
+                        vectors.data(),
+                        dim * sizeof(float)) == 0);
+}
 
 TEST_CASE("Quantized incremental PiPNN keeps FP32 graph state through path promotion and reload",
           "[ut][pipnn][add][quantized_add]") {
@@ -382,27 +516,47 @@ TEST_CASE("PiPNN publishes new labels after graph and quantized codes are ready"
 TEST_CASE("PiPNN Add reads stored code distances and original sketches after reload",
           "[ut][pipnn][add][coded_add]") {
     const bool pyramid = GENERATE(false, true);
-    const bool split = GENERATE(false, true);
-    CAPTURE(pyramid, split);
+    const std::string mode = GENERATE(
+        "sq8", "split", "migrate_sq8_reorder", "migrate_raw", "plain_raw", "migrate_plain_raw");
+    const bool migrate = mode.starts_with("migrate");
+    const bool plain_rabitq = mode == "plain_raw" || mode == "migrate_plain_raw";
+    const bool keep_raw = mode == "migrate_raw" || plain_rabitq;
+    CAPTURE(pyramid, mode);
     const std::string kind = pyramid ? "pyramid" : "hgraph";
     constexpr uint32_t dim = 64, total = 370;
     auto cfg = vsag::JsonType::Parse(
         R"({"dtype":"float32","dim":64,"metric_type":"l2","index_param":{"graph_type":"pipnn","max_degree":16,"pipnn_incremental_add":true,"pipnn_add_use_codes":true,"store_raw_vector":false,"build_thread_count":4,"pipnn_max_leaf_size":48,"pipnn_min_leaf_size":12}})");
     auto setting = cfg["index_param"];
-    setting["base_quantization_type"].SetString(split ? "rabitq" : "sq8");
-    if (split) {
+    setting["base_quantization_type"].SetString(mode == "sq8" ? "sq8" : "rabitq");
+    if (plain_rabitq) {
+        setting["rabitq_bits_per_dim_base"].SetInt(1);
+    } else if (mode != "sq8") {
         setting["use_reorder"].SetBool(true);
-        setting["precise_quantization_type"].SetString("rabitq");
+        setting["precise_quantization_type"].SetString(migrate ? "sq8" : "rabitq");
         setting["rabitq_bits_per_dim_base"].SetInt(3);
-        setting["rabitq_bits_per_dim_precise"].SetInt(5);
+        if (!migrate)
+            setting["rabitq_bits_per_dim_precise"].SetInt(5);
     }
+    setting["store_raw_vector"].SetBool(keep_raw);
     if (pyramid) {
         setting["root_graph_type"].SetString("multi_layer");
         setting["index_min_size"].SetInt(24);
         setting["no_build_levels"].SetJson(vsag::JsonType::Parse("[]"));
     }
     cfg["index_param"].SetJson(setting);
-    auto create = [&]() {
+    if (plain_rabitq) {
+        auto incompatible = vsag::JsonType::Parse(cfg.Dump());
+        incompatible["index_param"]["store_raw_vector"].SetBool(false);
+        REQUIRE_FALSE(vsag::Factory::CreateIndex(kind, incompatible.Dump()).has_value());
+        if (!pyramid) {
+            incompatible["index_param"]["store_raw_vector"].SetBool(true);
+            incompatible["index_param"]["build_by_base"].SetBool(true);
+            REQUIRE_FALSE(vsag::Factory::CreateIndex(kind, incompatible.Dump()).has_value());
+        }
+    }
+    auto create = [&](bool use_codes) {
+        setting["pipnn_add_use_codes"].SetBool(use_codes);
+        cfg["index_param"].SetJson(setting);
         auto result = vsag::Factory::CreateIndex(kind, cfg.Dump());
         if (!result)
             FAIL(result.error().message);
@@ -431,29 +585,58 @@ TEST_CASE("PiPNN Add reads stored code distances and original sketches after rel
         }
         return data;
     };
-    auto index = create();
+    auto index = create(!migrate);
     for (auto [start, end] : {std::pair{0U, 240U}, std::pair{240U, 320U}, std::pair{320U, total}}) {
         auto result =
             start ? index->Add(ds(start, end - start)) : index->Build(ds(start, end - start));
         if (!result)
             FAIL(result.error().message);
         REQUIRE(result->empty());
+        // Simulate a snapshot whose writer sampled a different random plane.
+        if (pyramid && migrate && !start)
+            vsag::PiPNNQuantizedAddTestAccess::flip_first_pyramid_plane(index, dim);
         const auto topology = vsag::PiPNNQuantizedAddTestAccess::topology(index, pyramid);
         std::stringstream wire;
         REQUIRE(index->Serialize(wire).has_value());
-        index = create();
+        if (migrate && start) {
+            std::istringstream coded(wire.str());
+            REQUIRE_FALSE(create(false)->Deserialize(coded).has_value());
+        }
+        index = create(true);
         auto loaded = index->Deserialize(wire);
         if (!loaded)
             FAIL(loaded.error().message);
         REQUIRE(index->GetNumElements() == end);
         REQUIRE(vsag::PiPNNQuantizedAddTestAccess::topology(index, pyramid) == topology);
+        if (plain_rabitq && !pyramid && !start) {
+            auto drop_raw = index->Tune(cfg.Dump(), true);
+            REQUIRE_FALSE(drop_raw.has_value());
+            REQUIRE(drop_raw.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+            REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_TUNE));
+            auto keep = index->Tune(cfg.Dump());
+            REQUIRE(keep.has_value());
+            REQUIRE(keep.value());
+        }
+        const auto raw = vsag::PiPNNQuantizedAddTestAccess::raw(index, pyramid);
+        REQUIRE(static_cast<bool>(raw) == keep_raw);
+        if (raw) {
+            REQUIRE(raw->GetQuantizerCodeSize() == dim * sizeof(float));
+            for (auto row : {0U, end - 1}) {
+                auto code = raw->AcquireCodesById(row);
+                REQUIRE(code);
+                REQUIRE(std::memcmp(code.Data(), values.data() + row * dim, dim * sizeof(float)) ==
+                        0);
+            }
+        }
+        const auto states = vsag::PiPNNQuantizedAddTestAccess::states(index, pyramid);
+        for (const auto& state : states) REQUIRE(state->Rows().empty());
         if (!start)
             continue;
-        auto store = vsag::PiPNNQuantizedAddTestAccess::codes(index, pyramid).front();
+        auto stores = vsag::PiPNNQuantizedAddTestAccess::codes(index, pyramid);
+        const auto& store = plain_rabitq ? raw : (migrate ? stores.back() : stores.front());
         uint64_t checked = 0;
         bool promoted = false;
-        for (const auto& state : vsag::PiPNNQuantizedAddTestAccess::states(index, pyramid)) {
-            REQUIRE(state->Rows().empty());
+        for (const auto& state : states) {
             for (uint32_t i = 0; i < state->ids.size(); ++i) {
                 const auto id = state->ids[i];
                 float dot = 0;
@@ -470,7 +653,7 @@ TEST_CASE("PiPNN Add reads stored code distances and original sketches after rel
                     const auto id = state->ids[leaf.points[i]];
                     if (id < start)
                         continue;
-                    const auto e = leaf.nearest.Row(i).front();
+                    const auto e = leaf.Neighbor(i, 0);
                     const auto dist = store->ComputePairVectors(id, state->ids[e.target]);
                     REQUIRE(std::abs(dist - e.distance) <= 1e-4F * (1 + std::abs(dist)));
                     ++checked;

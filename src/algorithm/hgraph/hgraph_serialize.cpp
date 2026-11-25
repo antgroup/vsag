@@ -24,6 +24,7 @@
 #include "datacell/sparse_graph_datacell.h"
 #include "hgraph.h"
 #include "hgraph_component_names.h"  // IWYU pragma: keep
+#include "hgraph_pipnn_rows.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pipnn/pipnn_incremental.h"
@@ -473,7 +474,7 @@ HGraph::Serialize(StreamWriter& writer) const {
     }
 
     if (pipnn_add_state_)
-        pipnn_add_state_->Serialize(writer, !pipnn_param_.add_use_codes);
+        pipnn_add_state_->Serialize(writer, pipnn_snapshot_version() == 1);
     // serialize footer (introduced since v0.15)
     auto jsonify_basic_info = this->serialize_basic_info();
     auto metadata = std::make_shared<Metadata>();
@@ -481,8 +482,11 @@ HGraph::Serialize(StreamWriter& writer) const {
     if (this->support_duplicate_) {
         metadata->Set("duplicate_format_version", 1);
     }
-    if (pipnn_add_state_)
-        metadata->Set("pipnn_incremental_version", pipnn_param_.add_use_codes ? 2 : 1);
+    if (pipnn_add_state_) {
+        metadata->Set("pipnn_incremental_version", pipnn_snapshot_version());
+        if (pipnn_exact_rows_)
+            metadata->Set("pipnn_exact_source", pipnn_exact_source());
+    }
     metadata->Set("has_conjugate_graph", this->use_conjugate_graph_);
     logger::debug(jsonify_basic_info.Dump());
 
@@ -613,7 +617,7 @@ HGraph::Serialize(SerializeWriter& writer, uint64_t chunk_size) const {
 
     if (pipnn_add_state_)
         serialize_whole("pipnn_incremental", [&]() {
-            pipnn_add_state_->Serialize(chunked_writer, !pipnn_param_.add_use_codes);
+            pipnn_add_state_->Serialize(chunked_writer, pipnn_snapshot_version() == 1);
         });
     // footer: plaintext, outside any component/frame
     auto jsonify_basic_info = this->serialize_basic_info();
@@ -622,8 +626,11 @@ HGraph::Serialize(SerializeWriter& writer, uint64_t chunk_size) const {
     if (this->support_duplicate_) {
         metadata->Set("duplicate_format_version", 1);
     }
-    if (pipnn_add_state_)
-        metadata->Set("pipnn_incremental_version", pipnn_param_.add_use_codes ? 2 : 1);
+    if (pipnn_add_state_) {
+        metadata->Set("pipnn_incremental_version", pipnn_snapshot_version());
+        if (pipnn_exact_rows_)
+            metadata->Set("pipnn_exact_source", pipnn_exact_source());
+    }
     metadata->Set("has_conjugate_graph", this->use_conjugate_graph_);
     // physical bytes before the footer (same coordinate as the layout
     // offsets); chunked readers take the truth from the layout instead, the
@@ -1257,24 +1264,59 @@ HGraph::Deserialize(StreamReader& reader) {
         }
         if (pipnn_param_.incremental_add &&
             metadata->Get("pipnn_incremental_version").IsNumberInteger()) {
-            CHECK_ARGUMENT(metadata->Get("pipnn_incremental_version").GetInt() ==
-                               (pipnn_param_.add_use_codes ? 2 : 1),
-                           "PiPNN snapshot distance mode does not match index configuration");
-            auto state = std::make_shared<PiPNNIncrementalState>();
-            state->Deserialize(buffer_reader,
-                               total_count_.load(),
-                               dim_,
-                               pipnn_param_.hash_plane_count,
-                               bottom_graph_->MaxCapacity(),
-                               allocator_,
-                               !pipnn_param_.add_use_codes);
-            pipnn_add_state_ = std::move(state);
+            deserialize_pipnn_state(buffer_reader, metadata, total_count_.load());
         }
         if (this->raw_vector_ != nullptr) {
             this->has_raw_vector_ = true;
         }
     }
     this->finish_deserialize();
+}
+
+void
+HGraph::deserialize_pipnn_state(StreamReader& reader,
+                                const MetadataPtr& metadata,
+                                uint64_t count,
+                                bool forward_only) {
+    const auto version = metadata->Get("pipnn_incremental_version").GetInt();
+    const bool borrowed = version == 3;
+    CHECK_ARGUMENT(version == 1 || (version == 2 && pipnn_param_.add_use_codes) || borrowed,
+                   "PiPNN snapshot distance mode does not match index configuration");
+    std::shared_ptr<HGraphPiPNNRows> view;
+    if (!pipnn_param_.add_use_codes) {
+        int64_t source = 0;
+        if (borrowed) {
+            const auto saved = metadata->Get("pipnn_exact_source");
+            CHECK_ARGUMENT(saved.IsNumberInteger() && saved.GetInt() != 0,
+                           "missing PiPNN exact source");
+            source = saved.GetInt();
+        }
+        if (auto exact = pipnn_exact_store(source))
+            view = std::make_shared<HGraphPiPNNRows>(std::move(exact));
+        CHECK_ARGUMENT(!borrowed || view, "missing FP32 backing for PiPNN snapshot");
+    }
+    auto state = std::make_shared<PiPNNIncrementalState>();
+    std::function<void(StreamReader&)> consume;
+    if (version == 1 && view)
+        consume = [&](StreamReader& stream) {
+            view->RestoreLegacy(stream, *state, dim_, allocator_);
+        };
+    else if (version == 1 && pipnn_param_.add_use_codes && forward_only)
+        consume = [&](StreamReader& stream) {
+            SkipForward(stream, state->ids.size() * dim_ * sizeof(float));
+        };
+    state->Deserialize(reader,
+                       count,
+                       dim_,
+                       pipnn_param_.hash_plane_count,
+                       bottom_graph_->MaxCapacity(),
+                       allocator_,
+                       version >= 2                 ? PiPNNVectorPayload::Absent
+                       : pipnn_param_.add_use_codes ? PiPNNVectorPayload::Skip
+                                                    : PiPNNVectorPayload::Restore,
+                       consume);
+    pipnn_exact_rows_ = state->Rows().empty() ? std::move(view) : nullptr;
+    pipnn_add_state_ = std::move(state);
 }
 
 void
@@ -1455,6 +1497,8 @@ HGraph::GetMemoryUsageDetail() const {
     memory_usage["pipnn_build_cache"] = pipnn_cache_memory_.load(std::memory_order_acquire);
     if (pipnn_add_state_)
         memory_usage["pipnn_incremental"] = pipnn_add_state_->MemoryUsage();
+    if (pipnn_exact_rows_)
+        memory_usage["pipnn_exact_row_view"] = pipnn_exact_rows_->MemoryUsage();
     memory_usage["neighbors_mutex"] = this->neighbors_mutex_->GetMemoryUsage();
     memory_usage["pool"] = this->pool_->GetMemoryUsage();
     memory_usage["label_table"] = this->label_table_->GetMemoryUsage();

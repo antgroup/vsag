@@ -161,8 +161,6 @@ public:
             precise_codes_ =
                 FlattenInterface::MakeInstance(pyramid_param->precise_codes_param, common_param);
         }
-        pipnn_param_.ValidateAddDistanceCodes(
-            *(has_precise_reorder() ? precise_codes_ : base_codes_));
         if (use_reorder_) {
             reorder_ = std::make_shared<FlattenReorder>(get_reorder_codes(), allocator_);
         }
@@ -170,6 +168,13 @@ public:
             raw_vector_ =
                 FlattenInterface::MakeInstance(pyramid_param->raw_vector_param, common_param);
             has_raw_vector_ = true;
+        }
+        if (pipnn_param_.add_use_codes) {
+            const auto codes = construction_codes();
+            CHECK_ARGUMENT(codes != raw_vector_ ||
+                               raw_vector_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32,
+                           "plain RaBitQ PiPNN Add requires FP32 raw storage");
+            pipnn_param_.ValidateAddDistanceCodes(*codes);
         }
     }
 
@@ -710,6 +715,8 @@ private:
     PiPNNProjectionState pipnn_projections_;
     FlattenInterfacePtr
     pipnn_exact_codes() const;
+    void
+    restore_pipnn_projections_from_exact(StreamReader& reader);
     void
     add_pipnn_to_hierarchy(Hierarchy&,
                            const DatasetPtr&,

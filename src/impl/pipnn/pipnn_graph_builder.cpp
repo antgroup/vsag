@@ -314,8 +314,8 @@ visit_leaf_candidates(const PiPNNCachedLeaf& leaf, const ReplayRows* changes, Su
         return;
     }
     auto visit_row = [&](uint64_t row) {
-        for (const auto& neighbor : leaf.nearest.Row(row)) {
-            submit(leaf.points[row], neighbor);
+        for (uint32_t rank = 0; rank < leaf.nearest.Width(); ++rank) {
+            submit(leaf.points[row], leaf.Neighbor(row, rank));
         }
     };
     uint64_t first = 0;
@@ -486,7 +486,12 @@ public:
     void
     merge_candidate(ReservoirState& state, ReservoirEntry* row, const ReservoirEntry& candidate);
     void
-    emit(uint32_t u, uint32_t v, float distance, std::vector<PiPNNLocalNeighbor>* cache);
+    emit(const Leaf& leaf,
+         uint32_t source,
+         uint32_t rank,
+         uint32_t target,
+         float distance,
+         PiPNNLeafTopK* cache);
 
 private:
     void
@@ -555,7 +560,7 @@ private:
     merge_undersized_leaves(Leaves leaves) const;
 
     void
-    build_leaf(const Leaf& leaf, std::vector<PiPNNLocalNeighbor>* cache = nullptr);
+    build_leaf(const Leaf& leaf, PiPNNLeafTopK* cache = nullptr);
 
     void
     group_near_duplicates(Leaves& leaves,
@@ -573,7 +578,7 @@ private:
     build_small_leaf(const Leaf& leaf,
                      UninitializedFloatBuffer& matrix,
                      uint64_t neighbor_count,
-                     std::vector<PiPNNLocalNeighbor>* cache);
+                     PiPNNLeafTopK* cache);
 
     void
     insert_pair(uint32_t source, uint32_t target, float distance);
@@ -1127,14 +1132,17 @@ PiPNNPipeline::prepare_sketches(PiPNNProjectionState* state,
         sketches_ = &state->projections;
         norms_ = &state->norms;
     }
-    if (start == 0 && shared_sketches_) {
-        hyperplanes = shared_sketches_->planes;
-    } else if (start == 0) {
-        hyperplanes.resize(plane_values);
-        std::mt19937_64 random(42);
-        std::normal_distribution<float> normal(0.0F, 1.0F);
-        for (auto& value : hyperplanes) {
-            value = normal(random);
+    if (start == 0) {
+        if (shared_sketches_) {
+            hyperplanes = shared_sketches_->planes;
+        } else if (hyperplanes.empty()) {
+            hyperplanes.resize(plane_values);
+            std::mt19937_64 random(42);
+            std::normal_distribution<float> normal(0.0F, 1.0F);
+            for (auto& value : hyperplanes) value = normal(random);
+        }
+        require_argument(hyperplanes.size() == plane_values, "bad PiPNN projection plane shape");
+        for (const auto value : hyperplanes) {
             hyperplane_signature_ ^= std::bit_cast<uint32_t>(value);
             hyperplane_signature_ *= 1099511628211ULL;
         }
@@ -1898,7 +1906,7 @@ PiPNNPipeline::group_near_duplicates(Leaves& leaves,
 }
 
 void
-PiPNNPipeline::build_leaf(const Leaf& leaf, std::vector<PiPNNLocalNeighbor>* cache) {
+PiPNNPipeline::build_leaf(const Leaf& leaf, PiPNNLeafTopK* cache) {
     if (leaf.size() <= 1) {
         return;
     }
@@ -1910,7 +1918,7 @@ PiPNNPipeline::build_leaf(const Leaf& leaf, std::vector<PiPNNLocalNeighbor>* cac
             : parameter_.leaf_neighbor_count;
     const uint64_t neighbor_count = std::min<uint64_t>(requested_neighbor_count, point_count - 1);
     if (cache) {
-        cache->reserve(checked_product(point_count, neighbor_count, "leaf top-k"));
+        *cache = PiPNNLeafTopK(point_count, neighbor_count);
     }
     std::optional<UninitializedFloatBuffer> matrix_storage;
     if (!codes_) {
@@ -2016,7 +2024,7 @@ PiPNNPipeline::build_leaf(const Leaf& leaf, std::vector<PiPNNLocalNeighbor>* cac
             std::sort(nearest.begin(), nearest.begin() + retained, comparator);
             for (uint64_t candidate = 0; candidate < retained; ++candidate) {
                 const uint32_t target = nearest[candidate].second;
-                emit(leaf[source], leaf[target], nearest[candidate].first, cache);
+                emit(leaf, source, candidate, target, nearest[candidate].first, cache);
             }
         }
         return;
@@ -2057,7 +2065,7 @@ PiPNNPipeline::build_leaf(const Leaf& leaf, std::vector<PiPNNLocalNeighbor>* cac
                           comparator);
         for (uint64_t candidate = 0; candidate < retained; ++candidate) {
             const uint32_t target = candidates[candidate].second;
-            emit(leaf[source], leaf[target], candidates[candidate].first, cache);
+            emit(leaf, source, candidate, target, candidates[candidate].first, cache);
         }
     }
 }
@@ -2067,7 +2075,7 @@ void
 PiPNNPipeline::build_small_leaf(const Leaf& leaf,
                                 UninitializedFloatBuffer& matrix_buffer,
                                 uint64_t requested_k,
-                                std::vector<PiPNNLocalNeighbor>* cache) {
+                                PiPNNLeafTopK* cache) {
     auto* matrix = matrix_buffer.Data();
     const uint64_t neighbor_count = fixed_k == 0 ? requested_k : fixed_k;
     static_assert(metric == MetricType::METRIC_TYPE_L2SQR || metric == MetricType::METRIC_TYPE_IP);
@@ -2248,7 +2256,7 @@ PiPNNPipeline::build_small_leaf(const Leaf& leaf,
         auto* row = nearest.data() + source * neighbor_count;
         for (uint64_t candidate = 0; candidate < neighbor_count; ++candidate) {
             const auto [distance, target] = row[candidate];
-            emit(leaf[source], leaf[target], distance, cache);
+            emit(leaf, source, candidate, target, distance, cache);
         }
     }
 }
@@ -2260,15 +2268,16 @@ PiPNNPipeline::relative_hashes(uint32_t source, uint32_t target) const {
 }
 
 void
-PiPNNPipeline::emit(uint32_t u,
-                    uint32_t v,
+PiPNNPipeline::emit(const Leaf& leaf,
+                    uint32_t source,
+                    uint32_t rank,
+                    uint32_t target,
                     float distance,
-                    std::vector<PiPNNLocalNeighbor>* cache) {
+                    PiPNNLeafTopK* cache) {
     if (cache)
-        cache->push_back({v, distance});
-    else {
-        insert_pair(u, v, distance);
-    }
+        cache->Row(source).Set(rank, {target, distance});
+    else
+        insert_pair(leaf[source], leaf[target], distance);
 }
 
 void
@@ -2596,9 +2605,7 @@ PiPNNPipeline::cache_partition(Leaves& leaves, PiPNNIncrementalState& state) {
             for (auto* terminal : leaf.terminals) terminal->leaf = offset + i;
             auto& cached = caches[i];
             cached.points.assign(leaf.begin(), leaf.end());
-            std::vector<PiPNNLocalNeighbor> packed;
-            build_leaf(leaf, &packed);
-            cached.nearest = PiPNNLeafTopK(leaf.size(), std::move(packed));
+            build_leaf(leaf, &cached.nearest);
         }
     });
     if (state.leaves.empty()) {
@@ -2769,9 +2776,6 @@ PiPNNPipeline::BuildCached(PiPNNIncrementalState& state) {
     auto leaves = partition(&state.root);
     cache_partition(leaves, state);
     state.UpdateLeafDepths(state.root, 0);
-    state.memberships.resize(ids_.size());
-    for (uint64_t i = 0; i < state.leaves.size(); ++i)
-        for (auto id : state.leaves[i].points) state.memberships[id].push_back(i);
     parallel_for(state.leaves.size(), 4, [&](uint64_t begin, uint64_t end) {
         for (uint64_t i = begin; i < end; ++i) {
             visit_leaf_candidates(state.leaves[i], nullptr, [&](uint32_t u, const auto& neighbor) {
@@ -2846,6 +2850,13 @@ PiPNNPipeline::extend_leaf(PiPNNCachedLeaf& leaf, const Leaf& batch, ReplayRows&
                                                              MIN_UNDERSIZED_LEAF_NEIGHBOR_COUNT)
                                                   : parameter_.leaf_neighbor_count;
     const auto k = std::min<uint64_t>(requested, n - 1);
+    // A single append can touch thousands of leaves. Bound spare member IDs in each
+    // leaf while retaining geometric growth for repeated inserts.
+    if (n > leaf.points.capacity()) {
+        const auto next =
+            std::min<uint64_t>(parameter_.max_leaf_size, m + std::max<size_t>(8, m / 8));
+        leaf.points.reserve(std::max<uint64_t>(n, next));
+    }
     leaf.points.insert(leaf.points.end(), batch.begin(), batch.end());
     if (!k)
         return;
@@ -2889,8 +2900,7 @@ PiPNNPipeline::extend_leaf(PiPNNCachedLeaf& leaf, const Leaf& batch, ReplayRows&
     if (old_k == k) {
         leaf.nearest.AppendRows(b);
     } else {
-        auto resized =
-            PiPNNLeafTopK(n, std::vector<PiPNNLocalNeighbor>(checked_product(n, k, "leaf top-k")));
+        PiPNNLeafTopK resized(n, k);
         previous = std::exchange(leaf.nearest, std::move(resized));
     }
     std::vector<PiPNNLocalNeighbor> row;
@@ -2904,39 +2914,43 @@ PiPNNPipeline::extend_leaf(PiPNNCachedLeaf& leaf, const Leaf& batch, ReplayRows&
     std::vector<float> thresholds(batch_filter ? m : 0);
     std::vector<uint32_t> selected(batch_filter ? m : 0);
     for (uint64_t i = 0; i < thresholds.size(); ++i) {
-        thresholds[i] = leaf.nearest.Row(i).back().distance;
+        thresholds[i] = leaf.nearest.Row(i).Distance(k - 1);
     }
     auto order_for = [&](uint32_t u) {
         return [&, u](const PiPNNLocalNeighbor& lhs, const PiPNNLocalNeighbor& rhs) {
             if (lhs.distance != rhs.distance) {
                 return lhs.distance < rhs.distance;
             }
-            const auto left = ids_[lhs.target];
-            const auto right = ids_[rhs.target];
+            const auto left = ids_[leaf.points[lhs.target]];
+            const auto right = ids_[leaf.points[rhs.target]];
             return std::make_pair(id_gap(ids_[u], left), left) <
                    std::make_pair(id_gap(ids_[u], right), right);
         };
     };
     auto offer = [&](uint64_t i, PiPNNLocalNeighbor candidate) {
-        auto first = leaf.nearest.Row(i).data();
-        auto last = first + k - 1;
+        const auto ranks = leaf.nearest.Row(i);
         const auto less = order_for(leaf.points[i]);
-        if (less(candidate, *last)) {
-            const auto pos = std::lower_bound(first, last, candidate, less);
-            std::move_backward(pos, last, last + 1);
-            *pos = candidate;
+        if (less(candidate, ranks.Get(k - 1))) {
+            uint32_t first = 0, last = k - 1;
+            while (first < last) {
+                const auto mid = first + (last - first) / 2;
+                if (less(ranks.Get(mid), candidate))
+                    first = mid + 1;
+                else
+                    last = mid;
+            }
+            ranks.ReplaceLast(first, k - 1, candidate);
             changes.changed[i / 64] |= uint64_t{1} << (i % 64);
         }
-        return last->distance;
+        return ranks.Distance(k - 1);
     };
     for (uint64_t i = batch_filter ? m : 0; i < n; ++i) {
         const auto u = leaf.points[i];
-        auto first = leaf.nearest.Row(i).data();
         if (i < m && old_k == k) {
             for (uint64_t j = m; j < n; ++j) {
                 const auto v = leaf.points[j];
                 const auto dot = dots.Data()[(j - m) * n + i];
-                offer(i, {v, distance_from_dot(u, v, dot)});
+                offer(i, {static_cast<uint32_t>(j), distance_from_dot(u, v, dot)});
             }
             continue;
         }
@@ -2944,7 +2958,7 @@ PiPNNPipeline::extend_leaf(PiPNNCachedLeaf& leaf, const Leaf& batch, ReplayRows&
         row.clear();
         if (i < m && old_k != 0) {
             const auto old_row = previous.Row(i);
-            row.insert(row.end(), old_row.begin(), old_row.end());
+            for (uint32_t rank = 0; rank < old_k; ++rank) row.push_back(old_row.Get(rank));
         }
         for (uint64_t j = (i < m ? m : 0); j < n; ++j) {
             if (i == j)
@@ -2952,7 +2966,7 @@ PiPNNPipeline::extend_leaf(PiPNNCachedLeaf& leaf, const Leaf& batch, ReplayRows&
             const auto v = leaf.points[j];
             auto& dot = dots.Data()[(std::max(i, j) - m) * n + std::min(i, j)];
             const float distance = distance_from_dot(u, v, dot);
-            row.push_back({v, distance});
+            row.push_back({static_cast<uint32_t>(j), distance});
             if (batch_filter && j < m) {
                 // Neither endpoint needs this dot again. Cosine rounds in source-first order.
                 dot = metric_ == MetricType::METRIC_TYPE_COSINE ? distance_from_dot(v, u, dot)
@@ -2964,11 +2978,12 @@ PiPNNPipeline::extend_leaf(PiPNNCachedLeaf& leaf, const Leaf& batch, ReplayRows&
             const auto count = select_rows(distances, thresholds.data(), m, selected.data());
             for (uint64_t t = 0; t < count; ++t) {
                 const auto old = selected[t];
-                thresholds[old] = offer(old, {u, distances[old]});
+                thresholds[old] = offer(old, {static_cast<uint32_t>(i), distances[old]});
             }
         }
         std::partial_sort(row.begin(), row.begin() + k, row.end(), order_for(u));
-        std::copy_n(row.begin(), k, first);
+        const auto ranks = leaf.nearest.Row(i);
+        for (uint32_t rank = 0; rank < k; ++rank) ranks.Set(rank, row[rank]);
     }
 }
 
@@ -3013,7 +3028,6 @@ PiPNNPipeline::Increment(PiPNNIncrementalState& state, size_t old_count) {
     Leaf incoming(allocator_);
     for (size_t i = old_count; i < ids_.size(); ++i) incoming.push_back(i);
     route_batch(state.root, std::move(incoming), additions, state);
-    state.memberships.resize(ids_.size());
     std::vector<size_t> hit_leaves;
     std::vector<LeafSplit> splits;
     for (auto& [i, batch] : additions) {
@@ -3028,33 +3042,22 @@ PiPNNPipeline::Increment(PiPNNIncrementalState& state, size_t old_count) {
     uint64_t child = state.leaves.size();
     rebuild_split_leaves(splits, additions, state);
 
-    // Overlapping leaves share points. Publish memberships in the original traversal order.
     const auto ordinary_count = hit_leaves.size();
-    auto split = splits.begin();
-    for (const auto& [i, batch] : additions) {
-        if (split == splits.end() || split->parent != i) {
-            for (auto id : batch) state.memberships[id].push_back(i);
-            continue;
-        }
-        for (auto id : state.leaves[i].points) {
-            auto& hits = state.memberships[id];
-            hits.erase(std::remove(hits.begin(), hits.end(), i), hits.end());
-        }
-        for (; child < split->end_child; ++child) {
-            bool contains_new = false;
-            for (auto id : state.leaves[child].points) {
-                state.memberships[id].push_back(child);
-                contains_new |= id >= old_count;
-            }
-            if (contains_new)
+    for (auto& split : splits) {
+        for (; child < split.end_child; ++child) {
+            const auto& points = state.leaves[child].points;
+            if (std::any_of(points.begin(), points.end(), [old_count](uint32_t id) {
+                    return id >= old_count;
+                })) {
                 hit_leaves.push_back(child);
+            }
         }
-        const auto depth = state.leaves[i].depth;
-        state.leaves[i] = {};
-        state.leaves[i].depth = depth;
-        state.leaves[i].replacement = std::move(split->replacement);
-        state.UpdateLeafDepths(state.leaves[i].replacement, depth);
-        ++split;
+        auto& parent = state.leaves[split.parent];
+        const auto depth = parent.depth;
+        parent = {};
+        parent.depth = depth;
+        parent.replacement = std::move(split.replacement);
+        state.UpdateLeafDepths(parent.replacement, depth);
     }
     // Ordinary hits come first. A hit split child already has a freshly rebuilt top-k.
     std::vector<ReplayRows> changed_rows(ordinary_count);
@@ -3229,6 +3232,18 @@ PiPNNGraphBuilderParameter::ToJson() const {
     json[PIPNN_PARAMETER_ADAPTIVE_PRUNING].SetBool(adaptive_pruning);
     json[PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP].SetFloat(adaptive_pruning_adjust_step);
     return json;
+}
+
+bool
+PiPNNGraphBuilderParameter::CanLoadIncremental(const PiPNNGraphBuilderParameter& stored) const {
+    if (!incremental_add || !stored.incremental_add)
+        return true;
+    // The encoded-distance reader can consume an exact snapshot's stored projections.
+    // An exact reader cannot reconstruct the discarded historical vectors from codes.
+    auto required = *this;
+    if (add_use_codes)
+        required.add_use_codes = stored.add_use_codes;
+    return required.ToJson().Dump() == stored.ToJson().Dump();
 }
 
 void

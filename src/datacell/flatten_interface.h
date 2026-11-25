@@ -622,6 +622,13 @@ public:
         return writer.cursor_;
     }
 
+    // Direct reads of unchanged records can be retained until the next Resize.
+    // Callers must hold any owned leases returned for records spanning IO blocks.
+    virtual bool
+    CanBorrowRowsUntilResize() const {
+        return false;
+    }
+
     [[nodiscard]] virtual bool
     InMemory() const {
         return true;

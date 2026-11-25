@@ -1969,9 +1969,12 @@ Pyramid::Deserialize(StreamReader& reader) {
 
     if (pipnn_param_.incremental_add && basic_info.Contains("pipnn_incremental_version")) {
         const auto version = basic_info["pipnn_incremental_version"].GetInt();
-        CHECK_ARGUMENT(pipnn_param_.add_use_codes ? version == 3 : (version == 1 || version == 2),
+        CHECK_ARGUMENT(pipnn_param_.add_use_codes ? (version == 2 || version == 3)
+                                                  : (version == 1 || version == 2),
                        "PiPNN snapshot distance mode does not match index configuration");
         std::vector<uint8_t> recovered;
+        const bool migrate_exact = version == 2 && pipnn_param_.add_use_codes;
+        std::optional<uint64_t> exact_offset;
         if (version == 3) {
             if (cur_element_count_) {
                 pipnn_projections_.ReadSketches(buffer_reader,
@@ -1984,6 +1987,19 @@ Pyramid::Deserialize(StreamReader& reader) {
                         (common_param_.metric_ == MetricType::METRIC_TYPE_IP ? 0
                                                                              : cur_element_count_),
                     "invalid PiPNN sketch norms");
+            }
+        } else if (migrate_exact) {
+            // In v2 the shared FP32 rows precede each graph's saved projection planes.
+            // Revisit these rows after recovering the planes used by the writer.
+            if (!pipnn_exact_codes()) {
+                uint64_t elements;
+                StreamReader::ReadObj(buffer_reader, elements);
+                const auto count = static_cast<uint64_t>(cur_element_count_);
+                exact_offset = buffer_reader.GetCursor();
+                CHECK_ARGUMENT(dim_ && count <= UINT64_MAX / dim_ && elements == count * dim_ &&
+                                   elements <= (UINT64_MAX - *exact_offset) / sizeof(float),
+                               "bad PiPNN shared FP32 snapshot");
+                buffer_reader.Seek(*exact_offset + elements * sizeof(float));
             }
         } else if (!pipnn_exact_codes()) {
             if (version == 2)
@@ -1998,13 +2014,20 @@ Pyramid::Deserialize(StreamReader& reader) {
             StreamReader::ReadObj(buffer_reader, present);
             if (present) {
                 auto state = std::make_shared<PiPNNIncrementalState>();
-                state->Deserialize(buffer_reader,
-                                   cur_element_count_,
-                                   dim_,
-                                   pipnn_param_.hash_plane_count,
-                                   std::min<uint64_t>(graph->MaxCapacity(), cur_element_count_),
-                                   allocator_,
-                                   version == 1);
+                state->Deserialize(
+                    buffer_reader,
+                    cur_element_count_,
+                    dim_,
+                    pipnn_param_.hash_plane_count,
+                    std::min<uint64_t>(graph->MaxCapacity(), cur_element_count_),
+                    allocator_,
+                    version == 1 ? PiPNNVectorPayload::Restore : PiPNNVectorPayload::Absent);
+                if (pipnn_param_.add_use_codes) {
+                    if (migrate_exact && pipnn_projections_.planes.empty())
+                        pipnn_projections_.planes = state->planes;
+                    CHECK_ARGUMENT(state->planes == pipnn_projections_.planes,
+                                   "inconsistent PiPNN projection planes across Pyramid graphs");
+                }
                 if (version == 1) {
                     for (size_t i = 0; !recovered.empty() && i < state->ids.size(); ++i) {
                         const auto id = state->ids[i];
@@ -2015,6 +2038,13 @@ Pyramid::Deserialize(StreamReader& reader) {
                 }
                 pipnn_graph_states_[graph.get()] = std::move(state);
             }
+        }
+        if (migrate_exact) {
+            if (exact_offset)
+                buffer_reader.PushSeek(*exact_offset);
+            restore_pipnn_projections_from_exact(buffer_reader);
+            if (exact_offset)
+                buffer_reader.PopSeek();
         }
         // A v1 cosine flat-only member may have only a normalized query code.
         if (std::find(recovered.begin(), recovered.end(), 0) != recovered.end()) {
@@ -2227,6 +2257,43 @@ Pyramid::pipnn_exact_codes() const {
 }
 
 void
+Pyramid::restore_pipnn_projections_from_exact(StreamReader& reader) {
+    const uint64_t count = cur_element_count_;
+    auto codes = pipnn_exact_codes();
+    if (!count)
+        return;
+    PiPNNGraphBuilder builder(pipnn_param_,
+                              dim_,
+                              common_param_.metric_,
+                              allocator_,
+                              thread_pool_.get(),
+                              build_thread_count_);
+    // Read roughly 1 MiB at a time. Keep leases only through projection of this block.
+    const uint64_t block = std::min(count, std::max<uint64_t>(1, (1U << 18) / dim_));
+    Vector<float> buffer(codes ? 0 : block * dim_, allocator_);
+    PiPNNRowView view;
+    view.rows.reserve(block);
+    for (uint64_t first = 0; first < count; first += block) {
+        const auto n = std::min(block, count - first);
+        view.rows.clear();
+        view.owned.clear();
+        if (codes) {
+            for (uint64_t i = 0; i < n; ++i) {
+                auto lease = codes->AcquireCodesById(first + i);
+                CHECK_ARGUMENT(lease, "missing exact PiPNN code");
+                view.rows.push_back(reinterpret_cast<const float*>(lease.Data()));
+                if (lease.NeedsRelease())
+                    view.owned.emplace_back(std::move(lease));
+            }
+        } else {
+            reader.Read(reinterpret_cast<char*>(buffer.data()), n * dim_ * sizeof(float));
+            for (uint64_t i = 0; i < n; ++i) view.rows.push_back(buffer.data() + i * dim_);
+        }
+        builder.AppendProjections(pipnn_projections_, view.rows);
+    }
+}
+
+void
 Pyramid::insert_add_batch(const DatasetPtr& base, const AddBatch& batch) {
     std::shared_lock<std::shared_mutex> storage_lock(resize_mutex_);
     const auto* data_vectors = get_data(base);
@@ -2364,7 +2431,7 @@ Pyramid::add_pipnn_to_hierarchy(Hierarchy& h,
                                     ids,
                                     Vector<const float*>(allocator_),
                                     *state,
-                                    *(has_precise_reorder() ? precise_codes_ : base_codes_),
+                                    *construction_codes(),
                                     &pipnn_projections_);
         else
             builder.UpdateFromSharedRows(graph, ids, exact, *state);

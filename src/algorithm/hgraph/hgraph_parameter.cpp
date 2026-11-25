@@ -346,8 +346,7 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
     CHECK_FIELD_EQ(*this, *p, duplicate_distance_threshold);
     CHECK_FIELD_EQ(*this, *p, support_force_remove);
     CHECK_FIELD_EQ(*this, *p, rabitq_fused_datacell);
-    if (pipnn_param.incremental_add && p->pipnn_param.incremental_add &&
-        pipnn_param.ToJson().Dump() != p->pipnn_param.ToJson().Dump()) {
+    if (!pipnn_param.CanLoadIncremental(p->pipnn_param)) {
         return false;
     }
     CHECK_FIELD_EQ(*this, *p, pipnn_param.adaptive_pruning);

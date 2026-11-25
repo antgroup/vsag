@@ -417,6 +417,33 @@ TEST_CASE("HGraph ParallelDeserialize Compressed Chunked Round-Trip",
     RequireSameKnnResults(index, loaded, data);
 }
 
+TEST_CASE("HGraph restores compressed incremental PiPNN after its code stores",
+          "[ut][hgraph][pipnn][exact_row_storage][parallel_deserialize]") {
+    const std::string mode = GENERATE("shared", "coded", "legacy-to-coded", "shared-to-coded");
+    CAPTURE(mode);
+    auto setting = MakeHGraphJson();
+    setting["graph_type"].SetString("pipnn");
+    setting["pipnn_incremental_add"].SetBool(true);
+    setting["base_quantization_type"].SetString(mode == "legacy-to-coded" ? "sq8" : "fp32");
+    setting["store_raw_vector"].SetBool(false);
+    setting["pipnn_add_use_codes"].SetBool(mode == "coded");
+    auto data = MakeTestData(32, 90);
+    auto params = MakeCommonParam(data.dim);
+    auto index = MakeHGraphIndex(params, setting);
+    REQUIRE(index->Build(MakeDataset(data)).has_value());
+    FrameSerializeWriter writer;
+    REQUIRE(index->Serialize(writer, 4096).has_value());
+    FrameMemoryReader reader(writer.buffer_);
+    setting["pipnn_add_use_codes"].SetBool(mode != "shared");
+    auto restored = MakeHGraphIndex(params, setting);
+    REQUIRE(restored->ParallelDeserialize(reader).has_value());
+    RequireSameKnnResults(index, restored, data);
+    auto extra = MakeTestData(32, 1);
+    extra.ids[0] = data.count;
+    REQUIRE(restored->Add(MakeDataset(extra)).has_value());
+    REQUIRE(restored->GetNumElements() == data.count + 1);
+}
+
 TEST_CASE("HGraph ParallelDeserialize Compressed Source IDs",
           "[ut][hgraph][parallel_deserialize]") {
     auto data = MakeTestData(32, 300);

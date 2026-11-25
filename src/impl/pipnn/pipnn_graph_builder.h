@@ -60,6 +60,8 @@ struct PiPNNGraphBuilderParameter {
     JsonType
     ToJson() const;
 
+    bool
+    CanLoadIncremental(const PiPNNGraphBuilderParameter& stored) const;
     void
     Validate(uint64_t max_degree) const;
     void

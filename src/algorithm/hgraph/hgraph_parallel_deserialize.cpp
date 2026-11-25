@@ -65,8 +65,7 @@ is_known_component(const std::string& name) {
     return supports_chunked_granularity(name) || name == COMPONENT_LABEL_TABLE ||
            name == COMPONENT_CODE_SLOT_MAP || name == COMPONENT_ROUTE_GRAPHS ||
            name == COMPONENT_EXTRA_INFOS || name == COMPONENT_ATTR_FILTER ||
-           name == COMPONENT_MCI_CLIQUES || name == COMPONENT_CONJUGATE_GRAPH ||
-           name == "pipnn_incremental";
+           name == COMPONENT_MCI_CLIQUES || name == COMPONENT_CONJUGATE_GRAPH;
 }
 
 // components whose Deserialize seeks inside its own payload rather than reading
@@ -172,7 +171,41 @@ HGraph::ParallelDeserialize(DeserializeReader& reader) {
         // a tampered footer cannot alias frames or escape the body bounds
         const uint64_t physical_body = reader.Size() - footer->Length();
         chunked_manifest.Validate(physical_body);
+        // The PiPNN component may borrow exact codes or compare its historical FP32
+        // inputs against them. Restore it after the code bodies and quantizer tails.
+        std::optional<ComponentManifestEntry> incremental;
+        auto& components = chunked_manifest.components_;
+        auto it = std::find_if(components.begin(), components.end(), [](const auto& comp) {
+            return comp.name == "pipnn_incremental";
+        });
+        if (it != components.end()) {
+            CHECK_ARGUMENT(it->granularity == ComponentGranularity::Whole &&
+                               metadata->Get("pipnn_incremental_version").IsNumberInteger(),
+                           "invalid incremental PiPNN component");
+            incremental = std::move(*it);
+            components.erase(it);
+        }
         this->parallel_deserialize_manifest(reader, pool, chunked_manifest, basic_info);
+        if (incremental && pipnn_param_.incremental_add) {
+            const auto& comp = *incremental;
+            const auto count =
+                std::max<uint64_t>(serialized_total_count, basic_flatten_codes_->TotalCount());
+            if (chunked_manifest.codec_ == "none") {
+                auto frame = footer_reader.Slice(comp.offset, comp.logical_size);
+                deserialize_pipnn_state(frame, metadata, count);
+                CHECK_ARGUMENT(frame.GetCursor() == comp.logical_size, "bad PiPNN frame size");
+            } else {
+                read_decompressed_checked(
+                    reader, comp.offset, comp.compressed_size, [&](std::istream& is) {
+                        ForwardStreamReader stream(is);
+                        BoundedForwardReader frame(&stream, comp.logical_size);
+                        deserialize_pipnn_state(frame, metadata, count, true);
+                        CHECK_ARGUMENT(frame.GetCursor() == comp.logical_size &&
+                                           is.peek() == std::istream::traits_type::eof(),
+                                       "bad PiPNN frame size");
+                    });
+            }
+        }
     } else {
         // no recorded layout: probe an uncompressed sequential body
         const uint64_t physical_body = reader.Size() - footer->Length();
@@ -563,16 +596,6 @@ HGraph::deserialize_whole_component(const std::string& name,
     } else if (name == COMPONENT_RAW_VECTOR) {
         require_enabled(this->raw_vector_ != nullptr);
         this->raw_vector_->Deserialize(reader);
-    } else if (name == "pipnn_incremental") {
-        auto state = std::make_shared<PiPNNIncrementalState>();
-        state->Deserialize(reader,
-                           basic_info["total_count"].GetUint64(),
-                           dim_,
-                           pipnn_param_.hash_plane_count,
-                           basic_info["max_capacity"].GetUint64(),
-                           allocator_);
-        if (pipnn_param_.incremental_add)
-            pipnn_add_state_ = std::move(state);
     } else if (name == COMPONENT_MCI_CLIQUES) {
         require_enabled(this->mci_parameters_.enabled);
         // single-writer: each whole component is dispatched as exactly one task

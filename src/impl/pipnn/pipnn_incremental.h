@@ -4,6 +4,8 @@
 
 #include <bit>
 #include <cstdint>
+#include <cstring>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <span>
@@ -30,62 +32,119 @@ struct PiPNNLocalNeighbor {
     float distance;
 };
 
-// Build and snapshot load supply one packed block. New members use small row-aligned
-// blocks, so updating a leaf never relocates existing rows of the same width.
+// Each entry retains its exact FP32 distance and a position in the leaf's member list.
+// Packed byte loads also work on architectures that require aligned float access.
 class PiPNNLeafTopK {
 public:
-    PiPNNLeafTopK() = default;
-    PiPNNLeafTopK(uint32_t rows, std::vector<PiPNNLocalNeighbor>&& packed);
+    template <typename Byte>
+    struct RowView {
+        Byte* data;
+        uint32_t stride;
 
+        float
+        Distance(uint32_t rank) const {
+            float distance;
+            std::memcpy(&distance, data + uint64_t{rank} * stride, sizeof(distance));
+            return distance;
+        }
+        PiPNNLocalNeighbor
+        Get(uint32_t rank) const {
+            const auto* index = data + uint64_t{rank} * stride + sizeof(float);
+            uint32_t target;
+            if (stride == sizeof(float) + 1) {
+                target = *index;
+            } else if (stride == sizeof(float) + 2) {
+                uint16_t small;
+                std::memcpy(&small, index, sizeof(small));
+                target = small;
+            } else {
+                std::memcpy(&target, index, sizeof(target));
+            }
+            return {target, Distance(rank)};
+        }
+        void
+        Set(uint32_t rank, PiPNNLocalNeighbor neighbor) const {
+            auto* entry = data + uint64_t{rank} * stride;
+            std::memcpy(entry, &neighbor.distance, sizeof(float));
+            auto* index = entry + sizeof(float);
+            if (stride == sizeof(float) + 1) {
+                *index = static_cast<uint8_t>(neighbor.target);
+            } else if (stride == sizeof(float) + 2) {
+                const auto small = static_cast<uint16_t>(neighbor.target);
+                std::memcpy(index, &small, sizeof(small));
+            } else {
+                std::memcpy(index, &neighbor.target, sizeof(neighbor.target));
+            }
+        }
+        void
+        ReplaceLast(uint32_t rank, uint32_t last, PiPNNLocalNeighbor neighbor) const {
+            auto* first = data + uint64_t{rank} * stride;
+            std::memmove(first + stride, first, uint64_t{last - rank} * stride);
+            Set(rank, neighbor);
+        }
+    };
+
+    PiPNNLeafTopK() = default;
+    PiPNNLeafTopK(uint32_t rows, uint32_t width);
     uint32_t
     Width() const {
         return width_;
     }
-    std::span<const PiPNNLocalNeighbor>
+    RowView<const uint8_t>
     Row(uint32_t row) const {
-        return {row_data(*this, row), width_};
+        return {row_data(row), stride_};
     }
-    std::span<PiPNNLocalNeighbor>
+    RowView<uint8_t>
     Row(uint32_t row) {
-        return {row_data(*this, row), width_};
+        return {row_data(row), stride_};
     }
     void
     AppendRows(uint32_t count);
     uint64_t
     MemoryUsage() const;
     void
-    Write(StreamWriter& writer) const;
+    Write(StreamWriter& writer, std::span<const uint32_t> points) const;
 
 private:
-    // A leaf often receives only a few new members. Bound unused tail capacity to three rows.
+    // New members use small row-aligned blocks. The packed base stays in place unless
+    // the leaf grows beyond the range of the original target width.
     static constexpr uint32_t BLOCK_ROWS = 4;
     uint32_t base_rows_{0};
     uint32_t rows_{0};
     uint32_t width_{0};
-    std::vector<PiPNNLocalNeighbor> base_;
-    std::vector<std::unique_ptr<PiPNNLocalNeighbor[]>> blocks_;
+    uint32_t stride_{0};
+    std::unique_ptr<uint8_t[]> base_;
+    std::vector<std::unique_ptr<uint8_t[]>> blocks_;
 
-    template <typename Self>
-    static auto
-    row_data(Self& self, uint32_t row) -> decltype(self.base_.data()) {
-        if (self.width_ == 0) {
+    static uint32_t
+    entry_size(uint32_t rows) {
+        return sizeof(float) + (rows <= 256 ? 1 : rows <= 65536 ? 2 : 4);
+    }
+    uint8_t*
+    row_data(uint32_t row) const {
+        if (width_ == 0)
             return nullptr;
-        }
-        if (row < self.base_rows_) {
-            return self.base_.data() + uint64_t{row} * self.width_;
-        }
-        const auto offset = row - self.base_rows_;
-        return self.blocks_[offset / BLOCK_ROWS].get() +
-               uint64_t{offset % BLOCK_ROWS} * self.width_;
+        if (row < base_rows_)
+            return base_.get() + uint64_t{row} * width_ * stride_;
+        const auto offset = row - base_rows_;
+        return blocks_[offset / BLOCK_ROWS].get() +
+               uint64_t{offset % BLOCK_ROWS} * width_ * stride_;
     }
 };
 
 struct PiPNNCachedLeaf {
     std::vector<uint32_t> points;
-    // Row-major, sorted local top-k. Targets use pipeline-local point IDs.
+    // Row-major, sorted local top-k.
     PiPNNLeafTopK nearest;
     uint64_t depth{UINT64_MAX};  // Minimum route depth across merged terminals.
     PiPNNRoute replacement;      // set when this leaf has been split
+
+    PiPNNLocalNeighbor
+    Neighbor(uint32_t row, uint32_t rank) const {
+        auto neighbor = nearest.Row(row).Get(rank);
+        neighbor.target = points[neighbor.target];
+        return neighbor;
+    }
 };
 
 // Fixed row blocks keep previous sketches at stable addresses during Add.
@@ -142,11 +201,11 @@ struct PiPNNProjectionState {
                  Allocator* allocator);
 };
 
+enum class PiPNNVectorPayload { Absent, Restore, Skip };
+
 struct PiPNNIncrementalState : PiPNNProjectionState {
     PiPNNRoute root;
     std::vector<PiPNNCachedLeaf> leaves;
-    // Derived from leaf membership, rebuilt on load.
-    std::vector<std::vector<uint32_t>> memberships;
     std::vector<uint32_t> ids;
 
     // Derived on first use and omitted from snapshots.
@@ -197,7 +256,8 @@ struct PiPNNIncrementalState : PiPNNProjectionState {
                 uint64_t planes_count,
                 uint64_t graph_capacity,
                 Allocator* allocator,
-                bool with_vectors = true);
+                PiPNNVectorPayload vectors = PiPNNVectorPayload::Restore,
+                const std::function<void(StreamReader&)>& consume_vectors = {});
 
 private:
     std::vector<const float*> row_pointers_;

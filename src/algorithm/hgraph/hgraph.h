@@ -65,6 +65,7 @@ namespace vsag {
 class ChunkedManifest;
 struct ComponentManifestEntry;
 class FlattenOptimizedBuildInterface;
+class HGraphPiPNNRows;
 class HGraphFGIM;
 class HGraphRaBitQFusedDataCell;
 class HGraphRaBitQSearcher;
@@ -823,6 +824,12 @@ private:
     void
     serialize_label_info(StreamWriter& writer) const;
 
+    void
+    deserialize_pipnn_state(StreamReader& reader,
+                            const MetadataPtr& metadata,
+                            uint64_t count,
+                            bool forward_only = false);
+
     /// shared post-deserialization steps (dedup validation, memory accounting)
     void
     finish_deserialize();
@@ -988,6 +995,17 @@ private:
     has_precise_reorder() const {
         return use_reorder_ and not reorder_by_base_;
     }
+
+    [[nodiscard]] FlattenInterfacePtr
+    graph_build_distance_codes() const {
+        return graph_build_distance_codes(basic_flatten_codes_,
+                                          has_precise_reorder() ? high_precise_codes_ : nullptr,
+                                          raw_vector_);
+    }
+    FlattenInterfacePtr
+    graph_build_distance_codes(const FlattenInterfacePtr& base,
+                               const FlattenInterfacePtr& precise,
+                               const FlattenInterfacePtr& raw) const;
 
     /// True when force-remove is enabled.
     [[nodiscard]] bool
@@ -1300,6 +1318,13 @@ private:
 
     ODescentParameterPtr odescent_param_{nullptr};  // ODescent build parameters
     std::shared_ptr<PiPNNIncrementalState> pipnn_add_state_;
+    std::shared_ptr<HGraphPiPNNRows> pipnn_exact_rows_;
+    FlattenInterfacePtr
+    pipnn_exact_store(int64_t source = 0) const;
+    int64_t
+    pipnn_snapshot_version() const;
+    int64_t
+    pipnn_exact_source() const;
     PiPNNGraphBuilderParameter pipnn_param_{};      // PiPNN build parameters
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};  // graph algorithm type
 
