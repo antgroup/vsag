@@ -1,5 +1,9 @@
 name: asan-build-and-test-build-asan-macos-arm64
 description: Shared build_asan_macos_arm64 execution; callers own runners and dependencies.
+inputs:
+  save-cache:
+    description: Allow this build to publish the missing cache generation.
+    default: 'false'
 runs:
   using: composite
   steps:
@@ -15,12 +19,8 @@ runs:
         clang++ --version
         cmake --version
     - name: Load Cache
-      uses: hendrikmuhs/ccache-action@v1.2.25
-      with:
-        job-summary: ${{ env.VSAG_DAILY_AGGREGATE != '1' && 'CCache Statistics' || '' }}
-        max-size: "2G"
-        save: true
-        key: build-macos-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+      id: cache
+      uses: ./.github/actions/setup-macos-asan-cache
     - name: Make Asan
       shell: bash -e {0}
       run: export CMAKE_GENERATOR="Ninja" CMAKE_EXPORT_COMPILE_COMMANDS=ON; make asan VSAG_ENABLE_EXAMPLES=ON COMPILE_JOBS=3 DATACELL_COMPILE_JOBS=1
@@ -41,3 +41,9 @@ runs:
         compression-level: 1
         retention-days: 3
         overwrite: 'true'
+    - name: Save macOS ASan compiler cache
+      if: ${{ inputs.save-cache == 'true' && steps.cache.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v5
+      with:
+        path: ${{ github.workspace }}/.ccache
+        key: ${{ steps.cache.outputs.cache-primary-key }}

@@ -1,0 +1,27 @@
+name: Set up macOS ASan compiler cache
+description: Restore a shared cache generation and initialize ccache for the build.
+outputs:
+  cache-hit:
+    description: Whether the fixed generation key was restored exactly.
+    value: ${{ steps.restore.outputs.cache-hit }}
+  cache-primary-key:
+    description: Fixed key for the current cache generation.
+    value: ${{ steps.restore.outputs.cache-primary-key }}
+runs:
+  using: composite
+  steps:
+    - name: Restore macOS ASan compiler cache
+      id: restore
+      uses: actions/cache/restore@v5
+      with:
+        path: ${{ github.workspace }}/.ccache
+        key: ccache-build-macos-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+        # The previous policy saved snapshots with a timestamp after this prefix.
+        restore-keys: ccache-build-macos-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}-
+    - name: Configure ccache
+      uses: hendrikmuhs/ccache-action@v1.2.25
+      with:
+        job-summary: ${{ env.VSAG_DAILY_AGGREGATE != '1' && 'CCache Statistics' || '' }}
+        max-size: "2G"
+        restore: false
+        save: false

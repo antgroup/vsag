@@ -194,6 +194,8 @@ jobs:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/asan-build-and-test-build-asan-macos-arm64
         id: execute
+        with:
+          save-cache: ${{ github.event_name == 'push' && github.workflow_ref == 'antgroup/vsag/.github/workflows/main-ci.yml@refs/heads/main' }}
     needs:
       - entry-scope
       - changes
