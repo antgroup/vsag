@@ -494,6 +494,30 @@ TEST_CASE("(Daily) BruteForce GetDistance By ID Test", "[ft][BruteForce][daily]"
     TestBruteForceCalcDistanceById(resource);
 }
 
+TEST_CASE("(PR) BruteForce Batch CalcDistanceById Empty Ids", "[ft][bruteforce][pr]") {
+    // BruteForce does not override the batch CalDistanceById overloads, so this exercises the
+    // shared InnerIndexInterface fallback: an empty id list returns NumElements() == 1 /
+    // Dim() == 0 without allocating a distance buffer.
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    vsag::Options::Instance().set_block_size_limit(1024 * 1024 * 2);
+
+    constexpr int64_t dim = 32;
+    auto param =
+        fixtures::BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", dim, "fp32");
+    auto index = fixtures::TestIndex::TestFactory(fixtures::BruteForceTestIndex::name, param, true);
+    auto dataset = fixtures::BruteForceTestIndex::pool.GetDatasetAndCreate(dim, 100, "l2");
+    fixtures::TestIndex::TestBuildIndex(index, dataset, true);
+
+    const int64_t id = dataset->base_->GetIds()[0];
+    auto result = index->CalDistanceById(dataset->base_->GetFloat32Vectors(), &id, 0);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetNumElements() * result.value()->GetDim() == 0);
+    REQUIRE(result.value()->GetNumElements() == 1);
+    REQUIRE(result.value()->GetDim() == 0);
+
+    vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
 static void
 TestBruteForceDuplicateBuild(const fixtures::BruteForceResourcePtr& resource) {
     using namespace fixtures;

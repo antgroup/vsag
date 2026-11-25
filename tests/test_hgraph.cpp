@@ -1413,6 +1413,13 @@ TEST_CASE("(PR) HGraph CalcDistanceById Removed Label", "[ft][hgraph][pr]") {
     auto index = fixtures::TestIndex::TestFactory(fixtures::HGraphTestIndex::name, param, true);
     auto dataset = fixtures::HGraphTestIndex::pool.GetDatasetAndCreate(dim, 100, "l2");
     fixtures::TestIndex::TestCalcDistanceByIdRemovedLabel(index, dataset);
+    // An empty id list must keep the (NumElements, Dim) shape contract without allocating.
+    const int64_t empty_id = dataset->base_->GetIds()[0];
+    auto empty_result = index->CalDistanceById(dataset->base_->GetFloat32Vectors(), &empty_id, 0);
+    REQUIRE(empty_result.has_value());
+    REQUIRE(empty_result.value()->GetNumElements() * empty_result.value()->GetDim() == 0);
+    REQUIRE(empty_result.value()->GetNumElements() == 1);
+    REQUIRE(empty_result.value()->GetDim() == 0);
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
