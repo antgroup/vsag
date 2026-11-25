@@ -2242,16 +2242,17 @@ void PQFlashIndex<T, LabelT>::cal_distance_by_ids(const float *query, const int6
         valids->assign((size_t) count, false);
     }
 
-    std::vector<uint32_t> inner_ids((size_t) count, 0);
     std::vector<int64_t> found_positions;
     found_positions.reserve((size_t) count);
+    std::vector<uint32_t> found_inner_ids;
+    found_inner_ids.reserve((size_t) count);
     for (int64_t i = 0; i < count; ++i)
     {
         auto it = this->tag_to_id_map.find((LabelT)ids[i]);
         if (it != this->tag_to_id_map.end())
         {
-            inner_ids[(size_t) i] = it->second;
             found_positions.push_back(i);
+            found_inner_ids.push_back(it->second);
             if (valids != nullptr)
             {
                 (*valids)[(size_t) i] = true;
@@ -2270,11 +2271,6 @@ void PQFlashIndex<T, LabelT>::cal_distance_by_ids(const float *query, const int6
     }
 
     const uint64_t found_count = found_positions.size();
-    std::vector<uint32_t> found_inner_ids(found_count);
-    for (uint64_t k = 0; k < found_count; ++k)
-    {
-        found_inner_ids[k] = inner_ids[(size_t) found_positions[k]];
-    }
 
     std::shared_ptr<float[]> aligned_query_T = std::shared_ptr<float[]>(new float[this->data_dim]); // TODO: add support for other data type
 
@@ -2288,11 +2284,11 @@ void PQFlashIndex<T, LabelT>::cal_distance_by_ids(const float *query, const int6
     }
 
     pq_table.preprocess_query(aligned_query_T.get());
-    auto pq_dists = std::shared_ptr<float[]>(new float[NUM_CENTROID * this->n_chunks]);
-    pq_table.populate_chunk_distances(aligned_query_T.get(), pq_dists.get());
 
     if (not use_reorder)
     {
+        auto pq_dists = std::shared_ptr<float[]>(new float[NUM_CENTROID * this->n_chunks]);
+        pq_table.populate_chunk_distances(aligned_query_T.get(), pq_dists.get());
         std::shared_ptr<uint8_t[]> pq_coord_scratch(new uint8_t[found_count * this->n_chunks]);
         diskann::aggregate_coords(found_inner_ids, this->data, this->n_chunks, pq_coord_scratch.get());
         std::vector<float> found_distances(found_count);
