@@ -130,6 +130,7 @@ FP16 或 BF16 的单向量存储码占 `2 * dim` 字节，FP32 则占 `4 * dim` 
 | `graph_iter_turn` | int | — | ODescent 迭代轮数（`graph_type: "odescent"` 时生效） |
 | `neighbor_sample_rate` | float | — | ODescent 的邻居采样比率 |
 | `pipnn_incremental_add` | bool | `false` | 保存 PiPNN 分区及叶内状态，支持稠密 FP32 输入的增量 Add。 |
+| `pipnn_add_use_codes` | bool | `false` | 增量 PiPNN 使用已存储的编码估算路由、叶内近邻和剪枝距离。需开启 `pipnn_incremental_add`。 |
 | `pipnn_max_leaf_size` | int | `1024` | PiPNN 分区叶子的最大点数 |
 | `pipnn_min_leaf_size` | int | `64` | PiPNN 合并过小叶子时的目标规模 |
 | `pipnn_leader_sample_rate` | float | `0.005` | 分区 leader 的采样比率；每个分区使用 `2` 到 `1000` 个 leader，且不超过分区点数 |
@@ -188,9 +189,11 @@ PiPNN 支持 `dtype: "float32"`、`"float16"` 或 `"bfloat16"`，以及
 
 ### PiPNN 增量 Add
 
-在首次 Build 前设置 `graph_type: "pipnn"` 和 `pipnn_incremental_add: true`，默认仍使用普通 Add。增量模式接收稠密 FP32，分区路由、投影、叶内近邻、哈希筛选和图剪枝均读取原始行。Add 复用首次 Build 训练的查询量化器。SQ8 和普通 RaBitQ 使用底层码。RaBitQ split 同时指定基础位宽、补充位宽和 RaBitQ 精排。3-bit RaBitQ 配独立 SQ8 精排时，设置 `rabitq_bits_per_dim_base: 3`、`use_reorder: true`、`precise_quantization_type: "sq8"`，省略 `rabitq_bits_per_dim_precise`。
+在首次 Build 前设置 `graph_type: "pipnn"` 和 `pipnn_incremental_add: true`，默认仍使用普通 Add。默认距离模式接收稠密 FP32，分区路由、投影、叶内近邻、哈希筛选和图剪枝均读取原始行。Add 复用首次 Build 训练的查询量化器。SQ8 和普通 RaBitQ 使用底层码。RaBitQ split 同时指定基础位宽、补充位宽和 RaBitQ 精排。3-bit RaBitQ 配独立 SQ8 精排时，设置 `rabitq_bits_per_dim_base: 3`、`use_reorder: true`、`precise_quantization_type: "sq8"`，省略 `rabitq_bits_per_dim_precise`。
 
-Pyramid 以全局内部 ID 共享 FP32 行，平铺节点中的旧点也会保留原值。路径节点升级及根路由层可在重载后读取同一份数据。已有能精确还原原行的 FP32 存储时直接复用，否则额外保存每点 4 × 维度字节，100 万条 960 维向量合计 3.84 GB，另计查询码和图状态。文件流和 BinarySet 快照只保存一份共享行。增量模式不支持分块 streaming 写出。已有的普通快照（含分块格式）缺少增量状态时，加载后仍使用普通 Add。Pyramid 增量模式暂不支持重复向量跟踪。
+如需用量化码计算 Add 距离，在 Build 前设置 `pipnn_add_use_codes: true`，加载快照时使用相同配置。首次 Build 使用输入 FP32，并保存叶内 top-k 和哈希投影。Add 的新距离计算（含叶分裂和 RobustPrune）使用已存储的编码，RaBitQ 3+5 同时使用两段码。设置 `store_raw_vector: false` 可同时省去独立的原始向量存储。所选量化器须支持码与码之间的对称距离。Pyramid 按全局 ID 保存投影，重载后平铺节点升级时也能取回旧点投影。
+
+默认距离模式下，Pyramid 以全局内部 ID 共享 FP32 行，平铺节点中的旧点也会保留原值。路径节点升级及根路由层可在重载后读取同一份数据。已有能精确还原原行的 FP32 存储时直接复用，否则额外保存每点 4 × 维度字节，100 万条 960 维向量合计 3.84 GB，另计查询码和图状态。文件流和 BinarySet 快照只保存一份共享行。增量模式不支持分块 streaming 写出。已有的普通快照（含分块格式）缺少增量状态时，加载后仍使用普通 Add。Pyramid 增量模式暂不支持重复向量跟踪。
 
 ### PiPNN 动态 alpha 剪枝
 

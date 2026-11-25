@@ -52,6 +52,50 @@ read_route(StreamReader& r,
 }
 }  // namespace
 
+PiPNNLeafTopK::PiPNNLeafTopK(uint32_t rows, std::vector<PiPNNLocalNeighbor>&& packed)
+    : base_rows_(rows),
+      rows_(rows),
+      width_(rows ? packed.size() / rows : 0),
+      base_(std::move(packed)) {
+    CHECK_ARGUMENT(uint64_t{rows} * width_ == base_.size(), "bad PiPNN top-k shape");
+}
+
+void
+PiPNNLeafTopK::AppendRows(uint32_t count) {
+    const uint64_t end = uint64_t{rows_} + count;
+    CHECK_ARGUMENT(end <= UINT32_MAX, "too many PiPNN leaf rows");
+    const uint64_t needed = (end - base_rows_ + BLOCK_ROWS - 1) / BLOCK_ROWS;
+    while (width_ && blocks_.size() < needed) {
+        blocks_.emplace_back(std::make_unique<PiPNNLocalNeighbor[]>(uint64_t{BLOCK_ROWS} * width_));
+    }
+    rows_ = end;
+}
+
+uint64_t
+PiPNNLeafTopK::MemoryUsage() const {
+    return (base_.capacity() + blocks_.size() * uint64_t{BLOCK_ROWS} * width_) *
+               sizeof(PiPNNLocalNeighbor) +
+           blocks_.capacity() * sizeof(blocks_.front());
+}
+
+void
+PiPNNLeafTopK::Write(StreamWriter& writer) const {
+    // Keep the flat vector wire format, omitting unused slots in the final block.
+    StreamWriter::WriteObj(writer, uint64_t{rows_} * width_);
+    if (width_ == 0) {
+        return;
+    }
+    if (!base_.empty()) {
+        writer.Write(reinterpret_cast<const char*>(base_.data()),
+                     base_.size() * sizeof(base_.front()));
+    }
+    for (uint64_t row = base_rows_; row < rows_; row += BLOCK_ROWS) {
+        const auto count = std::min<uint64_t>(BLOCK_ROWS, rows_ - row) * width_;
+        writer.Write(reinterpret_cast<const char*>(Row(row).data()),
+                     count * sizeof(PiPNNLocalNeighbor));
+    }
+}
+
 void
 PiPNNFloatRows::Resize(uint64_t rows, uint64_t width, Allocator* allocator) {
     CHECK_ARGUMENT(
@@ -164,6 +208,20 @@ PiPNNIncrementalState::AppendIds(std::span<const uint32_t> incoming) {
     required_capacity_ = capacity;
 }
 
+void
+PiPNNIncrementalState::UpdateLeafDepths(const PiPNNRoute& route, uint64_t depth) {
+    if (!route.children.empty()) {
+        for (const auto& child : route.children) UpdateLeafDepths(child, depth + 1);
+    } else {
+        auto& leaf = leaves.at(route.leaf);
+        if (depth >= leaf.depth)
+            return;
+        leaf.depth = depth;
+        if (!leaf.replacement.children.empty() || leaf.replacement.leaf != UINT32_MAX)
+            UpdateLeafDepths(leaf.replacement, depth);
+    }
+}
+
 uint64_t
 PiPNNIncrementalState::MemoryUsage() const {
     const auto bytes = [](const auto& v) { return v.capacity() * sizeof(v.front()); };
@@ -177,12 +235,29 @@ PiPNNIncrementalState::MemoryUsage() const {
         projections.MemoryUsage() + norms.MemoryUsage() + bytes(row_pointers_) +
         sparse_ids_.bucket_count() * sizeof(void*) +
         sparse_ids_.size() * (sizeof(decltype(sparse_ids_)::value_type) + sizeof(void*)) +
-        bytes(memberships) + bytes(leaves) + tree(tree, root);
+        bytes(memberships) + bytes(leaves) + tree(tree, root) + bytes(root_leader_vectors);
     for (const auto& v : memberships) result += bytes(v);
     for (const auto& leaf : leaves)
-        result += bytes(leaf.points) + bytes(leaf.nearest) + tree(tree, leaf.replacement);
+        result += bytes(leaf.points) + leaf.nearest.MemoryUsage() + tree(tree, leaf.replacement);
     return result;
 }
+void
+PiPNNProjectionState::WriteSketches(StreamWriter& w) const {
+    StreamWriter::WriteVector(w, planes);
+    projections.Write(w);
+    norms.Write(w);
+}
+
+void
+PiPNNProjectionState::ReadSketches(
+    StreamReader& r, uint64_t count, uint64_t dim, uint64_t h, Allocator* allocator) {
+    CHECK_ARGUMENT(h && h <= UINT64_MAX / dim, "bad PiPNN plane dimensions");
+    read_array(r, planes, h * dim);
+    CHECK_ARGUMENT(planes.size() == h * dim, "bad PiPNN plane shape");
+    projections.Read(r, count, h, false, allocator);
+    norms.Read(r, count, 1, true, allocator);
+}
+
 void
 PiPNNIncrementalState::Serialize(StreamWriter& w, bool with_vectors) const {
     StreamWriter::WriteVector(w, ids);
@@ -192,14 +267,12 @@ PiPNNIncrementalState::Serialize(StreamWriter& w, bool with_vectors) const {
         if (!ids.empty())
             vectors_->WriteRecords(w, ids.size());
     }
-    StreamWriter::WriteVector(w, planes);
-    projections.Write(w);
-    norms.Write(w);
+    WriteSketches(w);
     StreamWriter::WriteObj(w, static_cast<uint64_t>(leaves.size()));
     write_route(w, root);
     for (auto& leaf : leaves) {
         StreamWriter::WriteVector(w, leaf.points);
-        StreamWriter::WriteVector(w, leaf.nearest);
+        leaf.nearest.Write(w);
         write_route(w, leaf.replacement);
     }
 }
@@ -211,6 +284,7 @@ PiPNNIncrementalState::Deserialize(StreamReader& r,
                                    uint64_t graph_capacity,
                                    Allocator* allocator,
                                    bool with_vectors) {
+    root_leader_vectors.clear();
     std::vector<uint32_t> loaded_ids;
     read_array(r, loaded_ids, std::min<uint64_t>(count, UINT32_MAX));
     ids.clear();
@@ -234,11 +308,7 @@ PiPNNIncrementalState::Deserialize(StreamReader& r,
         ReserveVectors(count, dim, allocator);
         vectors_->ReadRecords(r, count);
     }
-    CHECK_ARGUMENT(h && h <= UINT64_MAX / dim, "bad PiPNN plane dimensions");
-    read_array(r, planes, h * dim);
-    CHECK_ARGUMENT(planes.size() == h * dim, "bad PiPNN plane shape");
-    projections.Read(r, count, h, false, allocator);
-    norms.Read(r, count, 1, true, allocator);
+    ReadSketches(r, count, dim, h, allocator);
     uint64_t n;
     StreamReader::ReadObj(r, n);
     CHECK_ARGUMENT(n && n < UINT32_MAX, "bad PiPNN leaf count");
@@ -246,16 +316,19 @@ PiPNNIncrementalState::Deserialize(StreamReader& r,
     read_route(r, root, count, n, 0);
     memberships.assign(count, {});
     for (auto& leaf : leaves) {
+        leaf.depth = UINT64_MAX;
         read_array(r, leaf.points, count);
         const uint64_t m = leaf.points.size();
-        read_array(r, leaf.nearest, m * m);
-        CHECK_ARGUMENT(!m || leaf.nearest.size() % m == 0, "bad PiPNN top-k shape");
+        std::vector<PiPNNLocalNeighbor> packed;
+        read_array(r, packed, m * m);
         for (auto p : leaf.points) {
             CHECK_ARGUMENT(p < count, "bad cached point");
             memberships[p].push_back(&leaf - leaves.data());
         }
-        for (auto e : leaf.nearest) CHECK_ARGUMENT(e.target < count, "bad cached neighbor");
+        for (auto e : packed) CHECK_ARGUMENT(e.target < count, "bad cached neighbor");
+        leaf.nearest = PiPNNLeafTopK(m, std::move(packed));
         read_route(r, leaf.replacement, count, n, 0, 1 + (&leaf - leaves.data()), true);
     }
+    UpdateLeafDepths(root, 0);
 }
 }  // namespace vsag

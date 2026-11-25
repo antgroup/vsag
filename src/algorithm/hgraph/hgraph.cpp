@@ -124,6 +124,8 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
                             "HGraph deduplicate_storage only supports dense vectors");
     }
     if (this->graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
+        if (pipnn_param_.add_use_codes)
+            CHECK_ARGUMENT(!support_duplicate_, "coded PiPNN requires unique graph IDs");
         if (pipnn_param_.incremental_add) {
             CHECK_ARGUMENT(common_param.data_type_ == DataTypes::DATA_TYPE_FLOAT &&
                                !support_force_remove_ && !mci_parameters_.enabled &&
@@ -158,6 +160,8 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         this->high_precise_codes_ =
             FlattenInterface::MakeInstance(hgraph_param->precise_codes_param, common_param);
     }
+    pipnn_param_.ValidateAddDistanceCodes(
+        *(has_precise_reorder() && !build_by_base_ ? high_precise_codes_ : basic_flatten_codes_));
     this->searcher_ = std::make_shared<BasicSearcher>(common_param, neighbors_mutex_);
     this->mci_searcher_ = std::make_shared<MCISearcher>(common_param);
     this->hybrid_mci_searcher_ = std::make_shared<HybridMCISearcher>(common_param);

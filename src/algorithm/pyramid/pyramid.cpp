@@ -778,7 +778,15 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
                 rows.emplace_back(static_cast<const float*>(row));
             }
         }
-        if (pipnn_param_.incremental_add && !pipnn_exact_codes()) {
+        if (pipnn_param_.add_use_codes) {
+            PiPNNGraphBuilder(pipnn_param_,
+                              dim_,
+                              common_param_.metric_,
+                              allocator_,
+                              thread_pool_.get(),
+                              build_thread_count_)
+                .AppendProjections(pipnn_projections_, rows);
+        } else if (pipnn_param_.incremental_add && !pipnn_exact_codes()) {
             pipnn_exact_rows_.Resize(rows.size(), dim_, allocator_);
             for (size_t i = 0; i < rows.size(); ++i)
                 std::copy_n(rows[i], dim_, pipnn_exact_rows_.Row(i));
@@ -1441,6 +1449,10 @@ Pyramid::GetMemoryUsageDetail() const {
     }
     memory_usage["hierarchies"] = hierarchy_memory;
     memory_usage["root_route_graphs"] = route_memory;
+    if (pipnn_projections_.projections.Size())
+        memory_usage["pipnn_global_sketches"] =
+            pipnn_projections_.planes.capacity() * sizeof(float) +
+            pipnn_projections_.projections.MemoryUsage() + pipnn_projections_.norms.MemoryUsage();
     if (pipnn_exact_rows_.Size())
         memory_usage["pipnn_shared_fp32"] = pipnn_exact_rows_.MemoryUsage();
     for (const auto& [graph, state] : pipnn_graph_states_)
@@ -1495,8 +1507,11 @@ Pyramid::Serialize(StreamWriter& writer) const {
     // serialize footer (introduced since v0.15)
     JsonType basic_info;
     if (pipnn_param_.incremental_add) {
-        basic_info["pipnn_incremental_version"].SetInt(2);
-        if (!pipnn_exact_codes())
+        basic_info["pipnn_incremental_version"].SetInt(pipnn_param_.add_use_codes ? 3 : 2);
+        if (pipnn_param_.add_use_codes) {
+            if (cur_element_count_)
+                pipnn_projections_.WriteSketches(writer);
+        } else if (!pipnn_exact_codes())
             pipnn_exact_rows_.Write(writer);
         for (auto& graph : pipnn_graphs_in_path_order()) {
             auto it = pipnn_graph_states_.find(graph.get());
@@ -1943,9 +1958,23 @@ Pyramid::Deserialize(StreamReader& reader) {
 
     if (pipnn_param_.incremental_add && basic_info.Contains("pipnn_incremental_version")) {
         const auto version = basic_info["pipnn_incremental_version"].GetInt();
-        CHECK_ARGUMENT(version == 1 || version == 2, "unknown PiPNN state version");
+        CHECK_ARGUMENT(pipnn_param_.add_use_codes ? version == 3 : (version == 1 || version == 2),
+                       "PiPNN snapshot distance mode does not match index configuration");
         std::vector<uint8_t> recovered;
-        if (!pipnn_exact_codes()) {
+        if (version == 3) {
+            if (cur_element_count_) {
+                pipnn_projections_.ReadSketches(buffer_reader,
+                                                cur_element_count_,
+                                                dim_,
+                                                pipnn_param_.hash_plane_count,
+                                                allocator_);
+                CHECK_ARGUMENT(
+                    pipnn_projections_.norms.Size() ==
+                        (common_param_.metric_ == MetricType::METRIC_TYPE_IP ? 0
+                                                                             : cur_element_count_),
+                    "invalid PiPNN sketch norms");
+            }
+        } else if (!pipnn_exact_codes()) {
             if (version == 2)
                 pipnn_exact_rows_.Read(buffer_reader, cur_element_count_, dim_, false, allocator_);
             else {
@@ -2196,7 +2225,19 @@ Pyramid::insert_add_batch(const DatasetPtr& base, const AddBatch& batch) {
     // until every hierarchy has finished borrowing the rows, and never across Resize.
     std::vector<FlattenCodesLease> leases;
     std::vector<const float*> exact;
-    if (pipnn_param_.incremental_add) {
+    if (pipnn_param_.incremental_add && pipnn_param_.add_use_codes) {
+        std::vector<const float*> fresh;
+        for (auto i : batch.input_indices) fresh.push_back(base->GetFloat32Vectors() + i * dim_);
+        CHECK_ARGUMENT(pipnn_projections_.projections.Size() == batch.first_inner_id,
+                       "PiPNN projection IDs out of sequence");
+        PiPNNGraphBuilder(pipnn_param_,
+                          dim_,
+                          common_param_.metric_,
+                          allocator_,
+                          thread_pool_.get(),
+                          build_thread_count_)
+            .AppendProjections(pipnn_projections_, fresh);
+    } else if (pipnn_param_.incremental_add) {
         const auto first = batch.first_inner_id;
         const auto total = first + batch.input_indices.size();
         exact.reserve(total);
@@ -2298,7 +2339,15 @@ Pyramid::add_pipnn_to_hierarchy(Hierarchy& h,
         auto& state = pipnn_graph_states_[graph.get()];
         if (!state)
             state = std::make_shared<PiPNNIncrementalState>();
-        builder.UpdateFromSharedRows(graph, ids, exact, *state);
+        if (parameters.add_use_codes)
+            builder.UpdateWithCodes(graph,
+                                    ids,
+                                    Vector<const float*>(allocator_),
+                                    *state,
+                                    *(has_precise_reorder() ? precise_codes_ : base_codes_),
+                                    &pipnn_projections_);
+        else
+            builder.UpdateFromSharedRows(graph, ids, exact, *state);
     };
     for (auto& [node, ids] : groups) {
         std::unique_lock lock(node->mutex_);
@@ -2642,8 +2691,8 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
             inner_json[GRAPH_KEY][ODESCENT_PARAMETER_GRAPH_ITER_TURN].SetJson(value);
         } else if (key == ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE) {
             inner_json[GRAPH_KEY][ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE].SetJson(value);
-        } else if (key == "pipnn_incremental_add" or key == PIPNN_PARAMETER_MAX_LEAF_SIZE or
-                   key == PIPNN_PARAMETER_MIN_LEAF_SIZE or
+        } else if (key == "pipnn_incremental_add" or key == "pipnn_add_use_codes" or
+                   key == PIPNN_PARAMETER_MAX_LEAF_SIZE or key == PIPNN_PARAMETER_MIN_LEAF_SIZE or
                    key == PIPNN_PARAMETER_LEADER_SAMPLE_RATE or key == PIPNN_PARAMETER_FANOUT or
                    key == PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT or
                    key == PIPNN_PARAMETER_HASH_PLANE_COUNT or

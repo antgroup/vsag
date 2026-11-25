@@ -267,8 +267,8 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             inner_json[GRAPH_KEY][ODESCENT_PARAMETER_MIN_IN_DEGREE].SetJson(value);
         } else if (key == ODESCENT_PARAMETER_BUILD_BLOCK_SIZE) {
             inner_json[GRAPH_KEY][ODESCENT_PARAMETER_BUILD_BLOCK_SIZE].SetJson(value);
-        } else if (key == "pipnn_incremental_add" or key == PIPNN_PARAMETER_MAX_LEAF_SIZE or
-                   key == PIPNN_PARAMETER_MIN_LEAF_SIZE or
+        } else if (key == "pipnn_incremental_add" or key == "pipnn_add_use_codes" or
+                   key == PIPNN_PARAMETER_MAX_LEAF_SIZE or key == PIPNN_PARAMETER_MIN_LEAF_SIZE or
                    key == PIPNN_PARAMETER_LEADER_SAMPLE_RATE or key == PIPNN_PARAMETER_FANOUT or
                    key == PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT or
                    key == PIPNN_PARAMETER_HASH_PLANE_COUNT or

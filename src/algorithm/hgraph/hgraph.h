@@ -672,6 +672,10 @@ private:
     [[nodiscard]] bool
     need_temporary_sq8_build_data_for_add() const;
 
+    bool
+    try_write_pipnn_rabitq_codes(const Vector<InnerIdType>& ids,
+                                 const Vector<const float*>& vectors);
+
     void
     prepare_build_codes(const DatasetPtr& data, const Vector<AddRow>& rows);
 

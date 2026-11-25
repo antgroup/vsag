@@ -473,7 +473,7 @@ HGraph::Serialize(StreamWriter& writer) const {
     }
 
     if (pipnn_add_state_)
-        pipnn_add_state_->Serialize(writer);
+        pipnn_add_state_->Serialize(writer, !pipnn_param_.add_use_codes);
     // serialize footer (introduced since v0.15)
     auto jsonify_basic_info = this->serialize_basic_info();
     auto metadata = std::make_shared<Metadata>();
@@ -482,7 +482,7 @@ HGraph::Serialize(StreamWriter& writer) const {
         metadata->Set("duplicate_format_version", 1);
     }
     if (pipnn_add_state_)
-        metadata->Set("pipnn_incremental_version", 1);
+        metadata->Set("pipnn_incremental_version", pipnn_param_.add_use_codes ? 2 : 1);
     metadata->Set("has_conjugate_graph", this->use_conjugate_graph_);
     logger::debug(jsonify_basic_info.Dump());
 
@@ -612,8 +612,9 @@ HGraph::Serialize(SerializeWriter& writer, uint64_t chunk_size) const {
     }
 
     if (pipnn_add_state_)
-        serialize_whole("pipnn_incremental",
-                        [&]() { pipnn_add_state_->Serialize(chunked_writer); });
+        serialize_whole("pipnn_incremental", [&]() {
+            pipnn_add_state_->Serialize(chunked_writer, !pipnn_param_.add_use_codes);
+        });
     // footer: plaintext, outside any component/frame
     auto jsonify_basic_info = this->serialize_basic_info();
     auto metadata = std::make_shared<Metadata>();
@@ -622,7 +623,7 @@ HGraph::Serialize(SerializeWriter& writer, uint64_t chunk_size) const {
         metadata->Set("duplicate_format_version", 1);
     }
     if (pipnn_add_state_)
-        metadata->Set("pipnn_incremental_version", 1);
+        metadata->Set("pipnn_incremental_version", pipnn_param_.add_use_codes ? 2 : 1);
     metadata->Set("has_conjugate_graph", this->use_conjugate_graph_);
     // physical bytes before the footer (same coordinate as the layout
     // offsets); chunked readers take the truth from the layout instead, the
@@ -1256,15 +1257,17 @@ HGraph::Deserialize(StreamReader& reader) {
         }
         if (pipnn_param_.incremental_add &&
             metadata->Get("pipnn_incremental_version").IsNumberInteger()) {
-            CHECK_ARGUMENT(metadata->Get("pipnn_incremental_version").GetInt() == 1,
-                           "unknown PiPNN state version");
+            CHECK_ARGUMENT(metadata->Get("pipnn_incremental_version").GetInt() ==
+                               (pipnn_param_.add_use_codes ? 2 : 1),
+                           "PiPNN snapshot distance mode does not match index configuration");
             auto state = std::make_shared<PiPNNIncrementalState>();
             state->Deserialize(buffer_reader,
                                total_count_.load(),
                                dim_,
                                pipnn_param_.hash_plane_count,
                                bottom_graph_->MaxCapacity(),
-                               allocator_);
+                               allocator_,
+                               !pipnn_param_.add_use_codes);
             pipnn_add_state_ = std::move(state);
         }
         if (this->raw_vector_ != nullptr) {

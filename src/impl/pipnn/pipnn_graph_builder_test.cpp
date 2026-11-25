@@ -1731,7 +1731,7 @@ TEST_CASE("PiPNN Add keeps old FP32 rows in place and writes the version 1 paylo
 
         REQUIRE(state.leaves.size() == 1);
         const auto& leaf = state.leaves.front();
-        const auto k = leaf.nearest.size() / end;
+        const auto k = leaf.nearest.Width();
         for (uint32_t u = 0; u < end; ++u) {
             std::vector<std::tuple<float, uint32_t, uint32_t>> expected;
             for (uint32_t v = 0; v < end; ++v) {
@@ -1746,7 +1746,7 @@ TEST_CASE("PiPNN Add keeps old FP32 rows in place and writes the version 1 paylo
             }
             std::sort(expected.begin(), expected.end());
             for (uint32_t j = 0; j < k; ++j) {
-                const auto& actual = leaf.nearest[u * k + j];
+                const auto& actual = leaf.nearest.Row(u)[j];
                 REQUIRE(actual.target == std::get<2>(expected[j]));
                 REQUIRE(actual.distance == std::get<0>(expected[j]));
             }
@@ -1990,7 +1990,7 @@ TEST_CASE("PiPNN old and new leaf rows retain exact ranks across vector filter b
             }
             std::sort(expected.begin(), expected.end());
             for (uint32_t j = 0; j < p.leaf_neighbor_count; ++j) {
-                const auto& actual = leaf.nearest[i * p.leaf_neighbor_count + j];
+                const auto& actual = leaf.nearest.Row(i)[j];
                 REQUIRE(actual.distance == std::get<0>(expected[j]));
                 REQUIRE(state.ids[actual.target] == std::get<2>(expected[j]));
             }
@@ -2022,7 +2022,7 @@ TEST_CASE("PiPNN ordinary leaf Add keeps ranked rows across ties and width chang
         REQUIRE(state.leaves.size() == 1);
         const auto& leaf = state.leaves.front();
         const auto k = std::min<uint64_t>(end - 1, end < 7 ? 4 : p.leaf_neighbor_count);
-        REQUIRE(leaf.nearest.size() == end * k);
+        REQUIRE(leaf.nearest.Width() == k);
         for (uint32_t i = 0; i < end; ++i) {
             auto u = leaf.points[i];
             std::vector<std::tuple<float, uint32_t, uint32_t>> expected;
@@ -2037,7 +2037,7 @@ TEST_CASE("PiPNN ordinary leaf Add keeps ranked rows across ties and width chang
             }
             std::sort(expected.begin(), expected.end());
             for (uint32_t j = 0; j < k; ++j) {
-                const auto& actual = leaf.nearest[i * k + j];
+                const auto& actual = leaf.nearest.Row(i)[j];
                 REQUIRE(actual.distance == std::get<0>(expected[j]));
                 REQUIRE(physical.at(actual.target) == std::get<2>(expected[j]));
             }
@@ -2068,6 +2068,7 @@ TEST_CASE("PiPNN parallel Add preserves routes across overlapping and replaced l
     // Start with a terminal root. Subsequent Adds traverse its replacement
     // and deeper replacements, with singleton and uneven four-way batches.
     bool saw_overlapping_split_parents = false;
+    const float* cached_root = nullptr;
     for (const auto end : {20U, 139U, 140U, 663U, total}) {
         vsag::Vector<vsag::InnerIdType> ids(alloc);
         vsag::Vector<const float*> rows(alloc);
@@ -2078,6 +2079,10 @@ TEST_CASE("PiPNN parallel Add preserves routes across overlapping and replaced l
         const auto old_memberships = reference.memberships;
         serial.Update(reference_graph, ids, rows, reference);
         parallel.Update(actual_graph, ids, rows, actual);
+        if (cached_root)
+            REQUIRE(actual.root_leader_vectors.data() == cached_root);
+        if (!actual.root_leader_vectors.empty())
+            cached_root = actual.root_leader_vectors.data();
         for (const auto& hits : old_memberships) {
             const auto replaced = std::count_if(hits.begin(), hits.end(), [&](uint32_t leaf) {
                 return !actual.leaves.at(leaf).replacement.children.empty();
@@ -2090,6 +2095,17 @@ TEST_CASE("PiPNN parallel Add preserves routes across overlapping and replaced l
         actual.Serialize(wa);
         reference.Serialize(wb);
         REQUIRE(a.str() == b.str());
+        if (end == 663) {
+            REQUIRE(cached_root != nullptr);
+            vsag::IOStreamReader reader(a);
+            actual.Deserialize(
+                reader, end, dim, p.hash_plane_count, actual_graph->MaxCapacity(), alloc);
+            REQUIRE(actual.root_leader_vectors.empty());
+            cached_root = nullptr;
+            for (uint64_t leaf = 0; leaf < actual.leaves.size(); ++leaf) {
+                REQUIRE(actual.leaves[leaf].depth == reference.leaves[leaf].depth);
+            }
+        }
         vsag::Vector<vsag::InnerIdType> x(alloc), y(alloc);
         for (uint32_t i = 0; i < end; ++i) {
             actual_graph->GetNeighbors(i, x);
@@ -2102,4 +2118,97 @@ TEST_CASE("PiPNN parallel Add preserves routes across overlapping and replaced l
     REQUIRE(std::any_of(actual.memberships.begin(), actual.memberships.end(), [](const auto& hits) {
         return hits.size() > 1;
     }));
+}
+
+TEST_CASE("PiPNN Add groups both directions by local ID for singleton and bulk batches",
+          "[ut][pipnn][add]") {
+    constexpr uint32_t base = 1024, additions = 256, total = base + additions;
+    const auto physical = [](uint32_t local) { return 2 * (total - local) - 1; };
+    auto common = MakeCommonParam(2);
+    auto* alloc = common.allocator_.get();
+    auto graph = MakeGraph(common, 2 * total, 8);
+    auto pool = vsag::SafeThreadPool::FactoryDefaultThreadPool();
+    pool->SetPoolSize(4);
+    vsag::PiPNNGraphBuilderParameter p;
+    p.max_leaf_size = total;
+    p.min_leaf_size = 1;
+    p.leaf_neighbor_count = 1;
+    vsag::PiPNNGraphBuilder builder(p, 2, common.metric_, alloc, pool.get(), 4);
+    vsag::PiPNNIncrementalState state;
+    std::vector<std::array<float, 2>> values(total);
+    for (uint32_t i = 0; i < total; ++i) {
+        const auto group = i < base ? i / 2 : i - base;
+        const float x = 8 * (group % 32);
+        const float y = 8 * (group / 32);
+        values[i] = {x + (i >= base ? 0.25F : 2.0F * (i % 2)), y};
+    }
+    // Old points form isolated pairs. Each insertion lies strictly between the two
+    // members of a distinct pair, so no other old row should receive a candidate.
+    for (const uint32_t end : {base, base + 1, total}) {
+        vsag::Vector<vsag::InnerIdType> ids(alloc);
+        vsag::Vector<const float*> rows(alloc);
+        for (uint32_t i = state.ids.size(); i < end; ++i) {
+            ids.push_back(physical(i));
+            rows.push_back(values[i].data());
+        }
+        builder.Update(graph, ids, rows, state);
+        vsag::Vector<vsag::InnerIdType> neighbors(alloc);
+        for (uint32_t old = 0; old < base; ++old) {
+            graph->GetNeighbors(physical(old), neighbors);
+            const auto newcomer = base + old / 2;
+            if (newcomer < end) {
+                REQUIRE(std::find(neighbors.begin(), neighbors.end(), physical(newcomer)) !=
+                        neighbors.end());
+            } else {
+                REQUIRE(neighbors.size() == 1);
+                REQUIRE(neighbors.front() == physical(old ^ 1U));
+            }
+        }
+        for (uint32_t i = base; i < end; ++i) {
+            graph->GetNeighbors(physical(i), neighbors);
+            REQUIRE(std::find(neighbors.begin(), neighbors.end(), physical(2 * (i - base))) !=
+                    neighbors.end());
+        }
+    }
+}
+
+TEST_CASE("PiPNN leaf top-k append keeps existing rows in place and writes packed snapshots",
+          "[ut][pipnn][add]") {
+    constexpr uint32_t width = 3;
+    std::vector<vsag::PiPNNLocalNeighbor> flat;
+    for (uint32_t i = 0; i < 5 * width; ++i) {
+        flat.push_back({i, static_cast<float>(i)});
+    }
+    auto packed = flat;
+    vsag::PiPNNLeafTopK cache(5, std::move(packed));
+    std::vector<const vsag::PiPNNLocalNeighbor*> addresses;
+    for (uint32_t i = 0; i < 5; ++i) {
+        addresses.push_back(cache.Row(i).data());
+    }
+    for (const uint32_t batch : {1U, 2U, 11U, 1U}) {
+        const auto old = addresses.size();
+        cache.AppendRows(batch);
+        for (uint32_t i = 0; i < old; ++i) {
+            REQUIRE(cache.Row(i).data() == addresses[i]);
+        }
+        for (uint32_t i = old; i < old + batch; ++i) {
+            auto row = cache.Row(i);
+            addresses.push_back(row.data());
+            for (uint32_t j = 0; j < width; ++j) {
+                const auto id = i * width + j;
+                row[j] = {id, static_cast<float>(id)};
+                flat.push_back(row[j]);
+            }
+        }
+        // An incumbent in the original block and another in the first append block can change.
+        for (uint32_t i : {1U, 5U}) {
+            cache.Row(i)[1].distance += 0.5F;
+            flat[i * width + 1].distance += 0.5F;
+        }
+        std::stringstream actual, expected;
+        vsag::IOStreamWriter actual_writer(actual), expected_writer(expected);
+        cache.Write(actual_writer);
+        vsag::StreamWriter::WriteVector(expected_writer, flat);
+        REQUIRE(actual.str() == expected.str());
+    }
 }

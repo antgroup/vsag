@@ -30,11 +30,62 @@ struct PiPNNLocalNeighbor {
     float distance;
 };
 
+// Build and snapshot load supply one packed block. New members use small row-aligned
+// blocks, so updating a leaf never relocates existing rows of the same width.
+class PiPNNLeafTopK {
+public:
+    PiPNNLeafTopK() = default;
+    PiPNNLeafTopK(uint32_t rows, std::vector<PiPNNLocalNeighbor>&& packed);
+
+    uint32_t
+    Width() const {
+        return width_;
+    }
+    std::span<const PiPNNLocalNeighbor>
+    Row(uint32_t row) const {
+        return {row_data(*this, row), width_};
+    }
+    std::span<PiPNNLocalNeighbor>
+    Row(uint32_t row) {
+        return {row_data(*this, row), width_};
+    }
+    void
+    AppendRows(uint32_t count);
+    uint64_t
+    MemoryUsage() const;
+    void
+    Write(StreamWriter& writer) const;
+
+private:
+    // A leaf often receives only a few new members. Bound unused tail capacity to three rows.
+    static constexpr uint32_t BLOCK_ROWS = 4;
+    uint32_t base_rows_{0};
+    uint32_t rows_{0};
+    uint32_t width_{0};
+    std::vector<PiPNNLocalNeighbor> base_;
+    std::vector<std::unique_ptr<PiPNNLocalNeighbor[]>> blocks_;
+
+    template <typename Self>
+    static auto
+    row_data(Self& self, uint32_t row) -> decltype(self.base_.data()) {
+        if (self.width_ == 0) {
+            return nullptr;
+        }
+        if (row < self.base_rows_) {
+            return self.base_.data() + uint64_t{row} * self.width_;
+        }
+        const auto offset = row - self.base_rows_;
+        return self.blocks_[offset / BLOCK_ROWS].get() +
+               uint64_t{offset % BLOCK_ROWS} * self.width_;
+    }
+};
+
 struct PiPNNCachedLeaf {
     std::vector<uint32_t> points;
     // Row-major, sorted local top-k. Targets use pipeline-local point IDs.
-    std::vector<PiPNNLocalNeighbor> nearest;
-    PiPNNRoute replacement;  // set when this leaf has been split
+    PiPNNLeafTopK nearest;
+    uint64_t depth{UINT64_MAX};  // Minimum route depth across merged terminals.
+    PiPNNRoute replacement;      // set when this leaf has been split
 };
 
 // Fixed row blocks keep previous sketches at stable addresses during Add.
@@ -77,15 +128,31 @@ private:
     uint32_t mask_{0};
 };
 
-struct PiPNNIncrementalState {
+struct PiPNNProjectionState {
+    std::vector<float> planes;
+    PiPNNFloatRows projections;
+    PiPNNFloatRows norms;
+    void
+    WriteSketches(StreamWriter& writer) const;
+    void
+    ReadSketches(StreamReader& reader,
+                 uint64_t count,
+                 uint64_t dim,
+                 uint64_t planes_count,
+                 Allocator* allocator);
+};
+
+struct PiPNNIncrementalState : PiPNNProjectionState {
     PiPNNRoute root;
     std::vector<PiPNNCachedLeaf> leaves;
     // Derived from leaf membership, rebuilt on load.
     std::vector<std::vector<uint32_t>> memberships;
     std::vector<uint32_t> ids;
-    std::vector<float> planes;
-    PiPNNFloatRows projections;
-    PiPNNFloatRows norms;
+
+    // Derived on first use and omitted from snapshots.
+    std::vector<float> root_leader_vectors;
+    void
+    UpdateLeafDepths(const PiPNNRoute& route, uint64_t depth);
 
     PiPNNIncrementalState();
     ~PiPNNIncrementalState();
@@ -97,7 +164,7 @@ struct PiPNNIncrementalState {
     SetVector(uint32_t row, const float* vector);
     std::span<const float* const>
     Rows() const {
-        return {row_pointers_.data(), ids.size()};
+        return {row_pointers_.data(), vectors_ ? ids.size() : 0};
     }
     bool
     ContainsId(uint32_t id) const {

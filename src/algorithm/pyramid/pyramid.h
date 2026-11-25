@@ -161,6 +161,8 @@ public:
             precise_codes_ =
                 FlattenInterface::MakeInstance(pyramid_param->precise_codes_param, common_param);
         }
+        pipnn_param_.ValidateAddDistanceCodes(
+            *(has_precise_reorder() ? precise_codes_ : base_codes_));
         if (use_reorder_) {
             reorder_ = std::make_shared<FlattenReorder>(get_reorder_codes(), allocator_);
         }
@@ -699,6 +701,7 @@ private:
         pipnn_graph_states_;
     mutable std::mutex pipnn_add_mutex_;
     PiPNNFloatRows pipnn_exact_rows_;
+    PiPNNProjectionState pipnn_projections_;
     FlattenInterfacePtr
     pipnn_exact_codes() const;
     void

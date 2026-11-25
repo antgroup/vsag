@@ -77,6 +77,7 @@ auto result = index->KnnSearch(
 | `alpha` | float | `1.0` | 最终 robust pruning 的系数；PiPNN 要求有限且不小于 `1.0` |
 | `graph_type` | string | `"nsw"` | 构图算法：`nsw`、`odescent` 或 `pipnn` |
 | `pipnn_incremental_add` | bool | `false` | 保存 PiPNN 分区及叶内状态，支持稠密 FP32 输入的增量 Add。 |
+| `pipnn_add_use_codes` | bool | `false` | 增量 PiPNN 使用已存储的编码估算路由、叶内近邻和剪枝距离。需开启 `pipnn_incremental_add`。 |
 | `pipnn_max_leaf_size` | int | `1024` | 分区叶子的最大点数；越大候选覆盖可能越高，叶内距离计算也越多 |
 | `pipnn_min_leaf_size` | int | `64` | 合并过小叶子时使用的目标规模 |
 | `pipnn_leader_sample_rate` | float | `0.005` | 分区 leader 的采样比率；每个分区最少使用 `2` 个、最多 `1000` 个 leader，且不超过分区点数 |
@@ -198,7 +199,9 @@ PiPNN，并通过查询验证每一份生成的图。
 
 ### PiPNN 增量 Add
 
-在首次 Build 前设置 `graph_type: "pipnn"` 和 `pipnn_incremental_add: true`，默认仍使用普通 Add。增量模式接收稠密 FP32，分区路由、投影、叶内近邻、哈希筛选和图剪枝均读取原始行。Add 复用首次 Build 训练的查询量化器。SQ8 和普通 RaBitQ 使用底层码。RaBitQ split 同时指定基础位宽、补充位宽和 RaBitQ 精排。3-bit RaBitQ 配独立 SQ8 精排时，设置 `rabitq_bits_per_dim_base: 3`、`use_reorder: true`、`precise_quantization_type: "sq8"`，省略 `rabitq_bits_per_dim_precise`。
+在首次 Build 前设置 `graph_type: "pipnn"` 和 `pipnn_incremental_add: true`，默认仍使用普通 Add。默认距离模式接收稠密 FP32，分区路由、投影、叶内近邻、哈希筛选和图剪枝均读取原始行。Add 复用首次 Build 训练的查询量化器。SQ8 和普通 RaBitQ 使用底层码。RaBitQ split 同时指定基础位宽、补充位宽和 RaBitQ 精排。3-bit RaBitQ 配独立 SQ8 精排时，设置 `rabitq_bits_per_dim_base: 3`、`use_reorder: true`、`precise_quantization_type: "sq8"`，省略 `rabitq_bits_per_dim_precise`。
+
+如需用量化码计算 Add 距离，在 Build 前设置 `pipnn_add_use_codes: true`，加载快照时使用相同配置。首次 Build 使用输入 FP32，并保存叶内 top-k 和哈希投影。Add 的新距离计算（含叶分裂和 RobustPrune）使用已存储的编码，RaBitQ 3+5 同时使用两段码。设置 `store_raw_vector: false` 可同时省去独立的原始向量存储。所选量化器须支持码与码之间的对称距离。
 
 HGraph 的底图使用 PiPNN，上层使用 HGraph 的路由插入逻辑。支持存储去重的配置会将跨批的相同向量映射到同一物理码槽。增量模式暂不支持 fused RaBitQ 存储。
 
