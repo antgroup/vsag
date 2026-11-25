@@ -381,28 +381,14 @@ code_distances(FlattenInterface& codes,
                std::span<const InnerIdType> targets,
                float* output,
                std::optional<uint64_t> first_diagonal = std::nullopt) {
-    auto* accelerated = dynamic_cast<FlattenPairwiseDistanceInterface*>(&codes);
-    auto computer = accelerated ? accelerated->FactoryPairwiseDistanceComputer() : nullptr;
-    const uint64_t width = targets.size();
-    auto limit = [&](uint64_t row) { return first_diagonal ? *first_diagonal + row : width; };
-    if (!computer) {
-        for (uint64_t row = 0; row < sources.size(); ++row) {
-            if (limit(row))
-                codes.QueryById(output + row * width, sources[row], targets.data(), limit(row));
-        }
+    if (auto* tiled = dynamic_cast<const FlattenPairwiseDistanceInterface*>(&codes);
+        tiled && tiled->ComputePairwiseTile(sources, targets, output, first_diagonal)) {
         return;
     }
-    // Both axes fit in the split computer's 512-entry unpacked-code cache.
-    constexpr uint64_t tile = 128;
-    for (uint64_t rs = 0; rs < sources.size(); rs += tile) {
-        const auto re = std::min<uint64_t>(rs + tile, sources.size());
-        for (uint64_t col = 0; col < limit(re - 1); col += tile) {
-            for (uint64_t row = rs; row < re; ++row) {
-                const auto end = std::min(col + tile, limit(row));
-                for (uint64_t j = col; j < end; ++j)
-                    output[row * width + j] = computer->Compute(sources[row], targets[j]);
-            }
-        }
+    for (uint64_t row = 0; row < sources.size(); ++row) {
+        const auto end = first_diagonal ? *first_diagonal + row : targets.size();
+        if (end)
+            codes.QueryById(output + row * targets.size(), sources[row], targets.data(), end);
     }
 }
 

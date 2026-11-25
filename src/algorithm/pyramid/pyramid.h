@@ -700,6 +700,12 @@ private:
     std::unordered_map<const GraphInterface*, std::shared_ptr<PiPNNIncrementalState>>
         pipnn_graph_states_;
     mutable std::mutex pipnn_add_mutex_;
+    struct PiPNNRowView {
+        std::vector<const float*> rows;
+        std::vector<FlattenCodesLease> owned;  // buffers for rows spanning storage blocks
+    };
+    // Derived from the exact storage; invalidate before its addresses change.
+    PiPNNRowView pipnn_row_view_;
     PiPNNFloatRows pipnn_exact_rows_;
     PiPNNProjectionState pipnn_projections_;
     FlattenInterfacePtr

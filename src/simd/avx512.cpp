@@ -912,6 +912,25 @@ RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim) {
 #endif
 }
 
+#if defined(ENABLE_AVX512)
+uint64_t
+RaBitQUnpackEightBitPlanes(const uint8_t* const* planes, uint64_t dim, uint8_t* output) {
+    auto sums = _mm512_setzero_si512();
+    for (uint64_t d = 0; d < dim; d += 64) {
+        auto lanes = _mm512_setzero_si512();
+        for (uint32_t bit = 0; bit < 8; ++bit) {
+            uint64_t mask;
+            memcpy(&mask, planes[bit] + d / 8, sizeof(mask));
+            lanes =
+                _mm512_or_si512(lanes, _mm512_maskz_set1_epi8(mask, static_cast<char>(1U << bit)));
+        }
+        _mm512_storeu_si512(output + d, lanes);
+        sums = _mm512_add_epi64(sums, _mm512_sad_epu8(lanes, _mm512_setzero_si512()));
+    }
+    return static_cast<uint64_t>(_mm512_reduce_add_epi64(sums));
+}
+#endif
+
 uint64_t
 RaBitQCodeCodeIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim) {
 #if defined(ENABLE_AVX512)

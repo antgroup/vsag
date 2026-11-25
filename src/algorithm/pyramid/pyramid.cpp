@@ -1453,6 +1453,15 @@ Pyramid::GetMemoryUsageDetail() const {
         memory_usage["pipnn_global_sketches"] =
             pipnn_projections_.planes.capacity() * sizeof(float) +
             pipnn_projections_.projections.MemoryUsage() + pipnn_projections_.norms.MemoryUsage();
+    if (!pipnn_row_view_.rows.empty()) {
+        const auto& view = pipnn_row_view_;
+        memory_usage["pipnn_exact_row_view"] = view.rows.capacity() * sizeof(const float*) +
+                                               view.owned.capacity() * sizeof(FlattenCodesLease);
+        if (!view.owned.empty()) {
+            memory_usage["pipnn_exact_row_view"] +=
+                view.owned.size() * pipnn_exact_codes()->GetQuantizerCodeSize();
+        }
+    }
     if (pipnn_exact_rows_.Size())
         memory_usage["pipnn_shared_fp32"] = pipnn_exact_rows_.MemoryUsage();
     for (const auto& [graph, state] : pipnn_graph_states_)
@@ -1732,6 +1741,7 @@ Pyramid::load_streaming_body(StreamReader& reader,
 
 void
 Pyramid::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
+    pipnn_row_view_ = {};
     auto basic_info = metadata->Get(BASIC_INFO);
     auto max_capacity = basic_info["max_capacity"].GetInt();
     if (basic_info.Contains(INDEX_PARAM)) {
@@ -1892,6 +1902,7 @@ Pyramid::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) 
 
 void
 Pyramid::Deserialize(StreamReader& reader) {
+    pipnn_row_view_ = {};
     // try to deserialize footer (only in new version)
     JsonType basic_info;
     if (not read_index_footer(reader, basic_info)) {
@@ -2221,10 +2232,8 @@ Pyramid::insert_add_batch(const DatasetPtr& base, const AddBatch& batch) {
     const auto* data_vectors = get_data(base);
     if (batch.input_indices.empty())
         return;
-    // Leases can own a read buffer for file-backed or cross-block codes. Keep them alive
-    // until every hierarchy has finished borrowing the rows, and never across Resize.
-    std::vector<FlattenCodesLease> leases;
-    std::vector<const float*> exact;
+    PiPNNRowView temporary;
+    std::span<const float* const> exact;
     if (pipnn_param_.incremental_add && pipnn_param_.add_use_codes) {
         std::vector<const float*> fresh;
         for (auto i : batch.input_indices) fresh.push_back(base->GetFloat32Vectors() + i * dim_);
@@ -2240,25 +2249,36 @@ Pyramid::insert_add_batch(const DatasetPtr& base, const AddBatch& batch) {
     } else if (pipnn_param_.incremental_add) {
         const auto first = batch.first_inner_id;
         const auto total = first + batch.input_indices.size();
-        exact.reserve(total);
         auto codes = pipnn_exact_codes();
-        if (codes) {
-            leases.reserve(first);
-            for (InnerIdType id = 0; id < first; ++id) {
-                leases.push_back(codes->AcquireCodesById(id));
-                CHECK_ARGUMENT(leases.back(), "missing exact PiPNN code");
-                exact.push_back(reinterpret_cast<const float*>(leases.back().Data()));
-            }
-        } else {
+        if (!codes) {
             pipnn_exact_rows_.Resize(total, dim_, allocator_);
-            for (InnerIdType id = 0; id < first; ++id) exact.push_back(pipnn_exact_rows_.Row(id));
+            for (size_t offset = 0; offset < batch.input_indices.size(); ++offset) {
+                const auto* row = base->GetFloat32Vectors() + batch.input_indices[offset] * dim_;
+                std::copy_n(row, dim_, pipnn_exact_rows_.Row(first + offset));
+            }
         }
-        for (auto index : batch.input_indices) {
-            auto* row = base->GetFloat32Vectors() + index * dim_;
-            if (!codes)
-                std::copy_n(row, dim_, pipnn_exact_rows_.Row(exact.size()));
-            exact.push_back(row);
+        // Only in-memory rows survive this call. File reads keep their leases for this
+        // batch, and use the caller's FP32 input for the newly encoded IDs.
+        const bool persistent = !codes || codes->InMemory();
+        auto& view = persistent ? pipnn_row_view_ : temporary;
+        if (view.rows.empty())
+            view.rows.reserve(persistent ? max_capacity_ : total);
+        for (size_t id = view.rows.size(); id < total; ++id) {
+            if (!codes) {
+                view.rows.push_back(pipnn_exact_rows_.Row(id));
+            } else if (!persistent && id >= static_cast<size_t>(first)) {
+                const auto input = batch.input_indices[id - first];
+                view.rows.push_back(base->GetFloat32Vectors() + input * dim_);
+            } else {
+                auto lease = codes->AcquireCodesById(id);
+                CHECK_ARGUMENT(lease, "missing exact PiPNN code");
+                const auto* row = reinterpret_cast<const float*>(lease.Data());
+                if (lease.NeedsRelease())
+                    view.owned.emplace_back(std::move(lease));
+                view.rows.push_back(row);
+            }
         }
+        exact = view.rows;
     }
     for (const auto& [hname, h_ptr] : hierarchies_) {
         if (store_paths_ and not batch.input_indices.empty()) {
@@ -2410,6 +2430,7 @@ Pyramid::resize(int64_t new_max_capacity) {
     if (new_max_capacity <= max_capacity_) {
         return;
     }
+    pipnn_row_view_ = {};
     pool_ = std::make_unique<VisitedListPool>(1, allocator_, new_max_capacity, allocator_);
     label_table_->Reserve(new_max_capacity);
     base_codes_->Resize(new_max_capacity);

@@ -24,6 +24,11 @@ class FlattenCodeWriter {
 public:
     virtual ~FlattenCodeWriter() = default;
 
+    virtual bool
+    CanInsertEncodedRange() const {
+        return true;
+    }
+
     virtual void
     InsertEncodedRange(InnerIdType first, InnerIdType count, const uint8_t* codes) = 0;
 };

@@ -455,6 +455,9 @@ public:
         return this->unpack_scalar_code(codes, scalar_code);
     }
 
+    uint64_t
+    UnpackSplitScalarCode(const uint8_t* filter, const uint8_t* supplement, uint8_t* scalar) const;
+
     bool
     EncodeOneToScalarCode(const float* data, uint8_t* scalar_code, uint64_t& code_sum) const;
 
@@ -821,6 +824,11 @@ private:
                         uint8_t* codes,
                         uint8_t* scalar_code,
                         uint64_t* code_sum) const;
+
+    uint64_t
+    unpack_scalar_planes(const std::array<const uint8_t*, 8>& planes,
+                         const uint8_t* metadata,
+                         uint8_t* scalar) const;
 
     uint64_t
     unpack_scalar_code(const uint8_t* codes, uint8_t* scalar_code) const;

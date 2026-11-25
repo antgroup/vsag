@@ -21,6 +21,10 @@
 
 namespace vsag {
 
+using RaBitQUnpackEightBitPlanesType = uint64_t (*)(const uint8_t* const*, uint64_t, uint8_t*);
+// Null when the split scalar decoder should use its portable lookup-table path.
+extern RaBitQUnpackEightBitPlanesType RaBitQUnpackEightBitPlanes;
+
 namespace avx512vpopcntdq {
 
 uint32_t
@@ -41,6 +45,10 @@ RaBitQSQ4UBinaryIPWithBaseSumBatch4(const uint8_t* codes,
 }  // namespace avx512vpopcntdq
 
 namespace avx512 {
+// Expand complete 64-dimension blocks from eight LSB-first planes and sum their bytes.
+uint64_t
+RaBitQUnpackEightBitPlanes(const uint8_t* const* planes, uint64_t dim, uint8_t* output);
+
 float
 RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim);
 

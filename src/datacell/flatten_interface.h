@@ -85,6 +85,11 @@ public:
         return data_ != nullptr;
     }
 
+    [[nodiscard]] bool
+    NeedsRelease() const {
+        return needs_release_;
+    }
+
     [[nodiscard]] const uint8_t*
     Data() const {
         return data_;

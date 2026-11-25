@@ -701,7 +701,7 @@ HGraph::try_write_pipnn_rabitq_codes(const Vector<InnerIdType>& ids,
     size_t count = 0;
     auto add_store = [&](const FlattenInterfacePtr& cell) {
         auto* writer = dynamic_cast<FlattenCodeWriter*>(cell.get());
-        if (writer == nullptr)
+        if (writer == nullptr || !writer->CanInsertEncodedRange())
             return false;
         stores[count++] = {cell.get(), writer, cell->GetQuantizerCodeSize()};
         return true;
