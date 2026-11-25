@@ -100,6 +100,10 @@ def audit_wheel(wheel, run=None):
             raise ValueError("Expected a thin 64-bit Mach-O library")
         header = archive.read("pyvsag/_vsag_c_api.h").decode("utf-8")
         required_symbols = required_c_api_symbols(header)
+        eval_header = "pyvsag/_vsag_eval_c_api.h"
+        # Older wheels did not ship eval. When present, audit its ABI as well.
+        if eval_header in names or "pyvsag/eval/_native.py" in names:
+            required_symbols |= required_c_api_symbols(archive.read(eval_header).decode("utf-8"))
         with tempfile.TemporaryDirectory(prefix="vsag-wheel-audit-") as directory:
             library = Path(directory) / "libvsag_c.dylib"
             library.write_bytes(binary)

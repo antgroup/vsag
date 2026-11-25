@@ -16,12 +16,18 @@ SPEC.loader.exec_module(audit)
 
 class MacOSWheelAuditTest(unittest.TestCase):
     def check(self, *, extra=None, dependency="/usr/lib/libSystem.B.dylib", minos="15.0",
-              symbol="_vsag_init\n_vsag_destroy", license_expression=audit.LICENSE_EXPRESSION, omit_license=None, platform="1", magic="cffaedfe"):
+              symbol="_vsag_init\n_vsag_destroy", license_expression=audit.LICENSE_EXPRESSION, omit_license=None, platform="1", magic="cffaedfe",
+              include_eval=False, omit_eval_header=False):
         with tempfile.TemporaryDirectory() as directory:
             wheel = Path(directory) / "pyvsag-1.0-py3-none-macosx_15_0_arm64.whl"
             with zipfile.ZipFile(wheel, "w") as archive:
                 archive.writestr(audit.LIBRARY, bytes.fromhex(magic))
                 archive.writestr("pyvsag/_vsag_c_api.h", "/* vsag_comment_only(); */\nvoid vsag_init(void);\nvoid vsag_destroy(void);\n")
+                if include_eval:
+                    archive.writestr("pyvsag/eval/_native.py", "")
+                    if not omit_eval_header:
+                        archive.write(ROOT / "include/vsag/vsag_eval_c_api.h",
+                                      "pyvsag/_vsag_eval_c_api.h")
                 if extra:
                     archive.writestr(extra, bytes.fromhex("cffaedfe"))
                 metadata = "License-Expression: " + license_expression + "\n"
@@ -49,6 +55,16 @@ class MacOSWheelAuditTest(unittest.TestCase):
 
     def test_accepts_private_runtime_with_system_dependencies(self):
         self.assertIn("passed", self.check())
+
+    def test_eval_exports_match_the_packaged_header_exactly(self):
+        symbols = ("_vsag_init\n_vsag_destroy\n_vsag_eval_build\n_vsag_eval_search\n"
+                   "_vsag_eval_set_num_threads_building\n_vsag_string_destroy")
+        self.assertIn("exports=6", self.check(include_eval=True, symbol=symbols))
+        for exports in (symbols.replace("\n_vsag_eval_build", ""), symbols + "\n_vsag_eval_extra"):
+            with self.subTest(exports=exports), self.assertRaisesRegex(ValueError, "export mismatch"):
+                self.check(include_eval=True, symbol=exports)
+        with self.assertRaisesRegex(KeyError, "_vsag_eval_c_api.h"):
+            self.check(include_eval=True, omit_eval_header=True, symbol=symbols)
 
     def test_rejects_bundled_or_disguised_runtime(self):
         for member in ("pyvsag/.dylibs/libomp.dylib", "pyvsag/hidden-runtime.bin"):
