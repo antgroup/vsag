@@ -995,7 +995,9 @@ DatasetImpl::Append(const DatasetPtr& other) {
     // append contiguous arrays via realloc-and-copy
     APPEND_DATA(IDS, int64_t*, Ids, 1);
     APPEND_DATA(DISTS, float*, Distances, dim);
-    if (this->GetValids() != nullptr) {
+    // Appending zero elements must not drop the existing valids: allocate_and_copy returns
+    // nullptr for a zero count, which would clear the field and leak the old buffer.
+    if (this->GetValids() != nullptr and new_num_elements * dim > 0) {
         auto* valids = const_cast<bool*>(this->GetValids());
         this->Valids(allocate_and_copy(other->GetValids(),
                                        new_num_elements * dim,

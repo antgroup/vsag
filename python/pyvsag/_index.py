@@ -201,6 +201,8 @@ class Index:
         if code != lib.VSAG_SUCCESS:
             raise RuntimeError(_CREATE_ERRORS.get(code, "error type: unexpectedError"))
         self._handle = ffi.gc(out[0], lib.vsag_index_destroy)
+        self._name = name
+        self._parameters = parameters
         self._dtype = _parse_dtype(parameters)
         self._dim = self._get_dim() if self._dtype == "binary" else 0
         self._encoded_parameters = {}

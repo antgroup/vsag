@@ -232,11 +232,24 @@ vectors share one physical code slot while retaining their individual labels. Th
 supports dense-vector HGraph indexes using `graph_type: "nsw"` or `"pipnn"`;
 `graph_type: "odescent"` is not supported.
 
-For PiPNN, initial `Build` groups byte-identical FP32 input rows and encodes each
-representative once. All labels, attributes, and extra information remain independent.
-This also works with adaptive alpha. `duplicate_distance_threshold` does not affect
-PiPNN batch grouping; later incremental `Add` retains its existing threshold/code-based
-duplicate detection. Quantizer training still uses the original training sample.
+With `support_duplicate: true`, PiPNN initial `Build` groups byte-identical input rows.
+For L2 (`l2`), a positive `duplicate_distance_threshold` also groups near duplicates:
+a point joins the lowest-ID existing representative that shares a partition leaf and whose
+**squared** L2 distance is at most the threshold. Grouping is greedy and non-transitive:
+a group member cannot bring in another point that is outside the threshold of the
+representative. Points that never share a leaf may be missed. Zero threshold and non-L2
+metrics keep byte-identical grouping during initial `Build`.
+Incremental `Add` keeps its existing threshold/code rules, including distance-based
+matching for non-L2 metrics when a positive threshold is set.
+
+A positive L2 threshold adds a candidate scan before graph construction. Build time may
+increase, especially when many points share leaves and a wide threshold or low-variance
+first coordinate leaves many candidate pairs to check.
+
+Labels, attributes, and extra information remain independent. A near duplicate may be
+returned with its representative's distance, including at a range-search boundary.
+With storage deduplication, each representative is encoded once and the original codes
+of its members are not stored. Quantizer training still uses the original sample.
 
 The following operations and configurations are not supported while storage deduplication
 is enabled:

@@ -244,6 +244,7 @@ extern const char* const HGRAPH_MCI_SEED_COVERAGE;
 extern const char* const HGRAPH_MCI_SEED_MAX_COUNT;
 extern const char* const HGRAPH_MCI_MCS;
 extern const char* const HGRAPH_MCI_CLIQUE_MAX;
+extern const char* const HGRAPH_MCI_CLIQUE_ACTIVATION_ORDER;
 extern const char* const HGRAPH_MCI_ALPHA;
 extern const char* const HGRAPH_MCI_KNNG_SOURCE;
 extern const char* const HGRAPH_MCI_KNNG_SOURCE_HGRAPH;

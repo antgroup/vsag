@@ -443,7 +443,10 @@ public:
     /**
      * @brief Sets the per-entry validity flags of the dataset.
      *
-     * The array has one flag per entry of the Distances() array (NumElements() * Dim() entries).
+     * The array holds one flag per entry of the Distances() array, i.e. NumElements() * Dim()
+     * flags. Batch results always populate NumElements()/Dim(). In top-k mode Dim() is the
+     * truncated per-row count min(topk, count), so the array is shorter than the number of
+     * requested IDs.
      * It follows the same ownership rules as the other pointer-backed Dataset fields. It is used
      * by CalcDistancesById to mark which requested IDs existed at lookup time.
      *

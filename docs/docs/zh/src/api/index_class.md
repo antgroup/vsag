@@ -227,9 +227,11 @@ RangeSearch(const DatasetPtr& query, float radius, const std::string& parameters
 
 批量结果在返回的 `Dataset` 上带有逐项有效性标记：通过 `Dataset::Valids(const bool*)` 写入，
 通过 `const bool* Dataset::GetValids() const` 读取。标记为 `false` 表示该 ID 在查询时不存在或已删除，
-其距离为 `NaN`（`std::numeric_limits<float>::quiet_NaN()`）。`topk == -1` 时标记数量为
-`NumElements() * count`，与输入 ID 顺序对齐（多查询为 row-major）；`topk > 0` 时标记数量为
-`NumElements() * Dim()`，与输出顺序对齐。调用方必须使用该标记而不是距离值来判断 ID 是否缺失。
+其距离为 `NaN`（`std::numeric_limits<float>::quiet_NaN()`）。标记数量与
+`GetDistances()` 的条目数一致：`topk == -1` 时每个请求的 ID 一个标记，顺序与输入 ID 一致
+（多查询为 row-major）；`topk > 0` 时每个 query 行 `min(topk, count)` 个标记，与输出顺序对齐。
+批量结果总是填充 `NumElements()`/`Dim()`，因此标记数量始终为 `NumElements() * Dim()`。
+调用方必须使用该标记而不是距离值来判断 ID 是否缺失。
 
 ## 共轭图增强
 

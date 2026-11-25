@@ -15,14 +15,26 @@
 
 #pragma once
 
-#include "argparse/argparse.hpp"
-#include "eval_job.h"
-#include "yaml-cpp/yaml.h"
+#include <cstdint>
+#include <nlohmann/json.hpp>
+#include <string>
+
+namespace argparse {
+class ArgumentParser;
+}
+
+namespace YAML {
+class Node;
+}
 
 namespace vsag::eval {
 
+struct EvalJob;
+
 class EvalConfig {
 public:
+    // The loaders below are implemented in eval_config_loader.cpp, which needs argparse and
+    // yaml-cpp and is therefore not part of the dependency-free evaluation core.
     static EvalConfig
     Load(argparse::ArgumentParser& parser);
 
@@ -31,6 +43,12 @@ public:
 
     static void
     CheckKeyAndType(YAML::Node& yaml_node);
+
+    // Builds a config from a flat JSON object keyed by the field names below. Unknown keys and
+    // values of the wrong type raise std::invalid_argument. `build_param` and `search_param` may be
+    // given either as JSON strings or as JSON objects.
+    static EvalConfig
+    FromJson(const nlohmann::json& json);
 
 public:
     std::string dataset_path;

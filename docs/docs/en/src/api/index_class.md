@@ -233,10 +233,12 @@ quantized codes. See [Calculate Distance by ID](../advanced/calc_distance_by_id.
 Batch results carry a per-entry validity mask on the returned `Dataset`, written through
 `Dataset::Valids(const bool*)` and read through `const bool* Dataset::GetValids() const`. A `false`
 entry means the requested ID did not exist or had been removed at lookup time, and its distance is
-`NaN` (`std::numeric_limits<float>::quiet_NaN()`). With `topk == -1` the mask has
-`NumElements() * count` entries aligned with the input ID order (row-major for multi-query); with
-`topk > 0` it has `NumElements() * Dim()` entries aligned with the output order. Callers must use
-the mask rather than the distance value to detect missing IDs.
+`NaN` (`std::numeric_limits<float>::quiet_NaN()`). The mask has one entry per entry of
+`GetDistances()`: one flag per requested ID, in the input ID order (row-major for multi-query), with
+`topk == -1`; and `min(topk, count)` flags per query row, aligned with the output order, with
+`topk > 0`. Batch results always populate `NumElements()`/`Dim()`, so the mask length is always
+`NumElements() * Dim()`. Callers must use the mask rather than the
+distance value to detect missing IDs.
 
 ## Conjugate-graph enhancement
 

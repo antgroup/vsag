@@ -3164,6 +3164,18 @@ TEST_CASE("HGraph CalcDistancesById default topk returns shaped result", "[ft][h
     REQUIRE(result.value()->GetDim() == count);
 }
 
+TEST_CASE("(PR) HGraph CalcDistanceById reports removed labels", "[ft][hgraph][remove][pr]") {
+    using namespace fixtures;
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+    build_param.support_remove = true;
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 256, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    TestIndex::TestCalcDistanceByIdAfterRemove(index, dataset);
+}
+
 TEST_CASE("(PR) HGraph SearchWithRequest Reasoning", "[ft][hgraph][pr]") {
     using namespace fixtures;
 

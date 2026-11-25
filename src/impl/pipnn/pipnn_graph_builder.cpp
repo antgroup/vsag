@@ -151,6 +151,7 @@ id_gap(InnerIdType first, InnerIdType second) {
 template <typename Element>
 void
 group_duplicate_rows(const Vector<InnerIdType>& ids,
+                     const Vector<uint32_t>& order,
                      const Vector<const Element*>& rows,
                      uint64_t dimensions,
                      Allocator* allocator,
@@ -166,14 +167,15 @@ group_duplicate_rows(const Vector<InnerIdType>& ids,
     representative_ids.reserve(ids.size());
     representative_rows.reserve(rows.size());
     for (uint64_t local_id = 0; local_id < ids.size(); ++local_id) {
-        const auto key = std::string_view(reinterpret_cast<const char*>(rows[local_id]),
+        const auto input = order.empty() ? local_id : order[local_id];
+        const auto key = std::string_view(reinterpret_cast<const char*>(rows[input]),
                                           static_cast<std::size_t>(row_bytes));
-        const auto [it, inserted] = representatives.emplace(key, ids[local_id]);
+        const auto [it, inserted] = representatives.emplace(key, ids[input]);
         if (inserted) {
-            representative_ids.emplace_back(ids[local_id]);
-            representative_rows.emplace_back(rows[local_id]);
+            representative_ids.emplace_back(ids[input]);
+            representative_rows.emplace_back(rows[input]);
         } else {
-            duplicates.emplace_back(it.value(), ids[local_id]);
+            duplicates.emplace_back(it.value(), ids[input]);
         }
     }
 }
@@ -255,6 +257,8 @@ private:
     uint32_t point_;
 };
 
+using DuplicatePairs = Vector<std::pair<InnerIdType, InnerIdType>>;
+
 class PiPNNPipeline {
 public:
     PiPNNPipeline(const PiPNNGraphBuilderParameter& parameter,
@@ -324,7 +328,7 @@ public:
     }
 
     void
-    Build(const Vector<InnerIdType>& ids_sequence);
+    Build(const Vector<InnerIdType>& ids_sequence, DuplicatePairs* duplicates);
 
 private:
     void
@@ -379,6 +383,17 @@ private:
     void
     build_leaf(const Leaf& leaf);
 
+    void
+    group_near_duplicates(Leaves& leaves,
+                          DuplicatePairs& duplicates,
+                          Vector<uint32_t>& representatives) const;
+
+    [[nodiscard]] float
+    coordinate(uint32_t point, uint64_t dimension) const;
+
+    [[nodiscard]] bool
+    within_duplicate_threshold(uint32_t lhs, uint32_t rhs) const;
+
     template <MetricType metric, uint64_t fixed_k = 0>
     void
     build_small_leaf(const Leaf& leaf, UninitializedFloatBuffer& matrix, uint64_t requested_k);
@@ -408,7 +423,7 @@ private:
                  PruneScratch& scratch) const;
 
     void
-    write_graph();
+    write_graph(const Vector<uint32_t>& representatives);
 
     void
     seed_cached_row(uint32_t source);
@@ -497,7 +512,7 @@ private:
 };
 
 void
-PiPNNPipeline::Build(const Vector<InnerIdType>& ids_sequence) {
+PiPNNPipeline::Build(const Vector<InnerIdType>& ids_sequence, DuplicatePairs* duplicates) {
     using Clock = std::chrono::steady_clock;
     std::array<double, 6> phase_seconds{};
     auto start = Clock::now();
@@ -515,7 +530,11 @@ PiPNNPipeline::Build(const Vector<InnerIdType>& ids_sequence) {
     finish_phase(0);
     restore_cache();
     finish_phase(1);
-    const auto leaves = partition();
+    auto leaves = partition();
+    Vector<uint32_t> representatives(allocator_);
+    if (duplicates != nullptr) {
+        group_near_duplicates(leaves, *duplicates, representatives);
+    }
     finish_phase(2);
     parallel_for(leaves.size(), 1, [&](uint64_t begin, uint64_t end) {
         for (uint64_t leaf = begin; leaf < end; ++leaf) {
@@ -527,7 +546,7 @@ PiPNNPipeline::Build(const Vector<InnerIdType>& ids_sequence) {
         }
     });
     finish_phase(3);
-    write_graph();
+    write_graph(representatives);
     finish_phase(4);
     capture_cache();
     finish_phase(5);
@@ -1473,6 +1492,129 @@ PiPNNPipeline::merge_undersized_leaves(Leaves leaves) const {
     return merged;
 }
 
+float
+PiPNNPipeline::coordinate(uint32_t point, uint64_t dimension) const {
+    return native_half() ? pipnn_half::Decode(half_row(point)[dimension], half_format())
+                         : vector_by_local_id(point)[dimension];
+}
+
+bool
+PiPNNPipeline::within_duplicate_threshold(uint32_t lhs, uint32_t rhs) const {
+    const double threshold = parameter_.duplicate_distance_threshold;
+    double distance = 0.0;
+    for (uint64_t dimension = 0; dimension < dimensions_; ++dimension) {
+        const double diff =
+            static_cast<double>(coordinate(lhs, dimension)) - coordinate(rhs, dimension);
+        distance += diff * diff;
+        if (distance > threshold) {
+            return false;
+        }
+    }
+    return std::isfinite(distance) and distance <= threshold;
+}
+
+void
+PiPNNPipeline::group_near_duplicates(Leaves& leaves,
+                                     DuplicatePairs& duplicates,
+                                     Vector<uint32_t>& representatives) const {
+    // A one-coordinate range check is a necessary condition for squared L2.
+    // This avoids a second BLAS pass and cancellation in the norm-dot formula.
+    Vector<float> first(ids_.size(), allocator_);
+    Vector<uint64_t> offsets(ids_.size() + 1, 0, allocator_);
+    for (uint64_t point = 0; point < ids_.size(); ++point) {
+        first[point] = coordinate(static_cast<uint32_t>(point), 0);
+    }
+    // Overlapping partitions can contain more leaves than input points; check the
+    // bound explicitly before storing leaf indices in 32 bits.
+    require_argument(leaves.size() <= std::numeric_limits<uint32_t>::max(),
+                     "PiPNN duplicate detection has too many leaves");
+    for (auto& leaf : leaves) {
+        for (const auto point : leaf) {
+            if (std::isfinite(first[point])) {
+                ++offsets[static_cast<uint64_t>(point) + 1];
+            }
+        }
+    }
+    std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
+    Vector<uint32_t> memberships(offsets.back(), allocator_);
+    {
+        auto cursor = offsets;
+        for (uint64_t leaf_id = 0; leaf_id < leaves.size(); ++leaf_id) {
+            auto& leaf = leaves[leaf_id];
+            std::sort(leaf.begin(), leaf.end(), [&](uint32_t lhs, uint32_t rhs) {
+                const bool lhs_finite = std::isfinite(first[lhs]);
+                const bool rhs_finite = std::isfinite(first[rhs]);
+                if (lhs_finite != rhs_finite) {
+                    return lhs_finite;
+                }
+                if (lhs_finite and first[lhs] != first[rhs]) {
+                    return first[lhs] < first[rhs];
+                }
+                return lhs < rhs;
+            });
+            for (const auto point : leaf) {
+                if (not std::isfinite(first[point])) {
+                    break;
+                }
+                memberships[cursor[point]++] = static_cast<uint32_t>(leaf_id);
+            }
+        }
+    }
+    representatives.resize(ids_.size());
+    Vector<uint32_t> checked(ids_.size(), std::numeric_limits<uint32_t>::max(), allocator_);
+    const double threshold = parameter_.duplicate_distance_threshold;
+    // Greedily process graph IDs in ascending order. Pick the lowest-ID existing
+    // representative that shares a leaf and is within the threshold, or keep this point
+    // as a new representative. Members never act as candidates: in the 1--2--4 test
+    // chain, 2 joins 1 but cannot pull 4 into that group when 1 and 4 are too far apart.
+    for (uint64_t point = 0; point < ids_.size(); ++point) {
+        const auto source = static_cast<uint32_t>(point);
+        auto representative = source;
+        for (uint64_t pos = offsets[point]; pos < offsets[point + 1]; ++pos) {
+            const auto& index = leaves[memberships[pos]];
+            const auto begin = std::lower_bound(
+                index.begin(), index.end(), first[source], [&](uint32_t target, float center) {
+                    const double diff = static_cast<double>(first[target]) - center;
+                    return std::isfinite(first[target]) and diff < 0.0 and diff * diff > threshold;
+                });
+            for (auto it = begin; it != index.end(); ++it) {
+                const auto target = *it;
+                const double diff = static_cast<double>(first[target]) - first[source];
+                if (not std::isfinite(first[target]) or diff * diff > threshold) {
+                    break;
+                }
+                if (target < representative and representatives[target] == target and
+                    checked[target] != source) {
+                    checked[target] = source;
+                    if (within_duplicate_threshold(source, target)) {
+                        representative = target;
+                    }
+                }
+            }
+        }
+        representatives[source] = representative;
+        if (representative != source) {
+            duplicates.emplace_back(ids_[representative], ids_[source]);
+        }
+    }
+    // Retain the union of leaf memberships without consuming Top-K slots on members.
+    // Return the leaves to ID order before graph construction.
+    for (auto& leaf : leaves) {
+        if (not duplicates.empty()) {
+            for (auto& point : leaf) {
+                point = representatives[point];
+            }
+        }
+        std::sort(leaf.begin(), leaf.end());
+        if (not duplicates.empty()) {
+            leaf.erase(std::unique(leaf.begin(), leaf.end()), leaf.end());
+        }
+    }
+    if (duplicates.empty()) {
+        representatives.clear();
+    }
+}
+
 void
 PiPNNPipeline::build_leaf(const Leaf& leaf) {
     if (leaf.size() <= 1) {
@@ -2180,10 +2322,13 @@ PiPNNPipeline::write_graph_row(uint32_t source, PruneScratch& scratch) {
 }
 
 void
-PiPNNPipeline::write_graph() {
+PiPNNPipeline::write_graph(const Vector<uint32_t>& representatives) {
     parallel_for(ids_.size(), 64, [&](uint64_t begin, uint64_t end) {
         PruneScratch scratch(allocator_);
         for (uint64_t source = begin; source < end; ++source) {
+            if (not representatives.empty() and representatives[source] != source) {
+                continue;
+            }
             write_graph_row(static_cast<uint32_t>(source), scratch);
         }
     });
@@ -2399,7 +2544,8 @@ PiPNNGraphBuilder::build_typed(const GraphInterfacePtr& graph,
     parameter_.Validate(graph->MaximumDegree());
     const auto build_pipeline = [&](const Vector<InnerIdType>& ids,
                                     const Vector<const ElementType*>& input_rows,
-                                    bool use_cache) {
+                                    bool use_cache,
+                                    DuplicatePairs* near_duplicates) {
         if constexpr (std::is_same_v<ElementType, float>) {
             PiPNNPipeline pipeline(parameter_,
                                    dimensions_,
@@ -2412,7 +2558,7 @@ PiPNNGraphBuilder::build_typed(const GraphInterfacePtr& graph,
             if (use_cache) {
                 pipeline.ConfigureCache(source_ids, imported_cache, exported_cache);
             }
-            pipeline.Build(ids);
+            pipeline.Build(ids, near_duplicates);
         } else {
             PiPNNPipeline(parameter_,
                           dimensions_,
@@ -2423,11 +2569,11 @@ PiPNNGraphBuilder::build_typed(const GraphInterfacePtr& graph,
                           graph,
                           input_rows,
                           data_type)
-                .Build(ids);
+                .Build(ids, near_duplicates);
         }
     };
     if (graph->GetDuplicateTracker() == nullptr) {
-        build_pipeline(ids_sequence, rows, true);
+        build_pipeline(ids_sequence, rows, true, nullptr);
         return;
     }
 
@@ -2449,17 +2595,42 @@ PiPNNGraphBuilder::build_typed(const GraphInterfacePtr& graph,
     }
     Vector<InnerIdType> representative_ids(allocator_);
     Vector<const ElementType*> representative_rows(allocator_);
-    Vector<std::pair<InnerIdType, InnerIdType>> duplicates(allocator_);
+    DuplicatePairs duplicates(allocator_);
+    DuplicatePairs near_duplicates(allocator_);
+    const bool use_threshold =
+        metric_ == MetricType::METRIC_TYPE_L2SQR and parameter_.duplicate_distance_threshold > 0.0F;
+    Vector<uint32_t> order(allocator_);
+    if (use_threshold and not std::is_sorted(ids_sequence.begin(), ids_sequence.end())) {
+        order.resize(ids_sequence.size());
+        std::iota(order.begin(), order.end(), uint32_t{0});
+        std::sort(order.begin(), order.end(), [&](uint32_t lhs, uint32_t rhs) {
+            return ids_sequence[lhs] < ids_sequence[rhs];
+        });
+    }
     group_duplicate_rows(ids_sequence,
+                         order,
                          rows,
                          dimensions_,
                          allocator_,
                          representative_ids,
                          representative_rows,
                          duplicates);
-    build_pipeline(representative_ids, representative_rows, false);
-    for (const auto& [representative, duplicate] : duplicates) {
+    build_pipeline(
+        representative_ids, representative_rows, false, use_threshold ? &near_duplicates : nullptr);
+    UnorderedMap<InnerIdType, InnerIdType> final_representatives(allocator_);
+    if (not duplicates.empty() and not near_duplicates.empty()) {
+        final_representatives.reserve(near_duplicates.size());
+    }
+    for (const auto& [representative, duplicate] : near_duplicates) {
         graph->SetDuplicateId(representative, duplicate);
+        if (not duplicates.empty()) {
+            final_representatives.emplace(duplicate, representative);
+        }
+    }
+    for (const auto& [representative, duplicate] : duplicates) {
+        const auto it = final_representatives.find(representative);
+        graph->SetDuplicateId(it == final_representatives.end() ? representative : it.value(),
+                              duplicate);
     }
 }
 

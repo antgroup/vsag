@@ -15,9 +15,12 @@
 
 #pragma once
 
+#include <iostream>
+#include <memory>
+
 #include "../eval_config.h"
 #include "../eval_dataset.h"
-#include "../monitor/http_server_monitor.h"
+#include "../monitor/progress_listener.h"
 #include "nlohmann/json.hpp"
 #include "vsag/index.h"
 #include "vsag/logger.h"
@@ -47,9 +50,9 @@ public:
         std::cout << result.dump(4) << std::endl;
     }
 
-    // HTTP Monitor integration
+    // Progress listener integration (used by the HTTP monitor of the command-line tool)
     static void
-    SetHttpMonitor(HttpServerMonitor* monitor) {
+    SetHttpMonitor(ProgressListener* monitor) {
         http_monitor_ = monitor;
     }
 
@@ -82,7 +85,7 @@ public:
         }
     }
 
-    static HttpServerMonitor*
+    static ProgressListener*
     GetMonitor() {
         return http_monitor_;
     }
@@ -112,8 +115,8 @@ protected:
 
     JsonType basic_info_{};
 
-    // Static members for HTTP monitor
-    inline static HttpServerMonitor* http_monitor_ = nullptr;
+    // Static members for the progress listener
+    inline static ProgressListener* http_monitor_ = nullptr;
     inline static std::string current_case_name_{};
 };
 
