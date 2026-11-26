@@ -1,10 +1,12 @@
 """Supplemental selection/accounting is independent from mandatory Daily scope."""
 import copy
 import datetime as dt
+import io
 import json
 import os
 import signal
 import subprocess
+from contextlib import redirect_stdout
 from pathlib import Path
 import sys
 import tempfile
@@ -166,7 +168,7 @@ class ExtraTests(unittest.TestCase):
 
     def test_runner_reports_timeout_only_as_warning_and_preserves_mixed_failure(self):
         results = self.source_results()
-        index, _ = self.update_record(results, "rotation", status="timeout",
+        index, timeout_key = self.update_record(results, "rotation", status="timeout",
                                       timeout_scope="case", exit_code=-signal.SIGTERM, seconds=1800)
         plan = results[index]["plan"]
         parent = {k: v for k, v in plan.items() if k not in ("digest", "sharding")}
@@ -183,17 +185,23 @@ class ExtraTests(unittest.TestCase):
                     if mixed:
                         next(r for r in records.values() if r["status"] == "passed")["status"] = "failed"
                     out = root / str(mixed)
+                    lane = results[index]["lane"]
                     argv = ["daily_run.py", "--binary", str(binary), "--context", str(context),
-                            "--lane", results[index]["lane"], "--environment", plan["environment"],
+                            "--lane", lane, "--environment", plan["environment"],
                             "--profile", "functional", "--output", str(out),
                             "--shard-index", str(index), "--shard-count", "4"]
-                    with (patch.object(sys, "argv", argv),
+                    stdout = io.StringIO()
+                    with (redirect_stdout(stdout),
+                          patch.object(sys, "argv", argv),
                           patch.object(run, "inventory_units", return_value=([], [], {})),
                           patch.object(dp, "build_plan", return_value=parent),
                           patch.object(dp, "execution_deadline", return_value=None),
                           patch.object(signal, "signal"),
                           patch.object(run, "run_unit", side_effect=lambda unit, *args: records[unit["key"]])):
                         self.assertEqual(run.main(), int(mixed))
+                    self.assertEqual(stdout.getvalue().splitlines(), [
+                        f"::warning::Nightly rotation timed out in {lane}: {timeout_key}"
+                    ])
                     recorded = dp.load(out / "daily-result.json")
                     self.assertIn("timeout", [r["status"] for r in recorded["records"]])
 
