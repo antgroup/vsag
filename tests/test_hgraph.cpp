@@ -4169,6 +4169,21 @@ TEST_CASE("HGraph Duplicate filtered recall preserves slots for nearer labels",
     dataset->query_ = dataset->filter_query_;
     dataset->ground_truth_ = dataset->filter_ground_truth_;
     REQUIRE(dataset->CountDenseKnnHits(0, result, "l2", aliases, false) == 1);
+
+    // A strict filter can leave unused slots in the base-only oracle.
+    const float partial_top_k[] = {1, -1};
+    dataset->filter_ground_truth_->Distances(partial_top_k);
+    dataset->filter_function_ = [](int64_t id) { return id != 1; };
+    result->Dim(1);
+    REQUIRE(dataset->CountDenseKnnHits(0, result, "l2", aliases, true) == 1);
+
+    dataset->filter_function_ = [](int64_t id) { return id != 1 && id != 3; };
+    result->Dim(2);
+    REQUIRE(dataset->CountDenseKnnHits(0, result, "l2", aliases, true) == 2);
+
+    dataset->filter_function_ = [](int64_t) { return true; };
+    result->Dim(0);
+    REQUIRE(dataset->CountDenseKnnHits(0, result, "l2", aliases, true) == 0);
 }
 
 static void
@@ -4225,6 +4240,8 @@ RunHGraphDuplicateChecks(const fixtures::HGraphTestIndexPtr& test_index,
                         // TestIndex::TestKnnSearchIter(index, dataset, search_param, recall, true);
                         TestIndex::TestConcurrentKnnSearch(
                             index, dataset, search_param, recall, true, count_knn_hits);
+                        // Range checks use base-only radius ground truth. They can undercount
+                        // eligible appended aliases and need a separate radius-based oracle.
                         TestIndex::TestRangeSearch(index, dataset, search_param, recall, 10, true);
                         TestIndex::TestRangeSearch(
                             index, dataset, search_param, recall / 2.0, 5, true);

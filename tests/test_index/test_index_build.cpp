@@ -216,7 +216,9 @@ TestIndex::TestBuildDuplicateIndex(const IndexPtr& index,
                 ->Owner(false);
             auto result = index->Add(new_data);
             REQUIRE(result.has_value() == expect_success);
-            first_row_aliases.push_back(id);
+            if (result.has_value() && result.value().empty()) {
+                first_row_aliases.push_back(id);
+            }
         }
     }
     if (duplicate_pos != "prefix") {
