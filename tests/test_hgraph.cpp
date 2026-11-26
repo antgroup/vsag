@@ -31,6 +31,7 @@
 #include <tuple>
 #include <vector>
 
+#include "algorithm/hgraph/hgraph.h"
 #include "core/test_budget.h"
 #include "framework/daily_test_plan.h"
 #include "framework/test_budget_context.h"
@@ -267,8 +268,9 @@ HGraphDailyGroups(const HGraphResourcePtr& resource, bool include_execution_part
     const auto title = HGraphCaseTitle(resource->identity);
     const bool disk_io = title == "HGraph Disk IO Type Index";
     const bool split_execution =
-        include_execution_parts && (title == "HGraph Reader IO" || title == "HGraph Duplicate" ||
-                                    title == "HGraph Multi-Query Knn Search");
+        include_execution_parts &&
+        (title == "HGraph Reader IO" || title == "HGraph Duplicate" ||
+         title == "HGraph Multi-Query Knn Search" || title == "HGraph Support Get Raw Vector");
     for (const auto& metric : resource->metric_types) {
         for (const auto dim : resource->dims) {
             nlohmann::json group = {{"metric", metric},
@@ -436,7 +438,8 @@ BoundDailyCoverage(const HGraphResourcePtr& resource, bool coverage) {
     const auto title = HGraphCaseTitle(resource->identity);
     if (!coverage || !resource->sample || resource->identity.name != "(PR) " + title ||
         (title != "HGraph Duplicate Build" && title != "HGraph Export Model" &&
-         title != "HGraph Search Over Time" &&
+         title != "HGraph Search Over Time" && title != "HGraph Mark Remove" &&
+         title != "HGraph Reverse Edges" &&
          title != "HGraph Estimate Memory And Get Memory Usage")) {
         return;
     }
@@ -605,9 +608,8 @@ ApplyHGraphBudget(const HGraphResourcePtr& resource, bool daily_coverage = false
                         work.train_num = 2 * count;
                         work.update_num = count;
                     } else if (title == "HGraph Reverse Edges") {
-                        work.build_runs = 2;
-                        work.train_runs *= 2;  // Each branch builds an independent index.
-                        work.search_runs = 3;
+                        // Reuse the pre-serialization index for the round-trip check.
+                        work.search_runs = 2;
                         work.serialize_runs = 1;
                     } else if (title == "HGraph Export Model" || title == "HGraph Clone" ||
                                title == "HGraph Merge") {
@@ -679,6 +681,8 @@ TEST_CASE("Daily coverage bounds only expensive HGraph functional workloads",
                                 "HGraph Export Model",
                                 "HGraph Search Over Time",
                                 "HGraph Estimate Memory And Get Memory Usage",
+                                "HGraph Mark Remove",
+                                "HGraph Reverse Edges",
                                 "HGraph Concurrent Add",
                                 "HGraph Build Test");
     const bool enabled = GENERATE(false, true);
@@ -695,6 +699,8 @@ TEST_CASE("Daily coverage bounds only expensive HGraph functional workloads",
                          (std::string(title) == "HGraph Duplicate Build" ||
                           std::string(title) == "HGraph Export Model" ||
                           std::string(title) == "HGraph Search Over Time" ||
+                          std::string(title) == "HGraph Mark Remove" ||
+                          std::string(title) == "HGraph Reverse Edges" ||
                           std::string(title) == "HGraph Estimate Memory And Get Memory Usage");
     BoundDailyCoverage(resource, enabled);
     REQUIRE(resource->base_count == (bounded ? 256 : 600));
@@ -1769,6 +1775,34 @@ TEST_CASE("HGraph Daily quantizer splitting preserves the complete tuple invento
     }
 }
 
+TEST_CASE("HGraph Daily Raw Vector preserves each fixed quantizer as an execution part",
+          "[ft][hgraph][test_budget][daily_plan][pr]") {
+    using namespace fixtures;
+    const auto whole = HGraphTestIndex::GetResource(
+        false, {"(Daily) HGraph Support Get Raw Vector", "", __FILE__, 0}, false);
+    const std::vector<std::pair<std::string, float>> quantizers = {
+        {"fp32", 0.99F}, {"sq8", 0.99F}, {"sq4_uniform,fp32", 0.95F}};
+    REQUIRE(whole->test_cases == quantizers);
+    const auto parents = HGraphDailyGroups(whole);
+    const auto inventory = HGraphDailyGroups(whole, true);
+    REQUIRE(inventory.size() == parents.size());
+    for (uint64_t i = 0; i < inventory.size(); ++i) {
+        auto parent = inventory.at(i);
+        const auto parts = parent.at("execution_parts");
+        parent.erase("execution_parts");
+        REQUIRE(parent == parents.at(i));
+        REQUIRE(parts.size() == quantizers.size());
+        for (uint64_t j = 0; j < parts.size(); ++j) {
+            auto selected = std::make_shared<HGraphTestResource>(*whole);
+            SelectHGraphDailyGroup(selected, parts.at(j));
+            REQUIRE(selected->test_cases ==
+                    std::vector<std::pair<std::string, float>>{quantizers.at(j)});
+            REQUIRE(selected->base_count == whole->base_count);
+            REQUIRE(selected->query_count == whole->query_count);
+        }
+    }
+}
+
 TEST_CASE("HGraph Daily disk IO splitting preserves the original backend sequence",
           "[ft][hgraph][test_budget][daily_plan][pr]") {
     using namespace fixtures;
@@ -1974,7 +2008,8 @@ TEST_CASE("HGraph budget respects partial PQ training and independent memory bui
             const bool needs_training = std::string(quantizer).rfind("pq", 0) == 0;
             const auto& training = planned->budget_plan->Runs().front().workload;
             REQUIRE(training.train_num == (duplicate ? 2 : 1) * planned->base_count);
-            REQUIRE(training.train_runs == (needs_training ? (duplicate ? 1 : 2) : 0));
+            REQUIRE(training.build_runs == (duplicate ? 2 : 1));
+            REQUIRE(training.train_runs == (needs_training ? 1 : 0));
             REQUIRE(training.repetitions == (duplicate ? 2 : 1));
             REQUIRE(planned->budget_plan->Runs()[1].workload.train_runs == 0);
             REQUIRE(planned->budget_plan->TotalCost().Total() <= planned->budget_plan->Cap());
@@ -3577,12 +3612,10 @@ static void
 TestHGraphGetRawVector(const fixtures::HGraphTestIndexPtr& test_index,
                        const fixtures::HGraphResourcePtr& resource) {
     using namespace fixtures;
-    const std::vector<std::pair<std::string, float>> test_cases = {
-        {"fp32", 0.99}, {"sq8", 0.99}, {"sq4_uniform,fp32", 0.95}};
     auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
     ForEachHGraphCase(
         resource,
-        test_cases,
+        resource->test_cases,
         [&](const auto& metric_type, int64_t dim, const auto& base_quantization_str, float recall) {
             RunWithGeneratedBlockSizeLimit([&] {
                 HGraphTestIndex::HGraphBuildParam build_param(
@@ -5496,58 +5529,38 @@ TestHGraphReverseEdges(const fixtures::HGraphTestIndexPtr& test_index,
                     metric_type, dim, base_quantization_str);
                 build_param.thread_count = 1;
                 build_param.graph_type = resource->graph_type;
-                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+                auto param_json = vsag::JsonType::Parse(
+                    HGraphTestIndex::GenerateHGraphBuildParametersString(build_param));
+                auto index_param = param_json["index_param"];
+                index_param[vsag::HGRAPH_USE_REVERSE_EDGES].SetBool(true);
+                const auto mapped = vsag::HGraph::map_hgraph_param(index_param);
+                REQUIRE(mapped[vsag::GRAPH_KEY][vsag::HGRAPH_USE_REVERSE_EDGES_KEY].GetBool());
+                const auto param = param_json.Dump();
+                REQUIRE(vsag::JsonType::Parse(param)["index_param"][vsag::HGRAPH_USE_REVERSE_EDGES]
+                            .GetBool());
 
+                auto index = TestIndex::TestFactory(test_index->name, param, true);
+                auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
+                    dim, resource->base_count, metric_type);
+                // #3435: Serialize the same graph after checking its pre-round-trip recall.
+                TestIndex::TestBuildIndex(index, dataset, true);
+                TestIndex::TestKnnSearch(index, dataset, search_param, recall, true);
+
+                fixtures::TempDir dir("hgraph_reverse_edge");
+                const auto path = dir.GenerateRandomFile();
                 {
-                    INFO("Build with use_reverse_edges enabled");
-                    auto param_with_reverse = param;
-                    uint64_t pos =
-                        static_cast<uint64_t>(param_with_reverse.find("\"index_param\": {{"));
-                    if (pos != static_cast<uint64_t>(std::string::npos)) {
-                        param_with_reverse.insert(static_cast<size_t>(pos) + 17,
-                                                  "\"use_reverse_edges\": true, ");
-                    }
-
-                    auto index = TestIndex::TestFactory(test_index->name, param_with_reverse, true);
-                    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
-                        dim, resource->base_count, metric_type);
-
-                    TestIndex::TestBuildIndex(index, dataset, true);
-                    TestIndex::TestKnnSearch(index, dataset, search_param, recall, true);
-                }
-
-                {
-                    INFO("Serialize and Deserialize with reverse edges");
-                    auto param_with_reverse = param;
-                    uint64_t pos =
-                        static_cast<uint64_t>(param_with_reverse.find("\"index_param\": {{"));
-                    if (pos != static_cast<uint64_t>(std::string::npos)) {
-                        param_with_reverse.insert(static_cast<size_t>(pos) + 17,
-                                                  "\"use_reverse_edges\": true, ");
-                    }
-
-                    auto index = TestIndex::TestFactory(test_index->name, param_with_reverse, true);
-                    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
-                        dim, resource->base_count, metric_type);
-
-                    TestIndex::TestBuildIndex(index, dataset, true);
-
-                    fixtures::TempDir dir("hgraph_reverse_edge");
-                    std::string path = dir.GenerateRandomFile();
-
+                    fixtures::daily::Phase serialize_phase("Serialize");
                     std::ofstream out_file(path, std::ios::binary);
-                    index->Serialize(out_file);
-                    out_file.close();
-
-                    std::ifstream in_file(path, std::ios::binary);
-                    auto deserialized_index =
-                        TestIndex::TestFactory(test_index->name, param_with_reverse, true);
-                    deserialized_index->Deserialize(in_file);
-                    in_file.close();
-
-                    TestIndex::TestKnnSearch(
-                        deserialized_index, dataset, search_param, recall, true);
+                    REQUIRE(index->Serialize(out_file).has_value());
                 }
+
+                auto deserialized_index = TestIndex::TestFactory(test_index->name, param, true);
+                {
+                    fixtures::daily::Phase deserialize_phase("Deserialize");
+                    std::ifstream in_file(path, std::ios::binary);
+                    REQUIRE(deserialized_index->Deserialize(in_file).has_value());
+                }
+                TestIndex::TestKnnSearch(deserialized_index, dataset, search_param, recall, true);
             }
         }
     }

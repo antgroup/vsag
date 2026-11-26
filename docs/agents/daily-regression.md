@@ -55,7 +55,7 @@ all shard indices exactly once. A failed shard does not cancel its siblings.
 ARM uses one shared OpenBLAS build for tests and examples. Its former duplicate
 build/core lane and artifact-overwriting cleanup are removed. x86's bundled-OpenBLAS
 source build and MKL build remain separate because they validate different backends.
-Coverage case names and thresholds remain unchanged; four expensive HGraph functional cases use a smaller, explicitly bounded Coverage dataset as described below.
+Coverage case names and thresholds remain unchanged; six expensive HGraph functional cases use a smaller, explicitly bounded Coverage dataset as described below.
 
 macOS ASan restores the same compiler cache in Branch CI and Nightly. Only
 Branch CI on pushes to the upstream main branch can publish, once per cache
@@ -295,6 +295,8 @@ for GCC/Clang. Aliases select the same value and collisions fail closed.
 
 Daily configuration groups split Build, Reverse Edges, ODescent Build, Serialize File, Multi-Query Range, With Extra Info, Compressed Graph Build and concurrent Add/Search/Remove by quantizer. Disk groups select one legal quantizer/backend tuple while retaining its original graph-IO cursor. The seven-day union preserves the effective combinations and assertions. Extra Info retains its original dataset sizes; splitting only isolates quantizers. The 1,800-second per-configuration timeout remains unchanged; logical cost estimates are not measured runtime guarantees.
 
+Daily Reverse Edges enables reverse edges in the build parameters, checks recall, and serializes that single built graph. A separately loaded index checks recall again. Support Get Raw Vector retains its metric/dimension groups for weekly selection, then runs each of its three fixed quantizers with a separate 30-minute limit.
+
 Daily Tune restores a verified snapshot of the original built index for the separate disable-future-tuning check, avoiding a second identical build. Ordinary PR/Branch invocations retain the original setup. All Tune, restored-index and general-contract assertions remain enabled.
 
 Each executed configuration writes `phases.jsonl` beside `report.xml` and `result.json`. Phase events include operation, start/end, timestamp and relevant quantizer/backend details; completed phases include elapsed seconds. The sidecar is flushed independently of Catch2 capture, so a timeout can retain progress even when XML is incomplete. `result.json` records `active_phases`, `last_phase_event` and any malformed-tail diagnostic. The last entered operation narrows investigation but does not by itself prove a deadlock.
@@ -356,7 +358,7 @@ streamed samples. Exit 137 alone is not proof of an OOM kill.
 ### Coverage-specific workload bound
 
 `VSAG_DAILY_COVERAGE=1` caps the original PR variants of HGraph Duplicate Build,
-Export Model, Search Over Time, and Estimate Memory And Get Memory Usage at
+Export Model, Search Over Time, Mark Remove, Reverse Edges, and Estimate Memory And Get Memory Usage at
 **256 rows after fixed-workload normalization and before cost-budget selection**.
 Coverage's `-O0` and atomic counters amplify the repeated distance/pruning work;
 these functional contracts do not require large-data stress. The bound preserves
