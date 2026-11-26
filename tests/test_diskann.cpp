@@ -16,6 +16,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <cmath>
 #include <fstream>
 #include <iostream>
 #include <nlohmann/json.hpp>
@@ -93,7 +94,7 @@ TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "diskann build test", "[ft][index][
 
 TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "diskann cal distance by id", "[ft][index][diskann]") {
     auto dims = fixtures::get_common_used_dims(3);
-    auto metric_type = GENERATE("l2", "ip");
+    auto metric_type = GENERATE("l2", "ip", "cosine");
     const std::string name = "diskann";
     constexpr auto search_param_template = R"(
         {{
@@ -143,6 +144,131 @@ TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "diskann cal distance by id", "[ft]
         }
         REQUIRE(index->GetIndexType() == vsag::IndexType::DISKANN);
     }
+}
+
+TEST_CASE_METHOD(fixtures::DiskANNTestIndex,
+                 "diskann cal distance by id with missing ids",
+                 "[ft][diskann][pr]") {
+    constexpr int64_t dim = 128;
+    constexpr uint64_t count = 200;
+    const std::string name = "diskann";
+    const std::string metric_type = "l2";
+    auto param = GenerateDiskANNBuildParametersString(metric_type, dim, false, true);
+    auto dataset = pool.GetDatasetAndCreate(dim, count, metric_type);
+
+    SECTION("not-built index reports every id as missing") {
+        auto index = TestFactory(name, param, true);
+        REQUIRE(index->CheckFeature(vsag::SUPPORT_CAL_DISTANCE_BY_ID));
+        auto* query = dataset->query_->GetFloat32Vectors();
+        auto single = index->CalcDistanceById(query, 16, true);
+        REQUIRE_FALSE(single.has_value());
+        REQUIRE(single.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+        int64_t ids[2] = {16, 17};
+        auto batch = index->CalDistanceById(query, ids, 2, true);
+        REQUIRE(batch.has_value());
+        const auto* valids = batch.value()->GetValids();
+        REQUIRE(valids != nullptr);
+        for (int64_t i = 0; i < 2; ++i) {
+            REQUIRE(std::isnan(batch.value()->GetDistances()[i]));
+            REQUIRE_FALSE(valids[i]);
+        }
+        auto negative_count = index->CalDistanceById(query, ids, -1, true);
+        REQUIRE_FALSE(negative_count.has_value());
+        REQUIRE(negative_count.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    }
+
+    SECTION("built index follows the missing-id contract") {
+        auto index = TestFactory(name, param, true);
+        TestBuildIndex(index, dataset, true);
+        REQUIRE(index->CheckFeature(vsag::SUPPORT_CAL_DISTANCE_BY_ID));
+        auto* query = dataset->query_->GetFloat32Vectors();
+        const auto* gt_ids = dataset->ground_truth_->GetIds();
+        int64_t valid_a = gt_ids[0];
+        int64_t valid_b = gt_ids[1];
+        int64_t missing = fixtures::get_missing_id(dataset->base_);
+        std::vector<int64_t> ids = {valid_a, missing, valid_b};
+        for (bool precise : {true, false}) {
+            auto single_missing = index->CalcDistanceById(query, missing, precise);
+            REQUIRE_FALSE(single_missing.has_value());
+            REQUIRE(single_missing.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+            auto single_a = index->CalcDistanceById(query, valid_a, precise);
+            auto single_b = index->CalcDistanceById(query, valid_b, precise);
+            REQUIRE(single_a.has_value());
+            REQUIRE(single_b.has_value());
+
+            auto batch = index->CalDistanceById(query, ids.data(), 3, precise);
+            REQUIRE(batch.has_value());
+            REQUIRE(batch.value()->GetNumElements() == 3);
+            REQUIRE(batch.value()->GetDim() == 1);
+            const auto* dists = batch.value()->GetDistances();
+            const auto* valids = batch.value()->GetValids();
+            REQUIRE(valids != nullptr);
+            REQUIRE(valids[0]);
+            REQUIRE(std::isfinite(dists[0]));
+            REQUIRE_FALSE(valids[1]);
+            REQUIRE(std::isnan(dists[1]));
+            REQUIRE(valids[2]);
+            REQUIRE(std::isfinite(dists[2]));
+            REQUIRE(dists[0] == single_a.value());
+            REQUIRE(dists[2] == single_b.value());
+        }
+        auto empty = index->CalDistanceById(query, nullptr, 0, true);
+        REQUIRE(empty.has_value());
+        REQUIRE(empty.value()->GetNumElements() == 0);
+        REQUIRE(empty.value()->GetValids() == nullptr);
+    }
+
+    SECTION("result stays valid after the index is destroyed") {
+        auto index = TestFactory(name, param, true);
+        TestBuildIndex(index, dataset, true);
+        REQUIRE(index->CheckFeature(vsag::SUPPORT_CAL_DISTANCE_BY_ID));
+        auto* query = dataset->query_->GetFloat32Vectors();
+        const auto* gt_ids = dataset->ground_truth_->GetIds();
+        int64_t valid_id = gt_ids[0];
+        int64_t missing = fixtures::get_missing_id(dataset->base_);
+        std::vector<int64_t> ids = {valid_id, missing};
+        auto single_valid = index->CalcDistanceById(query, valid_id, true);
+        REQUIRE(single_valid.has_value());
+        auto batch =
+            index->CalDistanceById(query, ids.data(), static_cast<int64_t>(ids.size()), true);
+        REQUIRE(batch.has_value());
+        REQUIRE(batch.value()->GetNumElements() == 2);
+        REQUIRE(batch.value()->GetDim() == 1);
+
+        // destroy the index (and the allocator it owns) before touching the returned result
+        index.reset();
+
+        const auto* dists = batch.value()->GetDistances();
+        const auto* valids = batch.value()->GetValids();
+        REQUIRE(dists != nullptr);
+        REQUIRE(valids != nullptr);
+        REQUIRE(valids[0]);
+        REQUIRE(dists[0] == single_valid.value());
+        REQUIRE_FALSE(valids[1]);
+        REQUIRE(std::isnan(dists[1]));
+
+        // the result must also be destroyable after the index is gone
+        batch.value().reset();
+    }
+}
+
+TEST_CASE_METHOD(fixtures::DiskANNTestIndex,
+                 "diskann cal distance by id without feature",
+                 "[ft][diskann][pr]") {
+    constexpr int64_t dim = 128;
+    const std::string name = "diskann";
+    const std::string metric_type = "l2";
+    auto param = GenerateDiskANNBuildParametersString(metric_type, dim, false, false);
+    auto index = TestFactory(name, param, true);
+    REQUIRE_FALSE(index->CheckFeature(vsag::SUPPORT_CAL_DISTANCE_BY_ID));
+    std::vector<float> query(dim, 0.1F);
+    auto single = index->CalcDistanceById(query.data(), 16);
+    REQUIRE_FALSE(single.has_value());
+    REQUIRE(single.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+    int64_t ids[2] = {16, 17};
+    auto batch = index->CalDistanceById(query.data(), ids, 2);
+    REQUIRE_FALSE(batch.has_value());
+    REQUIRE(batch.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
 }
 
 TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "diskann pq_dim test", "[ft][index][diskann]") {

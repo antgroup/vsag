@@ -17,15 +17,18 @@
 
 #include <local_file_reader.h>
 
+#include <cmath>
 #include <exception>
 #include <functional>
 #include <future>
 #include <iterator>
+#include <limits>
 #include <new>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 #include <utility>
 
+#include "algorithm/inner_index_interface.h"
 #include "datacell/flatten_datacell.h"
 #include "dataset_impl.h"
 #include "impl/odescent/odescent_graph_builder.h"
@@ -1392,28 +1395,90 @@ DiskANN::init_feature_list() {
                                       IndexFeature::SUPPORT_SERIALIZE_BINARY_SET,
                                       IndexFeature::SUPPORT_SERIALIZE_FILE});
     // calculate distance by id
-    this->feature_list_->SetFeatures({
-        SUPPORT_CAL_DISTANCE_BY_ID,
-    });
+    if (this->support_calc_distance_by_id_) {
+        this->feature_list_->SetFeatures({
+            SUPPORT_CAL_DISTANCE_BY_ID,
+        });
+    }
 }
+
+namespace {
+
+// Allocates the validity buffer with `new[]` and hands its ownership to the dataset. The dataset
+// must not depend on the index allocator, otherwise destroying the index before the returned
+// dataset would leave the dataset with a dangling allocator.
+void
+attach_valids_with_ownership(const DatasetPtr& dataset, const std::vector<bool>& validity) {
+    auto* valids = new bool[validity.size()];
+    for (uint64_t i = 0; i < validity.size(); ++i) {
+        valids[i] = validity[i];
+    }
+    dataset->Valids(valids);
+}
+
+}  // namespace
 
 DatasetPtr
 DiskANN::cal_distance_by_id(const float* query,
                             const int64_t* ids,
                             int64_t count,
                             bool calculate_precise_distance) const {
-    auto dataset = Dataset::Make();
-    auto* dists = new float[count];
-    dataset->NumElements(count)->Distances(dists)->Owner(true);
-    this->index_->cal_distance_by_ids(query, ids, count, dists, calculate_precise_distance);
-    return dataset;
+    if (not this->support_calc_distance_by_id_) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "diskann does not support calculating distance by id, please set "
+                            "support_calc_distance_by_id=true in the build parameters");
+    }
+    CHECK_ARGUMENT(count >= 0, fmt::format("count({}) must be non-negative", count));
+    if (count > 0) {
+        CHECK_ARGUMENT(query != nullptr, "query cannot be null when count is greater than 0");
+        CHECK_ARGUMENT(ids != nullptr, "ids cannot be null when count is greater than 0");
+    }
+    std::shared_lock lock(rw_mutex_);
+    auto result = Dataset::Make();
+    // the result must outlive the index, so it owns plain `new[]` buffers and no allocator
+    result->Owner(true);
+    result->NumElements(count)->Dim(1);
+    if (count == 0) {
+        return result;
+    }
+
+    auto* distances = new float[count];
+    result->Distances(distances);
+    std::vector<bool> validity(count, false);
+    if (not this->index_) {
+        // the index is empty or has not been built yet, every id is missing
+        for (int64_t i = 0; i < count; ++i) {
+            distances[i] = std::numeric_limits<float>::quiet_NaN();
+        }
+        attach_valids_with_ownership(result, validity);
+        return result;
+    }
+    this->index_->cal_distance_by_ids(
+        query, ids, count, distances, calculate_precise_distance, &validity);
+    attach_valids_with_ownership(result, validity);
+    return result;
 }
+
 float
 DiskANN::calc_distance_by_id(const float* vector,
                              int64_t id,
                              bool calculate_precise_distance) const {
-    float dist;
-    this->index_->cal_distance_by_ids(vector, &id, 1, &dist, calculate_precise_distance);
+    if (not this->support_calc_distance_by_id_) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "diskann does not support calculating distance by id, please set "
+                            "support_calc_distance_by_id=true in the build parameters");
+    }
+    CHECK_ARGUMENT(vector != nullptr, "vector cannot be null");
+    std::shared_lock lock(rw_mutex_);
+    if (not this->index_) {
+        ThrowLabelNotFound(id);
+    }
+    float dist = std::numeric_limits<float>::quiet_NaN();
+    std::vector<bool> validity(1, false);
+    this->index_->cal_distance_by_ids(vector, &id, 1, &dist, calculate_precise_distance, &validity);
+    if (not validity[0]) {
+        ThrowLabelNotFound(id);
+    }
     return dist;
 }
 
