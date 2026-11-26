@@ -198,9 +198,21 @@ TEST_CASE("HGraph shares exact incremental rows across resize, Tune and legacy r
         auto disk = vsag::Factory::CreateIndex("hgraph", file_params.Dump()).value();
         REQUIRE(disk->Deserialize(readers).has_value());
         REQUIRE(Access::fp32_version(disk) == 3);
-        auto result = disk->KnnSearch(data(8, 1), 1, R"({"hgraph":{"ef_search":100}})");
+        for (int i = 0; i < initial; ++i) {
+            auto distance = disk->CalcDistanceById(data(i, 1), ids[i], true);
+            REQUIRE(distance.has_value());
+            REQUIRE(distance.value() == 0.0F);
+        }
+        const auto query = data(8, 1);
+        const std::string search_params = R"({"hgraph":{"ef_search":100}})";
+        auto expected = owned->KnnSearch(query, 1, search_params);
+        auto result = disk->KnnSearch(query, 1, search_params);
+        REQUIRE(expected.has_value());
         REQUIRE(result.has_value());
-        REQUIRE(result.value()->GetIds()[0] == ids[8]);
+        REQUIRE(expected.value()->GetDim() == 1);
+        REQUIRE(result.value()->GetDim() == 1);
+        REQUIRE(result.value()->GetIds()[0] == expected.value()->GetIds()[0]);
+        REQUIRE(result.value()->GetDistances()[0] == expected.value()->GetDistances()[0]);
     }
     Access::own_fp32(owned);
     std::stringstream legacy;
