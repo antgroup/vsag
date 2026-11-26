@@ -716,6 +716,9 @@ private:
     FlattenInterfacePtr
     pipnn_exact_codes() const;
     void
+    disable_pipnn_incremental_add();
+
+    void
     restore_pipnn_projections_from_exact(StreamReader& reader);
     void
     add_pipnn_to_hierarchy(Hierarchy& hierarchy,

@@ -1137,6 +1137,7 @@ HGraph::read_streaming_body(StreamReader& reader,
     if (this->raw_vector_ != nullptr) {
         this->has_raw_vector_ = true;
     }
+    PiPNNAdd::RestoreOrdinaryAdd(*this);
     this->restore_fused_codec();
 
     if (use_elp_optimizer_) {
@@ -1449,6 +1450,20 @@ HGraph::initialize_deserialized_runtime_state() {
 }
 
 void
+HGraph::PiPNNAdd::RestoreOrdinaryAdd(HGraph& graph) {
+    if (graph.pipnn_add_ || !graph.pipnn_param_.incremental_add || graph.total_count_ == 0) {
+        return;
+    }
+    graph.pipnn_param_.incremental_add = false;
+    graph.pipnn_param_.add_use_codes = false;
+    auto parameters = std::make_shared<HGraphParameter>(
+        *std::static_pointer_cast<HGraphParameter>(graph.create_param_ptr_));
+    parameters->pipnn_param = graph.pipnn_param_;
+    graph.create_param_ptr_ = std::move(parameters);
+    graph.InitFeatures();
+}
+
+void
 HGraph::finish_deserialize() {
     // Ordinary snapshots can contain reservations beyond the written code range.
     // Publish written codes only; deduplicated snapshots validate all logical mappings below.
@@ -1482,6 +1497,7 @@ HGraph::finish_deserialize() {
             (void)this->code_slot_map_->Resolve(inner_id);
         }
     }
+    PiPNNAdd::RestoreOrdinaryAdd(*this);
     this->restore_fused_codec();
 
     // post serialize procedure

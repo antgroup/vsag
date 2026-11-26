@@ -684,3 +684,59 @@ TEST_CASE("PiPNN Add reads stored code distances and original sketches after rel
         REQUIRE(q.value()->GetDim() == 10);
     }
 }
+
+TEST_CASE("PiPNN readers retain ordinary Add across snapshot round trips",
+          "[ut][pipnn][add][snapshot_fallback]") {
+    const std::string kind = GENERATE("hgraph", "pyramid");
+    const bool streaming = GENERATE(false, true);
+    CAPTURE(kind, streaming);
+    auto create = [&](bool incremental, int planes) {
+        auto config = vsag::JsonType::Parse(
+            R"({"dim":16,"dtype":"float32","metric_type":"l2","index_param":{"graph_type":"pipnn","base_quantization_type":"fp32","max_degree":16,"build_thread_count":1}})");
+        config["index_param"]["pipnn_incremental_add"].SetBool(incremental);
+        config["index_param"]["pipnn_add_use_codes"].SetBool(incremental);
+        config["index_param"]["pipnn_hash_plane_count"].SetInt(planes);
+        auto result = vsag::Factory::CreateIndex(kind, config.Dump());
+        REQUIRE(result.has_value());
+        return result.value();
+    };
+    constexpr int count = 50, dim = 16;
+    std::vector<float> vectors(count * dim);
+    std::mt19937 random(71);
+    for (auto& v : vectors) v = std::generate_canonical<float, 24>(random);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto data = [&](int start, int size) {
+        auto rows = vsag::Dataset::Make()
+                        ->Dim(dim)
+                        ->NumElements(size)
+                        ->Float32Vectors(vectors.data() + start * dim)
+                        ->Ids(ids.data() + start)
+                        ->Owner(false);
+        if (kind == "pyramid") {
+            rows->Paths("", std::vector<std::vector<std::string>>(size, {"a/b"}));
+        }
+        return rows;
+    };
+    auto source = create(false, 11);
+    REQUIRE(source->Build(data(0, count - 1)).has_value());
+    std::stringstream snapshot;
+    REQUIRE((streaming ? source->SerializeStreaming(snapshot) : source->Serialize(snapshot))
+                .has_value());
+    auto loaded = create(true, 11);
+    REQUIRE((streaming ? loaded->DeserializeStreaming(snapshot) : loaded->Deserialize(snapshot))
+                .has_value());
+    REQUIRE(loaded->Add(data(count - 1, 1)).value().empty());
+    if (kind == "hgraph") {
+        CHECK(loaded->CheckFeature(vsag::IndexFeature::SUPPORT_MERGE_INDEX));
+        CHECK(loaded->CheckFeature(vsag::IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT));
+        CHECK(loaded->UpdateVector(0, data(0, 1), true).has_value());
+    }
+    std::stringstream resaved;
+    REQUIRE(loaded->Serialize(resaved).has_value());
+    // The ordinary snapshot has no persisted hash planes to constrain the next reader.
+    auto restored = create(true, 12);
+    REQUIRE(restored->Deserialize(resaved).has_value());
+    CHECK(restored->GetNumElements() == count);
+    CHECK(restored->CheckIdExist(count - 1));
+}

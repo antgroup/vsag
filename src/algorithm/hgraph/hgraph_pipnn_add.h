@@ -25,6 +25,8 @@ struct HGraph::PiPNNAdd {
     static FlattenInterfacePtr
     ExactStore(const HGraph& graph, int64_t source = 0);
 
+    static void
+    RestoreOrdinaryAdd(HGraph& graph);
     static std::unique_ptr<PiPNNAdd>
     Read(const HGraph& graph,
          StreamReader& reader,

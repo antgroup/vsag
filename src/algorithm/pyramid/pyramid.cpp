@@ -1902,10 +1902,23 @@ Pyramid::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) 
                             "Pyramid streaming serialization extra_info block is missing");
     }
 
-    pipnn_param_.incremental_add = false;  // Streaming snapshots contain no PiPNN state.
+    disable_pipnn_incremental_add();  // Streaming snapshots contain no PiPNN state.
     label_table_->TrimUnusedSlots(base_codes_->TotalCount());
     resize(max_capacity);
     this->current_memory_usage_ = static_cast<int64_t>(this->CalSerializeSize());
+}
+
+void
+Pyramid::disable_pipnn_incremental_add() {
+    if (!pipnn_param_.incremental_add) {
+        return;
+    }
+    pipnn_param_.incremental_add = false;
+    pipnn_param_.add_use_codes = false;
+    auto parameters = std::make_shared<PyramidParameters>(
+        *std::static_pointer_cast<PyramidParameters>(create_param_ptr_));
+    parameters->pipnn_param = pipnn_param_;
+    create_param_ptr_ = std::move(parameters);
 }
 
 void
@@ -2062,10 +2075,10 @@ Pyramid::Deserialize(StreamReader& reader) {
         if (std::find(recovered.begin(), recovered.end(), 0) != recovered.end()) {
             pipnn_graph_states_.clear();
             pipnn_exact_rows_ = {};
-            pipnn_param_.incremental_add = false;
+            disable_pipnn_incremental_add();
         }
     } else {
-        pipnn_param_.incremental_add = false;
+        disable_pipnn_incremental_add();
     }
     resize(max_capacity);
     this->current_memory_usage_ = this->CalSerializeSize();
