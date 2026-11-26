@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <algorithm>
 #include <array>
 
 #include "flatten_datacell.h"
@@ -64,8 +65,9 @@ public:
             const size_t first_row =
                 first_diagonal && begin >= *first_diagonal ? begin - *first_diagonal + 1 : 0;
             for (size_t row = first_row; row < sources.size(); ++row) {
-                const size_t n =
-                    first_diagonal ? std::min(end, *first_diagonal + row) - begin : end - begin;
+                const size_t n = first_diagonal
+                                     ? std::min<size_t>(end, *first_diagonal + row) - begin
+                                     : end - begin;
                 const auto* source = queries[row].Data();
                 auto* dest = output + row * targets.size() + begin;
                 size_t j = 0;
