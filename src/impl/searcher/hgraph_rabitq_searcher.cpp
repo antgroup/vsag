@@ -907,6 +907,7 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
         prefetch_next_candidate();
     };
 
+    Vector<InnerIdType> fresh_neighbors(allocator);
     while (candidate_set.HasNext()) {
         ++hops;
         if (hops >= search_param.hops_limit) {
@@ -935,24 +936,20 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
         CHECK_ARGUMENT(neighbor_count <= graph->MaximumDegree(),
                        "corrupt fused graph neighbor count");
         const auto* neighbors = current_node.neighbors;
-        uint32_t cursor = 0;
-        while (cursor < neighbor_count) {
-            InnerIdType batch_ids[4]{};
-            uint32_t batch_count = 0;
-            while (cursor < neighbor_count and batch_count < 4) {
-                InnerIdType neighbor = 0;
-                const auto stored_neighbor = neighbors[cursor++];
-                if (not graph->ResolveNeighbor(stored_neighbor, neighbor) or
-                    visited_list->TestAndSet(neighbor)) {
-                    continue;
-                }
-                batch_ids[batch_count] = neighbor;
+        // Issue the hot filter reads for this expansion before scoring its first SIMD batch.
+        fresh_neighbors.clear();
+        fresh_neighbors.reserve(neighbor_count);
+        for (uint32_t i = 0; i < neighbor_count; ++i) {
+            InnerIdType neighbor = 0;
+            if (graph->ResolveNeighbor(neighbors[i], neighbor) and
+                not visited_list->TestAndSet(neighbor)) {
                 graph->PrefetchFusedFilter(neighbor);
-                ++batch_count;
+                fresh_neighbors.push_back(neighbor);
             }
-            if (batch_count == 0) {
-                continue;
-            }
+        }
+        for (uint64_t begin = 0; begin < fresh_neighbors.size(); begin += 4) {
+            const auto* batch_ids = fresh_neighbors.data() + begin;
+            const auto batch_count = std::min<uint64_t>(4, fresh_neighbors.size() - begin);
             HGraphRaBitQFusedDataCell::CodeView batch_codes[4]{};
             for (uint32_t lane = 0; lane < batch_count; ++lane) {
                 batch_codes[lane] = graph->GetCodeView(batch_ids[lane]);
