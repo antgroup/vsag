@@ -159,7 +159,7 @@ add_reorder_lower_bound_probe_count(QueryContext& ctx, uint64_t count) {
     }
 }
 
-constexpr uint64_t kRerankBatchSize = 256;
+constexpr uint64_t K_RERANK_BATCH_SIZE = 256;
 
 // Establish the kth full distance before pruning subsequent batches. Iterators also need the
 // first unscored position so they can materialize exact discard distances.
@@ -180,7 +180,7 @@ rerank_by_lower_bound(Vector<uint64_t>& order,
     while (cursor < limit) {
         const bool heap_full = heap->Size() == topk;
         const auto batch_size =
-            cursor == 0 and not heap_full ? topk - heap->Size() : kRerankBatchSize;
+            cursor == 0 and not heap_full ? topk - heap->Size() : K_RERANK_BATCH_SIZE;
         const auto available = std::min(batch_size, limit - cursor);
         uint64_t count = available;
         if (heap_full) {
@@ -373,7 +373,7 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
 
     Vector<uint64_t> order(candidate_size, query_allocator);
     std::iota(order.begin(), order.end(), 0);
-    const auto buffer_size = std::max<uint64_t>(topk, kRerankBatchSize);
+    const auto buffer_size = std::max<uint64_t>(topk, K_RERANK_BATCH_SIZE);
     Vector<InnerIdType> ids(buffer_size, query_allocator);
     Vector<float> dists(buffer_size, query_allocator);
     Vector<float> hint_dists(buffer_size, query_allocator);
@@ -651,7 +651,7 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
     const uint64_t evaluation_limit =
         max_evaluations == 0 ? candidate_size : std::min(candidate_size, max_evaluations);
     const uint64_t batch_size =
-        std::min<uint64_t>(evaluation_limit, std::max<uint64_t>(topk, kRerankBatchSize));
+        std::min<uint64_t>(evaluation_limit, std::max<uint64_t>(topk, K_RERANK_BATCH_SIZE));
     const uint64_t missing_buffer_size = lower_bounds_available ? batch_size : evaluation_limit;
     Vector<InnerIdType> missing_ids(missing_buffer_size, query_allocator);
     Vector<float> missing_hints(missing_buffer_size, query_allocator);

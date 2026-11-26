@@ -1403,7 +1403,7 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
                 return FlattenReorder(flatten, allocator, graph)
                     .ReorderFused(nullptr,
                                   query,
-                                  rerank_topk,
+                                  static_cast<int64_t>(rerank_topk),
                                   ctx != nullptr ? *ctx : default_ctx,
                                   nullptr,
                                   &external_candidates,
