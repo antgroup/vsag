@@ -33,6 +33,7 @@
 #include "impl/filter/filter_headers.h"
 #include "impl/heap/distance_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
+#include "impl/pipnn/pipnn_incremental.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/basic_searcher.h"
 #include "index_common_param.h"
@@ -111,6 +112,11 @@ public:
                            common_param.metric_ == MetricType::METRIC_TYPE_L2SQR,
                        "Pyramid PiPNN adaptive pruning only supports L2");
         base_codes_ = FlattenInterface::MakeInstance(pyramid_param->base_codes_param, common_param);
+        if (pipnn_param_.incremental_add)
+            CHECK_ARGUMENT(
+                graph_type_ == GRAPH_TYPE_VALUE_PIPNN &&
+                    common_param.data_type_ == DataTypes::DATA_TYPE_FLOAT && !support_duplicate_,
+                "Pyramid incremental PiPNN requires dense FP32 input without duplicate tracking");
         if (pyramid_param->has_hierarchies) {
             for (const auto& h_param : pyramid_param->hierarchies) {
                 auto graph_param = pyramid_param->graph_param;
@@ -162,6 +168,13 @@ public:
             raw_vector_ =
                 FlattenInterface::MakeInstance(pyramid_param->raw_vector_param, common_param);
             has_raw_vector_ = true;
+        }
+        if (pipnn_param_.add_use_codes) {
+            const auto codes = construction_codes();
+            CHECK_ARGUMENT(codes != raw_vector_ ||
+                               raw_vector_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32,
+                           "plain RaBitQ PiPNN Add requires FP32 raw storage");
+            pipnn_param_.ValidateAddDistanceCodes(*codes);
         }
     }
 
@@ -292,6 +305,7 @@ public:
 
     friend class PyramidAnalyzer;
     friend class PyramidDuplicateTestPeer;
+    friend struct PiPNNQuantizedAddTestAccess;
     friend class PyramidOptimizedBuildSession;
 
 private:
@@ -634,7 +648,13 @@ private:
 
     [[nodiscard]] FlattenInterfacePtr
     construction_codes() const {
-        return has_precise_reorder() ? precise_codes_ : base_codes_;
+        if (has_precise_reorder())
+            return precise_codes_;
+        // Plain RaBitQ cannot compare two stored codes when NSW prunes graph edges.
+        if (raw_vector_ && !base_codes_->SupportSplitCodeStorage() &&
+            GetBaseQuantizerName(base_codes_->GetQuantizerName()) == QUANTIZATION_TYPE_VALUE_RABITQ)
+            return raw_vector_;
+        return base_codes_;
     }
 
     [[nodiscard]] FlattenInterfacePtr
@@ -682,9 +702,35 @@ private:
     mutable std::mutex cur_element_count_mutex_;         // guards cur_element_count_ updates
     mutable std::once_flag parallel_without_pool_warned_;  // one-shot latch for the pool warning
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};         // graph algorithm type
-    PiPNNGraphBuilderParameter pipnn_param_{};             // PiPNN build parameters
-    AdaptivePruningParameter adaptive_pruning_;            // bottom-layer adaptive NSW policy
-    bool default_rabitq_one_bit_search_{false};            // default split lower-bound search
+    std::unordered_map<const GraphInterface*, std::shared_ptr<PiPNNIncrementalState>>
+        pipnn_graph_states_;
+    mutable std::mutex pipnn_add_mutex_;
+    struct PiPNNRowView {
+        std::vector<const float*> rows;
+        std::vector<FlattenCodesLease> owned;  // buffers for rows spanning storage blocks
+    };
+    // Derived from the exact storage; invalidate before its addresses change.
+    PiPNNRowView pipnn_row_view_;
+    PiPNNFloatRows pipnn_exact_rows_;
+    PiPNNProjectionState pipnn_projections_;
+    FlattenInterfacePtr
+    pipnn_exact_codes() const;
+    void
+    disable_pipnn_incremental_add();
+
+    void
+    restore_pipnn_projections_from_exact(StreamReader& reader);
+    void
+    add_pipnn_to_hierarchy(Hierarchy& hierarchy,
+                           const DatasetPtr& dataset,
+                           const std::string& name,
+                           const AddBatch& batch,
+                           std::span<const float* const> exact);
+    std::vector<GraphInterfacePtr>
+    pipnn_graphs_in_path_order() const;
+    PiPNNGraphBuilderParameter pipnn_param_{};   // PiPNN build parameters
+    AdaptivePruningParameter adaptive_pruning_;  // bottom-layer adaptive NSW policy
+    bool default_rabitq_one_bit_search_{false};  // default split lower-bound search
 
     std::mutex random_generator_mutex_;
     std::default_random_engine level_generator_{

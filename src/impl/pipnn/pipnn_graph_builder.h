@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -27,6 +28,9 @@
 
 namespace vsag {
 
+struct PiPNNIncrementalState;
+struct PiPNNProjectionState;
+class FlattenInterface;
 class Allocator;
 class SafeThreadPool;
 struct PiPNNBuildCache;
@@ -42,6 +46,9 @@ struct PiPNNGraphBuilderParameter {
     uint64_t hash_plane_count{12};
     uint64_t reservoir_size{64};
     float alpha{1.0F};
+    bool incremental_add{false};
+    // Use symmetric distances between stored codes during Add. Build borrows its FP32 input.
+    bool add_use_codes{false};
     // Supplied by the owning index, not by the PiPNN tuning JSON.
     float duplicate_distance_threshold{0.0F};
     bool adaptive_pruning{false};
@@ -53,8 +60,12 @@ struct PiPNNGraphBuilderParameter {
     JsonType
     ToJson() const;
 
+    bool
+    CanLoadIncremental(const PiPNNGraphBuilderParameter& stored) const;
     void
     Validate(uint64_t max_degree) const;
+    void
+    ValidateAddDistanceCodes(FlattenInterface& codes) const;
 };
 
 /**
@@ -91,7 +102,39 @@ public:
           const Vector<const uint16_t*>& rows,
           DataTypes data_type) const;
 
+    void
+    Update(const GraphInterfacePtr& graph,
+           const Vector<InnerIdType>& batch_ids,
+           const Vector<const float*>& batch_vectors,
+           PiPNNIncrementalState& state) const;
+
+    void
+    UpdateFromSharedRows(const GraphInterfacePtr& graph,
+                         const Vector<InnerIdType>& ids,
+                         std::span<const float* const> rows_by_id,
+                         PiPNNIncrementalState& state) const;
+
+    void
+    AppendProjections(PiPNNProjectionState& sketches, std::span<const float* const> rows) const;
+
+    void
+    UpdateWithCodes(const GraphInterfacePtr& graph,
+                    const Vector<InnerIdType>& ids,
+                    const Vector<const float*>& input,
+                    PiPNNIncrementalState& state,
+                    FlattenInterface& codes,
+                    const PiPNNProjectionState* shared = nullptr) const;
+
 private:
+    void
+    update(const GraphInterfacePtr& graph,
+           const Vector<InnerIdType>& ids,
+           const Vector<const float*>& input,
+           PiPNNIncrementalState& state,
+           std::span<const float* const> rows_by_id,
+           FlattenInterface* codes = nullptr,
+           const PiPNNProjectionState* shared = nullptr) const;
+
     template <typename ElementType>
     void
     build_typed(const GraphInterfacePtr& graph,

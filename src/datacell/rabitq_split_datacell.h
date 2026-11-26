@@ -28,6 +28,7 @@
 #include <type_traits>
 
 #include "common.h"
+#include "flatten_code_writer.h"
 #include "flatten_interface.h"
 #include "flatten_optimized_build_interface.h"
 #include "flatten_pairwise_distance_interface.h"
@@ -251,7 +252,8 @@ class RaBitQSplitDataCell : public FlattenInterface,
                             public FlattenOptimizedBuildInterface,
                             public FlattenPairwiseDistanceInterface,
                             public RaBitQSplitResidualOriginalQueryInterface,
-                            public RaBitQSplitDataCellInterface {
+                            public RaBitQSplitDataCellInterface,
+                            public FlattenCodeWriter {
 public:
     using Accessor = BottomQuantizerAccessor<QuantizerT>;
     using BottomQuantizer = typename Accessor::BottomQuantizerType;
@@ -270,12 +272,62 @@ public:
         uint64_t code_sum_{0};
     };
 
+private:
+    bool
+    has_local_split_codes() const {
+        return !optimized_build_active_ && !fused_code_storage_ && !external_filter_code_storage_ &&
+               !split_layouts_deferred_;
+    }
+
+    uint64_t
+    read_scalar_code(InnerIdType id, uint8_t* scalar) const {
+        const auto filter = x_bit_layout_->Acquire(id);
+        const auto supplement = supplement_layout_->Acquire(id);
+        CHECK_ARGUMENT(filter && supplement, "failed to read split RaBitQ pairwise code");
+        return bottom_quantizer().UnpackSplitScalarCode(filter.Data(), supplement.Data(), scalar);
+    }
+
+public:
+    bool
+    ComputePairwiseTile(std::span<const InnerIdType> sources,
+                        std::span<const InnerIdType> targets,
+                        float* output,
+                        std::optional<uint64_t> first_diagonal) const override {
+        if (!has_local_split_codes())
+            return false;
+        // Decode a source stripe once and stream each target once for the stripe.
+        // A singleton leaf update therefore needs only two scalar records.
+        constexpr uint64_t stripe = 128;
+        const auto& quantizer = bottom_quantizer();
+        const auto width = quantizer.GetScalarCodeSize();
+        const auto rows = std::min<uint64_t>(stripe, sources.size());
+        ByteBuffer scratch((rows + 1) * width, allocator_);
+        auto* target = scratch.data + rows * width;
+        std::array<uint64_t, stripe> sums;
+        for (uint64_t first = 0; first < sources.size(); first += rows) {
+            const uint64_t count = std::min<uint64_t>(rows, sources.size() - first);
+            for (uint64_t r = 0; r < count; ++r)
+                sums[r] = read_scalar_code(sources[first + r], scratch.data + r * width);
+            const auto end = first_diagonal ? *first_diagonal + first + count - 1 : targets.size();
+            for (uint64_t col = 0; col < end; ++col) {
+                const auto sum = read_scalar_code(targets[col], target);
+                const uint64_t begin = first_diagonal && col >= *first_diagonal + first
+                                           ? col - (*first_diagonal + first) + 1
+                                           : 0;
+                for (uint64_t r = begin; r < count; ++r) {
+                    output[(first + r) * targets.size() + col] =
+                        quantizer.ComputeScalarCodesDistance(
+                            scratch.data + r * width, sums[r], target, sum);
+                }
+            }
+        }
+        return true;
+    }
+
     class PairwiseDistanceComputer final : public FlattenPairwiseDistanceComputer {
     public:
         explicit PairwiseDistanceComputer(RaBitQSplitDataCell& source)
-            : source_(source),
-              codes_(source.allocator_),
-              packed_code_(source.code_size_, source.allocator_) {
+            : source_(source), codes_(source.allocator_) {
         }
 
         float
@@ -301,10 +353,7 @@ public:
             }
             auto code = std::make_shared<OptimizedBuildComputer>(
                 source_.bottom_quantizer().GetScalarCodeSize(), source_.allocator_);
-            CHECK_ARGUMENT(source_.GetCodesById(id, packed_code_.data),
-                           "failed to read split RaBitQ pairwise code");
-            code->code_sum_ = source_.bottom_quantizer().UnpackScalarCode(packed_code_.data,
-                                                                          code->scalar_code_.data);
+            code->code_sum_ = source_.read_scalar_code(id, code->scalar_code_.data);
             if (codes_.size() == CACHE_CAPACITY) {
                 codes_.erase(order_[next_]);
             }
@@ -319,14 +368,13 @@ public:
         static constexpr uint64_t CACHE_CAPACITY = 512;
         RaBitQSplitDataCell& source_;
         UnorderedMap<InnerIdType, std::shared_ptr<OptimizedBuildComputer>> codes_;
-        ByteBuffer packed_code_;
         std::array<InnerIdType, CACHE_CAPACITY> order_{};
         uint64_t next_{0};
     };
 
     std::unique_ptr<FlattenPairwiseDistanceComputer>
     FactoryPairwiseDistanceComputer() override {
-        if (this->optimized_build_active_ or this->fused_code_storage_ != nullptr) {
+        if (!has_local_split_codes()) {
             return nullptr;
         }
         return std::make_unique<PairwiseDistanceComputer>(*this);
@@ -1705,6 +1753,28 @@ public:
         return this->optimized_build_active_;
     }
 
+    bool
+    CanInsertEncodedRange() const override {
+        return !optimized_build_active_ && !fused_code_storage_ && !external_filter_code_storage_;
+    }
+
+    void
+    InsertEncodedRange(InnerIdType first, InnerIdType count, const uint8_t* codes) override {
+        ByteBuffer filters(uint64_t{count} * one_bit_code_size_, allocator_);
+        ByteBuffer supplements(uint64_t{count} * supplement_code_size_, allocator_);
+        for (uint64_t i = 0; i < count; ++i) {
+            bottom_quantizer().SplitCode(codes + i * code_size_,
+                                         filters.data + i * one_bit_code_size_,
+                                         supplements.data + i * supplement_code_size_);
+        }
+        std::lock_guard lock(mutex_);
+        restore_deferred_split_layouts();
+        x_bit_layout_->WriteRange(first, filters.data, count);
+        supplement_layout_->WriteRange(first, supplements.data, count);
+        total_count_.store(std::max(total_count_.load(std::memory_order_relaxed), first + count),
+                           std::memory_order_release);
+    }
+
     void
     InsertVector(const void* vector,
                  InnerIdType idx = std::numeric_limits<InnerIdType>::max()) override {
@@ -1904,11 +1974,17 @@ public:
                 lease2.Data(),
                 (*optimized_build_code_sums_)[id2]);
         }
-        ByteBuffer codes1(this->code_size_, allocator_);
-        ByteBuffer codes2(this->code_size_, allocator_);
-        this->GetCodesById(id1, codes1.data);
-        this->GetCodesById(id2, codes2.data);
-        return this->bottom_quantizer().Compute(codes1.data, codes2.data);
+        if (!has_local_split_codes()) {
+            float distance;
+            QueryById(&distance, id1, &id2, 1);
+            return distance;
+        }
+        const auto& quantizer = bottom_quantizer();
+        const auto width = quantizer.GetScalarCodeSize();
+        ByteBuffer scalar(2 * width, allocator_);
+        const auto sum1 = read_scalar_code(id1, scalar.data);
+        const auto sum2 = read_scalar_code(id2, scalar.data + width);
+        return quantizer.ComputeScalarCodesDistance(scalar.data, sum1, scalar.data + width, sum2);
     }
 
     void

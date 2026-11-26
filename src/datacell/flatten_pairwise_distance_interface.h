@@ -15,6 +15,8 @@
 #pragma once
 
 #include <memory>
+#include <optional>
+#include <span>
 
 #include "basic_types.h"
 
@@ -39,6 +41,16 @@ public:
     // Optional acceleration for persisted codes. Returning nullptr retains the existing path.
     virtual std::unique_ptr<FlattenPairwiseDistanceComputer>
     FactoryPairwiseDistanceComputer() = 0;
+
+    // The optional diagonal bounds row r to columns below first_diagonal + r.
+    // Return false when the current storage mode does not provide a tile kernel.
+    virtual bool
+    ComputePairwiseTile(std::span<const InnerIdType> sources,
+                        std::span<const InnerIdType> targets,
+                        float* output,
+                        std::optional<uint64_t> first_diagonal) const {
+        return false;
+    }
 };
 
 }  // namespace vsag

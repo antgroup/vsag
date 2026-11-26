@@ -456,6 +456,18 @@ TEST_CASE("HGraph validates PiPNN graph type and data boundary", "[ut][pipnn][hg
         parameter["deduplicate_storage"].SetBool(true);
         REQUIRE_NOTHROW(MakePiPNNIndex(parameter, common_param));
     }
+    SECTION("incremental L2 duplicate detection requires exact rows") {
+        auto parameter = MakePiPNNHGraphParam();
+        parameter["pipnn_incremental_add"].SetBool(true);
+        parameter["support_duplicate"].SetBool(true);
+        REQUIRE_NOTHROW(MakePiPNNIndex(parameter, common_param));
+
+        parameter["duplicate_distance_threshold"].SetFloat(0.25F);
+        REQUIRE_THROWS_AS(MakePiPNNIndex(parameter, common_param), vsag::VsagException);
+
+        parameter["pipnn_incremental_add"].SetBool(false);
+        REQUIRE_NOTHROW(MakePiPNNIndex(parameter, common_param));
+    }
     SECTION("non-fp32 base codes") {
         auto parameter = MakePiPNNHGraphParam();
         parameter["base_quantization_type"].SetString("sq8");

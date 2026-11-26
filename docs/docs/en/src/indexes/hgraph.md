@@ -89,6 +89,8 @@ records cross-index defaults and the top-level common fields.
 | `ef_construction` | int | `400` | Candidate list size during build (higher = better recall, slower build) |
 | `alpha` | float | `1.0` | Final robust-pruning factor; PiPNN requires a finite value at least `1.0`. |
 | `graph_type` | string | `"nsw"` | Graph algorithm: `nsw`, `odescent`, or `pipnn` |
+| `pipnn_incremental_add` | bool | `false` | Persist PiPNN state for incremental Add with dense FP32 input. |
+| `pipnn_add_use_codes` | bool | `false` | Use stored code distances for incremental PiPNN routing, leaf neighbors and pruning. Requires `pipnn_incremental_add`. |
 | `pipnn_max_leaf_size` | int | `1024` | Maximum partition leaf size. Larger leaves increase candidate coverage and leaf distance work. |
 | `pipnn_min_leaf_size` | int | `64` | Target used when merging undersized leaves. |
 | `pipnn_leader_sample_rate` | float | `0.005` | Fraction sampled as partition leaders; each partition uses at least `2` and at most `1000` leaders, bounded by its point count. |
@@ -214,6 +216,16 @@ final pruning. Keep `OPENBLAS_NUM_THREADS=1` when benchmarking so BLAS threads d
 builder scaling. The reproducible `tools/eval/pipnn_parallel.yaml` workload compares NSW,
 ODescent, and PiPNN at a matched Recall@10 target on SIFT1M and query-validates every graph.
 
+
+### Incremental PiPNN Add
+
+Set `graph_type: "pipnn"` and `pipnn_incremental_add: true` before the initial Build. The default uses ordinary Add. In the default distance mode, incremental PiPNN uses the original FP32 rows for partition routing, projections, leaf neighbors, hash selection and graph pruning. Add reuses the quantizers trained during Build. SQ8 and ordinary RaBitQ use base codes. For split RaBitQ set the base and precise bit counts and use RaBitQ reorder. For 3-bit RaBitQ with independent SQ8 reorder set `rabitq_bits_per_dim_base: 3`, `use_reorder: true` and `precise_quantization_type: "sq8"`. Omit `rabitq_bits_per_dim_precise` in this configuration.
+
+In the default exact mode, HGraph and PiPNN share FP32 rows when the base, reorder, or raw store retains the input coordinates in memory and duplicate detection is disabled. For cosine, the FP32 store must retain the original coordinates and their norm. The snapshot stores these rows once. Without an eligible store, PiPNN retains its own FP32 rows. When loading an older exact snapshot, HGraph compares the historical rows with the candidate store in bounded blocks and shares matching data. If Tune removes the shared store, PiPNN retains the historical inputs for future Add calls.
+
+Set `pipnn_add_use_codes: true` before Build or when loading an exact incremental snapshot. Loading in code mode keeps the existing graph and drops PiPNN’s historical FP32 rows. Future Add calls use stored codes. Save and reload the converted snapshot with code mode enabled. Build uses its FP32 input and saves the leaf top-k and hash projections. Add uses stored code distances for new comparisons, including splits and RobustPrune. Split RaBitQ uses both code segments. A 3-bit RaBitQ base with independent SQ8 reorder uses the SQ8 codes when `build_by_base` is false. Set `store_raw_vector: false` to omit the separate original-vector store as well. For plain RaBitQ without reorder, set `store_raw_vector: true` and leave `build_by_base` false. PiPNN then reads distances from that FP32 store and keeps no additional historical FP32 rows. Plain RaBitQ without a symmetric distance source cannot use this mode.
+
+HGraph applies PiPNN to the bottom graph and uses its existing upper-layer insertion path. When L2 duplicate detection is enabled, incremental PiPNN requires `duplicate_distance_threshold: 0` and groups byte-identical FP32 rows across batches. Set `deduplicate_storage: true` to let each group share a physical code slot. Fused RaBitQ storage is outside the incremental mode.
 
 ### Experimental PiPNN adaptive alpha
 

@@ -77,6 +77,12 @@ public:
     bool
     DecodeOneImpl(const uint8_t* codes, float* data);
 
+    void
+    ComputeCodeDistances4(const uint8_t* source,
+                          const uint8_t* const* targets,
+                          float* distances) const
+        requires(bit == 8 && metric == MetricType::METRIC_TYPE_L2SQR);
+
     float
     ComputeImpl(const uint8_t* codes1, const uint8_t* codes2);
 

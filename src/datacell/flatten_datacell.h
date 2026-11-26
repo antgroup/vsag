@@ -24,6 +24,7 @@
 #include <type_traits>
 
 #include "common.h"
+#include "flatten_code_writer.h"
 #include "flatten_interface.h"
 #include "index_common_param.h"
 #include "layout/fixed_layout.h"
@@ -33,11 +34,13 @@
 #include "utils/timer.h"
 
 namespace vsag {
+class MemoryIO;
+class MemoryBlockIO;
 /*
 * thread unsafe
 */
 template <typename QuantTmpl, typename LayoutTmpl>
-class FlattenDataCell : public FlattenInterface {
+class FlattenDataCell : public FlattenInterface, public FlattenCodeWriter {
 public:
     FlattenDataCell() : layout_(std::make_shared<LayoutTmpl>()) {
         if constexpr (LayoutTmpl::InMemory) {
@@ -101,6 +104,17 @@ public:
 
     void
     BatchInsertVector(const void* vectors, InnerIdType count, InnerIdType* idx_vec) override;
+
+    void
+    InsertEncodedRange(InnerIdType first, InnerIdType count, const uint8_t* codes) override {
+        std::lock_guard lock(mutex_);
+        layout_->WriteRange(first, codes, count);
+        const auto end = first + count;
+        auto prev = total_count_.load(std::memory_order_relaxed);
+        while (prev < end && !total_count_.compare_exchange_weak(
+                                 prev, end, std::memory_order_release, std::memory_order_relaxed)) {
+        }
+    }
 
     bool
     Decode(const uint8_t* codes, float* data) override {
@@ -172,6 +186,12 @@ public:
 
     [[nodiscard]] bool
     InMemory() const override;
+
+    bool
+    CanBorrowRowsUntilResize() const override {
+        using IO = typename LayoutTmpl::IOType;
+        return std::is_same_v<IO, MemoryIO> || std::is_same_v<IO, MemoryBlockIO>;
+    }
 
     bool
     HoldMolds() const override;
@@ -318,6 +338,7 @@ private:
         return computer;
     }
 
+protected:
     MutexArrayPtr external_read_mutex_;
 };
 
@@ -423,15 +444,7 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::BatchInsertVector(const void* vectors,
             ByteBuffer codes(static_cast<uint64_t>(count) * static_cast<uint64_t>(code_size_),
                              allocator_);
             quantizer_->EncodeBatch(static_cast<const float*>(vectors), codes.data, count);
-            std::lock_guard lock(mutex_);
-            {
-                auto prev = total_count_.load(std::memory_order_relaxed);
-                const auto target = idx_vec[0] + count;
-                if (target > prev) {
-                    total_count_.store(target, std::memory_order_release);
-                }
-                layout_->WriteRange(idx_vec[0], codes.data, count);
-            }
+            InsertEncodedRange(idx_vec[0], count, codes.data);
             return;
         }
         // The quantizer API type-erases input through float*, but source rows retain

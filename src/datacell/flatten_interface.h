@@ -85,6 +85,11 @@ public:
         return data_ != nullptr;
     }
 
+    [[nodiscard]] bool
+    NeedsRelease() const {
+        return needs_release_;
+    }
+
     [[nodiscard]] const uint8_t*
     Data() const {
         return data_;
@@ -615,6 +620,13 @@ public:
         WriteFuncStreamWriter writer(calSizeFunc, 0);
         this->Serialize(writer);
         return writer.cursor_;
+    }
+
+    // Direct reads of unchanged records can be retained until the next Resize.
+    // Callers must hold any owned leases returned for records spanning IO blocks.
+    virtual bool
+    CanBorrowRowsUntilResize() const {
+        return false;
     }
 
     [[nodiscard]] virtual bool

@@ -433,6 +433,9 @@ PyramidParameters::CheckCompatibility(const ParamPtr& other) const {
     }
 
     CHECK_SUB_PARAM(*this, *p, graph_param);
+    if (!pipnn_param.CanLoadIncremental(p->pipnn_param)) {
+        return false;
+    }
     CHECK_FIELD_EQ(*this, *p, pipnn_param.adaptive_pruning);
     if (pipnn_param.adaptive_pruning) {
         CHECK_FIELD_EQ(*this, *p, graph_type);

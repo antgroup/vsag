@@ -105,6 +105,14 @@ GetRaBitQSQ4UBinaryIPWithBaseSumBatch4() {
 RaBitQSQ4UBinaryWithBaseSumBatch4Type RaBitQSQ4UBinaryIPWithBaseSumBatch4 =
     GetRaBitQSQ4UBinaryIPWithBaseSumBatch4();
 
+RaBitQUnpackEightBitPlanesType RaBitQUnpackEightBitPlanes = []() -> RaBitQUnpackEightBitPlanesType {
+#if defined(ENABLE_AVX512)
+    if (SimdStatus::SupportAVX512())
+        return avx512::RaBitQUnpackEightBitPlanes;
+#endif
+    return nullptr;
+}();
+
 static RaBitQCodeCodeType
 GetRaBitQCodeCodeIP() {
     if (SimdStatus::SupportAVX512()) {

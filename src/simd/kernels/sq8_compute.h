@@ -15,6 +15,7 @@
 #pragma once
 
 #include <cstdint>
+#include <type_traits>
 
 // SQ8 quantized distance kernels.
 //
@@ -89,6 +90,21 @@ SQ8ComputeIPImpl(const float* query,
 
 // --- SQ8ComputeL2Sqr ---
 
+// Load either an FP32 query lane or an affine-decoded SQ8 lane.
+template <typename T, typename Input>
+inline typename T::FloatVec
+LoadSQ8L2Input(const Input* input,
+               typename T::FloatVec inv255,
+               typename T::FloatVec scale,
+               typename T::FloatVec lower) {
+    if constexpr (std::is_same_v<Input, uint8_t>) {
+        return T::fmadd(T::mul(T::load_u8_as_float(input), inv255), scale, lower);
+    } else {
+        static_assert(std::is_same_v<Input, float>);
+        return T::load(input);
+    }
+}
+
 template <typename T>
 inline float
 SQ8ComputeL2SqrImpl(const float* query,
@@ -115,13 +131,10 @@ SQ8ComputeL2SqrImpl(const float* query,
 
     uint64_t i = 0;
     for (; i + W <= dim; i += W) {
-        V code_floats = T::load_u8_as_float(codes + i);
-        V query_vals = T::load(query + i);
-        V diff_vals = T::load(diff + i);
-        V lb_vals = T::load(lower_bound + i);
-
-        V normalized = T::mul(code_floats, inv255);
-        V adjusted = T::fmadd(normalized, diff_vals, lb_vals);
+        const V scale = T::load(diff + i);
+        const V lb = T::load(lower_bound + i);
+        const V query_vals = LoadSQ8L2Input<T>(query + i, inv255, scale, lb);
+        const V adjusted = LoadSQ8L2Input<T>(codes + i, inv255, scale, lb);
         V d = T::sub(query_vals, adjusted);
         sum = T::fmadd(d, d, sum);
     }
@@ -136,10 +149,10 @@ SQ8ComputeL2SqrImpl(const float* query,
     return result;
 }
 
-template <typename T>
+template <typename T, typename Query>
 inline void
 SQ8ComputeL2SqrBatch4Impl(
-    const float* query,
+    const Query* query,
     const uint8_t* codes1,
     const uint8_t* codes2,
     const uint8_t* codes3,
@@ -151,7 +164,7 @@ SQ8ComputeL2SqrBatch4Impl(
     float& dist2,
     float& dist3,
     float& dist4,
-    float (*fallback)(const float*, const uint8_t*, const float*, const float*, uint64_t)) {
+    float (*fallback)(const Query*, const uint8_t*, const float*, const float*, uint64_t)) {
     using V = typename T::FloatVec;
     constexpr uint64_t W = T::Width;
     V sums[4] = {T::zero(), T::zero(), T::zero(), T::zero()};
@@ -160,13 +173,12 @@ SQ8ComputeL2SqrBatch4Impl(
 
     uint64_t i = 0;
     for (; i + W <= dim; i += W) {
-        const V q = T::load(query + i);
         const V lb = T::load(lower_bound + i);
         const V scale = T::load(diff + i);
+        const V q = LoadSQ8L2Input<T>(query + i, inv255, scale, lb);
         for (uint64_t j = 0; j < 4; ++j) {
-            const V code = T::load_u8_as_float(codes[j] + i);
-            const V adjusted = T::fmadd(T::mul(code, inv255), scale, lb);
-            const V delta = T::sub(q, adjusted);
+            const V target = LoadSQ8L2Input<T>(codes[j] + i, inv255, scale, lb);
+            const V delta = T::sub(q, target);
             sums[j] = T::fmadd(delta, delta, sums[j]);
         }
     }
@@ -299,13 +311,10 @@ SQ8ComputeCodesL2SqrImpl(const uint8_t* codes1,
 
     uint64_t i = 0;
     for (; i + W <= dim; i += W) {
-        V c1_floats = T::load_u8_as_float(codes1 + i);
-        V c2_floats = T::load_u8_as_float(codes2 + i);
-        V diff_vals = T::load(diff + i);
-        V lb_vals = T::load(lower_bound + i);
-
-        V adj1 = T::fmadd(T::mul(c1_floats, inv255), diff_vals, lb_vals);
-        V adj2 = T::fmadd(T::mul(c2_floats, inv255), diff_vals, lb_vals);
+        const V scale = T::load(diff + i);
+        const V lb = T::load(lower_bound + i);
+        const V adj1 = LoadSQ8L2Input<T>(codes1 + i, inv255, scale, lb);
+        const V adj2 = LoadSQ8L2Input<T>(codes2 + i, inv255, scale, lb);
         V d = T::sub(adj1, adj2);
         sum = T::fmadd(d, d, sum);
     }

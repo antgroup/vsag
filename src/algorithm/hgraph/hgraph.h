@@ -103,6 +103,7 @@ public:
     friend class HGraphCodeWriteTestAccess;
     friend class HGraphCacheTestAccess;
     friend class HGraphFusedInputTestAccess;
+    friend struct PiPNNQuantizedAddTestAccess;
     friend struct HGraphMCITestAccess;
     friend class HGraphOptimizedBuildSession;
     friend class MciIncrementalAddExecutor;
@@ -113,7 +114,7 @@ public:
     HGraph(const ParamPtr& param, const IndexCommonParam& common_param)
         : HGraph(std::dynamic_pointer_cast<HGraphParameter>(param), common_param) {};
 
-    ~HGraph() override = default;
+    ~HGraph() override;
 
     std::vector<int64_t>
     Add(const DatasetPtr& data) override;
@@ -705,7 +706,7 @@ private:
     prepare_add_context(const DatasetPtr& data);
 
     AddBatch
-    prepare_add_batch(const DatasetPtr& data);
+    prepare_add_batch(const DatasetPtr& data, bool defer_labels = false);
 
     void
     prepare_graph_read_codes(const DatasetPtr& data, AddContext& context);
@@ -1291,6 +1292,8 @@ private:
     InnerIdType entry_point_id_{INVALID_ENTRY_POINT};  // top-level entry point
 
     ODescentParameterPtr odescent_param_{nullptr};  // ODescent build parameters
+    struct PiPNNAdd;
+    std::unique_ptr<PiPNNAdd> pipnn_add_;
     PiPNNGraphBuilderParameter pipnn_param_{};      // PiPNN build parameters
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};  // graph algorithm type
 

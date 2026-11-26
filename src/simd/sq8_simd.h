@@ -144,6 +144,27 @@ SQ8ComputeIPBatch4Fallback(const float* query,
                            float& dist3,
                            float& dist4);
 
+using SQ8CodeBatch4Type =
+    void (*)(const uint8_t*, const uint8_t* const*, const float*, const float*, uint64_t, float*);
+namespace avx512 {
+void
+SQ8ComputeCodesL2SqrBatch4(const uint8_t* source,
+                           const uint8_t* const* targets,
+                           const float* lower_bound,
+                           const float* diff,
+                           uint64_t dim,
+                           float* distances);
+}
+// Four independent single-pair calls on platforms without the batched kernel.
+void
+SQ8CodeBatch4Fallback(const uint8_t* source,
+                      const uint8_t* const* targets,
+                      const float* lower_bound,
+                      const float* diff,
+                      uint64_t dim,
+                      float* distances);
+extern SQ8CodeBatch4Type SQ8ComputeCodesL2SqrBatch4;
+
 using SQ8ComputeCodesType = float (*)(const uint8_t* RESTRICT codes1,
                                       const uint8_t* RESTRICT codes2,
                                       const float* RESTRICT lower_bound,

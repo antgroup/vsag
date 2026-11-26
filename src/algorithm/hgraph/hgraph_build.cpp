@@ -31,6 +31,7 @@
 #include "hgraph.h"
 #include "hgraph_fast_build.h"
 #include "hgraph_mci_add.h"  // IWYU pragma: keep
+#include "hgraph_pipnn_add.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/logger/logger.h"
 #include "impl/odescent/odescent_graph_builder.h"
@@ -100,6 +101,49 @@ need_temporary_sq8_build_data(const FlattenInterfacePtr& basic_flatten_codes,
     const auto name = basic_flatten_codes->GetQuantizerName();
     return not has_precise_reorder and GetBaseQuantizerName(name) == QUANTIZATION_TYPE_VALUE_RABITQ;
 }
+
+// A non-split RaBitQ code supports a raw query against a stored target, but cannot
+// act as the source of a pairwise comparison. PiPNN already owns the exact source.
+class PiPNNRouteDistanceProvider final : public DistanceProviderForGraph {
+public:
+    PiPNNRouteDistanceProvider(const PiPNNIncrementalState& state,
+                               const FlattenInterfacePtr& codes,
+                               InnerIdType query_id,
+                               const HGraphPiPNNRows* exact_rows)
+        : state_(state), codes_(codes), query_id_(query_id), exact_rows_(exact_rows) {
+    }
+
+    float
+    QueryDistance(InnerIdType id, QueryContext* /*ctx*/ = nullptr) const override {
+        return PairwiseDistance(query_id_, id, nullptr);
+    }
+
+    [[nodiscard]] float
+    PairwiseDistance(InnerIdType source,
+                     InnerIdType target,
+                     const ComputerInterfacePtr& computer) const override {
+        float distance;
+        codes_->Query(&distance, computer ? computer : FactoryComputerById(source), &target, 1);
+        return distance;
+    }
+
+    [[nodiscard]] ComputerInterfacePtr
+    FactoryComputerById(InnerIdType id) const override {
+        return codes_->FactoryComputer(
+            (exact_rows_ != nullptr) ? exact_rows_->Get(id) : state_.GetVector(state_.LocalId(id)));
+    }
+
+    [[nodiscard]] bool
+    SupportsComputerById() const override {
+        return true;
+    }
+
+private:
+    const PiPNNIncrementalState& state_;
+    const FlattenInterfacePtr& codes_;
+    InnerIdType query_id_;
+    const HGraphPiPNNRows* exact_rows_;
+};
 
 static void
 wait_all_futures(std::vector<std::future<void>>& futures) {
@@ -306,8 +350,12 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         }
     }
     Vector<Vector<InnerIdType>> route_graph_ids(allocator_);
+    const bool use_precise_for_build =
+        this->has_precise_reorder() &&
+        !(use_pipnn && pipnn_param_.incremental_add && build_by_base_);
     auto need_sq8_build_data =
-        need_temporary_sq8_build_data(this->basic_flatten_codes_, this->has_precise_reorder());
+        !(use_pipnn && pipnn_param_.add_use_codes) &&
+        need_temporary_sq8_build_data(this->basic_flatten_codes_, use_precise_for_build);
     FlattenInterfacePtr temporary_sq8_build_data = nullptr;
     if (need_sq8_build_data and raw_vector_ == nullptr) {
         temporary_sq8_build_data =
@@ -457,8 +505,7 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         fused_codes.reset();
     }
 
-    auto build_data = (has_precise_reorder() and not build_by_base_) ? this->high_precise_codes_
-                                                                     : this->basic_flatten_codes_;
+    auto build_data = PiPNNAdd::DistanceCodes(*this);
     if (need_sq8_build_data) {
         build_data = raw_vector_ != nullptr ? raw_vector_ : temporary_sq8_build_data;
     }
@@ -499,8 +546,23 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
                                         this->allocator_,
                                         this->thread_pool_.get(),
                                         this->build_thread_count_);
-        if (half_input) {
-            // Reservoir caches only cover FP32 input; half input always builds cold.
+        if (pipnn_parameter.incremental_add) {
+            auto incremental = std::make_unique<PiPNNAdd>();
+            if (auto exact = PiPNNAdd::ExactStore(*this); !pipnn_param_.add_use_codes && exact) {
+                // Build consumes original inputs, including when query-code writes are deferred.
+                Vector<const float*> by_id(current_count + new_ids_count, nullptr, allocator_);
+                for (size_t i = 0; i < inner_ids.size(); ++i) {
+                    by_id[inner_ids[i]] = pipnn_f32_vectors[i];
+                }
+                pipnn_builder.UpdateFromSharedRows(
+                    bottom_graph_, inner_ids, by_id, incremental->state);
+                incremental->exact_rows = std::make_unique<HGraphPiPNNRows>(std::move(exact));
+            } else {
+                pipnn_builder.Update(
+                    bottom_graph_, inner_ids, pipnn_f32_vectors, incremental->state);
+            }
+            pipnn_add_ = std::move(incremental);
+        } else if (half_input) {
             pipnn_builder.Build(bottom_graph_, inner_ids, pipnn_half_vectors, data_type_);
         } else {
             std::vector<std::string> pipnn_sources;
@@ -620,6 +682,9 @@ HGraph::Add(const DatasetPtr& data) {
         std::unique_lock<std::mutex> initial_build_lock(pipnn_initial_build_mutex_);
         if (this->total_count_.load() == 0) {
             return this->Build(data);
+        }
+        if (pipnn_add_) {
+            return pipnn_add_->Add(*this, data);
         }
     }
     return this->add_impl(data);
@@ -834,7 +899,8 @@ HGraph::assign_batch_levels(Vector<AddRow>& rows) {
 }
 
 HGraph::AddBatch
-HGraph::prepare_add_batch(const DatasetPtr& data) {
+HGraph::prepare_add_batch(const DatasetPtr& data, bool defer_labels) {
+    std::unordered_set<int64_t> batch_labels;
     AddBatch batch(this->allocator_);
 
     auto total = data->GetNumElements();
@@ -844,7 +910,7 @@ HGraph::prepare_add_batch(const DatasetPtr& data) {
         {
             std::shared_lock label_lock(this->label_lookup_mutex_);
             auto [found, _] = this->label_table_->TryGetIdByLabel(labels[j]);
-            if (found) {
+            if (found || (defer_labels && !batch_labels.insert(labels[j]).second)) {
                 batch.failed_ids.emplace_back(labels[j]);
                 continue;
             }
@@ -875,17 +941,15 @@ HGraph::prepare_add_batch(const DatasetPtr& data) {
         AddRow row;
         row.input_idx = j;
         row.inner_id = inner_id;
-        {
+        if (!defer_labels) {
             std::scoped_lock label_lock(this->label_lookup_mutex_);
             this->label_table_->Insert(inner_id, labels[j]);
             // Same array-indexing semantics as build_with_cache().
             if (source_id != nullptr && not source_id[j].empty()) {
                 this->label_table_->InsertSourceId(inner_id, source_id[j]);
             }
-            // Level is assigned in a separate, deterministic pass (see
-            // assign_batch_levels) so that it cannot depend on thread scheduling.
-            batch.rows.emplace_back(row);
         }
+        batch.rows.emplace_back(row);
     }
 
     // Assign all levels up front, in input order, so the value is a pure function of
@@ -1354,6 +1418,16 @@ HGraph::publish_unique_to_route_graphs(const void* data,
     DistHeapPtr result = nullptr;
     const auto build_computer = this->make_build_computer(data, inner_id);
 
+    FlattenDistanceProvider stored_distances(flatten_codes, nullptr);
+    std::optional<PiPNNRouteDistanceProvider> raw_query_distances;
+    if (pipnn_add_ && !pipnn_param_.add_use_codes && !flatten_codes->SupportSplitCodeStorage() &&
+        GetBaseQuantizerName(flatten_codes->GetQuantizerName()) == QUANTIZATION_TYPE_VALUE_RABITQ) {
+        raw_query_distances.emplace(
+            pipnn_add_->state, flatten_codes, inner_id, pipnn_add_->exact_rows.get());
+    }
+    const DistanceProviderForGraph& distances =
+        raw_query_distances ? static_cast<const DistanceProviderForGraph&>(*raw_query_distances)
+                            : static_cast<const DistanceProviderForGraph&>(stored_distances);
     for (int64_t j = 0; j <= level; ++j) {
         if (route_graphs_[j]->TotalCount() != 0) {
             result = this->search_graph_for_build(
@@ -1370,7 +1444,7 @@ HGraph::publish_unique_to_route_graphs(const void* data,
                 mutually_connect_new_element(inner_id,
                                              filtered_result,
                                              route_graphs_[j],
-                                             flatten_codes,
+                                             distances,
                                              neighbors_mutex_,
                                              allocator_,
                                              alpha_);
@@ -1482,7 +1556,7 @@ HGraph::InitFeatures() {
         IndexFeature::SUPPORT_BUILD_WITH_MULTI_THREAD,
         IndexFeature::SUPPORT_ADD_AFTER_BUILD,
     });
-    if (not this->using_dedup_storage()) {
+    if (not this->using_dedup_storage() && !pipnn_param_.incremental_add) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_MERGE_INDEX);
     }
     // search
@@ -1494,7 +1568,7 @@ HGraph::InitFeatures() {
         IndexFeature::SUPPORT_CONTINUE_SEARCH_SESSION,
     });
     // update
-    if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
+    if (data_type_ != DataTypes::DATA_TYPE_SPARSE && !pipnn_param_.incremental_add) {
         this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT});
     }
     this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_UPDATE_ID_CONCURRENT});

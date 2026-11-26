@@ -24,6 +24,7 @@
 #include "datacell/clique_datacell.h"
 #include "hgraph.h"
 #include "hgraph_component_names.h"  // IWYU pragma: keep
+#include "hgraph_pipnn_add.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "storage/chunked_manifest.h"
 #include "storage/parallel_deserialize_utils.h"
@@ -153,6 +154,12 @@ HGraph::ParallelDeserialize(DeserializeReader& reader) {
     }
     auto metadata = footer->GetMetadata();
 
+    if (metadata->Get("pipnn_incremental_version").IsNumberInteger() &&
+        !metadata->Get(CHUNKED_LAYOUT_KEY).IsObject()) {
+        footer_reader.Seek(0);
+        Deserialize(footer_reader);
+        return;
+    }
     const auto serialized_total_count = this->apply_footer_metadata(metadata);
     const auto basic_info = metadata->Get(BASIC_INFO);
 
@@ -164,7 +171,42 @@ HGraph::ParallelDeserialize(DeserializeReader& reader) {
         // a tampered footer cannot alias frames or escape the body bounds
         const uint64_t physical_body = reader.Size() - footer->Length();
         chunked_manifest.Validate(physical_body);
+        // The PiPNN component may borrow exact codes or compare its historical FP32
+        // inputs against them. Restore it after the code bodies and quantizer tails.
+        std::optional<ComponentManifestEntry> incremental;
+        auto& components = chunked_manifest.components_;
+        auto it = std::find_if(components.begin(), components.end(), [](const auto& comp) {
+            return comp.name == "pipnn_incremental";
+        });
+        if (it != components.end()) {
+            const bool valid_component =
+                it->granularity == ComponentGranularity::Whole &&
+                metadata->Get("pipnn_incremental_version").IsNumberInteger();
+            CHECK_ARGUMENT(valid_component, "invalid incremental PiPNN component");
+            incremental = std::move(*it);
+            components.erase(it);
+        }
         this->parallel_deserialize_manifest(reader, pool, chunked_manifest, basic_info);
+        if (incremental && pipnn_param_.incremental_add) {
+            const auto& comp = *incremental;
+            const auto count =
+                std::max<uint64_t>(serialized_total_count, basic_flatten_codes_->TotalCount());
+            if (chunked_manifest.codec_ == "none") {
+                auto frame = footer_reader.Slice(comp.offset, comp.logical_size);
+                pipnn_add_ = PiPNNAdd::Read(*this, frame, metadata, count);
+                CHECK_ARGUMENT(frame.GetCursor() == comp.logical_size, "bad PiPNN frame size");
+            } else {
+                read_decompressed_checked(
+                    reader, comp.offset, comp.compressed_size, [&](std::istream& is) {
+                        ForwardStreamReader stream(is);
+                        BoundedForwardReader frame(&stream, comp.logical_size);
+                        pipnn_add_ = PiPNNAdd::Read(*this, frame, metadata, count, true);
+                        const bool valid_frame_size = frame.GetCursor() == comp.logical_size &&
+                                                      is.peek() == std::istream::traits_type::eof();
+                        CHECK_ARGUMENT(valid_frame_size, "bad PiPNN frame size");
+                    });
+            }
+        }
     } else {
         // no recorded layout: probe an uncompressed sequential body
         const uint64_t physical_body = reader.Size() - footer->Length();
@@ -174,6 +216,9 @@ HGraph::ParallelDeserialize(DeserializeReader& reader) {
     // The probe path parses graph tails before filling IO. Rebuild incoming edges only
     // after all fills have joined, before any FORCE_REMOVE may relocate tail IDs.
     this->bottom_graph_->FinishDeserialize();
+    const bool ids_fit_graph =
+        !pipnn_add_ || pipnn_add_->state.RequiredCapacity() <= bottom_graph_->MaxCapacity();
+    CHECK_ARGUMENT(ids_fit_graph, "PiPNN state ID exceeds loaded graph capacity");
     this->validate_and_publish_dedup_state(serialized_total_count);
     if (!this->using_dedup_storage()) {
         // Keep failed Add reservations unavailable to subsequent Adds after restore.

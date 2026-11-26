@@ -79,4 +79,24 @@ SQ8ComputeBatch4Type SQ8ComputeIPBatch4 = GetSQ8ComputeIPBatch4();
 VSAG_DEFINE_SIMD_DISPATCH(SQ8ComputeCodesIP, SQ8ComputeCodesType);
 VSAG_DEFINE_SIMD_DISPATCH(SQ8ComputeCodesL2Sqr, SQ8ComputeCodesType);
 VSAG_DEFINE_SIMD_DISPATCH(SQ8SparseAccumulate, SQ8SparseAccumulateType);
+void
+SQ8CodeBatch4Fallback(const uint8_t* source,
+                      const uint8_t* const* targets,
+                      const float* lower_bound,
+                      const float* diff,
+                      uint64_t dim,
+                      float* distances) {
+    for (size_t i = 0; i < 4; ++i)
+        distances[i] = SQ8ComputeCodesL2Sqr(source, targets[i], lower_bound, diff, dim);
+}
+
+static SQ8CodeBatch4Type
+GetSQ8CodeBatch4() {
+    if (SimdStatus::SupportAVX512()) {
+        VSAG_SIMD_DISPATCH_BODY_AVX512(SQ8ComputeCodesL2SqrBatch4)
+    }
+    return SQ8CodeBatch4Fallback;
+}
+SQ8CodeBatch4Type SQ8ComputeCodesL2SqrBatch4 = GetSQ8CodeBatch4();
+
 }  // namespace vsag

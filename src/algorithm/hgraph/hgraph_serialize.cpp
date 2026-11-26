@@ -24,6 +24,7 @@
 #include "datacell/sparse_graph_datacell.h"
 #include "hgraph.h"
 #include "hgraph_component_names.h"  // IWYU pragma: keep
+#include "hgraph_pipnn_add.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
@@ -408,6 +409,8 @@ HGraph::Serialize(StreamWriter& writer) const {
 
     // FIXME(wxyu): this option is used for special purposes, like compatibility testing
     if (this->use_old_serial_format_) {
+        CHECK_ARGUMENT(!pipnn_add_,
+                       "incremental PiPNN state requires the current serialization format");
         if (this->use_conjugate_graph_) {
             throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                 "HGraph conjugate graph does not support v0.14 serialization");
@@ -469,12 +472,18 @@ HGraph::Serialize(StreamWriter& writer) const {
         this->conjugate_graph_->Serialize(writer);
     }
 
+    if (pipnn_add_) {
+        pipnn_add_->Write(writer, pipnn_param_.add_use_codes);
+    }
     // serialize footer (introduced since v0.15)
     auto jsonify_basic_info = this->serialize_basic_info();
     auto metadata = std::make_shared<Metadata>();
     metadata->Set(BASIC_INFO, jsonify_basic_info);
     if (this->support_duplicate_) {
         metadata->Set("duplicate_format_version", 1);
+    }
+    if (pipnn_add_) {
+        pipnn_add_->WriteMetadata(*metadata, *this);
     }
     metadata->Set("has_conjugate_graph", this->use_conjugate_graph_);
     logger::debug(jsonify_basic_info.Dump());
@@ -604,12 +613,19 @@ HGraph::Serialize(SerializeWriter& writer, uint64_t chunk_size) const {
         });
     }
 
+    if (pipnn_add_) {
+        serialize_whole("pipnn_incremental",
+                        [&]() { pipnn_add_->Write(chunked_writer, pipnn_param_.add_use_codes); });
+    }
     // footer: plaintext, outside any component/frame
     auto jsonify_basic_info = this->serialize_basic_info();
     auto metadata = std::make_shared<Metadata>();
     metadata->Set(BASIC_INFO, jsonify_basic_info);
     if (this->support_duplicate_) {
         metadata->Set("duplicate_format_version", 1);
+    }
+    if (pipnn_add_) {
+        pipnn_add_->WriteMetadata(*metadata, *this);
     }
     metadata->Set("has_conjugate_graph", this->use_conjugate_graph_);
     // physical bytes before the footer (same coordinate as the layout
@@ -623,6 +639,8 @@ HGraph::Serialize(SerializeWriter& writer, uint64_t chunk_size) const {
 
 MetadataPtr
 HGraph::collect_streaming_header() const {
+    CHECK_ARGUMENT(!pipnn_add_,
+                   "incremental PiPNN state requires file or binary-set serialization");
     if (this->mci_parameters_.enabled) {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "HGraph MCI does not support streaming serialization");
@@ -1119,6 +1137,7 @@ HGraph::read_streaming_body(StreamReader& reader,
     if (this->raw_vector_ != nullptr) {
         this->has_raw_vector_ = true;
     }
+    PiPNNAdd::RestoreOrdinaryAdd(*this);
     this->restore_fused_codec();
 
     if (use_elp_optimizer_) {
@@ -1240,11 +1259,91 @@ HGraph::Deserialize(StreamReader& reader) {
                 throw VsagException(result.error().type, result.error().message);
             }
         }
+        if (pipnn_param_.incremental_add &&
+            metadata->Get("pipnn_incremental_version").IsNumberInteger()) {
+            pipnn_add_ = PiPNNAdd::Read(*this, buffer_reader, metadata, total_count_.load());
+        }
         if (this->raw_vector_ != nullptr) {
             this->has_raw_vector_ = true;
         }
     }
     this->finish_deserialize();
+}
+
+int64_t
+HGraph::PiPNNAdd::SnapshotVersion(bool use_codes) const {
+    return exact_rows ? 3 : use_codes ? 2 : 1;
+}
+
+void
+HGraph::PiPNNAdd::Write(StreamWriter& writer, bool use_codes) const {
+    state.Serialize(writer, SnapshotVersion(use_codes) == 1);
+}
+
+void
+HGraph::PiPNNAdd::WriteMetadata(Metadata& metadata, const HGraph& graph) const {
+    metadata.Set("pipnn_incremental_version", SnapshotVersion(graph.pipnn_param_.add_use_codes));
+    if (exact_rows) {
+        const auto& store = exact_rows->Store();
+        const int64_t source = store == graph.basic_flatten_codes_  ? BASE_CODE
+                               : store == graph.high_precise_codes_ ? PRECISE_CODE
+                                                                    : RAW_CODE;
+        metadata.Set("pipnn_exact_source", source);
+    }
+}
+
+std::unique_ptr<HGraph::PiPNNAdd>
+HGraph::PiPNNAdd::Read(const HGraph& graph,
+                       StreamReader& reader,
+                       const MetadataPtr& metadata,
+                       uint64_t count,
+                       bool forward_only) {
+    const auto version = metadata->Get("pipnn_incremental_version").GetInt();
+    const bool borrowed = version == 3;
+    const bool compatible_distance_mode =
+        version == 1 || (version == 2 && graph.pipnn_param_.add_use_codes) || borrowed;
+    CHECK_ARGUMENT(compatible_distance_mode,
+                   "PiPNN snapshot distance mode does not match index configuration");
+    auto incremental = std::make_unique<PiPNNAdd>();
+    auto& state = incremental->state;
+    if (!graph.pipnn_param_.add_use_codes) {
+        int64_t source = 0;
+        if (borrowed) {
+            const auto saved = metadata->Get("pipnn_exact_source");
+            const bool has_exact_source = saved.IsNumberInteger() && saved.GetInt() != 0;
+            CHECK_ARGUMENT(has_exact_source, "missing PiPNN exact source");
+            source = saved.GetInt();
+        }
+        if (auto exact = ExactStore(graph, source)) {
+            incremental->exact_rows = std::make_unique<HGraphPiPNNRows>(std::move(exact));
+        }
+        const bool has_required_backing = !borrowed || incremental->exact_rows;
+        CHECK_ARGUMENT(has_required_backing, "missing FP32 backing for PiPNN snapshot");
+    }
+    std::function<void(StreamReader&)> consume;
+    if (version == 1 && incremental->exact_rows) {
+        consume = [&](StreamReader& stream) {
+            incremental->exact_rows->RestoreLegacy(stream, state, graph.dim_, graph.allocator_);
+        };
+    } else if (version == 1 && graph.pipnn_param_.add_use_codes && forward_only) {
+        consume = [&](StreamReader& stream) {
+            SkipForward(stream, state.ids.size() * graph.dim_ * sizeof(float));
+        };
+    }
+    state.Deserialize(reader,
+                      count,
+                      graph.dim_,
+                      graph.pipnn_param_.hash_plane_count,
+                      graph.bottom_graph_->MaxCapacity(),
+                      graph.allocator_,
+                      version >= 2                       ? PiPNNVectorPayload::Absent
+                      : graph.pipnn_param_.add_use_codes ? PiPNNVectorPayload::Skip
+                                                         : PiPNNVectorPayload::Restore,
+                      consume);
+    if (!state.Rows().empty()) {
+        incremental->exact_rows.reset();
+    }
+    return incremental;
 }
 
 void
@@ -1351,6 +1450,20 @@ HGraph::initialize_deserialized_runtime_state() {
 }
 
 void
+HGraph::PiPNNAdd::RestoreOrdinaryAdd(HGraph& graph) {
+    if (graph.pipnn_add_ || !graph.pipnn_param_.incremental_add || graph.total_count_ == 0) {
+        return;
+    }
+    graph.pipnn_param_.incremental_add = false;
+    graph.pipnn_param_.add_use_codes = false;
+    auto parameters = std::make_shared<HGraphParameter>(
+        *std::static_pointer_cast<HGraphParameter>(graph.create_param_ptr_));
+    parameters->pipnn_param = graph.pipnn_param_;
+    graph.create_param_ptr_ = std::move(parameters);
+    graph.InitFeatures();
+}
+
+void
 HGraph::finish_deserialize() {
     // Ordinary snapshots can contain reservations beyond the written code range.
     // Publish written codes only; deduplicated snapshots validate all logical mappings below.
@@ -1384,6 +1497,7 @@ HGraph::finish_deserialize() {
             (void)this->code_slot_map_->Resolve(inner_id);
         }
     }
+    PiPNNAdd::RestoreOrdinaryAdd(*this);
     this->restore_fused_codec();
 
     // post serialize procedure
@@ -1423,6 +1537,12 @@ std::unordered_map<std::string, uint64_t>
 HGraph::GetMemoryUsageDetail() const {
     std::unordered_map<std::string, uint64_t> memory_usage;
     memory_usage["pipnn_build_cache"] = pipnn_cache_memory_.load(std::memory_order_acquire);
+    if (pipnn_add_) {
+        memory_usage["pipnn_incremental"] = pipnn_add_->state.MemoryUsage();
+        if (pipnn_add_->exact_rows) {
+            memory_usage["pipnn_exact_row_view"] = pipnn_add_->exact_rows->MemoryUsage();
+        }
+    }
     memory_usage["neighbors_mutex"] = this->neighbors_mutex_->GetMemoryUsage();
     memory_usage["pool"] = this->pool_->GetMemoryUsage();
     memory_usage["label_table"] = this->label_table_->GetMemoryUsage();

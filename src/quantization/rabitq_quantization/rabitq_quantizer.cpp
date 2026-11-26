@@ -1270,15 +1270,40 @@ RaBitQuantizer<metric>::PackScalarCodeToSplitCode(const uint8_t* scalar_code,
 template <MetricType metric>
 uint64_t
 RaBitQuantizer<metric>::unpack_scalar_code(const uint8_t* codes, uint8_t* scalar_code) const {
-    memset(scalar_code, 0, GetScalarCodeSize());
     const uint64_t plane_bytes = PlaneBytes();
     const auto* planes = codes + offset_code_;
     std::array<const uint8_t*, 8> stored_planes{};
     for (uint32_t bit = 0; bit < num_bits_per_dim_base_; ++bit) {
         stored_planes[bit] = GetStoredPlane(planes, bit, plane_bytes);
     }
+    return unpack_scalar_planes(stored_planes, codes + CodeMetaOffset(), scalar_code);
+}
+
+template <MetricType metric>
+uint64_t
+RaBitQuantizer<metric>::UnpackSplitScalarCode(const uint8_t* filter,
+                                              const uint8_t* supplement,
+                                              uint8_t* scalar_code) const {
+    std::array<const uint8_t*, 8> stored_planes{};
+    for (uint32_t bit = 0; bit < num_bits_per_dim_base_; ++bit) {
+        const auto offset = split_layout_.stored_plane_offsets[bit];
+        stored_planes[bit] =
+            bit < ReorderBits() ? supplement + (offset - FilterPlanesSize()) : filter + offset;
+    }
+    return unpack_scalar_planes(stored_planes, supplement + SupplementMetaOffset(), scalar_code);
+}
+
+template <MetricType metric>
+uint64_t
+RaBitQuantizer<metric>::unpack_scalar_planes(const std::array<const uint8_t*, 8>& stored_planes,
+                                             const uint8_t* metadata,
+                                             uint8_t* scalar_code) const {
     uint64_t code_sum = 0;
     uint64_t d = 0;
+    if (num_bits_per_dim_base_ == 8 && RaBitQUnpackEightBitPlanes != nullptr) {
+        d = this->dim_ / 64 * 64;
+        code_sum = RaBitQUnpackEightBitPlanes(stored_planes.data(), d, scalar_code);
+    }
     for (; d + 8 <= this->dim_; d += 8) {
         uint64_t packed_lanes = 0;
         for (uint32_t bit = 0; bit < num_bits_per_dim_base_; ++bit) {
@@ -1303,9 +1328,8 @@ RaBitQuantizer<metric>::unpack_scalar_code(const uint8_t* codes, uint8_t* scalar
         scalar_code[d] = value;
         code_sum += value;
     }
-    memcpy(scalar_code + ScalarCodeMetaOffset(),
-           codes + CodeMetaOffset(),
-           this->code_size_ - CodeMetaOffset());
+    memset(scalar_code + this->dim_, 0, ScalarCodeMetaOffset() - this->dim_);
+    memcpy(scalar_code + ScalarCodeMetaOffset(), metadata, this->code_size_ - CodeMetaOffset());
     return code_sum;
 }
 

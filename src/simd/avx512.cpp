@@ -23,12 +23,15 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <limits>
 
 #include "kernels/local_sq_compute.h"
+#include "pipnn_filter.h"
+#include "pipnn_ip_tile.h"
 #include "simd.h"
 #include "sq4_local_simd.h"
 #include "sq8_local_simd.h"
@@ -194,6 +197,86 @@ void
 Prefetch(const void* data) {
     avx2::Prefetch(data);
 }
+
+#if defined(ENABLE_AVX512)
+namespace {
+void
+ComputeFourByFour(const float* const* old_rows,
+                  const float* const* new_rows,
+                  float* out,
+                  uint64_t stride) {
+    __m512 sums[4][4]{};
+    for (uint64_t d = 0; d < PIPNN_TILE_DIM; d += 16) {
+        __m512 incoming[4];
+        for (int j = 0; j < 4; ++j) {
+            incoming[j] = _mm512_loadu_ps(new_rows[j] + d);
+        }
+        for (int i = 0; i < 4; ++i) {
+            const auto old = _mm512_loadu_ps(old_rows[i] + d);
+            for (int j = 0; j < 4; ++j) {
+                sums[i][j] = _mm512_fmadd_ps(old, incoming[j], sums[i][j]);
+            }
+        }
+    }
+    for (int j = 0; j < 4; ++j) {
+        for (int i = 0; i < 4; ++i) {
+            out[j * stride + i] = _mm512_reduce_add_ps(sums[i][j]);
+        }
+    }
+}
+
+// A leftover column previously used FP32ComputeIP, which sums four independent
+// accumulators in dimension order. Preserve its rounding at the top-k boundary.
+void
+ComputeFourByOne(const float* const* old_rows, const float* incoming, float* out) {
+    __m512 sums[4][4]{};
+    for (uint64_t d = 0; d < PIPNN_TILE_DIM; d += 64) {
+        for (int lane = 0; lane < 4; ++lane) {
+            const auto query = _mm512_loadu_ps(incoming + d + lane * 16);
+            for (int i = 0; i < 4; ++i) {
+                const auto old = _mm512_loadu_ps(old_rows[i] + d + lane * 16);
+                sums[i][lane] = _mm512_fmadd_ps(old, query, sums[i][lane]);
+            }
+        }
+    }
+    for (int i = 0; i < 4; ++i) {
+        auto sum = sums[i][0];
+        for (int lane = 1; lane < 4; ++lane) {
+            sum = _mm512_add_ps(sum, sums[i][lane]);
+        }
+        out[i] = _mm512_reduce_add_ps(sum);
+    }
+}
+}  // namespace
+
+uint64_t
+ComputePiPNNOldRowTiles960(const float* const* rows,
+                           const uint32_t* members,
+                           uint64_t old_count,
+                           uint64_t new_count,
+                           float* dots) {
+    const auto stride = old_count + new_count;
+    uint64_t first = 0;
+    for (; first + 4 <= old_count; first += 4) {
+        const float* old_rows[4];
+        for (int i = 0; i < 4; ++i) {
+            old_rows[i] = rows[members[first + i]];
+        }
+        uint64_t j = 0;
+        for (; j + 4 <= new_count; j += 4) {
+            const float* new_rows[4];
+            for (int k = 0; k < 4; ++k) {
+                new_rows[k] = rows[members[old_count + j + k]];
+            }
+            ComputeFourByFour(old_rows, new_rows, dots + j * stride + first, stride);
+        }
+        for (; j < new_count; ++j) {
+            ComputeFourByOne(old_rows, rows[members[old_count + j]], dots + j * stride + first);
+        }
+    }
+    return first;
+}
+#endif
 
 float
 FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
@@ -624,6 +707,34 @@ SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
 #endif
 }
 
+void
+SQ8ComputeCodesL2SqrBatch4(const uint8_t* source,
+                           const uint8_t* const* targets,
+                           const float* lower_bound,
+                           const float* diff,
+                           uint64_t dim,
+                           float* distances) {
+#if defined(ENABLE_AVX512)
+    simd::SQ8ComputeL2SqrBatch4Impl<simd::SQ8Traits<simd::Avx512SQ8Tag>>(
+        source,
+        targets[0],
+        targets[1],
+        targets[2],
+        targets[3],
+        lower_bound,
+        diff,
+        dim,
+        distances[0],
+        distances[1],
+        distances[2],
+        distances[3],
+        &avx2::SQ8ComputeCodesL2Sqr);
+#else
+    for (uint64_t i = 0; i < 4; ++i)
+        distances[i] = avx2::SQ8ComputeCodesL2Sqr(source, targets[i], lower_bound, diff, dim);
+#endif
+}
+
 float
 SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
                      const uint8_t* RESTRICT codes2,
@@ -828,6 +939,25 @@ RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim) {
     return avx2::RaBitQFloatSQIP(vector, codes, dim);
 #endif
 }
+
+#if defined(ENABLE_AVX512)
+uint64_t
+RaBitQUnpackEightBitPlanes(const uint8_t* const* planes, uint64_t dim, uint8_t* output) {
+    auto sums = _mm512_setzero_si512();
+    for (uint64_t d = 0; d < dim; d += 64) {
+        auto lanes = _mm512_setzero_si512();
+        for (uint32_t bit = 0; bit < 8; ++bit) {
+            uint64_t mask;
+            memcpy(&mask, planes[bit] + d / 8, sizeof(mask));
+            lanes =
+                _mm512_or_si512(lanes, _mm512_maskz_set1_epi8(mask, static_cast<char>(1U << bit)));
+        }
+        _mm512_storeu_si512(output + d, lanes);
+        sums = _mm512_add_epi64(sums, _mm512_sad_epu8(lanes, _mm512_setzero_si512()));
+    }
+    return static_cast<uint64_t>(_mm512_reduce_add_epi64(sums));
+}
+#endif
 
 uint64_t
 RaBitQCodeCodeIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim) {
@@ -2056,3 +2186,38 @@ SQ4LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
 #endif
 }
 }  // namespace vsag::avx512
+
+#if defined(ENABLE_AVX512)
+namespace vsag::pipnn_filter::avx512 {
+RelativeHashes
+Hash(const float* source, const float* target, uint64_t planes) {
+    const auto lanes = static_cast<__mmask16>((1U << planes) - 1);
+    const auto lhs = _mm512_maskz_loadu_ps(lanes, source);
+    const auto rhs = _mm512_maskz_loadu_ps(lanes, target);
+    const auto forward = _mm512_mask_cmp_ps_mask(lanes, rhs, lhs, _CMP_GE_OQ);
+    const auto reverse = _mm512_mask_cmp_ps_mask(lanes, lhs, rhs, _CMP_GE_OQ);
+    const auto flag = (forward & reverse) == lanes ? COINCIDENT_HASH_FLAG : 0;
+    return {static_cast<uint16_t>(forward | flag), static_cast<uint16_t>(reverse | flag)};
+}
+
+uint64_t
+SelectKth(const float* distances, const float* thresholds, uint64_t count, uint32_t* selected) {
+    uint64_t written = 0;
+    auto indices = _mm512_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+    for (uint64_t i = 0; i < count; i += 16) {
+        const auto remaining = count - i;
+        const auto lanes =
+            static_cast<__mmask16>(remaining >= 16 ? 0xffffU : (1U << remaining) - 1);
+        const auto d = _mm512_maskz_loadu_ps(lanes, distances + i);
+        const auto kth = _mm512_maskz_loadu_ps(lanes, thresholds + i);
+        const auto keep = _mm512_mask_cmp_ps_mask(lanes, d, kth, _CMP_LE_OQ);
+        if (keep != 0) {
+            _mm512_mask_compressstoreu_epi32(selected + written, keep, indices);
+            written += std::popcount(static_cast<unsigned>(keep));
+        }
+        indices = _mm512_add_epi32(indices, _mm512_set1_epi32(16));
+    }
+    return written;
+}
+}  // namespace vsag::pipnn_filter::avx512
+#endif

@@ -15,6 +15,7 @@
 #include "rabitq_simd.h"
 
 #include <algorithm>
+#include <array>
 #include <catch2/benchmark/catch_benchmark.hpp>
 #include <cstring>
 
@@ -2021,4 +2022,33 @@ TEST_CASE("RaBitQ scalar code to split planes SIMD", "[ut][simd][rabitq]") {
             }
         }
     }
+}
+
+TEST_CASE("RaBitQ unpacks eight bit planes into exact bytes and their sum",
+          "[ut][simd][scalar_unpack]") {
+    const auto unpack = vsag::RaBitQUnpackEightBitPlanes;
+    if (unpack == nullptr) {
+        SKIP("No eight-plane unpack kernel for this architecture");
+    }
+    const uint64_t dim = GENERATE(64U, 128U, 192U);
+    const auto stride = dim / 8 + 1;
+    std::vector<uint8_t> packed(8 * stride, 0);
+    std::vector<uint8_t> expected(dim);
+    uint64_t sum = 0;
+    for (uint64_t i = 0; i < dim; ++i) {
+        expected[i] = static_cast<uint8_t>((73U * i + 255U) % 256U);
+        sum += expected[i];
+        for (uint32_t bit = 0; bit < 8; ++bit) {
+            packed[bit * stride + 1 + i / 8] |= ((expected[i] >> bit) & 1U) << (i % 8);
+        }
+    }
+    std::array<const uint8_t*, 8> planes{};
+    for (size_t bit = 0; bit < planes.size(); ++bit) {
+        planes[bit] = packed.data() + bit * stride + 1;
+    }
+    std::vector<uint8_t> output(dim + 2, 0xA5);
+    REQUIRE(unpack(planes.data(), dim, output.data() + 1) == sum);
+    REQUIRE(std::equal(expected.begin(), expected.end(), output.begin() + 1));
+    REQUIRE(output.front() == 0xA5);
+    REQUIRE(output.back() == 0xA5);
 }

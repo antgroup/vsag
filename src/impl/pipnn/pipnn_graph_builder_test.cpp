@@ -17,6 +17,8 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <cfenv>
 #include <chrono>
 #include <cmath>
@@ -24,14 +26,17 @@
 #include <cstring>
 #include <future>
 #include <limits>
+#include <map>
 #include <numeric>
 #include <random>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <tuple>
 #include <vector>
 
+#include "datacell/flatten_interface.h"
 #include "datacell/graph_interface.h"
 #include "datacell/graph_interface_parameter.h"
 #include "half_vector.h"
@@ -39,7 +44,9 @@
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index_common_param.h"
 #include "pipnn_build_cache.h"
+#include "pipnn_incremental.h"
 #include "simd/bf16_simd.h"
+#include "simd/fp32_simd.h"
 #include "unittest.h"
 #include "utils/half_input.h"
 #include "vsag_exception.h"
@@ -1523,4 +1530,753 @@ TEST_CASE("PiPNN final graph reuse matches full pruning with stable graph IDs",
         remapped_reference->GetNeighbors(id, expected);
         REQUIRE(actual == expected);
     }
+}
+
+TEST_CASE("PiPNN Add matches brute force on its persisted overlapping leaves", "[ut][pipnn][add]") {
+    constexpr uint64_t dim = 8, total = 220;
+    auto common = MakeCommonParam(dim);
+    auto* alloc = common.allocator_.get();
+    const bool sparse = GENERATE(false, true);
+    const auto physical = [sparse](uint32_t i) -> uint32_t {
+        return sparse ? 2 * (total - 1 - i) + 1 : i;
+    };
+    auto graph = MakeGraph(common, 2 * total, 8);
+    bool appended = false, replaced = false, rejected = false, filtered = false;
+    vsag::PiPNNGraphBuilderParameter p;
+    p.max_leaf_size = 40;
+    p.min_leaf_size = 10;
+    p.fanout = {2, 2};
+    p.leader_sample_rate = 0.12F;
+    p.reservoir_size = GENERATE(8U, 16U);
+    p.hash_plane_count = 8;
+    p.alpha = 1.2F;
+    auto values = MakeVectors(total, dim);
+    std::mt19937 generator(291);
+    for (auto& x : values) x = static_cast<float>(generator() % 6);
+    auto distance = [&](uint32_t a, uint32_t b) {
+        float d = 0;
+        for (uint64_t j = 0; j < dim; ++j) {
+            const auto diff = values[a * dim + j] - values[b * dim + j];
+            d += diff * diff;
+        }
+        return d;
+    };
+    vsag::PiPNNIncrementalState state;
+    // Parallel leaf replay can deliver both ends of the same pair from different leaves.
+    // Compare every graph row with the exhaustive oracle for both schedules.
+    const auto workers = GENERATE(1U, 4U);
+    CAPTURE(workers);
+    auto pool = vsag::SafeThreadPool::FactoryDefaultThreadPool();
+    pool->SetPoolSize(workers);
+    vsag::PiPNNGraphBuilder builder(p, dim, common.metric_, alloc, pool.get(), workers);
+    auto hash = [&](uint32_t u, uint32_t v) {
+        unsigned bits = 0;
+        for (uint64_t j = 0; j < p.hash_plane_count; ++j) {
+            bits |= (state.projections.Row(v)[j] >= state.projections.Row(u)[j]) << j;
+        }
+        return bits;
+    };
+    std::vector<std::vector<uint32_t>> prior(total);
+    for (auto end : {139U, 140U, 179U, 220U}) {
+        auto start = static_cast<uint32_t>(state.ids.size());
+        vsag::Vector<vsag::InnerIdType> ids(end - start, 0, alloc);
+        vsag::Vector<const float*> rows(alloc);
+        for (auto i = start; i < end; ++i) {
+            ids[i - start] = physical(i);
+            rows.push_back(values.data() + i * dim);
+        }
+        builder.Update(graph, ids, rows, state);
+        std::vector<std::set<uint32_t>> candidates(end);
+        auto order = [&](uint32_t u, uint32_t v) {
+            return std::make_tuple(
+                distance(u, v),
+                std::abs(static_cast<int>(physical(u)) - static_cast<int>(physical(v))),
+                physical(v));
+        };
+        for (const auto& leaf : state.leaves) {
+            REQUIRE(leaf.points.size() <= p.max_leaf_size);
+            for (auto u : leaf.points) {
+                auto neighbors = leaf.points;
+                neighbors.erase(std::find(neighbors.begin(), neighbors.end(), u));
+                std::sort(neighbors.begin(), neighbors.end(), [&](auto a, auto b) {
+                    return order(u, a) < order(u, b);
+                });
+                neighbors.resize(std::min<uint64_t>(p.leaf_neighbor_count, neighbors.size()));
+                for (auto v : neighbors) {
+                    candidates[u].insert(v);
+                    candidates[v].insert(u);
+                }
+            }
+        }
+        for (uint32_t u = 0; u < end; ++u) {
+            if (u < start) {
+                auto& eligible = candidates[u];
+                eligible.erase(eligible.begin(), eligible.lower_bound(start));
+                eligible.insert(prior[u].begin(), prior[u].end());
+            }
+            std::map<unsigned, uint32_t> best;
+            for (auto v : candidates[u]) {
+                auto key = hash(u, v);
+                auto it = best.find(key);
+                if (it == best.end() ||
+                    std::make_pair(distance(u, v), physical(v)) <
+                        std::make_pair(distance(u, it->second), physical(it->second)))
+                    best[key] = v;
+            }
+            std::vector<uint32_t> pool;
+            for (auto [h, v] : best) pool.push_back(v);
+            std::sort(pool.begin(), pool.end(), [&](auto a, auto b) {
+                return std::make_pair(distance(u, a), physical(a)) <
+                       std::make_pair(distance(u, b), physical(b));
+            });
+            pool.resize(std::min<uint64_t>(pool.size(), p.reservoir_size));
+            std::vector<uint32_t> expected;
+            if (u < start) {
+                expected = prior[u];
+                for (auto v : candidates[u]) {
+                    filtered |= v >= start && std::find(pool.begin(), pool.end(), v) == pool.end();
+                }
+                for (auto v : pool) {
+                    if (v < start)
+                        continue;
+                    if (expected.size() < 8) {
+                        expected.push_back(v);
+                        appended = true;
+                        continue;
+                    }
+                    auto priority = [&](uint32_t w) {
+                        return std::make_tuple(std::popcount(hash(u, w) ^ hash(u, v)),
+                                               -distance(u, w),
+                                               -static_cast<int>(physical(w)));
+                    };
+                    auto rival =
+                        std::min_element(expected.begin(), expected.end(), [&](auto a, auto b) {
+                            return priority(a) < priority(b);
+                        });
+                    if (distance(u, v) < distance(u, *rival)) {
+                        *rival = v;
+                        replaced = true;
+                    } else {
+                        rejected = true;
+                    }
+                }
+            } else {
+                std::sort(pool.begin(), pool.end(), [&](auto a, auto b) {
+                    return order(u, a) < order(u, b);
+                });
+                for (auto v : pool) {
+                    if (std::none_of(expected.begin(), expected.end(), [&](auto w) {
+                            return p.alpha * distance(w, v) < distance(u, v);
+                        }))
+                        expected.push_back(v);
+                    if (expected.size() == 8)
+                        break;
+                }
+            }
+            prior[u] = expected;
+            vsag::Vector<vsag::InnerIdType> actual(alloc), expected_ids(alloc);
+            graph->GetNeighbors(physical(u), actual);
+            for (auto v : expected) expected_ids.push_back(physical(v));
+            CAPTURE(start, end, u, sparse);
+            REQUIRE(actual == expected_ids);
+        }
+    }
+    REQUIRE(appended);
+    REQUIRE(replaced);
+    REQUIRE(rejected);
+    REQUIRE(filtered);
+}
+
+TEST_CASE("PiPNN old-point HashPrune uses only current edges and new candidates",
+          "[ut][pipnn][add]") {
+    auto common = MakeCommonParam(1);
+    auto* alloc = common.allocator_.get();
+    auto graph = MakeGraph(common, 5, 3);
+    vsag::PiPNNGraphBuilder builder({}, 1, common.metric_, alloc);
+    vsag::PiPNNIncrementalState state;
+    const float x[] = {0, 1, -3, 2, 4};
+    vsag::Vector<vsag::InnerIdType> ids(alloc), neighbors(alloc);
+    vsag::Vector<const float*> rows(alloc);
+    ids = {0, 1, 2};
+    rows = {x, x + 1, x + 2};
+    builder.Update(graph, ids, rows, state);
+
+    // Point 1 stays in the leaf cache and is closer than 3 in the same
+    // relative-hash bucket. Only point 2 is currently an outgoing neighbor.
+    neighbors = {2};
+    graph->InsertNeighborsById(0, neighbors);
+    ids = {3};
+    rows = {x + 3};
+    builder.Update(graph, ids, rows, state);
+    graph->GetNeighbors(0, neighbors);
+    vsag::Vector<vsag::InnerIdType> expected(alloc);
+    expected = {2, 3};
+    REQUIRE(neighbors == expected);
+
+    // Point 3 now occupies that bucket and blocks the farther point 4,
+    // even though there is still a free outgoing slot.
+    ids = {4};
+    rows = {x + 4};
+    builder.Update(graph, ids, rows, state);
+    graph->GetNeighbors(0, neighbors);
+    REQUIRE(neighbors == expected);
+}
+
+TEST_CASE("PiPNN old edge survives a tie in the reservoir distance key", "[ut][pipnn][add]") {
+    auto common = MakeCommonParam(1);
+    auto* alloc = common.allocator_.get();
+    auto graph = MakeGraph(common, 20, 1);
+    vsag::PiPNNGraphBuilder builder({}, 1, common.metric_, alloc);
+    vsag::PiPNNIncrementalState state;
+    const float points[] = {0.0F, 1.0004F, 1.0F, 0.5F};
+    vsag::Vector<vsag::InnerIdType> ids(alloc), neighbors(alloc);
+    vsag::Vector<const float*> rows(alloc);
+    ids = {17, 9};
+    rows = {points, points + 1};
+    builder.Update(graph, ids, rows, state);
+    // ID 3 beats 9 in HashPrune's same-bucket distance tie. The incumbent edge to 9
+    // still wins the separate one-to-one competition on the equal BF16 keys.
+    ids = {3};
+    rows = {points + 2};
+    builder.Update(graph, ids, rows, state);
+    graph->GetNeighbors(17, neighbors);
+    REQUIRE(neighbors.size() == 1);
+    REQUIRE(neighbors.front() == 9);
+    ids = {14};
+    rows = {points + 3};
+    builder.Update(graph, ids, rows, state);
+    graph->GetNeighbors(17, neighbors);
+    REQUIRE(neighbors.size() == 1);
+    REQUIRE(neighbors.front() == 14);
+}
+
+TEST_CASE("PiPNN old-edge competition follows the index metric", "[ut][pipnn][add]") {
+    const auto metric = GENERATE(vsag::MetricType::METRIC_TYPE_L2SQR,
+                                 vsag::MetricType::METRIC_TYPE_COSINE,
+                                 vsag::MetricType::METRIC_TYPE_IP);
+    auto common = MakeCommonParam(2, metric);
+    auto* alloc = common.allocator_.get();
+    auto graph = MakeGraph(common, 20, 1);
+    vsag::PiPNNGraphBuilder builder({}, 2, metric, alloc);
+    vsag::PiPNNIncrementalState state;
+    const float points[][2] = {{1, 0}, {0, 1}, {1, 0.125F}};
+    vsag::Vector<vsag::InnerIdType> ids(alloc), neighbors(alloc);
+    vsag::Vector<const float*> rows(alloc);
+    ids = {17, 9};
+    rows = {points[0], points[1]};
+    builder.Update(graph, ids, rows, state);
+    ids = {3};
+    rows = {points[2]};
+    builder.Update(graph, ids, rows, state);
+    graph->GetNeighbors(17, neighbors);
+    REQUIRE(neighbors.size() == 1);
+    REQUIRE(neighbors.front() == 3);
+}
+
+TEST_CASE("PiPNN Add keeps old FP32 rows in place and writes the version 1 payload",
+          "[ut][pipnn][add]") {
+    constexpr uint32_t dim = 33, total = 83;
+    auto common = MakeCommonParam(dim);
+    auto* alloc = common.allocator_.get();
+    auto graph = MakeGraph(common, total, 8);
+    vsag::PiPNNIncrementalState state;
+    vsag::PiPNNGraphBuilderParameter parameter;
+    vsag::PiPNNGraphBuilder builder(parameter, dim, common.metric_, alloc);
+    std::mt19937 generator(54);
+    std::vector<float> values(total * dim);
+    for (auto& v : values) v = static_cast<float>(generator() % 8);
+    std::vector<const float*> prior;
+    for (uint32_t end : {7U, 8U, 39U, total}) {
+        vsag::Vector<vsag::InnerIdType> ids(alloc);
+        vsag::Vector<const float*> input(alloc);
+        for (uint32_t i = prior.size(); i < end; ++i) {
+            ids.push_back(i);
+            input.push_back(values.data() + i * dim);
+        }
+        builder.Update(graph, ids, input, state);
+        for (uint32_t i = 0; i < prior.size(); ++i) REQUIRE(state.GetVector(i) == prior[i]);
+        for (uint32_t i = prior.size(); i < end; ++i) prior.push_back(state.GetVector(i));
+
+        REQUIRE(state.leaves.size() == 1);
+        const auto& leaf = state.leaves.front();
+        const auto k = leaf.nearest.Width();
+        for (uint32_t u = 0; u < end; ++u) {
+            std::vector<std::tuple<float, uint32_t, uint32_t>> expected;
+            for (uint32_t v = 0; v < end; ++v) {
+                if (u == v)
+                    continue;
+                float distance = 0;
+                for (uint32_t d = 0; d < dim; ++d) {
+                    const auto delta = values[u * dim + d] - values[v * dim + d];
+                    distance += delta * delta;
+                }
+                expected.emplace_back(distance, std::max(u, v) - std::min(u, v), v);
+            }
+            std::sort(expected.begin(), expected.end());
+            for (uint32_t j = 0; j < k; ++j) {
+                const auto& actual = leaf.Neighbor(u, j);
+                REQUIRE(actual.target == std::get<2>(expected[j]));
+                REQUIRE(actual.distance == std::get<0>(expected[j]));
+            }
+        }
+    }
+
+    std::stringstream wire;
+    vsag::IOStreamWriter writer(wire);
+    state.Serialize(writer);
+    vsag::IOStreamReader reader(wire);
+    std::vector<uint32_t> legacy_ids;
+    std::vector<float> legacy_rows;
+    vsag::StreamReader::ReadVector(reader, legacy_ids);
+    vsag::StreamReader::ReadVector(reader, legacy_rows);
+    REQUIRE(legacy_ids == state.ids);
+    REQUIRE(legacy_rows == values);
+
+    wire.seekg(0);
+    vsag::IOStreamReader input(wire);
+    vsag::PiPNNIncrementalState restored;
+    restored.Deserialize(
+        input, total, dim, parameter.hash_plane_count, graph->MaxCapacity(), alloc);
+    const auto* first = restored.GetVector(0);
+    restored.ReserveVectors(total * 3, dim, alloc);
+    REQUIRE(first == restored.GetVector(0));
+    for (uint32_t i = 0; i < total; ++i) {
+        REQUIRE(std::memcmp(values.data() + i * dim, restored.GetVector(i), dim * sizeof(float)) ==
+                0);
+    }
+    std::stringstream output;
+    vsag::IOStreamWriter restored_writer(output);
+    restored.Serialize(restored_writer);
+    REQUIRE(output.str() == wire.str());
+}
+
+TEST_CASE("PiPNN appends sketches in place and validates sparse IDs after reload",
+          "[ut][pipnn][add]") {
+    constexpr uint32_t dim = 7, total = 97, capacity = 223;
+    auto common = MakeCommonParam(dim);
+    auto* alloc = common.allocator_.get();
+    auto graph = MakeGraph(common, capacity, 8);
+    vsag::PiPNNGraphBuilderParameter p;
+    vsag::PiPNNGraphBuilder builder(p, dim, common.metric_, alloc);
+    vsag::PiPNNIncrementalState initial, restored;
+    auto vectors = MakeVectors(total, dim);
+    auto append = [&](auto& state, uint32_t end) {
+        vsag::Vector<uint32_t> ids(alloc);
+        vsag::Vector<const float*> rows(alloc);
+        for (uint32_t i = state.ids.size(); i < end; ++i) {
+            ids.push_back((i * 31) % capacity);
+            rows.push_back(vectors.data() + i * dim);
+        }
+        builder.Update(graph, ids, rows, state);
+    };
+    auto serialize = [](const auto& state) {
+        std::stringstream stream;
+        vsag::IOStreamWriter writer(stream);
+        state.Serialize(writer);
+        return stream.str();
+    };
+    auto load = [&](const std::string& wire, auto& state) {
+        std::stringstream stream(wire);
+        vsag::IOStreamReader reader(stream);
+        state.Deserialize(reader, total, dim, p.hash_plane_count, capacity, alloc);
+    };
+    append(initial, 17);
+    const auto snapshot = serialize(initial);
+    load(snapshot, restored);
+    REQUIRE(serialize(restored) == snapshot);
+    const auto planes = restored.planes;
+    const auto* old_vector = restored.Rows()[3];
+    const auto* old_projection = restored.projections.Row(3);
+    const auto* old_norm = restored.norms.Row(3);
+    const auto expected_norm = *old_norm;
+    std::vector<float> expected_projection(old_projection, old_projection + p.hash_plane_count);
+    for (uint32_t end : {18U, 34U, total}) {
+        append(restored, end);
+        REQUIRE(restored.Rows()[3] == old_vector);
+        REQUIRE(restored.projections.Row(3) == old_projection);
+        REQUIRE(restored.norms.Row(3) == old_norm);
+        REQUIRE(*old_norm == expected_norm);
+        REQUIRE(std::equal(expected_projection.begin(), expected_projection.end(), old_projection));
+        REQUIRE(restored.planes == planes);
+        for (uint32_t i = 0; i < end; ++i) REQUIRE(restored.LocalId(restored.ids[i]) == i);
+    }
+    const auto before = serialize(restored);
+    auto reject = [&](std::initializer_list<uint32_t> values, bool null_row = false) {
+        vsag::Vector<uint32_t> ids(values, alloc);
+        vsag::Vector<const float*> rows(ids.size(), null_row ? nullptr : vectors.data(), alloc);
+        REQUIRE_THROWS(builder.Update(graph, ids, rows, restored));
+        REQUIRE(serialize(restored) == before);
+    };
+    reject({31});  // A historical sparse ID.
+    reject({222, 222});
+    reject({capacity});
+    reject({222}, true);
+    for (const auto invalid : {uint32_t{0}, capacity}) {
+        auto damaged = snapshot;
+        std::memcpy(
+            damaged.data() + sizeof(uint64_t) + sizeof(uint32_t), &invalid, sizeof(invalid));
+        vsag::PiPNNIncrementalState state;
+        REQUIRE_THROWS(load(damaged, state));
+    }
+}
+
+TEST_CASE("PiPNN old and new leaf rows retain exact ranks across vector filter batches",
+          "[ut][pipnn][add]") {
+    const auto metric = GENERATE(vsag::MetricType::METRIC_TYPE_L2SQR,
+                                 vsag::MetricType::METRIC_TYPE_IP,
+                                 vsag::MetricType::METRIC_TYPE_COSINE);
+    auto common = MakeCommonParam(1, metric);
+    auto* alloc = common.allocator_.get();
+    auto graph = MakeGraph(common, 64, 8);
+    vsag::PiPNNGraphBuilderParameter p;
+    p.min_leaf_size = 5;
+    p.leaf_neighbor_count = 3;
+    vsag::PiPNNGraphBuilder builder(p, 1, metric, alloc);
+    vsag::PiPNNIncrementalState state;
+    std::array<float, 41> values{};
+    for (uint32_t i = 0; i < values.size(); ++i) values[i] = static_cast<int>(i * 7 % 5) - 2;
+    for (const uint32_t end : {15U, 16U, 33U, 41U}) {
+        vsag::Vector<vsag::InnerIdType> ids(alloc);
+        vsag::Vector<const float*> rows(alloc);
+        for (uint32_t i = state.ids.size(); i < end; ++i) {
+            ids.push_back(2 + i * 17 % 59);
+            rows.push_back(&values[i]);
+        }
+        builder.Update(graph, ids, rows, state);
+        REQUIRE(state.leaves.size() == 1);
+        const auto& leaf = state.leaves.front();
+        for (uint32_t i = 0; i < end; ++i) {
+            const auto u = leaf.points[i];
+            std::vector<std::tuple<float, uint32_t, uint32_t>> expected;
+            for (uint32_t v = 0; v < end; ++v) {
+                if (v == u)
+                    continue;
+                const float dot = values[u] * values[v];
+                float d = 1 - dot;
+                if (metric == vsag::MetricType::METRIC_TYPE_L2SQR) {
+                    const float delta = values[u] - values[v];
+                    d = delta * delta;
+                } else if (metric == vsag::MetricType::METRIC_TYPE_COSINE) {
+                    d = 1 - ((dot > 0) - (dot < 0));
+                }
+                const auto gap =
+                    std::max(state.ids[u], state.ids[v]) - std::min(state.ids[u], state.ids[v]);
+                expected.emplace_back(d, gap, state.ids[v]);
+            }
+            std::sort(expected.begin(), expected.end());
+            for (uint32_t j = 0; j < p.leaf_neighbor_count; ++j) {
+                const auto& actual = leaf.Neighbor(i, j);
+                REQUIRE(actual.distance == std::get<0>(expected[j]));
+                REQUIRE(state.ids[actual.target] == std::get<2>(expected[j]));
+            }
+        }
+    }
+}
+
+TEST_CASE("PiPNN ordinary leaf Add keeps ranked rows across ties and width changes",
+          "[ut][pipnn][add]") {
+    constexpr uint32_t total = 12;
+    const std::array<uint32_t, total> physical{40, 80, 90, 56, 60, 62, 70, 41, 39, 10, 38, 42};
+    const std::array<float, total> values{0, 1, 1, 1, -1, 1, 1, 1, -1, 10, -1, 0};
+    auto common = MakeCommonParam(1);
+    auto* alloc = common.allocator_.get();
+    auto graph = MakeGraph(common, 96, 8);
+    vsag::PiPNNGraphBuilderParameter p;
+    p.min_leaf_size = 7;
+    p.leaf_neighbor_count = GENERATE(1U, 2U);
+    vsag::PiPNNGraphBuilder builder(p, 1, common.metric_, alloc);
+    vsag::PiPNNIncrementalState state;
+    for (const uint32_t end : {2U, 5U, 7U, 9U, total}) {
+        vsag::Vector<vsag::InnerIdType> ids(alloc);
+        vsag::Vector<const float*> rows(alloc);
+        for (uint32_t i = state.ids.size(); i < end; ++i) {
+            ids.push_back(physical[i]);
+            rows.push_back(&values[i]);
+        }
+        builder.Update(graph, ids, rows, state);
+        REQUIRE(state.leaves.size() == 1);
+        const auto& leaf = state.leaves.front();
+        const auto k = std::min<uint64_t>(end - 1, end < 7 ? 4 : p.leaf_neighbor_count);
+        REQUIRE(leaf.nearest.Width() == k);
+        for (uint32_t i = 0; i < end; ++i) {
+            auto u = leaf.points[i];
+            std::vector<std::tuple<float, uint32_t, uint32_t>> expected;
+            for (uint32_t v = 0; v < end; ++v) {
+                if (u == v) {
+                    continue;
+                }
+                const auto delta = values[u] - values[v];
+                const auto gap =
+                    std::max(physical[u], physical[v]) - std::min(physical[u], physical[v]);
+                expected.emplace_back(delta * delta, gap, physical[v]);
+            }
+            std::sort(expected.begin(), expected.end());
+            for (uint32_t j = 0; j < k; ++j) {
+                const auto& actual = leaf.Neighbor(i, j);
+                REQUIRE(actual.distance == std::get<0>(expected[j]));
+                REQUIRE(physical.at(actual.target) == std::get<2>(expected[j]));
+            }
+        }
+    }
+}
+
+TEST_CASE("PiPNN parallel Add preserves routes across overlapping and replaced leaves",
+          "[ut][pipnn][add]") {
+    constexpr uint32_t dim = 9, total = 701;
+    auto common = MakeCommonParam(dim);
+    auto* alloc = common.allocator_.get();
+    vsag::PiPNNGraphBuilderParameter p;
+    p.max_leaf_size = 32;
+    p.min_leaf_size = 12;
+    p.leader_sample_rate = 0.12F;
+    p.fanout = {2, 2};
+    auto pool = vsag::SafeThreadPool::FactoryDefaultThreadPool();
+    pool->SetPoolSize(4);
+    vsag::PiPNNGraphBuilder serial(p, dim, common.metric_, alloc);
+    vsag::PiPNNGraphBuilder parallel(p, dim, common.metric_, alloc, pool.get(), 4);
+    vsag::PiPNNIncrementalState reference, actual;
+    auto reference_graph = MakeGraph(common, total, 8);
+    auto actual_graph = MakeGraph(common, total, 8);
+    std::mt19937 random(49);
+    std::vector<float> values(total * dim);
+    for (auto& x : values) x = static_cast<float>(random() % 16);
+    // Start with a terminal root. Subsequent Adds traverse its replacement
+    // and deeper replacements, with singleton and uneven four-way batches.
+    const auto memberships = [](const vsag::PiPNNIncrementalState& state) {
+        std::vector<std::vector<uint32_t>> result(state.ids.size());
+        for (uint32_t leaf = 0; leaf < state.leaves.size(); ++leaf) {
+            for (auto id : state.leaves[leaf].points) result[id].push_back(leaf);
+        }
+        return result;
+    };
+    bool saw_overlapping_split_parents = false;
+    const float* cached_root = nullptr;
+    for (const auto end : {20U, 139U, 140U, 663U, total}) {
+        vsag::Vector<vsag::InnerIdType> ids(alloc);
+        vsag::Vector<const float*> rows(alloc);
+        for (uint32_t i = reference.ids.size(); i < end; ++i) {
+            ids.push_back(i);
+            rows.push_back(values.data() + i * dim);
+        }
+        const auto old_memberships = memberships(reference);
+        serial.Update(reference_graph, ids, rows, reference);
+        parallel.Update(actual_graph, ids, rows, actual);
+        if (cached_root)
+            REQUIRE(actual.root_leader_vectors.data() == cached_root);
+        if (!actual.root_leader_vectors.empty())
+            cached_root = actual.root_leader_vectors.data();
+        for (const auto& hits : old_memberships) {
+            const auto replaced = std::count_if(hits.begin(), hits.end(), [&](uint32_t leaf) {
+                return !actual.leaves.at(leaf).replacement.children.empty();
+            });
+            saw_overlapping_split_parents |= replaced >= 2;
+        }
+        std::stringstream a, b;
+        vsag::IOStreamWriter wa(a), wb(b);
+        actual.Serialize(wa);
+        reference.Serialize(wb);
+        REQUIRE(a.str() == b.str());
+        if (end == 663) {
+            REQUIRE(cached_root != nullptr);
+            vsag::IOStreamReader reader(a);
+            actual.Deserialize(
+                reader, end, dim, p.hash_plane_count, actual_graph->MaxCapacity(), alloc);
+            REQUIRE(actual.root_leader_vectors.empty());
+            cached_root = nullptr;
+            for (uint64_t leaf = 0; leaf < actual.leaves.size(); ++leaf) {
+                REQUIRE(actual.leaves[leaf].depth == reference.leaves[leaf].depth);
+            }
+        }
+        vsag::Vector<vsag::InnerIdType> x(alloc), y(alloc);
+        for (uint32_t i = 0; i < end; ++i) {
+            actual_graph->GetNeighbors(i, x);
+            reference_graph->GetNeighbors(i, y);
+            REQUIRE(x == y);
+        }
+    }
+    REQUIRE(actual.leaves.at(actual.root.leaf).replacement.children.size() > 1);
+    REQUIRE(saw_overlapping_split_parents);
+    const auto final_memberships = memberships(actual);
+    REQUIRE(std::any_of(final_memberships.begin(), final_memberships.end(), [](const auto& hits) {
+        return hits.size() > 1;
+    }));
+}
+
+TEST_CASE("PiPNN split row tasks match serial ranked distances and ordered graph edges",
+          "[ut][pipnn][add][split_rows]") {
+    constexpr uint32_t base = 257, dim = 65, count = base + 1;
+    const bool coded = GENERATE(false, true);
+    const auto common = MakeCommonParam(dim);
+    auto* alloc = common.allocator_.get();
+    auto param = vsag::PiPNNGraphBuilderParameter();
+    param.max_leaf_size = base;
+    param.min_leaf_size = 2;
+    param.leader_sample_rate = 0.005F;
+    param.fanout = {1};
+    auto pool = vsag::SafeThreadPool::FactoryDefaultThreadPool();
+    pool->SetPoolSize(4);
+    auto values = MakeVectors(count, dim);
+    auto code_params = std::make_shared<vsag::FlattenDataCellParameter>();
+    code_params->FromJson(vsag::JsonType::Parse(R"({"io_params":{"type":"memory_io"},
+                                            "quantization_params":{"type":"sq8"}})"));
+    auto codes = vsag::FlattenInterface::MakeInstance(code_params, common);
+    codes->Train(values.data(), count);
+    codes->BatchInsertVector(values.data(), count);
+
+    auto run = [&](uint64_t threads) {
+        vsag::PiPNNGraphBuilder builder(param, dim, common.metric_, alloc, pool.get(), threads);
+        vsag::PiPNNIncrementalState state;
+        auto graph = MakeGraph(common, count, 8);
+        for (const auto end : {base, count}) {
+            vsag::Vector<vsag::InnerIdType> ids(alloc);
+            for (uint32_t i = state.ids.size(); i < end; ++i) ids.push_back(i);
+            const auto rows = MakeRows(values, ids, dim, alloc);
+            if (coded)
+                builder.UpdateWithCodes(graph, ids, rows, state, *codes);
+            else
+                builder.Update(graph, ids, rows, state);
+        }
+        REQUIRE(state.leaves.size() == 3);
+        REQUIRE(std::max(state.leaves[1].points.size(), state.leaves[2].points.size()) > 64);
+        std::stringstream bytes;
+        vsag::IOStreamWriter writer(bytes);
+        state.Serialize(writer);
+        return std::make_pair(bytes.str(), graph);
+    };
+    const auto serial = run(1);
+    const auto parallel = run(4);
+    REQUIRE(serial.first == parallel.first);
+    vsag::Vector<vsag::InnerIdType> a(alloc), b(alloc);
+    for (uint32_t id = 0; id < count; ++id) {
+        serial.second->GetNeighbors(id, a);
+        parallel.second->GetNeighbors(id, b);
+        REQUIRE(a == b);
+    }
+}
+
+TEST_CASE("PiPNN Add groups both directions by local ID for singleton and bulk batches",
+          "[ut][pipnn][add]") {
+    constexpr uint32_t base = 1024, additions = 256, total = base + additions;
+    const auto physical = [](uint32_t local) { return 2 * (total - local) - 1; };
+    auto common = MakeCommonParam(2);
+    auto* alloc = common.allocator_.get();
+    auto graph = MakeGraph(common, 2 * total, 8);
+    auto pool = vsag::SafeThreadPool::FactoryDefaultThreadPool();
+    pool->SetPoolSize(4);
+    vsag::PiPNNGraphBuilderParameter p;
+    p.max_leaf_size = total;
+    p.min_leaf_size = 1;
+    p.leaf_neighbor_count = 1;
+    vsag::PiPNNGraphBuilder builder(p, 2, common.metric_, alloc, pool.get(), 4);
+    vsag::PiPNNIncrementalState state;
+    std::vector<std::array<float, 2>> values(total);
+    for (uint32_t i = 0; i < total; ++i) {
+        const auto group = i < base ? i / 2 : i - base;
+        const float x = 8 * (group % 32);
+        const float y = 8 * (group / 32);
+        values[i] = {x + (i >= base ? 0.25F : 2.0F * (i % 2)), y};
+    }
+    // Old points form isolated pairs. Each insertion lies strictly between the two
+    // members of a distinct pair, so no other old row should receive a candidate.
+    for (const uint32_t end : {base, base + 1, total}) {
+        vsag::Vector<vsag::InnerIdType> ids(alloc);
+        vsag::Vector<const float*> rows(alloc);
+        for (uint32_t i = state.ids.size(); i < end; ++i) {
+            ids.push_back(physical(i));
+            rows.push_back(values[i].data());
+        }
+        builder.Update(graph, ids, rows, state);
+        vsag::Vector<vsag::InnerIdType> neighbors(alloc);
+        for (uint32_t old = 0; old < base; ++old) {
+            graph->GetNeighbors(physical(old), neighbors);
+            const auto newcomer = base + old / 2;
+            if (newcomer < end) {
+                REQUIRE(std::find(neighbors.begin(), neighbors.end(), physical(newcomer)) !=
+                        neighbors.end());
+            } else {
+                REQUIRE(neighbors.size() == 1);
+                REQUIRE(neighbors.front() == physical(old ^ 1U));
+            }
+        }
+        for (uint32_t i = base; i < end; ++i) {
+            graph->GetNeighbors(physical(i), neighbors);
+            REQUIRE(std::find(neighbors.begin(), neighbors.end(), physical(2 * (i - base))) !=
+                    neighbors.end());
+        }
+    }
+}
+
+TEST_CASE("PiPNN empty leaf top-k has no addressable neighbors", "[ut][pipnn][add]") {
+    vsag::PiPNNLeafTopK empty(1, 0);
+    empty.AppendRows(3);
+    REQUIRE_THROWS(empty.Row(0));
+    const auto& readonly = empty;
+    REQUIRE_THROWS(readonly.Row(3));
+    const std::array<uint32_t, 4> points{0, 1, 2, 3};
+    std::ostringstream snapshot;
+    vsag::IOStreamWriter writer(snapshot);
+    empty.Write(writer, points);
+    REQUIRE(snapshot.str() == std::string(sizeof(uint64_t), '\0'));
+}
+
+TEST_CASE("PiPNN leaf top-k append keeps existing rows in place and writes packed snapshots",
+          "[ut][pipnn][add]") {
+    constexpr uint32_t width = 3;
+    vsag::PiPNNLeafTopK cache(5, width);
+    std::vector<uint32_t> points;
+    std::vector<vsag::PiPNNLocalNeighbor> flat;
+    std::vector<const uint8_t*> addresses;
+    auto fill = [&](uint32_t first, uint32_t end) {
+        for (uint32_t i = first; i < end; ++i) {
+            points.push_back(80001 + 17 * i);
+        }
+        for (uint32_t i = first; i < end; ++i) {
+            const auto row = cache.Row(i);
+            addresses.push_back(row.data);
+            for (uint32_t j = 0; j < width; ++j) {
+                const auto target = (i + j + 1) % end;
+                const auto distance = static_cast<float>(i * width + j);
+                row.Set(j, {target, distance});
+                flat.push_back({points[target], distance});
+            }
+        }
+    };
+    fill(0, 5);
+    for (const uint32_t batch : {1U, 2U, 11U, 1U}) {
+        const auto old = addresses.size();
+        cache.AppendRows(batch);
+        for (uint32_t i = 0; i < old; ++i) {
+            REQUIRE(cache.Row(i).data == addresses[i]);
+        }
+        fill(old, old + batch);
+        for (uint32_t i : {1U, 5U}) {
+            auto row = cache.Row(i);
+            auto neighbor = row.Get(1);
+            neighbor.distance += 0.5F;
+            row.Set(1, neighbor);
+            flat[i * width + 1].distance += 0.5F;
+        }
+        std::stringstream actual, expected;
+        vsag::IOStreamWriter actual_writer(actual), expected_writer(expected);
+        cache.Write(actual_writer, points);
+        vsag::StreamWriter::WriteVector(expected_writer, flat);
+        REQUIRE(actual.str() == expected.str());
+    }
+}
+
+TEST_CASE("PiPNN cached target positions widen across leaf size boundaries", "[ut][pipnn][add]") {
+    const auto limit = GENERATE(256U, 65536U);
+    vsag::PiPNNLeafTopK cache(limit, 1);
+    REQUIRE(cache.MemoryUsage() == limit * (limit == 256 ? 5 : 6));
+    for (uint32_t i = 0; i < limit; ++i) {
+        cache.Row(i).Set(0, {limit - 1 - i, -0.0F});
+    }
+    cache.AppendRows(1);
+    REQUIRE(cache.MemoryUsage() == (limit + 1) * (limit == 256 ? 6 : 8));
+    auto incumbent = cache.Row(0).Get(0);
+    REQUIRE(incumbent.target == limit - 1);
+    REQUIRE(std::bit_cast<uint32_t>(incumbent.distance) == 0x80000000U);
+    cache.Row(0).Set(0, {limit, 2.5F});
+    REQUIRE(cache.Row(0).Get(0).target == limit);
+    REQUIRE(cache.Row(0).Distance(0) == 2.5F);
 }

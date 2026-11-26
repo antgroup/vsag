@@ -26,17 +26,23 @@
 #include <future>
 #include <iterator>
 #include <limits>
+#include <map>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <numeric>
+#include <optional>
 #include <random>
+#include <span>
 #include <string>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 
 #include "common.h"
+#include "datacell/flatten_interface.h"
+#include "datacell/flatten_pairwise_distance_interface.h"
 #include "datacell/graph_interface.h"
 #include "half_vector.h"
 #include "hash_types.h"
@@ -44,9 +50,12 @@
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "pipnn_adaptive_pruning.h"
 #include "pipnn_build_cache.h"
+#include "pipnn_incremental.h"
 #include "simd/basic_func.h"
 #include "simd/bf16_simd.h"
 #include "simd/fp32_simd.h"
+#include "simd/pipnn_filter.h"
+#include "simd/pipnn_ip_tile.h"
 #include "utils/lock_strategy.h"
 
 namespace vsag {
@@ -54,7 +63,7 @@ namespace {
 
 constexpr uint64_t MAX_HASH_PLANES = 15;
 constexpr uint64_t MAX_POINT_LOCK_COUNT = 1U << 16;
-constexpr uint16_t COINCIDENT_HASH_FLAG = 1U << 15;
+using pipnn_filter::COINCIDENT_HASH_FLAG;
 constexpr uint64_t MAX_PARTITION_ITERATIONS = 30;
 constexpr uint64_t LEADER_CAP = 1000;
 constexpr uint64_t PARTITION_STRIPE_SIZE = 256;
@@ -62,6 +71,7 @@ constexpr uint64_t PARTITION_ASSIGNMENT_CHUNK_STRIPES = 16;
 constexpr uint64_t PARTITION_SEED = 1000;
 constexpr uint64_t MIN_PARALLEL_PARTITION_POINTS = 4096;
 constexpr uint64_t SMALL_TOP_K_LIMIT = 16;
+constexpr uint64_t LEAF_DOT_STRIP = 64;
 constexpr uint64_t MIN_UNDERSIZED_LEAF_NEIGHBOR_COUNT = 4;
 constexpr uint64_t CONCERNING_PARTITION_LEVEL = 2;
 constexpr double MIN_PARTITION_SHRINK_RATIO = 0.8;
@@ -202,9 +212,18 @@ struct ReservoirState {
     uint16_t farthest{0};
 };
 
+struct AddCandidate {
+    uint32_t source;
+    ReservoirEntry entry;
+};
+static_assert(sizeof(AddCandidate) == 12);
+
 struct WorkItem {
-    WorkItem(Vector<uint32_t>&& input_points, uint64_t input_level, uint64_t input_seed)
-        : points(std::move(input_points)), level(input_level), seed(input_seed) {
+    WorkItem(Vector<uint32_t>&& input_points,
+             uint64_t input_level,
+             uint64_t input_seed,
+             PiPNNRoute* trace = nullptr)
+        : route(trace), points(std::move(input_points)), level(input_level), seed(input_seed) {
     }
 
     WorkItem(WorkItem&&) = default;
@@ -212,13 +231,20 @@ struct WorkItem {
     WorkItem&
     operator=(WorkItem&& other) noexcept(false) = default;
 
+    PiPNNRoute* route;
     Vector<uint32_t> points;
     uint64_t level{0};
     uint64_t seed{0};
 };
 
-using Leaf = Vector<uint32_t>;
+struct Leaf : Vector<uint32_t> {
+    using Vector<uint32_t>::Vector;
+    std::vector<PiPNNRoute*> terminals;
+};
 using Leaves = Vector<Leaf>;
+using LeafAdditions = std::map<uint32_t, Leaf>;
+
+enum class AssignmentMode { SERIAL, BUILD_CHUNKS, SPLIT_STRIPES, ROUTE_ROOT };
 
 struct SplitResult {
     explicit SplitResult(Allocator* allocator) : pending(allocator), finished(allocator) {
@@ -228,6 +254,13 @@ struct SplitResult {
     Leaves finished;
 };
 
+struct LeafSplit {
+    uint64_t parent;
+    PiPNNRoute replacement;
+    Leaves children;
+    uint64_t end_child{0};
+};
+
 struct PruneScratch {
     explicit PruneScratch(Allocator* allocator)
         : ordered(allocator), selected(allocator), neighbors(allocator) {
@@ -235,6 +268,16 @@ struct PruneScratch {
 
     Vector<std::pair<float, uint32_t>> ordered;
     Vector<uint32_t> selected;
+    Vector<InnerIdType> neighbors;
+};
+
+struct EdgeUpdateScratch {
+    explicit EdgeUpdateScratch(Allocator* allocator)
+        : incoming(allocator), incumbents(allocator), neighbors(allocator) {
+    }
+
+    Vector<ReservoirEntry> incoming;
+    Vector<ReservoirEntry> incumbents;
     Vector<InnerIdType> neighbors;
 };
 
@@ -257,6 +300,103 @@ private:
     uint32_t point_;
 };
 
+// Only ordinary leaves with unchanged top-k width need an old-row bitmap.
+struct ReplayRows {
+    uint64_t old_count{0};
+    std::vector<uint64_t> changed;
+};
+
+// Split children and leaves with a new top-k width replay every row. Otherwise only
+// changed old rows and the appended rows can contain a member of the new batch.
+template <typename Submit>
+void
+visit_leaf_candidates(const PiPNNCachedLeaf& leaf, const ReplayRows* changes, Submit submit) {
+    if (leaf.nearest.Width() == 0) {
+        return;
+    }
+    auto visit_row = [&](uint64_t row) {
+        for (uint32_t rank = 0; rank < leaf.nearest.Width(); ++rank) {
+            submit(leaf.points[row], leaf.Neighbor(row, rank));
+        }
+    };
+    uint64_t first = 0;
+    if (changes != nullptr) {
+        for (uint64_t word = 0; word < changes->changed.size(); ++word) {
+            auto bits = changes->changed[word];
+            while (bits != 0) {
+                visit_row(word * 64 + std::countr_zero(bits));
+                bits &= bits - 1;
+            }
+        }
+        first = changes->old_count;
+    }
+    for (uint64_t row = first; row < leaf.points.size(); ++row) {
+        visit_row(row);
+    }
+}
+
+// The source's local ID determines the owner even when physical graph IDs are sparse.
+// Preserve arrival order within each source in both grouping paths.
+Vector<AddCandidate>
+group_add_candidates(const std::vector<Vector<AddCandidate>>& buffers,
+                     uint64_t shard,
+                     uint64_t shards,
+                     uint64_t source_count,
+                     Allocator* allocator) {
+    uint64_t count = 0;
+    for (uint64_t i = shard; i < buffers.size(); i += shards) {
+        count += buffers[i].size();
+    }
+    Vector<AddCandidate> grouped(allocator);
+    const uint64_t range = (source_count + shards - 1 - shard) / shards;
+    // Sparse shards sort just their records. Dense shards use a linear counting sort.
+    if (count < (range + 7) / 8) {
+        grouped.reserve(count);
+        for (uint64_t i = shard; i < buffers.size(); i += shards) {
+            grouped.insert(grouped.end(), buffers[i].begin(), buffers[i].end());
+        }
+        std::stable_sort(grouped.begin(), grouped.end(), [](const auto& a, const auto& b) {
+            return a.source < b.source;
+        });
+    } else {
+        Vector<uint64_t> offsets(range, 0, allocator);
+        for (uint64_t i = shard; i < buffers.size(); i += shards) {
+            for (const auto& event : buffers[i]) {
+                ++offsets[event.source / shards];
+            }
+        }
+        std::exclusive_scan(offsets.begin(), offsets.end(), offsets.begin(), uint64_t{0});
+        grouped.resize(count);
+        for (uint64_t i = shard; i < buffers.size(); i += shards) {
+            for (const auto& event : buffers[i]) {
+                grouped[offsets[event.source / shards]++] = event;
+            }
+        }
+    }
+    return grouped;
+}
+
+// Materialize a distance tile from stored codes. For leaf tiles, first_diagonal is
+// the position of the first source in targets; each unordered pair is visited once.
+void
+code_distances(FlattenInterface& codes,
+               std::span<const InnerIdType> sources,
+               std::span<const InnerIdType> targets,
+               float* output,
+               std::optional<uint64_t> first_diagonal = std::nullopt) {
+    if (const auto* tiled = dynamic_cast<const FlattenPairwiseDistanceInterface*>(&codes);
+        (tiled != nullptr) &&
+        tiled->ComputePairwiseTile(sources, targets, output, first_diagonal)) {
+        return;
+    }
+    for (uint64_t row = 0; row < sources.size(); ++row) {
+        const auto end = first_diagonal ? *first_diagonal + row : targets.size();
+        if (end != 0U) {
+            codes.QueryById(output + row * targets.size(), sources[row], targets.data(), end);
+        }
+    }
+}
+
 using DuplicatePairs = Vector<std::pair<InnerIdType, InnerIdType>>;
 
 class PiPNNPipeline {
@@ -268,7 +408,7 @@ public:
                   SafeThreadPool* thread_pool,
                   uint64_t thread_count,
                   GraphInterfacePtr graph,
-                  const Vector<const float*>& rows)
+                  std::span<const float* const> rows)
         : parameter_(parameter),
           allocator_(allocator),
           graph_(std::move(graph)),
@@ -276,10 +416,9 @@ public:
           thread_count_(thread_count),
           dimensions_(dimensions),
           metric_(metric),
-          rows_(&rows),
+          rows_(rows),
           fingerprints_(allocator),
           cached_rows_(allocator),
-          ids_(allocator),
           reservoirs_(allocator),
           reservoir_states_(allocator) {
     }
@@ -304,11 +443,19 @@ public:
           data_type_(data_type),
           fingerprints_(allocator),
           cached_rows_(allocator),
-          ids_(allocator),
           reservoirs_(allocator),
           reservoir_states_(allocator) {
     }
 
+    void
+    SetCodeDistances(FlattenInterface* codes, const PiPNNProjectionState* shared) {
+        codes_ = codes;
+        shared_sketches_ = shared;
+    }
+    void
+    AppendProjections(PiPNNProjectionState& state) {
+        prepare_sketches(&state, state.projections.Size(), rows_);
+    }
     void
     ConfigureCache(const std::vector<std::string>* source_ids,
                    const PiPNNBuildCache* imported,
@@ -318,24 +465,58 @@ public:
         exported_cache_ = exported;
     }
 
-    ~PiPNNPipeline() {
-        if (norms_ != nullptr) {
-            allocator_->Deallocate(norms_);
-        }
-        if (sketches_ != nullptr) {
-            allocator_->Deallocate(sketches_);
-        }
-    }
-
     void
     Build(const Vector<InnerIdType>& ids_sequence, DuplicatePairs* duplicates);
+    void
+    Increment(PiPNNIncrementalState& state, size_t old_count);
+    void
+    BuildCached(PiPNNIncrementalState& state);
+    void
+    RouteBatch(const PiPNNRoute& /*route*/,
+               Leaf /*points*/,
+               LeafAdditions& /*additions*/,
+               PiPNNIncrementalState& /*state*/) const;
+    void
+    ExtendLeaf(PiPNNCachedLeaf& /*leaf*/, const Leaf& /*batch*/, ReplayRows& /*changes*/) const;
+    void
+    CachePartition(Leaves& /*leaves*/, PiPNNIncrementalState& /*state*/);
+    void
+    RebuildSplitLeaves(std::vector<LeafSplit>& splits,
+                       const LeafAdditions& additions,
+                       PiPNNIncrementalState& state);
+    void
+    ReplayAdd(const PiPNNIncrementalState& state,
+              uint64_t first_new,
+              std::span<const size_t> hit_leaves,
+              std::span<const ReplayRows> rows);
+    void
+    MergeCandidate(ReservoirState& state, ReservoirEntry* row, const ReservoirEntry& candidate);
+    void
+    Emit(const Leaf& leaf,
+         uint32_t source,
+         uint32_t rank,
+         uint32_t target,
+         float distance,
+         PiPNNLeafTopK* cache);
 
 private:
     void
-    prepare(const Vector<InnerIdType>& ids_sequence);
+    update_existing_edges(uint32_t source,
+                          uint64_t first_new,
+                          const PiPNNIncrementalState& state,
+                          ReservoirState& candidates,
+                          ReservoirEntry* row,
+                          EdgeUpdateScratch& scratch);
 
     void
-    prepare_sketches();
+    prepare_build_reservoirs();
+    void
+    validate_build_input() const;
+
+    void
+    prepare_sketches(PiPNNProjectionState* state = nullptr,
+                     size_t start = 0,
+                     std::span<const float* const> batch = {});
 
     void
     restore_cache();
@@ -353,26 +534,31 @@ private:
     fingerprint(uint32_t source) const;
 
     [[nodiscard]] Leaves
-    partition() const;
+    partition(PiPNNRoute* root = nullptr,
+              const Leaf* subset = nullptr,
+              uint64_t level = 0,
+              bool allow_parallelism = true) const;
 
     void
     split_work_item(const WorkItem& item,
                     Vector<WorkItem>& pending,
                     Leaves& finished,
-                    bool allow_inner_parallelism) const;
+                    bool allow_inner_parallelism,
+                    bool incremental_split = false) const;
 
     [[nodiscard]] Vector<uint32_t>
     sample_leaders(const WorkItem& item) const;
 
     [[nodiscard]] Leaves
-    assign_to_leaders(const WorkItem& item,
-                      const Vector<uint32_t>& leaders,
+    assign_to_leaders(const Vector<uint32_t>& points,
+                      std::span<const uint32_t> leaders,
                       uint64_t fanout,
-                      bool allow_parallelism) const;
+                      AssignmentMode mode,
+                      std::vector<float>* root_vectors = nullptr) const;
 
     void
     select_leaders(uint32_t source,
-                   const Vector<uint32_t>& leaders,
+                   std::span<const uint32_t> leaders,
                    const float* dots,
                    uint64_t fanout,
                    Vector<std::pair<float, uint32_t>>& candidates) const;
@@ -380,8 +566,19 @@ private:
     [[nodiscard]] Leaves
     merge_undersized_leaves(Leaves leaves) const;
 
+    [[nodiscard]] uint64_t
+    leaf_neighbor_count(uint64_t points) const;
+    bool
+    cache_split_rows(const Leaves& leaves, std::vector<PiPNNCachedLeaf>& caches);
     void
-    build_leaf(const Leaf& leaf);
+    select_leaf_neighbors(const Leaf& leaf,
+                          PiPNNLeafTopK* cache,
+                          const float* distances,
+                          uint64_t neighbor_count,
+                          uint64_t begin,
+                          uint64_t end);
+    void
+    build_leaf(const Leaf& leaf, PiPNNLeafTopK* cache = nullptr);
 
     void
     group_near_duplicates(Leaves& leaves,
@@ -396,19 +593,16 @@ private:
 
     template <MetricType metric, uint64_t fixed_k = 0>
     void
-    build_small_leaf(const Leaf& leaf, UninitializedFloatBuffer& matrix, uint64_t requested_k);
+    build_small_leaf(const Leaf& leaf, uint64_t requested_k, PiPNNLeafTopK* cache);
 
     void
-    insert_bidirectional(uint32_t first, uint32_t second, float distance);
+    insert_pair(uint32_t source, uint32_t target, float distance);
+
+    [[nodiscard]] pipnn_filter::RelativeHashes
+    relative_hashes(uint32_t source, uint32_t target) const;
 
     void
-    insert_candidate(uint32_t source, uint32_t target, uint16_t hash, uint16_t distance_key);
-
-    [[nodiscard]] std::pair<uint16_t, uint16_t>
-    relative_hash(uint32_t source, uint32_t target) const;
-
-    void
-    update_farthest(uint32_t source);
+    update_farthest(ReservoirState& state, const ReservoirEntry* row);
 
     [[nodiscard]] float
     pair_distance(uint32_t lhs, uint32_t rhs) const;
@@ -423,7 +617,7 @@ private:
                  PruneScratch& scratch) const;
 
     void
-    write_graph(const Vector<uint32_t>& representatives);
+    write_graph(std::span<const uint32_t> representatives = {});
 
     void
     seed_cached_row(uint32_t source);
@@ -456,25 +650,26 @@ private:
     }
 
     void
-    gather_row(uint32_t local_id, UninitializedFloatBuffer& buffer, uint64_t row) const {
+    gather_row(uint32_t local_id, float* buffer, uint64_t row) const {
         if (native_half()) {
             const auto* source = half_row(local_id);
-            auto* destination = buffer.Data() + row * dimensions_;
+            auto* destination = buffer + row * dimensions_;
             pipnn_half::DecodeRow(source, destination, dimensions_, half_format());
         } else {
             const auto* source = vector_by_local_id(local_id);
             std::copy(source,
                       source + static_cast<int64_t>(dimensions_),
-                      buffer.Data() + static_cast<int64_t>(row * dimensions_));
+                      buffer + static_cast<int64_t>(row * dimensions_));
         }
     }
 
     [[nodiscard]] const float*
     vector_by_local_id(uint32_t local_id) const {
-        return (*rows_)[local_id];
+        return rows_[local_id];
     }
 
 private:
+    const pipnn_filter::Kernels& filters_{pipnn_filter::GetKernels()};
     const PiPNNGraphBuilderParameter& parameter_;
     Allocator* allocator_;
     GraphInterfacePtr graph_;
@@ -484,7 +679,9 @@ private:
     uint64_t dimensions_;
     MetricType metric_;
     // Build() is synchronous, so the pipeline borrows rows only for its own lifetime.
-    const Vector<const float*>* rows_{nullptr};
+    std::span<const float* const> rows_;
+    FlattenInterface* codes_{nullptr};
+    const PiPNNProjectionState* shared_sketches_{nullptr};
     const Vector<const uint16_t*>* half_rows_{nullptr};
     DataTypes data_type_{DataTypes::DATA_TYPE_FLOAT};
     const std::vector<std::string>* source_ids_{nullptr};
@@ -501,10 +698,12 @@ private:
     std::vector<uint8_t> reused_graph_rows_;
     std::vector<uint8_t> certificate_rows_;
     uint64_t hyperplane_signature_{14695981039346656037ULL};
-    uint64_t reservoir_size_{0};
-    Vector<InnerIdType> ids_;
-    float* norms_{nullptr};
-    float* sketches_{nullptr};
+    const uint64_t reservoir_size_{
+        graph_ ? std::max<uint64_t>(parameter_.reservoir_size, graph_->MaximumDegree()) : 0};
+    std::span<const InnerIdType> ids_;
+    PiPNNFloatRows owned_norms_, owned_sketches_;
+    PiPNNFloatRows* norms_{&owned_norms_};
+    PiPNNFloatRows* sketches_{&owned_sketches_};
     Vector<ReservoirEntry> reservoirs_;
     Vector<ReservoirState> reservoir_states_;
     std::unique_ptr<PointsMutex> point_locks_;
@@ -521,7 +720,9 @@ PiPNNPipeline::Build(const Vector<InnerIdType>& ids_sequence, DuplicatePairs* du
         phase_seconds[phase] = std::chrono::duration<double>(now - start).count();
         start = now;
     };
-    prepare(ids_sequence);
+    ids_ = ids_sequence;
+    validate_build_input();
+    prepare_build_reservoirs();
     if (ids_.empty()) {
         return;
     }
@@ -568,7 +769,7 @@ uint64_t
 PiPNNPipeline::fingerprint(uint32_t source) const {
     uint64_t hash = 14695981039346656037ULL;
     for (uint64_t dimension = 0; dimension < dimensions_; ++dimension) {
-        const auto bits = std::bit_cast<uint32_t>((*rows_)[source][dimension]);
+        const auto bits = std::bit_cast<uint32_t>(rows_[source][dimension]);
         for (uint64_t byte = 0; byte < sizeof(bits); ++byte) {
             hash ^= (bits >> (byte * 8)) & 0xffU;
             hash *= 1099511628211ULL;
@@ -722,7 +923,7 @@ PiPNNPipeline::seed_cached_row(uint32_t source) {
             row[state.size++] = ReservoirEntry(target, cache.hashes[edge], cache.distances[edge]);
         }
     }
-    update_farthest(source);
+    update_farthest(state, row);
 }
 
 void
@@ -819,10 +1020,10 @@ PiPNNPipeline::build_missing_leaf(const Leaf& leaf) {
     UninitializedFloatBuffer queries(
         checked_product(missing.size(), dimensions_, "cache queries"), allocator_, "cache queries");
     for (uint64_t i = 0; i < leaf.size(); ++i) {
-        std::copy_n((*rows_)[leaf[i]], dimensions_, points.Data() + i * dimensions_);
+        std::copy_n(rows_[leaf[i]], dimensions_, points.Data() + i * dimensions_);
     }
     for (uint64_t i = 0; i < missing.size(); ++i) {
-        std::copy_n((*rows_)[missing[i]], dimensions_, queries.Data() + i * dimensions_);
+        std::copy_n(rows_[missing[i]], dimensions_, queries.Data() + i * dimensions_);
     }
     UninitializedFloatBuffer dots(
         checked_product(missing.size(), leaf.size(), "cache dots"), allocator_, "cache dots");
@@ -869,15 +1070,14 @@ PiPNNPipeline::build_missing_leaf(const Leaf& leaf) {
         }
         std::sort(nearest.begin(), nearest.end(), less);
         for (const auto& [distance, target] : nearest) {
-            insert_bidirectional(source, target, distance);
+            insert_pair(source, target, distance);
         }
     }
 }
 
 void
-PiPNNPipeline::prepare(const Vector<InnerIdType>& ids_sequence) {
-    ids_.assign(ids_sequence.begin(), ids_sequence.end());
-    require_argument(ids_.size() == (native_half() ? half_rows_->size() : rows_->size()),
+PiPNNPipeline::validate_build_input() const {
+    require_argument(ids_.size() == (native_half() ? half_rows_->size() : rows_.size()),
                      "PiPNN IDs and rows must have equal sizes");
     require_argument(ids_.size() <= std::numeric_limits<uint32_t>::max(),
                      "PiPNN point count exceeds the local ID limit");
@@ -914,20 +1114,17 @@ PiPNNPipeline::prepare(const Vector<InnerIdType>& ids_sequence) {
             }
         });
     }
+}
 
-    reservoir_size_ =
-        std::max(parameter_.reservoir_size, static_cast<uint64_t>(graph_->MaximumDegree()));
+void
+PiPNNPipeline::prepare_build_reservoirs() {
+    if (ids_.empty()) {
+        return;
+    }
     const uint64_t reservoir_count = checked_product(ids_.size(), reservoir_size_, "reservoir");
     require_argument(reservoir_count <= reservoirs_.max_size(),
                      "PiPNN reservoir exceeds the allocator limit");
 
-    if (metric_ != MetricType::METRIC_TYPE_IP) {
-        const uint64_t norm_bytes = checked_product(ids_.size(), sizeof(float), "norm bytes");
-        norms_ = static_cast<float*>(allocator_->Allocate(norm_bytes));
-        if (norms_ == nullptr) {
-            throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "PiPNN failed to allocate norms");
-        }
-    }
     reservoirs_.resize(reservoir_count);
     reservoir_states_.resize(ids_.size());
     if (thread_pool_ != nullptr and thread_count_ > 1) {
@@ -938,28 +1135,51 @@ PiPNNPipeline::prepare(const Vector<InnerIdType>& ids_sequence) {
 }
 
 void
-PiPNNPipeline::prepare_sketches() {
+PiPNNPipeline::prepare_sketches(PiPNNProjectionState* state,
+                                size_t start,
+                                std::span<const float* const> batch) {
+    const auto total = batch.empty() ? ids_.size() : start + batch.size();
     const uint64_t plane_values =
         checked_product(parameter_.hash_plane_count, dimensions_, "hyperplane");
-    const uint64_t sketch_values =
-        checked_product(ids_.size(), parameter_.hash_plane_count, "sketch");
-    Vector<float> hyperplanes(plane_values, allocator_);
-    const uint64_t sketch_bytes = checked_product(sketch_values, sizeof(float), "sketch bytes");
-    sketches_ = static_cast<float*>(allocator_->Allocate(sketch_bytes));
-    if (sketches_ == nullptr) {
-        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "PiPNN failed to allocate sketches");
+    std::vector<float> local_planes;
+    auto& hyperplanes = (state != nullptr) ? state->planes : local_planes;
+    if (state != nullptr) {
+        sketches_ = &state->projections;
+        norms_ = &state->norms;
     }
-
-    std::mt19937_64 random(42);
-    std::normal_distribution<float> normal(0.0F, 1.0F);
-    for (auto& value : hyperplanes) {
-        value = normal(random);
-        hyperplane_signature_ ^= std::bit_cast<uint32_t>(value);
-        hyperplane_signature_ *= 1099511628211ULL;
+    if (start == 0) {
+        if (shared_sketches_ != nullptr) {
+            hyperplanes = shared_sketches_->planes;
+        } else if (hyperplanes.empty()) {
+            hyperplanes.resize(plane_values);
+            std::mt19937_64 random(42);
+            std::normal_distribution<float> normal(0.0F, 1.0F);
+            for (auto& value : hyperplanes) {
+                value = normal(random);
+            }
+        }
+        require_argument(hyperplanes.size() == plane_values, "bad PiPNN projection plane shape");
+        for (const auto value : hyperplanes) {
+            hyperplane_signature_ ^= std::bit_cast<uint32_t>(value);
+            hyperplane_signature_ *= 1099511628211ULL;
+        }
     }
-
-    parallel_for(ids_.size(), 64, [&](uint64_t begin, uint64_t end) {
-        for (uint64_t local_id = begin; local_id < end; ++local_id) {
+    sketches_->Resize(total, parameter_.hash_plane_count, allocator_);
+    if (metric_ != MetricType::METRIC_TYPE_IP) {
+        norms_->Resize(total, 1, allocator_);
+    }
+    parallel_for(total - start, 64, [&](uint64_t begin, uint64_t end) {
+        for (uint64_t local_id = start + begin; local_id < start + end; ++local_id) {
+            auto* sketch = sketches_->Row(local_id);
+            if (shared_sketches_) {
+                const auto id = ids_[local_id];
+                std::copy_n(
+                    shared_sketches_->projections.Row(id), parameter_.hash_plane_count, sketch);
+                if (metric_ != MetricType::METRIC_TYPE_IP) {
+                    norms_->Scalar(local_id) = shared_sketches_->norms.Row(id)[0];
+                }
+                continue;
+            }
             if (native_half()) {
                 const auto* vector = half_row(static_cast<uint32_t>(local_id));
                 if (metric_ != MetricType::METRIC_TYPE_IP) {
@@ -967,10 +1187,10 @@ PiPNNPipeline::prepare_sketches() {
                         pipnn_half::Preparation(vector, nullptr, dimensions_, half_format());
                     if (metric_ == MetricType::METRIC_TYPE_COSINE) {
                         const float length = std::sqrt(std::max(0.0F, norm));
-                        norms_[local_id] =
+                        norms_->Scalar(local_id) =
                             length > 0.0F and std::isfinite(length) ? 1.0F / length : 0.0F;
                     } else {
-                        norms_[local_id] = norm;
+                        norms_->Scalar(local_id) = norm;
                     }
                 }
                 for (uint64_t plane = 0; plane < parameter_.hash_plane_count; ++plane) {
@@ -978,13 +1198,14 @@ PiPNNPipeline::prepare_sketches() {
                     float dot =
                         pipnn_half::Preparation(vector, hyperplane, dimensions_, half_format());
                     if (metric_ == MetricType::METRIC_TYPE_COSINE) {
-                        dot *= norms_[local_id];
+                        dot *= norms_->Scalar(local_id);
                     }
-                    sketches_[local_id * parameter_.hash_plane_count + plane] = dot;
+                    sketch[plane] = dot;
                 }
                 continue;
             }
-            const auto* vector = vector_by_local_id(static_cast<uint32_t>(local_id));
+            const auto* vector = batch.empty() ? vector_by_local_id(static_cast<uint32_t>(local_id))
+                                               : batch[local_id - start];
             if (metric_ != MetricType::METRIC_TYPE_IP) {
                 float norm = 0.0F;
                 for (uint64_t dim = 0; dim < dimensions_; ++dim) {
@@ -992,10 +1213,10 @@ PiPNNPipeline::prepare_sketches() {
                 }
                 if (metric_ == MetricType::METRIC_TYPE_COSINE) {
                     const float length = std::sqrt(std::max(0.0F, norm));
-                    norms_[local_id] =
+                    norms_->Scalar(local_id) =
                         length > 0.0F and std::isfinite(length) ? 1.0F / length : 0.0F;
                 } else {
-                    norms_[local_id] = norm;
+                    norms_->Scalar(local_id) = norm;
                 }
             }
             for (uint64_t plane = 0; plane < parameter_.hash_plane_count; ++plane) {
@@ -1005,30 +1226,39 @@ PiPNNPipeline::prepare_sketches() {
                     dot += vector[dim] * hyperplane[dim];
                 }
                 if (metric_ == MetricType::METRIC_TYPE_COSINE) {
-                    dot *= norms_[local_id];
+                    dot *= norms_->Scalar(local_id);
                 }
-                sketches_[local_id * parameter_.hash_plane_count + plane] = dot;
+                sketch[plane] = dot;
             }
         }
     });
 }
 
 Leaves
-PiPNNPipeline::partition() const {
+PiPNNPipeline::partition(PiPNNRoute* root,
+                         const Leaf* subset,
+                         uint64_t level,
+                         bool allow_parallelism) const {
     Leaf initial(allocator_);
-    initial.resize(ids_.size());
-    for (uint64_t i = 0; i < ids_.size(); ++i) {
-        initial[i] = static_cast<uint32_t>(i);
+    if (subset != nullptr) {
+        initial.assign(subset->begin(), subset->end());
+    } else {
+        initial.resize(ids_.size());
+        for (uint64_t i = 0; i < ids_.size(); ++i) {
+            initial[i] = static_cast<uint32_t>(i);
+        }
     }
-
     Leaves finished(allocator_);
     if (initial.size() <= parameter_.max_leaf_size) {
+        if (root != nullptr) {
+            initial.terminals.push_back(root);
+        }
         finished.emplace_back(std::move(initial));
         return finished;
     }
 
     Vector<WorkItem> work(allocator_);
-    work.emplace_back(std::move(initial), 0, PARTITION_SEED);
+    work.emplace_back(std::move(initial), level, PARTITION_SEED, root);
     for (uint64_t iteration = 0; iteration < MAX_PARTITION_ITERATIONS; ++iteration) {
         Vector<WorkItem> pending(allocator_);
         const bool all_items_are_small =
@@ -1036,8 +1266,8 @@ PiPNNPipeline::partition() const {
                 return item.points.size() < MIN_PARALLEL_PARTITION_POINTS;
             });
         // Use one pool level at a time: outer work-item fan-out disables inner stripe fan-out.
-        const bool parallelize_work_items = thread_pool_ != nullptr and thread_count_ > 1 and
-                                            work.size() > 1 and
+        const bool parallelize_work_items = allow_parallelism and thread_pool_ != nullptr and
+                                            thread_count_ > 1 and work.size() > 1 and
                                             (work.size() >= thread_count_ or all_items_are_small);
         if (parallelize_work_items) {
             Vector<std::unique_ptr<SplitResult>> results(allocator_);
@@ -1105,7 +1335,7 @@ PiPNNPipeline::partition() const {
             }
         } else {
             for (const auto& item : work) {
-                split_work_item(item, pending, finished, true);
+                split_work_item(item, pending, finished, allow_parallelism, subset != nullptr);
             }
         }
         if (pending.empty()) {
@@ -1121,12 +1351,16 @@ void
 PiPNNPipeline::split_work_item(const WorkItem& item,
                                Vector<WorkItem>& pending,
                                Leaves& finished,
-                               bool allow_inner_parallelism) const {
+                               bool allow_inner_parallelism,
+                               bool incremental_split) const {
     const uint64_t requested_fanout =
         item.level < parameter_.fanout.size() ? parameter_.fanout[item.level] : 1;
     const auto leaders = sample_leaders(item);
     const uint64_t fanout = std::min<uint64_t>(requested_fanout, leaders.size());
-    auto clusters = assign_to_leaders(item, leaders, fanout, allow_inner_parallelism);
+    const auto mode = !allow_inner_parallelism ? AssignmentMode::SERIAL
+                      : incremental_split      ? AssignmentMode::SPLIT_STRIPES
+                                               : AssignmentMode::BUILD_CHUNKS;
+    auto clusters = assign_to_leaders(item.points, leaders, fanout, mode);
 
     bool every_cluster_is_parent = not clusters.empty();
     for (const auto& cluster : clusters) {
@@ -1134,16 +1368,30 @@ PiPNNPipeline::split_work_item(const WorkItem& item,
     }
     if (every_cluster_is_parent and fanout > 1) {
         Leaf unchanged(item.points.begin(), item.points.end(), allocator_);
-        pending.emplace_back(
-            std::move(unchanged), item.level + 1, mix_seed(item.seed, item.points.size()));
+        pending.emplace_back(std::move(unchanged),
+                             item.level + 1,
+                             mix_seed(item.seed, item.points.size()),
+                             item.route);
         return;
     }
 
+    if (item.route != nullptr) {
+        item.route->leaders.assign(leaders.begin(), leaders.end());
+        item.route->fanout = fanout;
+        item.route->children.resize(leaders.size());
+    }
     // Assignment visits the sorted, unique parent points in order, so every child keeps that
     // invariant without another sort and deduplication pass.
     for (uint64_t cluster_id = 0; cluster_id < clusters.size(); ++cluster_id) {
         auto& cluster = clusters[cluster_id];
+        auto* child = (item.route != nullptr) ? &item.route->children[cluster_id] : nullptr;
+        if (child != nullptr) {
+            cluster.terminals.push_back(child);
+        }
         if (cluster.empty()) {
+            if (child != nullptr) {
+                finished.emplace_back(std::move(cluster));
+            }
             continue;
         }
         if (cluster.size() <= parameter_.max_leaf_size) {
@@ -1161,6 +1409,10 @@ PiPNNPipeline::split_work_item(const WorkItem& item,
                 std::mt19937_64 random(mix_seed(item.seed, cluster.size()));
                 std::shuffle(cluster.begin(), cluster.end(), random);
             }
+            if (child != nullptr) {
+                child->children.resize((cluster.size() - 2) / (parameter_.max_leaf_size - 1) + 1);
+            }
+            size_t part = 0;
             uint64_t begin = 0;
             while (begin < cluster.size()) {
                 Leaf fallback(allocator_);
@@ -1172,6 +1424,10 @@ PiPNNPipeline::split_work_item(const WorkItem& item,
                 fallback.insert(fallback.end(),
                                 cluster.begin() + static_cast<int64_t>(begin),
                                 cluster.begin() + static_cast<int64_t>(end));
+                if (child != nullptr) {
+                    child->leaders.push_back(fallback.front());
+                    fallback.terminals.push_back(&child->children.at(part++));
+                }
                 finished.emplace_back(std::move(fallback));
                 begin = end;
             }
@@ -1180,7 +1436,8 @@ PiPNNPipeline::split_work_item(const WorkItem& item,
 
         pending.emplace_back(std::move(cluster),
                              item.level + 1,
-                             mix_seed(item.seed, cluster_id + item.points.size()));
+                             mix_seed(item.seed, cluster_id + item.points.size()),
+                             child);
     }
 }
 
@@ -1215,7 +1472,7 @@ PiPNNPipeline::sample_leaders(const WorkItem& item) const {
 
 void
 PiPNNPipeline::select_leaders(uint32_t source,
-                              const Vector<uint32_t>& leaders,
+                              std::span<const uint32_t> leaders,
                               const float* dots,
                               uint64_t fanout,
                               Vector<std::pair<float, uint32_t>>& candidates) const {
@@ -1261,27 +1518,92 @@ PiPNNPipeline::select_leaders(uint32_t source,
 }
 
 Leaves
-PiPNNPipeline::assign_to_leaders(const WorkItem& item,
-                                 const Vector<uint32_t>& leaders,
+PiPNNPipeline::assign_to_leaders(const Vector<uint32_t>& points,
+                                 std::span<const uint32_t> leaders,
                                  uint64_t fanout,
-                                 bool allow_parallelism) const {
+                                 AssignmentMode mode,
+                                 std::vector<float>* root_vectors) const {
     Leaves clusters(allocator_);
     clusters.reserve(leaders.size());
     for (uint64_t leader = 0; leader < leaders.size(); ++leader) {
         clusters.emplace_back(allocator_);
     }
 
-    const uint64_t leader_value_count =
-        checked_product(leaders.size(), dimensions_, "leader matrix");
-    UninitializedFloatBuffer leader_values(leader_value_count, allocator_, "leader matrix");
-    for (uint64_t leader = 0; leader < leaders.size(); ++leader) {
-        gather_row(leaders[leader], leader_values, leader);
+    if (codes_ != nullptr) {
+        Vector<InnerIdType> targets(allocator_);
+        for (auto leader : leaders) {
+            targets.push_back(ids_[leader]);
+        }
+        Vector<uint32_t> selected(checked_product(points.size(), fanout, "route assignments"),
+                                  allocator_);
+        constexpr uint64_t stripe = 128;
+        auto assign = [&](uint64_t begin, uint64_t end) {
+            Vector<float> distances(std::min(end - begin, stripe) * targets.size(), allocator_);
+            Vector<InnerIdType> sources(allocator_);
+            Vector<std::pair<float, uint32_t>> candidates(allocator_);
+            for (uint64_t first = begin; first < end; first += stripe) {
+                const auto last = std::min(first + stripe, end);
+                sources.clear();
+                for (auto i = first; i < last; ++i) {
+                    sources.push_back(ids_[points[i]]);
+                }
+                code_distances(*codes_, sources, targets, distances.data());
+                for (auto i = first; i < last; ++i) {
+                    select_leaders(points[i],
+                                   leaders,
+                                   distances.data() + (i - first) * targets.size(),
+                                   fanout,
+                                   candidates);
+                    for (uint64_t j = 0; j < fanout; ++j) {
+                        selected[i * fanout + j] = candidates[j].second;
+                    }
+                }
+            }
+        };
+        if (mode == AssignmentMode::SERIAL) {
+            assign(0, points.size());
+        } else {
+            parallel_for(
+                points.size(),
+                std::min<uint64_t>(stripe, (points.size() + thread_count_ - 1) / thread_count_),
+                assign);
+        }
+        for (uint64_t i = 0; i < points.size(); ++i) {
+            for (uint64_t j = 0; j < fanout; ++j) {
+                clusters[selected[i * fanout + j]].push_back(points[i]);
+            }
+        }
+        return clusters;
     }
 
-    if (allow_parallelism and thread_pool_ != nullptr and thread_count_ > 1 and
-        item.points.size() >= MIN_PARALLEL_PARTITION_POINTS) {
+    std::optional<UninitializedFloatBuffer> local_leaders;
+    const float* leader_matrix;
+    if ((root_vectors != nullptr) && !root_vectors->empty()) {
+        leader_matrix = root_vectors->data();
+    } else {
+        const auto count = checked_product(leaders.size(), dimensions_, "leader matrix");
+        float* values;
+        if (root_vectors != nullptr) {
+            root_vectors->resize(count);
+            values = root_vectors->data();
+        } else {
+            local_leaders.emplace(count, allocator_, "leader matrix");
+            values = local_leaders->Data();
+        }
+        for (uint64_t i = 0; i < leaders.size(); ++i) {
+            gather_row(leaders[i], values, i);
+        }
+        leader_matrix = values;
+    }
+
+    const uint64_t count = points.size();
+    const bool root_chunks = mode == AssignmentMode::ROUTE_ROOT;
+    const bool split_stripes = mode == AssignmentMode::SPLIT_STRIPES;
+    if (thread_pool_ != nullptr && thread_count_ > 1 &&
+        ((root_chunks && count > 1) || (split_stripes && count > PARTITION_STRIPE_SIZE) ||
+         (mode == AssignmentMode::BUILD_CHUNKS && count >= MIN_PARALLEL_PARTITION_POINTS))) {
         const uint64_t assignment_count =
-            checked_product(item.points.size(), fanout, "partition assignments");
+            checked_product(points.size(), fanout, "partition assignments");
         const uint64_t assignment_bytes =
             checked_product(assignment_count, sizeof(uint32_t), "partition assignment bytes");
         auto* assignment_data = static_cast<uint32_t*>(allocator_->Allocate(assignment_bytes));
@@ -1292,22 +1614,28 @@ PiPNNPipeline::assign_to_leaders(const WorkItem& item,
         auto release_assignments = [this](uint32_t* data) { allocator_->Deallocate(data); };
         std::unique_ptr<uint32_t, decltype(release_assignments)> assignments(assignment_data,
                                                                              release_assignments);
-        const uint64_t stripe_count =
-            (item.points.size() + PARTITION_STRIPE_SIZE - 1) / PARTITION_STRIPE_SIZE;
-        const uint64_t chunk_count = (stripe_count + PARTITION_ASSIGNMENT_CHUNK_STRIPES - 1) /
-                                     PARTITION_ASSIGNMENT_CHUNK_STRIPES;
+        const uint64_t stripe_count = (count + PARTITION_STRIPE_SIZE - 1) / PARTITION_STRIPE_SIZE;
+        const uint64_t stripes_per_chunk = split_stripes ? 1 : PARTITION_ASSIGNMENT_CHUNK_STRIPES;
+        const uint64_t chunk_count =
+            root_chunks ? std::min(thread_count_, count)
+                        : (stripe_count + stripes_per_chunk - 1) / stripes_per_chunk;
         const uint64_t offset_count =
             checked_product(chunk_count, leaders.size(), "partition cluster offsets");
         Vector<uint64_t> cluster_offsets(offset_count, 0, allocator_);
-        auto stripe_range = [&](uint64_t chunk) {
-            const uint64_t begin = chunk * PARTITION_ASSIGNMENT_CHUNK_STRIPES;
-            const uint64_t end =
-                std::min<uint64_t>(begin + PARTITION_ASSIGNMENT_CHUNK_STRIPES, stripe_count);
-            return std::pair<uint64_t, uint64_t>{begin, end};
+        // Keep full BLAS stripes when enough exist. For a small root batch, split
+        // rows directly so every nonempty task still owns a disjoint input range.
+        auto chunk_start = [&](uint64_t chunk) -> uint64_t {
+            if (!root_chunks) {
+                return std::min(count, chunk * stripes_per_chunk * PARTITION_STRIPE_SIZE);
+            }
+            if (stripe_count < chunk_count) {
+                return chunk * count / chunk_count;
+            }
+            return std::min(count, (chunk * stripe_count / chunk_count) * PARTITION_STRIPE_SIZE);
         };
         parallel_for(chunk_count, 1, [&](uint64_t chunk_begin, uint64_t chunk_end) {
             const uint64_t max_stripe_size =
-                std::min<uint64_t>(PARTITION_STRIPE_SIZE, item.points.size());
+                std::min<uint64_t>(PARTITION_STRIPE_SIZE, points.size());
             UninitializedFloatBuffer point_values(
                 checked_product(max_stripe_size, dimensions_, "partition stripe"),
                 allocator_,
@@ -1320,13 +1648,12 @@ PiPNNPipeline::assign_to_leaders(const WorkItem& item,
             candidates.reserve(fanout <= SMALL_TOP_K_LIMIT ? fanout : leaders.size());
             for (uint64_t chunk = chunk_begin; chunk < chunk_end; ++chunk) {
                 auto* offsets = cluster_offsets.data() + chunk * leaders.size();
-                const auto [stripe_begin, stripe_end] = stripe_range(chunk);
-                for (uint64_t stripe = stripe_begin; stripe < stripe_end; ++stripe) {
-                    const uint64_t begin = stripe * PARTITION_STRIPE_SIZE;
-                    const uint64_t stripe_size =
-                        std::min<uint64_t>(PARTITION_STRIPE_SIZE, item.points.size() - begin);
+                const auto end = chunk_start(chunk + 1);
+                for (uint64_t begin = chunk_start(chunk); begin < end;
+                     begin += PARTITION_STRIPE_SIZE) {
+                    const uint64_t stripe_size = std::min(PARTITION_STRIPE_SIZE, end - begin);
                     for (uint64_t point = 0; point < stripe_size; ++point) {
-                        gather_row(item.points[begin + point], point_values, point);
+                        gather_row(points[begin + point], point_values.Data(), point);
                     }
 
                     BlasFunction::Sgemm(BlasFunction::RowMajor,
@@ -1338,7 +1665,7 @@ PiPNNPipeline::assign_to_leaders(const WorkItem& item,
                                         1.0F,
                                         point_values.Data(),
                                         static_cast<int32_t>(dimensions_),
-                                        leader_values.Data(),
+                                        leader_matrix,
                                         static_cast<int32_t>(dimensions_),
                                         0.0F,
                                         dots.Data(),
@@ -1346,7 +1673,7 @@ PiPNNPipeline::assign_to_leaders(const WorkItem& item,
 
                     for (uint64_t point = 0; point < stripe_size; ++point) {
                         const uint64_t point_index = begin + point;
-                        const uint32_t local_id = item.points[point_index];
+                        const uint32_t local_id = points[point_index];
                         select_leaders(local_id,
                                        leaders,
                                        dots.Data() + point * leaders.size(),
@@ -1377,14 +1704,12 @@ PiPNNPipeline::assign_to_leaders(const WorkItem& item,
         parallel_for(chunk_count, 1, [&](uint64_t chunk_begin, uint64_t chunk_end) {
             for (uint64_t chunk = chunk_begin; chunk < chunk_end; ++chunk) {
                 auto* offsets = cluster_offsets.data() + chunk * leaders.size();
-                const auto [stripe_begin, stripe_end] = stripe_range(chunk);
-                const uint64_t begin = stripe_begin * PARTITION_STRIPE_SIZE;
-                const uint64_t end =
-                    std::min<uint64_t>(stripe_end * PARTITION_STRIPE_SIZE, item.points.size());
+                const uint64_t begin = chunk_start(chunk);
+                const uint64_t end = chunk_start(chunk + 1);
                 for (uint64_t point = begin; point < end; ++point) {
                     for (uint64_t selected = 0; selected < fanout; ++selected) {
                         const uint32_t leader = assignment_data[point * fanout + selected];
-                        clusters[leader][offsets[leader]++] = item.points[point];
+                        clusters[leader][offsets[leader]++] = points[point];
                     }
                 }
             }
@@ -1392,7 +1717,7 @@ PiPNNPipeline::assign_to_leaders(const WorkItem& item,
         return clusters;
     }
 
-    const uint64_t max_stripe_size = std::min<uint64_t>(PARTITION_STRIPE_SIZE, item.points.size());
+    const uint64_t max_stripe_size = std::min<uint64_t>(PARTITION_STRIPE_SIZE, points.size());
     UninitializedFloatBuffer point_values(
         checked_product(max_stripe_size, dimensions_, "partition stripe"),
         allocator_,
@@ -1403,11 +1728,11 @@ PiPNNPipeline::assign_to_leaders(const WorkItem& item,
         "partition distances");
     Vector<std::pair<float, uint32_t>> candidates(allocator_);
     candidates.reserve(fanout <= SMALL_TOP_K_LIMIT ? fanout : leaders.size());
-    for (uint64_t begin = 0; begin < item.points.size(); begin += PARTITION_STRIPE_SIZE) {
+    for (uint64_t begin = 0; begin < points.size(); begin += PARTITION_STRIPE_SIZE) {
         const uint64_t stripe_size =
-            std::min<uint64_t>(PARTITION_STRIPE_SIZE, item.points.size() - begin);
+            std::min<uint64_t>(PARTITION_STRIPE_SIZE, points.size() - begin);
         for (uint64_t point = 0; point < stripe_size; ++point) {
-            gather_row(item.points[begin + point], point_values, point);
+            gather_row(points[begin + point], point_values.Data(), point);
         }
 
         BlasFunction::Sgemm(BlasFunction::RowMajor,
@@ -1419,14 +1744,14 @@ PiPNNPipeline::assign_to_leaders(const WorkItem& item,
                             1.0F,
                             point_values.Data(),
                             static_cast<int32_t>(dimensions_),
-                            leader_values.Data(),
+                            leader_matrix,
                             static_cast<int32_t>(dimensions_),
                             0.0F,
                             dots.Data(),
                             static_cast<int32_t>(leaders.size()));
 
         for (uint64_t point = 0; point < stripe_size; ++point) {
-            const uint32_t local_id = item.points[begin + point];
+            const uint32_t local_id = points[begin + point];
             select_leaders(
                 local_id, leaders, dots.Data() + point * leaders.size(), fanout, candidates);
             for (uint64_t selected = 0; selected < fanout; ++selected) {
@@ -1447,12 +1772,14 @@ PiPNNPipeline::merge_undersized_leaves(Leaves leaves) const {
         Leaf result(allocator_);
         result.reserve(lhs.size() + rhs.size());
         std::set_union(lhs.begin(), lhs.end(), rhs.begin(), rhs.end(), std::back_inserter(result));
+        result.terminals = lhs.terminals;
+        result.terminals.insert(result.terminals.end(), rhs.terminals.begin(), rhs.terminals.end());
         return result;
     };
 
     Leaf accumulator(allocator_);
     for (auto& leaf : leaves) {
-        if (leaf.size() >= parameter_.min_leaf_size) {
+        if (leaf.empty() || leaf.size() >= parameter_.min_leaf_size) {
             merged.emplace_back(std::move(leaf));
             continue;
         }
@@ -1615,58 +1942,125 @@ PiPNNPipeline::group_near_duplicates(Leaves& leaves,
     }
 }
 
+uint64_t
+PiPNNPipeline::leaf_neighbor_count(uint64_t points) const {
+    const auto requested =
+        points < parameter_.min_leaf_size
+            ? std::max(parameter_.leaf_neighbor_count, MIN_UNDERSIZED_LEAF_NEIGHBOR_COUNT)
+            : parameter_.leaf_neighbor_count;
+    return points < 2 ? 0 : std::min<uint64_t>(requested, points - 1);
+}
+
+// Keep the small-leaf BLAS strip shapes identical in serial and parallel rebuilds.
 void
-PiPNNPipeline::build_leaf(const Leaf& leaf) {
+leaf_dot_strip(const float* matrix,
+               uint64_t dims,
+               uint64_t count,
+               uint64_t begin,
+               uint64_t end,
+               float* output) {
+    const auto k = static_cast<int32_t>(dims);
+    const auto n = static_cast<int32_t>(end);
+    const auto stride = static_cast<int32_t>(count);
+    if (begin == 0) {
+        BlasFunction::Ssyrk(BlasFunction::RowMajor,
+                            BlasFunction::CblasLower,
+                            BlasFunction::NoTrans,
+                            n,
+                            k,
+                            1.0F,
+                            matrix,
+                            k,
+                            0.0F,
+                            output,
+                            stride);
+    } else {
+        BlasFunction::Sgemm(BlasFunction::RowMajor,
+                            BlasFunction::NoTrans,
+                            BlasFunction::Trans,
+                            static_cast<int32_t>(end - begin),
+                            n,
+                            k,
+                            1.0F,
+                            matrix + begin * dims,
+                            k,
+                            matrix,
+                            k,
+                            0.0F,
+                            output,
+                            stride);
+    }
+}
+
+void
+PiPNNPipeline::build_leaf(const Leaf& leaf, PiPNNLeafTopK* cache) {
     if (leaf.size() <= 1) {
         return;
     }
 
     const uint64_t point_count = leaf.size();
-    const uint64_t matrix_values = checked_product(point_count, dimensions_, "leaf matrix");
-    UninitializedFloatBuffer matrix(matrix_values, allocator_, "leaf matrix");
-    const uint64_t requested_neighbor_count =
-        point_count < parameter_.min_leaf_size
-            ? std::max(parameter_.leaf_neighbor_count, MIN_UNDERSIZED_LEAF_NEIGHBOR_COUNT)
-            : parameter_.leaf_neighbor_count;
-    const uint64_t neighbor_count = std::min<uint64_t>(requested_neighbor_count, point_count - 1);
-    if (neighbor_count <= SMALL_TOP_K_LIMIT) {
+    const auto neighbor_count = leaf_neighbor_count(point_count);
+    if (cache != nullptr) {
+        *cache = PiPNNLeafTopK(point_count, neighbor_count);
+    }
+    if (codes_ == nullptr && neighbor_count <= SMALL_TOP_K_LIMIT) {
         if (metric_ == MetricType::METRIC_TYPE_L2SQR) {
             if (neighbor_count == 5) {
-                build_small_leaf<MetricType::METRIC_TYPE_L2SQR, 5>(leaf, matrix, neighbor_count);
+                build_small_leaf<MetricType::METRIC_TYPE_L2SQR, 5>(leaf, neighbor_count, cache);
             } else {
-                build_small_leaf<MetricType::METRIC_TYPE_L2SQR>(leaf, matrix, neighbor_count);
+                build_small_leaf<MetricType::METRIC_TYPE_L2SQR>(leaf, neighbor_count, cache);
             }
             return;
         }
         if (metric_ == MetricType::METRIC_TYPE_IP) {
             if (neighbor_count == 5) {
-                build_small_leaf<MetricType::METRIC_TYPE_IP, 5>(leaf, matrix, neighbor_count);
+                build_small_leaf<MetricType::METRIC_TYPE_IP, 5>(leaf, neighbor_count, cache);
             } else {
-                build_small_leaf<MetricType::METRIC_TYPE_IP>(leaf, matrix, neighbor_count);
+                build_small_leaf<MetricType::METRIC_TYPE_IP>(leaf, neighbor_count, cache);
             }
             return;
         }
     }
-    for (uint64_t point = 0; point < point_count; ++point) {
-        gather_row(leaf[point], matrix, point);
-    }
     const uint64_t distance_values = checked_product(point_count, point_count, "leaf distances");
     UninitializedFloatBuffer distances(distance_values, allocator_, "leaf distances");
-    BlasFunction::Ssyrk(BlasFunction::RowMajor,
-                        BlasFunction::CblasLower,
-                        BlasFunction::NoTrans,
-                        static_cast<int32_t>(point_count),
-                        static_cast<int32_t>(dimensions_),
-                        1.0F,
-                        matrix.Data(),
-                        static_cast<int32_t>(dimensions_),
-                        0.0F,
-                        distances.Data(),
-                        static_cast<int32_t>(point_count));
+    if (codes_ != nullptr) {
+        Vector<InnerIdType> targets(allocator_);
+        for (auto id : leaf) {
+            targets.push_back(ids_[id]);
+        }
+        code_distances(*codes_, targets, targets, distances.Data(), 0);
+    } else {
+        UninitializedFloatBuffer matrix(
+            checked_product(point_count, dimensions_, "leaf matrix"), allocator_, "leaf matrix");
+        for (uint64_t point = 0; point < point_count; ++point) {
+            gather_row(leaf[point], matrix.Data(), point);
+        }
+        BlasFunction::Ssyrk(BlasFunction::RowMajor,
+                            BlasFunction::CblasLower,
+                            BlasFunction::NoTrans,
+                            static_cast<int32_t>(point_count),
+                            static_cast<int32_t>(dimensions_),
+                            1.0F,
+                            matrix.Data(),
+                            static_cast<int32_t>(dimensions_),
+                            0.0F,
+                            distances.Data(),
+                            static_cast<int32_t>(point_count));
+    }
+    select_leaf_neighbors(leaf, cache, distances.Data(), neighbor_count, 0, point_count);
+}
 
+void
+PiPNNPipeline::select_leaf_neighbors(const Leaf& leaf,
+                                     PiPNNLeafTopK* cache,
+                                     const float* distances,
+                                     uint64_t neighbor_count,
+                                     uint64_t begin,
+                                     uint64_t end) {
+    const uint64_t point_count = leaf.size();
     if (neighbor_count <= SMALL_TOP_K_LIMIT) {
         std::array<std::pair<float, uint32_t>, SMALL_TOP_K_LIMIT> nearest{};
-        for (uint64_t source = 0; source < point_count; ++source) {
+        for (uint64_t source = begin; source < end; ++source) {
             const auto source_id = ids_[leaf[source]];
             auto comparator = [&](const auto& lhs, const auto& rhs) {
                 if (lhs.first != rhs.first) {
@@ -1691,7 +2085,7 @@ PiPNNPipeline::build_leaf(const Leaf& leaf) {
                 const uint64_t row = std::max(source, target);
                 const uint64_t column = std::min(source, target);
                 const float distance = distance_from_dot(
-                    leaf[source], leaf[target], distances.Data()[row * point_count + column]);
+                    leaf[source], leaf[target], distances[row * point_count + column]);
                 const auto candidate = std::make_pair(distance, static_cast<uint32_t>(target));
 
                 if (retained < neighbor_count) {
@@ -1717,7 +2111,7 @@ PiPNNPipeline::build_leaf(const Leaf& leaf) {
             std::sort(nearest.begin(), nearest.begin() + retained, comparator);
             for (uint64_t candidate = 0; candidate < retained; ++candidate) {
                 const uint32_t target = nearest[candidate].second;
-                insert_bidirectional(leaf[source], leaf[target], nearest[candidate].first);
+                Emit(leaf, source, candidate, target, nearest[candidate].first, cache);
             }
         }
         return;
@@ -1725,7 +2119,7 @@ PiPNNPipeline::build_leaf(const Leaf& leaf) {
 
     Vector<std::pair<float, uint32_t>> candidates(allocator_);
     candidates.reserve(point_count - 1);
-    for (uint64_t source = 0; source < point_count; ++source) {
+    for (uint64_t source = begin; source < end; ++source) {
         candidates.clear();
         for (uint64_t target = 0; target < point_count; ++target) {
             if (source == target) {
@@ -1734,7 +2128,7 @@ PiPNNPipeline::build_leaf(const Leaf& leaf) {
             const uint64_t row = std::max(source, target);
             const uint64_t column = std::min(source, target);
             const float distance = distance_from_dot(
-                leaf[source], leaf[target], distances.Data()[row * point_count + column]);
+                leaf[source], leaf[target], distances[row * point_count + column]);
             candidates.emplace_back(distance, static_cast<uint32_t>(target));
         }
         const uint64_t retained = std::min<uint64_t>(neighbor_count, candidates.size());
@@ -1758,16 +2152,16 @@ PiPNNPipeline::build_leaf(const Leaf& leaf) {
                           comparator);
         for (uint64_t candidate = 0; candidate < retained; ++candidate) {
             const uint32_t target = candidates[candidate].second;
-            insert_bidirectional(leaf[source], leaf[target], candidates[candidate].first);
+            Emit(leaf, source, candidate, target, candidates[candidate].first, cache);
         }
     }
 }
 
 template <MetricType metric, uint64_t fixed_k>
 void
-PiPNNPipeline::build_small_leaf(const Leaf& leaf,
-                                UninitializedFloatBuffer& matrix_buffer,
-                                uint64_t requested_k) {
+PiPNNPipeline::build_small_leaf(const Leaf& leaf, uint64_t requested_k, PiPNNLeafTopK* cache) {
+    UninitializedFloatBuffer matrix_buffer(
+        checked_product(leaf.size(), dimensions_, "leaf matrix"), allocator_, "leaf matrix");
     auto* matrix = matrix_buffer.Data();
     const uint64_t neighbor_count = fixed_k == 0 ? requested_k : fixed_k;
     static_assert(metric == MetricType::METRIC_TYPE_L2SQR || metric == MetricType::METRIC_TYPE_IP);
@@ -1780,7 +2174,7 @@ PiPNNPipeline::build_small_leaf(const Leaf& leaf,
     for (uint64_t point = 0; point < count; ++point) {
         ids[point] = ids_[leaf[point]];
         if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
-            norms[point] = norms_[leaf[point]];
+            norms[point] = norms_->Scalar(leaf[point]);
         }
     }
     auto less = [&](uint64_t source, const auto& lhs, const auto& rhs) {
@@ -1822,7 +2216,7 @@ PiPNNPipeline::build_small_leaf(const Leaf& leaf,
         sorted_insert(source, row, candidate);
         worst_distances[source] = row[worst].first;
     };
-    constexpr uint64_t strip_rows = 64;
+    constexpr uint64_t strip_rows = LEAF_DOT_STRIP;
     static_assert(strip_rows > SMALL_TOP_K_LIMIT);
     UninitializedFloatBuffer dot_buffer(
         checked_product(std::min(count, strip_rows), count, "leaf dot strip"),
@@ -1833,7 +2227,7 @@ PiPNNPipeline::build_small_leaf(const Leaf& leaf,
 
         for (uint64_t point = row_begin; point < row_end; ++point) {
             if (native_half()) {
-                gather_row(leaf[point], matrix_buffer, point);
+                gather_row(leaf[point], matrix_buffer.Data(), point);
             } else {
                 const auto* source = vector_by_local_id(leaf[point]);
                 std::copy(source, source + dimensions_, matrix + point * dimensions_);
@@ -1841,19 +2235,8 @@ PiPNNPipeline::build_small_leaf(const Leaf& leaf,
         }
 
         const auto* dots = dot_buffer.Data();
+        leaf_dot_strip(matrix, dimensions_, count, row_begin, row_end, dot_buffer.Data());
         if (row_begin == 0) {
-            BlasFunction::Ssyrk(BlasFunction::RowMajor,
-                                BlasFunction::CblasLower,
-                                BlasFunction::NoTrans,
-                                static_cast<int32_t>(row_end),
-                                static_cast<int32_t>(dimensions_),
-                                1.0F,
-                                matrix,
-                                static_cast<int32_t>(dimensions_),
-                                0.0F,
-                                dot_buffer.Data(),
-                                static_cast<int32_t>(count));
-
             // Seed the first K+1 lists from their lower triangle. All later offers see
             // full lists, and every endpoint keeps ascending target order.
             for (uint64_t row = 1; row <= neighbor_count; ++row) {
@@ -1873,22 +2256,6 @@ PiPNNPipeline::build_small_leaf(const Leaf& leaf,
                 worst_distances[source] =
                     nearest[source * neighbor_count + neighbor_count - 1].first;
             }
-
-        } else {
-            BlasFunction::Sgemm(BlasFunction::RowMajor,
-                                BlasFunction::NoTrans,
-                                BlasFunction::Trans,
-                                static_cast<int32_t>(row_end - row_begin),
-                                static_cast<int32_t>(row_end),
-                                static_cast<int32_t>(dimensions_),
-                                1.0F,
-                                matrix + row_begin * dimensions_,
-                                static_cast<int32_t>(dimensions_),
-                                matrix,
-                                static_cast<int32_t>(dimensions_),
-                                0.0F,
-                                dot_buffer.Data(),
-                                static_cast<int32_t>(count));
         }
 
         for (uint64_t row = std::max(row_begin, neighbor_count + 1); row < row_end; ++row) {
@@ -1946,67 +2313,61 @@ PiPNNPipeline::build_small_leaf(const Leaf& leaf,
         auto* row = nearest.data() + source * neighbor_count;
         for (uint64_t candidate = 0; candidate < neighbor_count; ++candidate) {
             const auto [distance, target] = row[candidate];
-            insert_bidirectional(leaf[source], leaf[target], distance);
+            Emit(leaf, source, candidate, target, distance, cache);
         }
     }
 }
 
-std::pair<uint16_t, uint16_t>
-PiPNNPipeline::relative_hash(uint32_t source, uint32_t target) const {
-    uint16_t forward = 0;
-    uint16_t reverse = 0;
-    bool coincident = true;
-    const uint64_t source_offset = static_cast<uint64_t>(source) * parameter_.hash_plane_count;
-    const uint64_t target_offset = static_cast<uint64_t>(target) * parameter_.hash_plane_count;
-    for (uint64_t plane = 0; plane < parameter_.hash_plane_count; ++plane) {
-        const float source_value = sketches_[source_offset + plane];
-        const float target_value = sketches_[target_offset + plane];
-        if (target_value >= source_value) {
-            forward |= static_cast<uint16_t>(1U << plane);
-        }
-        if (source_value >= target_value) {
-            reverse |= static_cast<uint16_t>(1U << plane);
-        }
-        coincident = coincident and target_value == source_value;
-    }
-    if (coincident) {
-        forward |= COINCIDENT_HASH_FLAG;
-        reverse |= COINCIDENT_HASH_FLAG;
-    }
-    return {forward, reverse};
+pipnn_filter::RelativeHashes
+PiPNNPipeline::relative_hashes(uint32_t source, uint32_t target) const {
+    const auto planes = parameter_.hash_plane_count;
+    return filters_.hashes(sketches_->Row(source), sketches_->Row(target), planes);
 }
 
 void
-PiPNNPipeline::insert_bidirectional(uint32_t first, uint32_t second, float distance) {
-    if (first == second) {
-        return;
+PiPNNPipeline::Emit(const Leaf& leaf,
+                    uint32_t source,
+                    uint32_t rank,
+                    uint32_t target,
+                    float distance,
+                    PiPNNLeafTopK* cache) {
+    if (cache != nullptr) {
+        cache->Row(source).Set(rank, {target, distance});
+    } else {
+        insert_pair(leaf[source], leaf[target], distance);
     }
-    const auto [forward, reverse] = relative_hash(first, second);
-    const uint16_t distance_key = distance_order_key(distance);
-    // Keep the original forward-then-reverse publication order and per-source locks.
-    insert_candidate(first, second, forward, distance_key);
-    insert_candidate(second, first, reverse, distance_key);
 }
 
 void
-PiPNNPipeline::insert_candidate(uint32_t source,
-                                uint32_t target,
-                                uint16_t hash,
-                                uint16_t distance_key) {
+PiPNNPipeline::insert_pair(uint32_t source, uint32_t target, float distance) {
     if (source == target) {
         return;
     }
+    const auto hashes = relative_hashes(source, target);
+    const auto key = distance_order_key(distance);
+    auto insert = [&](uint32_t from, uint32_t to, uint16_t hash) {
+        const uint32_t lock_index = point_lock_count_ == 0 ? from : from % point_lock_count_;
+        PointLockGuard lock(point_locks_.get(), lock_index);
+        if (warm_build_) {
+            seed_cached_row(from);
+            if (reuse_graph_) {
+                clean_graph_rows_[from] = 0;
+            }
+        }
+        MergeCandidate(
+            reservoir_states_[from], reservoirs_.data() + from * reservoir_size_, {to, hash, key});
+    };
+    insert(source, target, hashes.forward);
+    insert(target, source, hashes.reverse);
+}
 
+// Caller owns the source row or holds its lock.
+void
+PiPNNPipeline::MergeCandidate(ReservoirState& state,
+                              ReservoirEntry* row,
+                              const ReservoirEntry& candidate) {
+    const auto [target, hash, distance_key] = candidate;
     const auto incoming_key = std::make_tuple(distance_key, ids_[target], hash);
-    const uint32_t lock_index = point_lock_count_ == 0 ? source : source % point_lock_count_;
-    PointLockGuard lock(point_locks_.get(), lock_index);
-    seed_cached_row(source);
-    if (reuse_graph_) {
-        clean_graph_rows_[source] = 0;
-    }
-    auto* row = reservoirs_.data() + static_cast<uint64_t>(source) * reservoir_size_;
-
-    auto& state = reservoir_states_[source];
 
     if (state.size == reservoir_size_) {
         const auto& farthest = row[state.farthest];
@@ -2024,7 +2385,7 @@ PiPNNPipeline::insert_candidate(uint32_t source,
                 const bool was_farthest = index == state.farthest;
                 entry = ReservoirEntry{target, hash, distance_key};
                 if (was_farthest) {
-                    update_farthest(source);
+                    update_farthest(state, row);
                 }
             }
             return;
@@ -2036,7 +2397,7 @@ PiPNNPipeline::insert_candidate(uint32_t source,
             const bool was_farthest = index == state.farthest;
             entry = ReservoirEntry{target, hash, distance_key};
             if (was_farthest) {
-                update_farthest(source);
+                update_farthest(state, row);
             }
         }
         return;
@@ -2060,13 +2421,11 @@ PiPNNPipeline::insert_candidate(uint32_t source,
     }
 
     row[state.farthest] = ReservoirEntry{target, hash, distance_key};
-    update_farthest(source);
+    update_farthest(state, row);
 }
 
 void
-PiPNNPipeline::update_farthest(uint32_t source) {
-    auto& state = reservoir_states_[source];
-    auto* row = reservoirs_.data() + static_cast<uint64_t>(source) * reservoir_size_;
+PiPNNPipeline::update_farthest(ReservoirState& state, const ReservoirEntry* row) {
     state.farthest = 0;
     for (uint16_t index = 1; index < state.size; ++index) {
         const auto& candidate = row[index];
@@ -2080,6 +2439,9 @@ PiPNNPipeline::update_farthest(uint32_t source) {
 
 float
 PiPNNPipeline::pair_distance(uint32_t lhs, uint32_t rhs) const {
+    if (codes_ != nullptr) {
+        return sanitize_distance(codes_->ComputePairVectors(ids_[lhs], ids_[rhs]));
+    }
     if (native_half()) {
         return distance_from_dot(
             lhs, rhs, pipnn_half::Dot(half_row(lhs), half_row(rhs), dimensions_, half_format()));
@@ -2092,14 +2454,18 @@ PiPNNPipeline::pair_distance(uint32_t lhs, uint32_t rhs) const {
 
 float
 PiPNNPipeline::distance_from_dot(uint32_t lhs, uint32_t rhs, float dot) const {
+    if (codes_ != nullptr) {
+        return sanitize_distance(dot);
+    }
     if (metric_ == MetricType::METRIC_TYPE_L2SQR) {
-        const float sum = norms_[lhs] + norms_[rhs];
+        const float sum = norms_->Scalar(lhs) + norms_->Scalar(rhs);
         return std::max(0.0F, sanitize_distance(sum - dot - dot));
     }
     if (metric_ == MetricType::METRIC_TYPE_IP) {
         return sanitize_distance(1.0F - dot);
     }
-    const float similarity = std::clamp(dot * norms_[lhs] * norms_[rhs], -1.0F, 1.0F);
+    const float similarity =
+        std::clamp(dot * norms_->Scalar(lhs) * norms_->Scalar(rhs), -1.0F, 1.0F);
     return sanitize_distance(1.0F - similarity);
 }
 
@@ -2152,7 +2518,7 @@ PiPNNPipeline::robust_prune(uint32_t source,
     selected.reserve(std::min<uint64_t>(ordered.size(), max_degree));
     for (uint64_t candidate_index = 0; candidate_index < ordered.size(); ++candidate_index) {
         constexpr uint64_t prefetch_distance = 4;
-        if (candidate_index + prefetch_distance < ordered.size()) {
+        if ((codes_ == nullptr) && candidate_index + prefetch_distance < ordered.size()) {
             const auto local_id = ordered[candidate_index + prefetch_distance].second;
             if (native_half()) {
                 const auto* future = reinterpret_cast<const char*>(half_row(local_id));
@@ -2289,6 +2655,609 @@ PiPNNPipeline::certify_cached_graph(uint32_t source) const {
     return true;
 }
 
+// A streaming Add usually splits one parent into a handful of uneven children.
+// Schedule disjoint strips from all children together; each phase drains the pool
+// before readers consume the triangle or the new leaf caches become visible.
+bool
+PiPNNPipeline::cache_split_rows(const Leaves& leaves, std::vector<PiPNNCachedLeaf>& caches) {
+    if ((thread_pool_ == nullptr) || leaves.size() >= thread_count_ || thread_count_ <= 1) {
+        return false;
+    }
+    uint64_t values = 0;
+    uint64_t largest = 0;
+    for (const auto& leaf : leaves) {
+        const uint64_t n = leaf.size();
+        // Bound additional FP32 scratch to 4 MiB. For large batches keep the
+        // established leaf-level schedule and the streaming FP32 kernels.
+        if (n > 1024 || ((codes_ == nullptr) && (metric_ == MetricType::METRIC_TYPE_COSINE ||
+                                                 leaf_neighbor_count(n) > SMALL_TOP_K_LIMIT))) {
+            return false;
+        }
+        values += n * n;
+        if (values > uint64_t{1024} * 1024) {
+            return false;
+        }
+        largest = std::max(largest, n);
+    }
+    if (largest < LEAF_DOT_STRIP) {
+        return false;
+    }
+
+    struct Child {
+        std::vector<InnerIdType> targets;
+        std::optional<UninitializedFloatBuffer> vectors, distances;
+    };
+    struct Strip {
+        uint64_t child, begin, end;
+    };
+    std::vector<Child> children(leaves.size());
+    std::vector<Strip> strips;
+    const uint64_t width = (codes_ != nullptr) ? 8 : LEAF_DOT_STRIP;
+    for (uint64_t i = 0; i < leaves.size(); ++i) {
+        const auto& leaf = leaves[i];
+        const uint64_t n = leaf.size();
+        if (n < 2) {
+            continue;
+        }
+        auto& child = children[i];
+        caches[i].nearest = PiPNNLeafTopK(n, leaf_neighbor_count(n));
+        child.distances.emplace(n * n, allocator_, "split distances");
+        if (codes_ != nullptr) {
+            child.targets.reserve(n);
+            for (auto point : leaf) {
+                child.targets.push_back(ids_[point]);
+            }
+        } else {
+            child.vectors.emplace(
+                checked_product(n, dimensions_, "split vectors"), allocator_, "split vectors");
+        }
+        // High rows touch more targets. Give them to the first available workers.
+        for (uint64_t end = n; end != 0;) {
+            const uint64_t begin = (end - 1) / width * width;
+            strips.push_back({i, begin, end});
+            end = begin;
+        }
+    }
+    auto visit_strips = [&](auto task) {
+        parallel_for(strips.size(), 1, [&](uint64_t begin, uint64_t end) {
+            for (auto i = begin; i < end; ++i) {
+                task(strips[i]);
+            }
+        });
+    };
+    if (codes_ == nullptr) {
+        visit_strips([&](const Strip& s) {
+            auto* data = children[s.child].vectors->Data();
+            for (auto i = s.begin; i < s.end; ++i) {
+                gather_row(leaves[s.child][i], data, i);
+            }
+        });
+    }
+    visit_strips([&](const Strip& s) {
+        auto& child = children[s.child];
+        const uint64_t n = leaves[s.child].size();
+        auto* out = child.distances->Data() + s.begin * n;
+        if (codes_) {
+            const auto ids = std::span<const InnerIdType>(child.targets);
+            code_distances(*codes_, ids.subspan(s.begin, s.end - s.begin), ids, out, s.begin);
+        } else {
+            leaf_dot_strip(child.vectors->Data(), dimensions_, n, s.begin, s.end, out);
+        }
+    });
+    visit_strips([&](const Strip& s) {
+        auto& nearest = caches[s.child].nearest;
+        select_leaf_neighbors(leaves[s.child],
+                              &nearest,
+                              children[s.child].distances->Data(),
+                              nearest.Width(),
+                              s.begin,
+                              s.end);
+    });
+    return true;
+}
+
+void
+PiPNNPipeline::CachePartition(Leaves& leaves, PiPNNIncrementalState& state) {
+    const auto offset = state.leaves.size();
+    std::vector<PiPNNCachedLeaf> caches(leaves.size());
+    const bool rebuilt = offset != 0 && cache_split_rows(leaves, caches);
+    parallel_for(leaves.size(), 1, [&](uint64_t begin, uint64_t end) {
+        for (size_t i = begin; i < end; ++i) {
+            auto& leaf = leaves[i];
+            for (auto* terminal : leaf.terminals) {
+                terminal->leaf = offset + i;
+            }
+            auto& cached = caches[i];
+            cached.points.assign(leaf.begin(), leaf.end());
+            if (!rebuilt) {
+                build_leaf(leaf, &cached.nearest);
+            }
+        }
+    });
+    if (state.leaves.empty()) {
+        state.leaves.swap(caches);
+    } else {
+        state.leaves.insert(state.leaves.end(),
+                            std::make_move_iterator(caches.begin()),
+                            std::make_move_iterator(caches.end()));
+    }
+}
+
+void
+PiPNNPipeline::update_existing_edges(uint32_t source,
+                                     uint64_t first_new,
+                                     const PiPNNIncrementalState& state,
+                                     ReservoirState& candidates,
+                                     ReservoirEntry* row,
+                                     EdgeUpdateScratch& scratch) {
+    auto& [incoming, incumbents, neighbors] = scratch;
+    neighbors.clear();
+    graph_->GetNeighbors(ids_[source], neighbors);
+    incumbents.clear();
+    // Sanitized distances encode at most +infinity (0xff80).
+    constexpr uint16_t unknown_distance = UINT16_MAX;
+    auto edge_distance = [&](ReservoirEntry& edge) {
+        if (edge.distance == unknown_distance) {
+            edge.distance = distance_order_key(pair_distance(source, edge.neighbor));
+        }
+        return edge.distance;
+    };
+    // The row initially contains just the batch's candidates. When capacity
+    // cannot bind, an incumbent can exclude a newcomer only in the same bucket.
+    const bool capacity_can_bind = candidates.size + neighbors.size() > reservoir_size_;
+    for (const auto id : neighbors) {
+        const auto local = state.LocalId(id);
+        auto& edge = incumbents.emplace_back(
+            local, relative_hashes(source, local).forward, unknown_distance);
+        auto* end = row + candidates.size;
+        if (capacity_can_bind ||
+            ((edge.hash & COINCIDENT_HASH_FLAG) == 0 &&
+             std::any_of(row, end, [&](const auto& e) { return e.hash == edge.hash; }))) {
+            edge_distance(edge);
+            MergeCandidate(candidates, row, edge);
+        }
+    }
+    incoming.clear();
+    std::copy_if(
+        row, row + candidates.size, std::back_inserter(incoming), [first_new](const auto& entry) {
+            return entry.neighbor >= first_new;
+        });
+    // Reservoir insertion is parallel. Make batch competition independent of arrival order.
+    std::sort(incoming.begin(), incoming.end(), [&](const auto& lhs, const auto& rhs) {
+        return std::tie(lhs.distance, ids_[lhs.neighbor]) <
+               std::tie(rhs.distance, ids_[rhs.neighbor]);
+    });
+    bool changed = false;
+    for (const auto& candidate : incoming) {
+        if (neighbors.size() < graph_->MaximumDegree()) {
+            incumbents.push_back(candidate);
+            neighbors.push_back(ids_[candidate.neighbor]);
+            changed = true;
+            continue;
+        }
+        // Break nearest-hash ties by the farthest source distance, then largest ID.
+        auto hamming = [&](const ReservoirEntry& edge) {
+            return std::popcount(
+                static_cast<unsigned>((edge.hash ^ candidate.hash) & ~COINCIDENT_HASH_FLAG));
+        };
+        auto competitor = incumbents.begin();
+        auto closest = hamming(*competitor);
+        for (auto it = competitor + 1; it != incumbents.end(); ++it) {
+            const auto bits = hamming(*it);
+            if (bits < closest ||
+                (bits == closest &&
+                 std::make_pair(edge_distance(*it), ids_[it->neighbor]) >
+                     std::make_pair(edge_distance(*competitor), ids_[competitor->neighbor]))) {
+                competitor = it;
+                closest = bits;
+            }
+        }
+        if (candidate.distance < edge_distance(*competitor)) {
+            neighbors[competitor - incumbents.begin()] = ids_[candidate.neighbor];
+            *competitor = candidate;
+            changed = true;
+        }
+    }
+    if (changed) {
+        graph_->InsertNeighborsById(ids_[source], neighbors);
+    }
+}
+
+void
+PiPNNPipeline::ReplayAdd(const PiPNNIncrementalState& state,
+                         uint64_t first_new,
+                         std::span<const size_t> hit_leaves,
+                         std::span<const ReplayRows> rows) {
+    const uint64_t batch = ids_.size() - first_new;
+    // Keep small Adds cheap and give the pool enough independent shards for larger batches.
+    const uint64_t shards = (thread_pool_ != nullptr) && thread_count_ > 1
+                                ? std::min<uint64_t>(ids_.size(), batch < 8 ? 8 : 64)
+                                : 1;
+    const uint64_t chunks = std::clamp<uint64_t>((hit_leaves.size() + 15) / 16, 1, 128);
+    std::vector<Vector<AddCandidate>> buffers;
+    buffers.reserve(chunks * shards);
+    for (uint64_t i = 0; i < chunks * shards; ++i) {
+        buffers.emplace_back(allocator_);
+    }
+    // Each leaf task owns its buffers. Both directions share the leaf's distance key.
+    parallel_for(chunks, 1, [&](uint64_t begin, uint64_t end) {
+        for (uint64_t chunk = begin; chunk < end; ++chunk) {
+            auto* output = buffers.data() + chunk * shards;
+            auto submit = [&](uint32_t u, const PiPNNLocalNeighbor& neighbor) {
+                const auto v = neighbor.target;
+                if (u == v || (u < first_new && v < first_new)) {
+                    return;
+                }
+                const auto hashes = relative_hashes(u, v);
+                const auto key = distance_order_key(neighbor.distance);
+                output[u % shards].push_back({u, {v, hashes.forward, key}});
+                output[v % shards].push_back({v, {u, hashes.reverse, key}});
+            };
+            for (uint64_t pos = hit_leaves.size() * chunk / chunks;
+                 pos < hit_leaves.size() * (chunk + 1) / chunks;
+                 ++pos) {
+                visit_leaf_candidates(state.leaves[hit_leaves[pos]],
+                                      pos < rows.size() ? &rows[pos] : nullptr,
+                                      submit);
+            }
+        }
+    });
+    // All events for a source now have a single owner. Consume one bounded reservoir at a time.
+    parallel_for(shards, 1, [&](uint64_t begin, uint64_t end) {
+        Vector<ReservoirEntry> row(reservoir_size_, allocator_);
+        PruneScratch prune(allocator_);
+        EdgeUpdateScratch update(allocator_);
+        for (uint64_t shard = begin; shard < end; ++shard) {
+            const auto grouped =
+                group_add_candidates(buffers, shard, shards, ids_.size(), allocator_);
+            auto it = grouped.begin();
+            auto collect = [&](uint32_t source) {
+                ReservoirState candidates;
+                while (it != grouped.end() && it->source == source) {
+                    MergeCandidate(candidates, row.data(), it->entry);
+                    ++it;
+                }
+                return candidates;
+            };
+            while (it != grouped.end() && it->source < first_new) {
+                const auto source = it->source;
+                auto candidates = collect(source);
+                update_existing_edges(source, first_new, state, candidates, row.data(), update);
+            }
+            // Every new ID owns a graph row, including singleton leaves with no candidates.
+            const auto first = first_new + (shard + shards - first_new % shards) % shards;
+            for (uint64_t source = first; source < ids_.size(); source += shards) {
+                const auto candidates = collect(source);
+                robust_prune(source, row.data(), candidates.size, prune);
+                graph_->InsertNeighborsById(ids_[source], prune.neighbors);
+            }
+        }
+    });
+}
+
+void
+PiPNNPipeline::BuildCached(PiPNNIncrementalState& state) {
+    ids_ = state.ids;
+    prepare_build_reservoirs();
+    prepare_sketches(&state);
+    auto leaves = partition(&state.root);
+    CachePartition(leaves, state);
+    state.UpdateLeafDepths(state.root, 0);
+    parallel_for(state.leaves.size(), 4, [&](uint64_t begin, uint64_t end) {
+        for (uint64_t i = begin; i < end; ++i) {
+            visit_leaf_candidates(state.leaves[i], nullptr, [&](uint32_t u, const auto& neighbor) {
+                insert_pair(u, neighbor.target, neighbor.distance);
+            });
+        }
+    });
+    write_graph();
+}
+
+void
+PiPNNPipeline::RouteBatch(const PiPNNRoute& route,
+                          Leaf points,
+                          LeafAdditions& additions,
+                          PiPNNIncrementalState& state) const {
+    struct NodeBatch {
+        const PiPNNRoute* node;
+        Leaf points;
+    };
+    std::vector<NodeBatch> pending;
+    // Merged terminals can share a leaf or replacement tree. Only the caller
+    // publishes to additions, in route order, after a wave of workers has joined.
+    auto dispatch = [&](const PiPNNRoute& start, Leaf& group) {
+        if (group.empty()) {
+            return;
+        }
+        const auto* node = &start;
+        while (node->children.empty()) {
+            const auto& replacement = state.leaves.at(node->leaf).replacement;
+            if (replacement.children.empty() && replacement.leaf == UINT32_MAX) {
+                auto& target = additions.try_emplace(node->leaf, allocator_).first->second;
+                target.insert(target.end(), group.begin(), group.end());
+                return;
+            }
+            node = &replacement;
+        }
+        pending.push_back({node, std::move(group)});
+    };
+    dispatch(route, points);
+    bool root = true;
+    while (!pending.empty()) {
+        std::vector<NodeBatch> layer;
+        layer.swap(pending);
+        std::vector<Leaves> children(layer.size(), Leaves(allocator_));
+        auto assign = [&](uint64_t i, AssignmentMode mode) {
+            const auto& [node, group] = layer[i];
+            // The first branching node stays the effective root when terminal leaves split.
+            auto* cache = mode == AssignmentMode::ROUTE_ROOT ? &state.root_leader_vectors : nullptr;
+            children[i] = assign_to_leaders(group, node->leaders, node->fanout, mode, cache);
+        };
+        if (root) {
+            assign(0, AssignmentMode::ROUTE_ROOT);
+            root = false;
+        } else {
+            // Each worker routes a whole node without submitting nested pool jobs.
+            parallel_for(layer.size(), 1, [&](uint64_t begin, uint64_t end) {
+                for (uint64_t i = begin; i < end; ++i) {
+                    assign(i, AssignmentMode::SERIAL);
+                }
+            });
+        }
+        for (uint64_t i = 0; i < layer.size(); ++i) {
+            for (uint64_t j = 0; j < children[i].size(); ++j) {
+                dispatch(layer[i].node->children[j], children[i][j]);
+            }
+        }
+    }
+}
+
+void
+PiPNNPipeline::ExtendLeaf(PiPNNCachedLeaf& leaf, const Leaf& batch, ReplayRows& changes) const {
+    const auto m = leaf.points.size();
+    const auto b = batch.size();
+    const auto n = m + b;
+    const auto old_k = leaf.nearest.Width();
+    auto requested = n < parameter_.min_leaf_size ? std::max(parameter_.leaf_neighbor_count,
+                                                             MIN_UNDERSIZED_LEAF_NEIGHBOR_COUNT)
+                                                  : parameter_.leaf_neighbor_count;
+    const auto k = std::min<uint64_t>(requested, n - 1);
+    // A single append can touch thousands of leaves. Bound spare member IDs in each
+    // leaf while retaining geometric growth for repeated inserts.
+    if (n > leaf.points.capacity()) {
+        const auto next =
+            std::min<uint64_t>(parameter_.max_leaf_size, m + std::max<size_t>(8, m / 8));
+        leaf.points.reserve(std::max<uint64_t>(n, next));
+    }
+    leaf.points.insert(leaf.points.end(), batch.begin(), batch.end());
+    if (k == 0U) {
+        return;
+    }
+    // Read coordinates in place. One inner product supplies both endpoints' top-k updates.
+    UninitializedFloatBuffer dots(
+        checked_product(b, n, "incremental products"), allocator_, "incremental products");
+    if (codes_ != nullptr) {
+        Vector<InnerIdType> targets(allocator_);
+        for (auto id : leaf.points) {
+            targets.push_back(ids_[id]);
+        }
+        code_distances(
+            *codes_, std::span<const InnerIdType>(targets).subspan(m), targets, dots.Data(), m);
+    } else {
+        const auto processed = ComputePiPNNOldRowTiles(
+            rows_.data(), leaf.points.data(), m, b, dimensions_, dots.Data());
+        for (size_t i = processed; i + 1 < n; ++i) {
+            const auto* point = vector_by_local_id(leaf.points[i]);
+            size_t j = std::max(m, i + 1);
+            for (; j + 4 <= n; j += 4) {
+                auto* out = dots.Data() + (j - m) * n + i;
+                // The batch kernel adds its products to the four output slots.
+                out[0] = out[n] = out[2 * n] = out[3 * n] = 0.0F;
+                FP32ComputeIPBatch4(point,
+                                    dimensions_,
+                                    vector_by_local_id(leaf.points[j]),
+                                    vector_by_local_id(leaf.points[j + 1]),
+                                    vector_by_local_id(leaf.points[j + 2]),
+                                    vector_by_local_id(leaf.points[j + 3]),
+                                    out[0],
+                                    out[n],
+                                    out[2 * n],
+                                    out[3 * n]);
+            }
+            for (; j < n; ++j) {
+                dots.Data()[(j - m) * n + i] =
+                    FP32ComputeIP(point, vector_by_local_id(leaf.points[j]), dimensions_);
+            }
+        }
+    }
+    // A width change also changes the row stride. Keep the old layout for that merge.
+    PiPNNLeafTopK previous;
+    if (old_k == k) {
+        leaf.nearest.AppendRows(b);
+    } else {
+        PiPNNLeafTopK resized(n, k);
+        previous = std::exchange(leaf.nearest, std::move(resized));
+    }
+    std::vector<PiPNNLocalNeighbor> row;
+    row.reserve(std::max(n, b + old_k));
+    const auto select_rows = filters_.kth;
+    if (old_k == k) {
+        changes.old_count = m;
+        changes.changed.resize((m + 63) / 64);
+    }
+    const bool batch_filter = select_rows != nullptr && old_k == k && m >= 16;
+    std::vector<float> thresholds(batch_filter ? m : 0);
+    std::vector<uint32_t> selected(batch_filter ? m : 0);
+    for (uint64_t i = 0; i < thresholds.size(); ++i) {
+        thresholds[i] = leaf.nearest.Row(i).Distance(k - 1);
+    }
+    auto order_for = [&](uint32_t u) {
+        return [&, u](const PiPNNLocalNeighbor& lhs, const PiPNNLocalNeighbor& rhs) {
+            if (lhs.distance != rhs.distance) {
+                return lhs.distance < rhs.distance;
+            }
+            const auto left = ids_[leaf.points[lhs.target]];
+            const auto right = ids_[leaf.points[rhs.target]];
+            return std::make_pair(id_gap(ids_[u], left), left) <
+                   std::make_pair(id_gap(ids_[u], right), right);
+        };
+    };
+    auto offer = [&](uint64_t i, PiPNNLocalNeighbor candidate) {
+        const auto ranks = leaf.nearest.Row(i);
+        const auto less = order_for(leaf.points[i]);
+        if (less(candidate, ranks.Get(k - 1))) {
+            uint32_t first = 0;
+            uint32_t last = k - 1;
+            while (first < last) {
+                const auto mid = first + (last - first) / 2;
+                if (less(ranks.Get(mid), candidate)) {
+                    first = mid + 1;
+                } else {
+                    last = mid;
+                }
+            }
+            ranks.ReplaceLast(first, k - 1, candidate);
+            changes.changed[i / 64] |= uint64_t{1} << (i % 64);
+        }
+        return ranks.Distance(k - 1);
+    };
+    for (uint64_t i = batch_filter ? m : 0; i < n; ++i) {
+        const auto u = leaf.points[i];
+        if (i < m && old_k == k) {
+            for (uint64_t j = m; j < n; ++j) {
+                const auto v = leaf.points[j];
+                const auto dot = dots.Data()[(j - m) * n + i];
+                offer(i, {static_cast<uint32_t>(j), distance_from_dot(u, v, dot)});
+            }
+            continue;
+        }
+
+        row.clear();
+        if (i < m && old_k != 0) {
+            const auto old_row = previous.Row(i);
+            for (uint32_t rank = 0; rank < old_k; ++rank) {
+                row.push_back(old_row.Get(rank));
+            }
+        }
+        for (uint64_t j = (i < m ? m : 0); j < n; ++j) {
+            if (i == j) {
+                continue;
+            }
+            const auto v = leaf.points[j];
+            auto& dot = dots.Data()[(std::max(i, j) - m) * n + std::min(i, j)];
+            const float distance = distance_from_dot(u, v, dot);
+            row.push_back({static_cast<uint32_t>(j), distance});
+            if (batch_filter && j < m) {
+                // Neither endpoint needs this dot again. Cosine rounds in source-first order.
+                dot = metric_ == MetricType::METRIC_TYPE_COSINE ? distance_from_dot(v, u, dot)
+                                                                : distance;
+            }
+        }
+        if (batch_filter) {
+            const auto* distances = dots.Data() + (i - m) * n;
+            const auto count = select_rows(distances, thresholds.data(), m, selected.data());
+            for (uint64_t t = 0; t < count; ++t) {
+                const auto old = selected[t];
+                thresholds[old] = offer(old, {static_cast<uint32_t>(i), distances[old]});
+            }
+        }
+        std::partial_sort(
+            row.begin(), row.begin() + static_cast<std::ptrdiff_t>(k), row.end(), order_for(u));
+        const auto ranks = leaf.nearest.Row(i);
+        for (uint32_t rank = 0; rank < k; ++rank) {
+            ranks.Set(rank, row[rank]);
+        }
+    }
+}
+
+void
+PiPNNPipeline::RebuildSplitLeaves(std::vector<LeafSplit>& splits,
+                                  const LeafAdditions& additions,
+                                  PiPNNIncrementalState& state) {
+    if (splits.empty()) {
+        return;
+    }
+    // A lone parent can use the pool internally. With multiple parents the outer loop owns it.
+    parallel_for(splits.size(), 1, [&](uint64_t begin, uint64_t end) {
+        for (uint64_t i = begin; i < end; ++i) {
+            auto& split = splits[i];
+            const auto& points = state.leaves[split.parent].points;
+            const auto& batch = additions.at(split.parent);
+            Leaf all(points.begin(), points.end(), allocator_);
+            all.insert(all.end(), batch.begin(), batch.end());
+            std::sort(all.begin(), all.end());
+            split.children = partition(
+                &split.replacement, &all, state.leaves[split.parent].depth, splits.size() == 1);
+        }
+    });
+
+    // Flatten in parent order so child IDs do not depend on worker completion order.
+    Leaves children(allocator_);
+    for (auto& split : splits) {
+        children.insert(children.end(),
+                        std::make_move_iterator(split.children.begin()),
+                        std::make_move_iterator(split.children.end()));
+        split.end_child = state.leaves.size() + children.size();
+    }
+    CachePartition(children, state);
+}
+
+void
+PiPNNPipeline::Increment(PiPNNIncrementalState& state, size_t old_count) {
+    ids_ = state.ids;
+    prepare_sketches(&state,
+                     old_count,
+                     (codes_ != nullptr) && (shared_sketches_ == nullptr)
+                         ? rows_
+                         : std::span<const float* const>{});
+    LeafAdditions additions;
+    Leaf incoming(allocator_);
+    for (size_t i = old_count; i < ids_.size(); ++i) {
+        incoming.push_back(i);
+    }
+    RouteBatch(state.root, std::move(incoming), additions, state);
+    std::vector<size_t> hit_leaves;
+    std::vector<LeafSplit> splits;
+    for (auto& [i, batch] : additions) {
+        std::sort(batch.begin(), batch.end());
+        batch.erase(std::unique(batch.begin(), batch.end()), batch.end());
+        if (state.leaves[i].points.size() + batch.size() <= parameter_.max_leaf_size) {
+            hit_leaves.push_back(i);
+        } else {
+            splits.push_back({i, {}, Leaves(allocator_)});
+        }
+    }
+    uint64_t child = state.leaves.size();
+    RebuildSplitLeaves(splits, additions, state);
+
+    const auto ordinary_count = hit_leaves.size();
+    for (auto& split : splits) {
+        for (; child < split.end_child; ++child) {
+            const auto& points = state.leaves[child].points;
+            if (std::any_of(points.begin(), points.end(), [old_count](uint32_t id) {
+                    return id >= old_count;
+                })) {
+                hit_leaves.push_back(child);
+            }
+        }
+        auto& parent = state.leaves[split.parent];
+        const auto depth = parent.depth;
+        parent = {};
+        parent.depth = depth;
+        parent.replacement = std::move(split.replacement);
+        state.UpdateLeafDepths(parent.replacement, depth);
+    }
+    // Ordinary hits come first. A hit split child already has a freshly rebuilt top-k.
+    std::vector<ReplayRows> changed_rows(ordinary_count);
+    parallel_for(ordinary_count, 1, [&](uint64_t begin, uint64_t end) {
+        for (size_t j = begin; j < end; ++j) {
+            const auto leaf = hit_leaves[j];
+            ExtendLeaf(state.leaves[leaf], additions.at(leaf), changed_rows[j]);
+        }
+    });
+    ReplayAdd(state, old_count, hit_leaves, changed_rows);
+}
+
 void
 PiPNNPipeline::write_graph_row(uint32_t source, PruneScratch& scratch) {
     // Adaptive thresholds depend on rejected-candidate counts as well as selected edges.
@@ -2320,7 +3289,7 @@ PiPNNPipeline::write_graph_row(uint32_t source, PruneScratch& scratch) {
 }
 
 void
-PiPNNPipeline::write_graph(const Vector<uint32_t>& representatives) {
+PiPNNPipeline::write_graph(std::span<const uint32_t> representatives) {
     parallel_for(ids_.size(), 64, [&](uint64_t begin, uint64_t end) {
         PruneScratch scratch(allocator_);
         for (uint64_t source = begin; source < end; ++source) {
@@ -2393,6 +3362,11 @@ PiPNNGraphBuilderParameter::FromJson(const JsonType& json) {
         json.Contains(PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP)
             ? json[PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP].GetFloat()
             : 0.06F;
+    add_use_codes = json.Contains("pipnn_add_use_codes") && json["pipnn_add_use_codes"].GetBool();
+    incremental_add =
+        json.Contains("pipnn_incremental_add") && json["pipnn_incremental_add"].GetBool();
+    require_argument(!add_use_codes || incremental_add,
+                     "pipnn_add_use_codes requires pipnn_incremental_add");
     auto read_uint = [&](const char* key, uint64_t& target) {
         if (not json.Contains(key)) {
             return;
@@ -2432,6 +3406,12 @@ PiPNNGraphBuilderParameter::FromJson(const JsonType& json) {
 JsonType
 PiPNNGraphBuilderParameter::ToJson() const {
     JsonType json;
+    if (add_use_codes) {
+        json["pipnn_add_use_codes"].SetBool(true);
+    }
+    if (incremental_add) {
+        json["pipnn_incremental_add"].SetBool(true);
+    }
     json[PIPNN_PARAMETER_MAX_LEAF_SIZE].SetUint64(max_leaf_size);
     json[PIPNN_PARAMETER_MIN_LEAF_SIZE].SetUint64(min_leaf_size);
     json[PIPNN_PARAMETER_LEADER_SAMPLE_RATE].SetFloat(leader_sample_rate);
@@ -2442,6 +3422,30 @@ PiPNNGraphBuilderParameter::ToJson() const {
     json[PIPNN_PARAMETER_ADAPTIVE_PRUNING].SetBool(adaptive_pruning);
     json[PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP].SetFloat(adaptive_pruning_adjust_step);
     return json;
+}
+
+bool
+PiPNNGraphBuilderParameter::CanLoadIncremental(const PiPNNGraphBuilderParameter& stored) const {
+    if (!incremental_add || !stored.incremental_add) {
+        return true;
+    }
+    // The encoded-distance reader can consume an exact snapshot's stored projections.
+    // An exact reader cannot reconstruct the discarded historical vectors from codes.
+    auto required = *this;
+    if (add_use_codes) {
+        required.add_use_codes = stored.add_use_codes;
+    }
+    return required.ToJson().Dump() == stored.ToJson().Dump();
+}
+
+void
+PiPNNGraphBuilderParameter::ValidateAddDistanceCodes(FlattenInterface& codes) const {
+    if (add_use_codes) {
+        require_argument(
+            codes.SupportSplitCodeStorage() ||
+                GetBaseQuantizerName(codes.GetQuantizerName()) != QUANTIZATION_TYPE_VALUE_RABITQ,
+            "PiPNN code distances require RaBitQ split or a quantizer with symmetric distances");
+    }
 }
 
 void
@@ -2499,6 +3503,166 @@ PiPNNGraphBuilder::PiPNNGraphBuilder(PiPNNGraphBuilderParameter parameter,
     require_argument(allocator_ != nullptr, "PiPNN allocator must not be null");
     require_argument(not parameter_.adaptive_pruning or metric_ == MetricType::METRIC_TYPE_L2SQR,
                      "PiPNN adaptive pruning only supports L2");
+}
+
+void
+PiPNNGraphBuilder::Update(const GraphInterfacePtr& graph,
+                          const Vector<InnerIdType>& batch_ids,
+                          const Vector<const float*>& batch_vectors,
+                          PiPNNIncrementalState& state) const {
+    update(graph, batch_ids, batch_vectors, state, {});
+}
+
+void
+PiPNNGraphBuilder::UpdateFromSharedRows(const GraphInterfacePtr& graph,
+                                        const Vector<InnerIdType>& ids,
+                                        std::span<const float* const> rows_by_id,
+                                        PiPNNIncrementalState& state) const {
+    require_argument(!graph->GetDuplicateTracker(), "shared PiPNN rows require unique graph IDs");
+    Vector<const float*> input(allocator_);
+    input.reserve(ids.size());
+    for (auto id : ids) {
+        require_argument(id < rows_by_id.size(), "missing global PiPNN row");
+        input.push_back(rows_by_id[id]);
+    }
+    update(graph, ids, input, state, rows_by_id);
+}
+
+void
+PiPNNGraphBuilder::AppendProjections(PiPNNProjectionState& sketches,
+                                     std::span<const float* const> rows) const {
+    if (rows.empty()) {
+        return;
+    }
+    PiPNNPipeline pipeline(
+        parameter_, dimensions_, metric_, allocator_, thread_pool_, thread_count_, nullptr, rows);
+    pipeline.AppendProjections(sketches);
+}
+
+void
+PiPNNGraphBuilder::UpdateWithCodes(const GraphInterfacePtr& graph,
+                                   const Vector<InnerIdType>& ids,
+                                   const Vector<const float*>& input,
+                                   PiPNNIncrementalState& state,
+                                   FlattenInterface& codes,
+                                   const PiPNNProjectionState* shared) const {
+    update(graph, ids, input, state, {}, &codes, shared);
+}
+
+void
+PiPNNGraphBuilder::update(const GraphInterfacePtr& graph,
+                          const Vector<InnerIdType>& ids,
+                          const Vector<const float*>& input,
+                          PiPNNIncrementalState& state,
+                          std::span<const float* const> rows_by_id,
+                          FlattenInterface* codes,
+                          const PiPNNProjectionState* shared) const {
+    require_argument((shared != nullptr) ? input.empty() : ids.size() == input.size(),
+                     "incremental row count mismatch");
+    if (ids.empty()) {
+        return;
+    }
+    parameter_.Validate(graph->MaximumDegree());
+    const auto old = state.ids.size();
+    require_argument(old + ids.size() <= UINT32_MAX, "too many PiPNN points");
+    const auto capacity = graph->MaxCapacity();
+    require_argument(state.RequiredCapacity() <= capacity,
+                     "PiPNN historical ID exceeds graph capacity");
+    const bool increasing =
+        std::adjacent_find(ids.begin(), ids.end(), std::greater_equal<>()) == ids.end();
+    UnorderedSet<InnerIdType> seen(allocator_);
+    if (!increasing) {
+        seen.reserve(ids.size());
+    }
+    for (uint64_t i = 0; i < ids.size(); ++i) {
+        const auto id = ids[i];
+        require_argument(
+            ((shared != nullptr) ? id < shared->projections.Size() : input[i] != nullptr) &&
+                id < capacity,
+            "invalid incremental PiPNN row or ID");
+        require_argument(!state.ContainsId(id) && graph->GetGroupId(id) == id &&
+                             (increasing || seen.emplace(id).second),
+                         "duplicate incremental PiPNN ID");
+    }
+    if (old != 0U) {
+        require_argument(
+            state.planes.size() == dimensions_ * parameter_.hash_plane_count &&
+                state.projections.Width() == parameter_.hash_plane_count &&
+                state.projections.Size() == old &&
+                state.norms.Size() == (metric_ == MetricType::METRIC_TYPE_IP ? 0 : old),
+            "incompatible PiPNN sketch state");
+    }
+    Vector<InnerIdType> unique_ids(allocator_);
+    Vector<const float*> unique_rows(allocator_);
+    std::vector<std::pair<InnerIdType, InnerIdType>> aliases;
+    if (graph->GetDuplicateTracker()) {
+        require_argument(!parameter_.add_use_codes, "coded PiPNN requires unique graph IDs");
+        std::unordered_map<std::string_view, InnerIdType> owners;
+        const auto key = [&](const float* v) {
+            return std::string_view(reinterpret_cast<const char*>(v), dimensions_ * sizeof(float));
+        };
+        owners.reserve(old + ids.size());
+        for (uint64_t i = 0; i < old; ++i) {
+            owners.emplace(key(state.GetVector(i)), state.ids[i]);
+        }
+        for (uint64_t i = 0; i < ids.size(); ++i) {
+            auto [it, added] = owners.emplace(key(input[i]), ids[i]);
+            if (added) {
+                unique_ids.push_back(ids[i]);
+                unique_rows.push_back(input[i]);
+            } else {
+                aliases.emplace_back(it->second, ids[i]);
+            }
+        }
+    }
+    const auto& accepted = graph->GetDuplicateTracker() ? unique_ids : ids;
+    const auto& accepted_rows = graph->GetDuplicateTracker() ? unique_rows : input;
+    if (!accepted.empty()) {
+        Vector<const float*> indirect(allocator_);
+        std::span<const float* const> local_rows;
+        if (parameter_.add_use_codes && rows_by_id.empty()) {
+            require_argument((old == 0U) || (codes != nullptr), "missing PiPNN distance codes");
+            state.AppendIds(accepted);
+            local_rows = accepted_rows;
+        } else if (rows_by_id.empty()) {
+            state.ReserveVectors(old + accepted.size(), dimensions_, allocator_);
+            state.AppendIds(accepted);
+            for (uint64_t i = 0; i < accepted.size(); ++i) {
+                state.SetVector(old + i, accepted_rows[i]);
+            }
+            local_rows = state.Rows();
+        } else {
+            require_argument(state.RequiredCapacity() <= rows_by_id.size(),
+                             "missing historical PiPNN row");
+            state.AppendIds(accepted);
+            if (state.HasDenseIds()) {
+                local_rows = rows_by_id.first(state.ids.size());
+            } else {
+                indirect.reserve(state.ids.size());
+                for (auto id : state.ids) {
+                    indirect.push_back(rows_by_id[id]);
+                }
+                local_rows = indirect;
+            }
+        }
+        PiPNNPipeline pipeline(parameter_,
+                               dimensions_,
+                               metric_,
+                               allocator_,
+                               thread_pool_,
+                               thread_count_,
+                               graph,
+                               local_rows);
+        pipeline.SetCodeDistances(codes, shared);
+        if (old != 0U) {
+            pipeline.Increment(state, old);
+        } else {
+            pipeline.BuildCached(state);
+        }
+    }
+    for (auto [owner, alias] : aliases) {
+        graph->SetDuplicateId(owner, alias);
+    }
 }
 
 void

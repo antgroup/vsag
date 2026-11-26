@@ -35,6 +35,7 @@
 #include "datacell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
 #include "hgraph_fgim.h"
+#include "hgraph_pipnn_add.h"
 #include "impl/filter/filter_headers.h"
 #include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
@@ -85,6 +86,8 @@ HGraph::check_user_defined_precise_io_supported(std::string_view operation) cons
     }
 }
 
+HGraph::~HGraph() = default;
+
 HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonParam& common_param)
     : InnerIndexInterface(hgraph_param, common_param),
       route_graphs_(common_param.allocator_.get()),
@@ -123,6 +126,24 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
                             "HGraph deduplicate_storage only supports dense vectors");
     }
     if (this->graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
+        if (pipnn_param_.add_use_codes) {
+            CHECK_ARGUMENT(!support_duplicate_, "coded PiPNN requires unique graph IDs");
+        }
+        if (pipnn_param_.incremental_add) {
+            const bool positive_duplicate_threshold =
+                support_duplicate_ && common_param.metric_ == MetricType::METRIC_TYPE_L2SQR &&
+                duplicate_distance_threshold_ > 0.0F;
+            CHECK_ARGUMENT(!positive_duplicate_threshold,
+                           "incremental PiPNN with L2 duplicate detection requires "
+                           "duplicate_distance_threshold = 0");
+            const bool supports_incremental_input =
+                common_param.data_type_ == DataTypes::DATA_TYPE_FLOAT && !support_force_remove_ &&
+                !mci_parameters_.enabled && !use_conjugate_graph_ &&
+                !hgraph_param->rabitq_fused_datacell;
+            CHECK_ARGUMENT(supports_incremental_input,
+                           "incremental PiPNN requires FP32 input without force removal, fused "
+                           "storage, conjugate graph or MCI");
+        }
         const bool valid_adaptive_metric = not this->pipnn_param_.adaptive_pruning or
                                            common_param.metric_ == MetricType::METRIC_TYPE_L2SQR;
         CHECK_ARGUMENT(valid_adaptive_metric, "PiPNN adaptive pruning only supports L2");
@@ -201,6 +222,9 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         optimizer_ = std::make_shared<Optimizer<BasicSearcher>>(common_param);
     }
     check_and_init_raw_vector(hgraph_param->raw_vector_param, common_param);
+    if (pipnn_param_.add_use_codes) {
+        pipnn_param_.ValidateAddDistanceCodes(*PiPNNAdd::DistanceCodes(*this));
+    }
     if (this->using_dedup_storage()) {
         this->basic_flatten_codes_ = MakeCodeSlotFlattenAdapter(
             this->basic_flatten_codes_, this->code_slot_map_, allocator_, &this->total_count_);
@@ -282,6 +306,18 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
                            this->pending_code_writes_.end(),
                            [code](const auto& entry) { return (entry.second & code) == 0; });
     };
+
+    if (pipnn_param_.add_use_codes) {
+        // Dropping the only source of symmetric distances would leave future Add calls unusable.
+        const auto raw_after_tune =
+            disable_future_tuning && !requires_raw_vector ? nullptr : raw_vector_;
+        const auto distance_codes =
+            PiPNNAdd::DistanceCodes(*this, new_basic_code, new_precise_code, raw_after_tune);
+        pipnn_param_.ValidateAddDistanceCodes(*distance_codes);
+        if (distance_codes == raw_after_tune && !covers_active_ids(raw_after_tune)) {
+            return false;
+        }
+    }
 
     // Check which codes need to be rebuilt.
     bool is_tune_base_code = false;
@@ -459,6 +495,15 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
                 this->raw_vector_.reset();
                 has_raw_vector_ = false;
                 create_new_raw_vector_ = false;
+            }
+        }
+        // Materialize historical inputs if the last index reference to their store was removed.
+        if (pipnn_add_ && pipnn_add_->exact_rows) {
+            const auto& source = pipnn_add_->exact_rows->Store();
+            if (source != basic_flatten_codes_ && source != high_precise_codes_ &&
+                source != raw_vector_) {
+                pipnn_add_->exact_rows->Materialize(pipnn_add_->state, dim_, allocator_);
+                pipnn_add_->exact_rows.reset();
             }
         }
     }
@@ -689,6 +734,8 @@ HGraph::GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const {
 
 void
 HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
+    CHECK_ARGUMENT(!pipnn_param_.incremental_add,
+                   "merging indexes invalidates the PiPNN routing tree");
     const auto parameters = std::dynamic_pointer_cast<HGraphParameter>(create_param_ptr_);
     CHECK_ARGUMENT(parameters != nullptr, "HGraph Merge requires HGraph parameters");
     if (parameters->merge_strategy == "fgim") {
@@ -1071,6 +1118,8 @@ HGraph::AcquireClusterNodeWriteLock(int64_t label) {
 
 bool
 HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
+    CHECK_ARGUMENT(!pipnn_param_.incremental_add,
+                   "in-place vector updates invalidate the PiPNN routing tree");
     if (cluster_vector_node_locks_ and not force_update) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             "externally locked node updates must use force_update");
@@ -1239,6 +1288,12 @@ HGraph::cal_memory_usage() const {
     // unaccounted and simply forces one more recalculation on the next query.
     const auto version = this->memory_usage_version_.load(std::memory_order_acquire);
     auto memory = sizeof(HGraph);
+    if (pipnn_add_) {
+        memory += pipnn_add_->state.MemoryUsage();
+        if (pipnn_add_->exact_rows) {
+            memory += pipnn_add_->exact_rows->MemoryUsage();
+        }
+    }
     memory += this->neighbors_mutex_->GetMemoryUsage();
     memory += this->pool_->GetMemoryUsage();
     memory += this->label_table_->GetMemoryUsage();

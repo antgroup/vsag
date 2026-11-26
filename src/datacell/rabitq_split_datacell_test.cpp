@@ -331,22 +331,31 @@ TEST_CASE("RaBitQ split cached pair distances preserve persisted distances",
 
 TEST_CASE("RaBitQ split pairwise cache reuses reads and bounds its lifetime",
           "[ut][RaBitQSplitDataCell][pairwise_cache]") {
-    using Split = RaBitQSplitDataCell<MetricType::METRIC_TYPE_IP, MemoryIO>;
-    class CountingSplit : public Split {
-    public:
-        using Split::Split;
-        mutable std::atomic<uint64_t> reads{0};
+    struct ReadCounts {
+        uint64_t reads{0};
         InnerIdType fail_id{std::numeric_limits<InnerIdType>::max()};
-
-        bool
-        GetCodesById(InnerIdType id, uint8_t* codes) const override {
-            reads.fetch_add(1, std::memory_order_relaxed);
-            if (id == fail_id) {
-                return false;
-            }
-            return Split::GetCodesById(id, codes);
+    };
+    class CountingFilterIO : public MemoryIO {
+    public:
+        using MemoryIO::MemoryIO;
+        static ReadCounts&
+        Counters() {
+            static thread_local ReadCounts counts;
+            return counts;
+        }
+        Lease
+        Acquire(uint64_t offset, uint64_t size) const {
+            auto& counts = Counters();
+            ++counts.reads;
+            if (offset / size == counts.fail_id)
+                return {};
+            return MemoryIO::Acquire(offset, size);
         }
     };
+    // One filter lease per unpacked point; supplement reads use normal MemoryIO.
+    using Split = RaBitQSplitDataCell<MetricType::METRIC_TYPE_IP, CountingFilterIO, MemoryIO>;
+    auto& counts = CountingFilterIO::Counters();
+    counts = {};
     constexpr uint64_t dim = 64;
     constexpr InnerIdType count = 600;
     auto recorded = std::make_shared<fixtures::MemoryRecordAllocator>();
@@ -360,14 +369,14 @@ TEST_CASE("RaBitQ split pairwise cache reuses reads and bounds its lifetime",
         "rabitq_bits_per_dim_base":8, "rabitq_bits_per_dim_filter":3
     })"));
     auto flatten =
-        std::make_shared<CountingSplit>(quantizer, std::make_shared<MemoryIOParameter>(), common);
+        std::make_shared<Split>(quantizer, std::make_shared<MemoryIOParameter>(), common);
     auto vectors = fixtures::generate_vectors(count, dim, true, 42);
     flatten->Train(vectors.data(), 64);
     flatten->Resize(count);
     flatten->BatchInsertVector(vectors.data(), count, nullptr);
     const float expected = flatten->ComputePairVectors(0, 1);
     const float eviction_expected = flatten->ComputePairVectors(0, 512);
-    flatten->reads = 0;
+    counts.reads = 0;
     const auto memory_before = recorded->GetCurrentMemory();
     {
         FlattenDistanceProvider provider(flatten, nullptr);
@@ -375,16 +384,16 @@ TEST_CASE("RaBitQ split pairwise cache reuses reads and bounds its lifetime",
             REQUIRE(provider.PairwiseDistance(0, 1, nullptr) == expected);
             REQUIRE(provider.PairwiseDistance(1, 0, nullptr) == expected);
         }
-        REQUIRE(flatten->reads == 2);
+        REQUIRE(counts.reads == 2);
         for (InnerIdType id = 2; id < 512; ++id) {
             REQUIRE(std::isfinite(provider.PairwiseDistance(id, id, nullptr)));
         }
-        REQUIRE(flatten->reads == 512);
+        REQUIRE(counts.reads == 512);
         // Fetching 512 evicts 0 while its scalar code is still used by this distance.
         REQUIRE(provider.PairwiseDistance(0, 512, nullptr) == eviction_expected);
-        REQUIRE(flatten->reads == 513);
+        REQUIRE(counts.reads == 513);
         REQUIRE(provider.PairwiseDistance(0, 1, nullptr) == expected);
-        REQUIRE(flatten->reads == 515);
+        REQUIRE(counts.reads == 515);
         const auto full_cache_memory = recorded->GetCurrentMemory();
         for (InnerIdType id = 2; id < count; ++id) {
             REQUIRE(std::isfinite(provider.PairwiseDistance(id, id, nullptr)));
@@ -392,21 +401,21 @@ TEST_CASE("RaBitQ split pairwise cache reuses reads and bounds its lifetime",
         REQUIRE(recorded->GetCurrentMemory() == full_cache_memory);
     }
     REQUIRE(recorded->GetCurrentMemory() == memory_before);
-    flatten->reads = 0;
+    counts.reads = 0;
     {
         FlattenIdDistanceProvider provider(flatten, 0);
         for (int i = 0; i < 100; ++i) {
             REQUIRE(provider.QueryDistance(1) == expected);
         }
-        REQUIRE(flatten->reads == 2);
+        REQUIRE(counts.reads == 2);
     }
     REQUIRE(recorded->GetCurrentMemory() == memory_before);
 
     {
         FlattenIdDistanceProvider provider(flatten, 0);
-        flatten->fail_id = 1;
+        counts.fail_id = 1;
         REQUIRE_THROWS(provider.QueryDistance(1));
-        flatten->fail_id = std::numeric_limits<InnerIdType>::max();
+        counts.fail_id = std::numeric_limits<InnerIdType>::max();
         REQUIRE(provider.QueryDistance(1) == expected);
     }
     REQUIRE(recorded->GetCurrentMemory() == memory_before);

@@ -23,6 +23,7 @@
 #include "quantization/scalar_quantization/sq8_local_quantizer.h"
 #include "quantization/transform_quantization/transform_quantizer_parameter.h"
 #include "rabitq_split_datacell_factory.h"
+#include "sq8_pairwise_datacell.h"
 
 namespace vsag {
 
@@ -31,6 +32,11 @@ FlattenInterfacePtr
 MakeFlattenDataCellInstance(const FlattenInterfaceParamPtr& param,
                             const IndexCommonParam& common_param) {
     if (param->name == FLATTEN_DATA_CELL) {
+        if constexpr (std::is_same_v<QuantTmpl, SQ8Quantizer<MetricType::METRIC_TYPE_L2SQR>> &&
+                      (std::is_same_v<IOTmpl, MemoryIO> || std::is_same_v<IOTmpl, MemoryBlockIO>)) {
+            return std::make_shared<SQ8PairwiseDataCell<FixedLayout<IOTmpl>>>(
+                param->quantizer_parameter, param->io_parameter, common_param);
+        }
         return std::make_shared<FlattenDataCell<QuantTmpl, FixedLayout<IOTmpl>>>(
             param->quantizer_parameter, param->io_parameter, common_param);
     }

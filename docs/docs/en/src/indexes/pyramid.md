@@ -137,6 +137,8 @@ Build-time parameters live under `index_param`.
 | `adaptive_pruning` | boolean | `false` | Optional NSW bottom forward/reverse L2 selector; see [configuration and scope](#experimental-adaptive-nsw-pruning). |
 | `graph_iter_turn` | int | — | ODescent iterations (effective with `graph_type: "odescent"`). |
 | `neighbor_sample_rate` | float | — | ODescent neighbor sampling rate. |
+| `pipnn_incremental_add` | bool | `false` | Persist PiPNN state for incremental Add with dense FP32 input. |
+| `pipnn_add_use_codes` | bool | `false` | Use stored code distances for incremental PiPNN routing, leaf neighbors and pruning. Requires `pipnn_incremental_add`. |
 | `pipnn_max_leaf_size` | int | `1024` | Maximum PiPNN partition leaf size. |
 | `pipnn_min_leaf_size` | int | `64` | Target used when PiPNN merges undersized leaves. |
 | `pipnn_leader_sample_rate` | float | `0.005` | Fraction sampled as leaders; each partition uses `2` to `1000`, bounded by its point count. |
@@ -195,6 +197,14 @@ behavior. Levels in `no_build_levels` are still skipped.
 The `pipnn_*` values are global to the Pyramid index; hierarchy objects may continue to override
 `max_degree` and `alpha`, and those overrides are applied when PiPNN builds that hierarchy.
 `ef_construction` does not tune PiPNN.
+
+### Incremental PiPNN Add
+
+Set `graph_type: "pipnn"` and `pipnn_incremental_add: true` before the initial Build. The default uses ordinary Add. In the default distance mode, incremental PiPNN uses the original FP32 rows for partition routing, projections, leaf neighbors, hash selection and graph pruning. Add reuses the quantizers trained during Build. SQ8 and ordinary RaBitQ use base codes. For split RaBitQ set the base and precise bit counts and use RaBitQ reorder. For 3-bit RaBitQ with independent SQ8 reorder set `rabitq_bits_per_dim_base: 3`, `use_reorder: true` and `precise_quantization_type: "sq8"`. Omit `rabitq_bits_per_dim_precise` in this configuration.
+
+Set `pipnn_add_use_codes: true` before Build or when loading an exact incremental snapshot (Pyramid v2). Loading in code mode keeps the existing graph and drops PiPNN’s historical FP32 rows. Future Add calls use stored codes. Save and reload the converted snapshot with code mode enabled. Build uses its FP32 input and saves the leaf top-k and hash projections. Add uses stored code distances for new comparisons, including splits and RobustPrune. Split RaBitQ uses both code segments. A 3-bit RaBitQ base with independent SQ8 reorder uses the SQ8 codes. Set `store_raw_vector: false` to omit the separate original-vector store as well. For plain RaBitQ without reorder, set `store_raw_vector: true`. PiPNN then reads distances from that FP32 store and keeps no additional historical FP32 rows. Plain RaBitQ without a symmetric distance source cannot use this mode. Pyramid stores projections by global ID so flat nodes can be promoted after a reload.
+
+In the default distance mode, Pyramid keeps one exact row per global internal ID across all paths and root routing layers, including points in flat nodes. On promotion it can build from the original old and new rows after a reload. When exact FP32 codes are available it borrows them. Otherwise its shared FP32 payload costs 4 × dimension bytes per point (3.84 GB for one million 960-dimensional points), in addition to graph state and query codes. File-stream and BinarySet snapshots save this shared payload once. Chunked streaming export is unavailable in incremental mode. Loading an ordinary snapshot, including a chunked snapshot, without incremental state retains ordinary Add. Incremental Pyramid does not support duplicate tracking.
 
 ### Adaptive PiPNN pruning
 
