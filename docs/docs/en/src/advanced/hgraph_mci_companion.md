@@ -56,7 +56,10 @@ Repair uses the existing point's stored vector and first attempts to join existi
 
 Degree is the size of the deduplicated union of other live members of all effective cliques
 covering the current point. It is neither HGraph out-degree nor the point's clique-membership count.
-The degree stopping target is:
+For single-row Add, the default target is 98 distinct neighbors, capped at the number of other
+live vectors. Set `mci_single_add_degree` to adjust it. Multi-row Add and deletion repair use the
+adaptive target below. A single-row Add also uses it when `mci_single_add_degree=0`, or when
+a legacy configuration sets a nondefault degree floor or divisor and omits the new parameter.
 
 ```cpp
 target = N <= 1 ? 0 :
@@ -89,9 +92,10 @@ can exceed the target.
 
 | Parameter | Default and range | Meaning |
 | --- | --- | --- |
-| `mci_incremental_join_ratio_threshold` | Default `0.6`; range `[0, 1]`. | Overlap threshold for joining an existing clique: the number of its live members present in the point's KNN candidates, divided by its live member count. For a 10-member clique with 6 members in the candidates, the ratio is `0.6`: threshold `0.6` qualifies, whereas `0.7` does not. The clique must also have room and add new neighbors. This ratio does not revalidate distance constraints against every member. Lowering the threshold relaxes joining; raising it is stricter and may leave more degree deficits for new-clique construction. Compare `0.5 / 0.6 / 0.7` while measuring recall, ADD time, and total memberships. |
-| `mci_incremental_degree_min` | Default `50`; positive integer. | Floor in the degree-target formula, still capped at `N-1`. At `N=10000, mcs=200`, the default target is `50`; setting the floor to `70` makes the target `70`. At `N≈3m, mcs=200`, both floors produce target `100`. If many points have low degree, try a higher floor and verify recall; a lower floor can reduce maintenance needed to reach the target but may reduce search connectivity. First check whether the floor actually determines the target. |
-| `mci_incremental_degree_n_divisor` | Default `10000`; positive integer. | Controls the size-dependent term `N / divisor`. At `N=800000, mcs=200, degree_min=50`, the default target is `80`. Changing the divisor to `20000` makes this term `40`, so the floor sets the final target to `50`. A smaller divisor raises the size-dependent term; a larger divisor lowers it. Use it to adjust how the target grows with the dataset, noting that the floor or MCS term can make a change ineffective. |
+| `mci_single_add_degree` | Default `98`. | Target distinct neighbors for single-row Add. A positive integer selects a fixed target, and `0` selects the adaptive target. |
+| `mci_incremental_join_ratio_threshold` | Default `0.6`; range `[0, 1]`. | Overlap threshold for joining an existing clique during multi-row Add and deletion repair: the number of its live members present in the point's KNN candidates, divided by its live member count. For a 10-member clique with 6 members in the candidates, the ratio is `0.6`: threshold `0.6` qualifies, whereas `0.7` does not. The clique must also have room and add new neighbors. This ratio does not revalidate distance constraints against every member. Lowering the threshold relaxes joining; raising it is stricter and may leave more degree deficits for new-clique construction. Compare `0.5 / 0.6 / 0.7` while measuring recall, ADD time, and total memberships. |
+| `mci_incremental_degree_min` | Default `50`; positive integer. | Floor in the degree-target formula, still capped at `N-1`. At `N=10000, mcs=200`, the adaptive target is `50`; setting the floor to `70` makes the target `70`. At `N≈3m, mcs=200`, both floors produce target `100`. If many points have low degree, try a higher floor and verify recall; a lower floor can reduce maintenance needed to reach the target but may reduce search connectivity. First check whether the floor actually determines the target. |
+| `mci_incremental_degree_n_divisor` | Default `10000`; positive integer. | Controls the size-dependent term `N / divisor`. At `N=800000, mcs=200, degree_min=50`, the adaptive target is `80`. Changing the divisor to `20000` makes this term `40`, so the floor sets the final target to `50`. A smaller divisor raises the size-dependent term; a larger divisor lowers it. Use it to adjust how the target grows with the dataset, noting that the floor or MCS term can make a change ineffective. |
 | `mci_incremental_degree_mcs_divisor` | Default `2`; positive integer. | Controls `mcs / divisor`, which is combined with the size-dependent term before applying the floor. At `N≈3m, mcs=200, degree_min=50`, divisor `2` gives target `100`; divisor `4` gives target `50`. A smaller divisor can raise the target and a larger one can lower it, subject to the other terms. This parameter does not change the number of KNN candidates; change `mci_mcs` to change that candidate budget. |
 | `mci_incremental_clique_max` | Default `50`, integer at least `2`. | Limits the size after joining an existing clique, and the size of new cliques during multi-row Add or deletion repair. For a single-row Add it sets the initial size sought for a new clique, including the inserted point. Construction then extends the clique across the full candidate pool at the selected radius. With `mci_mcs=400`, the resulting clique can contain up to 401 points. |
 | `mci_delete_clique_size_threshold` | Default `30`; positive integer. | Retire a clique affected by the deletion batch only if its remaining live member count after the entire batch is strictly below the threshold: 29 is retired, 30 is retained by default. Retirement removes the clique and its memberships, not surviving vectors; unrelated small cliques are not scanned for retirement. This is not a construction size cap. A higher threshold expands retirement and may increase repair cost and structural change; a lower threshold retains more small cliques. Start at `30` and adjust in steps of `10`, comparing retired cliques, repair counts, deletion time, and recall rather than assuming higher is better. If a construction size cap is below this threshold, every affected clique of that size is retired; evaluate the settings together. |
@@ -100,7 +104,7 @@ can exceed the target.
 These tuning directions follow the implementation; they are not validated optimal settings.
 Keep dataset stages, mutation IDs, ground truth, and other settings fixed while changing one
 parameter at a time. Compare quality, throughput, mutation time, and memory together.
-For example, at `N≈3m, mcs=100, degree_min=50`, the default target is `50`; changing only the
+For example, at `N≈3m, mcs=100, degree_min=50`, the adaptive target is `50`; changing only the
 live-count divisor leaves it unchanged whenever the size-dependent term remains at least 50.
 Explicit settings override defaults, and loading an existing index requires matching its stored
 parameters. Historical experiments using retirement threshold 3 do not measure the current default 30.
@@ -231,15 +235,17 @@ ADD and deletion repair follow these steps.
 2. Collect up to `min(mci_mcs, visible_total - 1)` distinct live predecessors. For single-row Add
    with in-memory FP32 squared L2, normal vector storage, duplicate handling disabled, no reordering,
    and `ef_construction >= mci_mcs`, MCI can reuse the bottom-layer insertion candidates before edge
-   pruning. It selects the closest eligible IDs, breaking distance ties by ID. If the heap is
+   pruning. A point assigned only to the bottom layer starts this beam at the HGraph entry point.
+   Points assigned an upper layer follow the usual upper-layer descent. MCI selects the closest
+   eligible IDs, breaking distance ties by ID. If the heap is
    unavailable or has too few distinct eligible points, MCI obtains candidates with the usual
    HGraph search (`use_mci=false`).
-3. Join existing cliques that meet the overlap threshold and have room. If the degree target is
-   still unmet, single-row Add finds a clique containing the inserted point and previously
+3. Single-row Add finds a clique containing the inserted point and previously
    uncovered neighbors. It extends this clique across the original candidate pool, including
    neighbors covered by earlier cliques. At the selected radius, every remaining candidate
    fails the distance test against the seed or at least one clique member. Multi-row Add and
-   deletion repair use the capped incremental builder.
+   deletion repair first join existing cliques that meet the overlap threshold and have room.
+   They fill any remaining degree deficit with the capped incremental builder.
 4. Deletion retires only affected cliques whose surviving size is **less than** `delete_size`.
    Select surviving members whose projected effective coverage is **less than** `delete_mct`;
    recheck coverage before repairing.
@@ -249,7 +255,7 @@ ADD and deletion repair follow these steps.
    repair can see the whole current HGraph.
 
 The ADD clique-count limit has been removed; `delete_mct` still triggers repair.
-The degree target is `max(mci_incremental_degree_min, min(N/10000, mcs/2))`, with zero for N≤1 and otherwise
+The adaptive degree target is `max(mci_incremental_degree_min, min(N/10000, mcs/2))`, with zero for N≤1 and otherwise
 capped at N-1; integer division rounds down. N counts live vectors including the completed graph
 insertion batch. The floor defaults to 50, so at N=10000 and mcs=200 the target is 50.
 Whole-clique joins may overshoot;
@@ -298,6 +304,7 @@ not the defaults for every library option.
     "mci_clique_max": 50,
     "mci_alpha": 1.2,
     "mci_incremental_join_ratio_threshold": 0.6,
+    "mci_single_add_degree": 98,
     "mci_incremental_degree_min": 50,
     "mci_incremental_degree_n_divisor": 10000,
     "mci_incremental_degree_mcs_divisor": 2,
@@ -317,6 +324,7 @@ enables reverse edges, and rejects incompatible deduplication, duplicate-group, 
 | `mci_clique_max` | 50 | `--mci-clique-max`; full-build clique cap |
 | `mci_alpha` | 1.2 | `--mci-alpha`; expansion coefficient |
 | `mci_incremental_join_ratio_threshold` | 0.6 | `--mci-incremental-join-ratio-threshold`; [0,1] |
+| `mci_single_add_degree` | 98 | Fixed neighbor target for single-row Add, or zero for the adaptive formula |
 | `mci_incremental_degree_min` | 50 | Positive degree-target floor; serialized with the index |
 | `mci_incremental_degree_n_divisor` | 10000 | Positive live-count divisor for the degree target |
 | `mci_incremental_degree_mcs_divisor` | 2 | Positive MCS divisor for the degree target |
@@ -386,9 +394,9 @@ See `examples/cpp/324_feature_hgraph_mci_companion.cpp` for Dataset and Filter c
 ## Add, Delete, Serialize, and Stats
 
 When MCI is enabled by the flat build parameters, `HGraph::Add()` first inserts the HGraph
-batch, then updates the MCI companion for the successfully inserted rows. It first tries to join
-suitable existing cliques, then creates incremental cliques if the unique neighbor degree is still
-too low.
+batch, then updates MCI for the successfully inserted rows. A single-row Add builds locally
+maximal cliques from its candidates. A multi-row Add first tries to join suitable existing
+cliques, then creates incremental cliques to cover the remaining degree deficit.
 
 That update is sequential: `HGraph::Add()` walks the inserted rows in order and calls
 `incremental_update_mci_clique` (followed by `maybe_compact_mci`) for each row before the next one
@@ -437,15 +445,16 @@ commits only after allocation succeeds; temporary old/new buffers coexist during
 Allocator retention and IO block granularity mean RSS need not fall proportionally to index
 memory accounting.
 
-MCI automatically merges incremental metadata into its two CSR arrays after 100 successful
-vector mutations, using one counter shared by Add and MARK_REMOVE. Add checks after each
-inserted point, including within a large batch. MARK_REMOVE projects and repairs the complete
-deletion batch before checking the threshold, so a large deletion batch compacts once at its end.
-Duplicate/missing removal IDs and failed insertions do not count; repair seeds do not count as
-new vectors. FORCE_REMOVE retains its mandatory end-of-batch compaction and resets the counter.
-Successful compaction resets the counter to zero; a new full build or load also resets this
-runtime-only counter. Below the threshold, queries and serialization still include delta.
-There is no public Flush interface and no change to the Index virtual interface for compaction.
+Single-row Add appends each clique to delta, where it is immediately available to searches.
+Saving with `Serialize()` or freezing with `SetImmutable()` merges pending single-row additions
+into the two CSR arrays once.
+Queries on the resulting in-memory index and the restored snapshot can use the packed CSR path
+when its other conditions hold.
+
+Multi-row Add and MARK_REMOVE still check a shared 100-vector maintenance threshold. The counter
+includes successful single-row additions. Multi-row Add checks after each inserted row.
+MARK_REMOVE checks after repairing the complete deletion batch. FORCE_REMOVE compacts after
+remapping. A successful compaction, full build, or load resets the counter.
 
 Flush includes new delta cliques and members appended to base cliques, drops retired cliques and
 deleted members, and rebuilds the node-to-clique mapping with compact clique IDs. It clears the
@@ -456,7 +465,7 @@ Flush is serialized with Add/Remove. It holds an exclusive clique-storage lock w
 and publishing the replacement, so searches may wait. Replacement buffers are allocated before
 publication; an allocation failure leaves the old clique representation intact. Automatic
 maintenance defers allocation failures without failing a completed Add/MARK_REMOVE and retries
-on the next successful mutation. This does not change FORCE_REMOVE's failure semantics. Temporary memory
+at the next compaction opportunity. This does not change FORCE_REMOVE's failure semantics. Temporary memory
 includes both the old and new CSR. Do not retain clique IDs across a flush.
 Loading a validated compact CSR with no delta entries, empty clique rows, or deletion/retirement
 markers preserves the clean state, so its first Flush skips rebuilding the CSR. Other snapshots
@@ -518,7 +527,7 @@ Do not mix their recall conclusions.
 | --- | --- |
 | `stage`, `active_vectors`, `index_elements` | Stage, live count, public element count; the last is not physical storage accounting |
 | `ef_search`, `recall_at_k`, `qps` | Search width, recall, timed throughput; fixed ef is not fixed quality |
-| `build_seconds`, `mutation_seconds`, `flush_seconds` | Historical build/mutation/explicit-flush timings; current automatic compaction is included in mutation time, with no public post-stage Flush |
+| `build_seconds`, `mutation_seconds`, `flush_seconds` | Historical build, mutation, and explicit-flush timings. Single-row Add defers compaction to serialization or a later batch mutation. |
 | `index_memory_bytes`, `vector_memory_bytes`, `graph_memory_bytes`, `mci_memory_bytes` | Index/component accounting, not RSS |
 | `mci_route_ratio`, `mci_raw_float_ratio` | Actual MCI/direct FP32 route rates |
 | `mci_total_cliques`, `mci_delta_cliques`, `mci_total_memberships` | Clique, delta-clique, and membership counts |

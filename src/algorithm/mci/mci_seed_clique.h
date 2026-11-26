@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <boost/dynamic_bitset.hpp>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "basic_types.h"
@@ -77,19 +78,47 @@ FindCliqueWitness(const std::vector<CliqueBits>& adjacency,
     return false;
 }
 
-// Local IDs in order include every candidate in the original pool. Only preferred
-// neighbors may form the initial witness, but all can extend it at the same radius.
+// A witness of k neighbors needs at least k-1 edges per vertex in its induced graph.
+// Peel low-degree vertices before picking a pivot; their edges cannot support a witness.
+inline CliqueBits
+CliqueCore(const std::vector<CliqueBits>& adjacency, uint64_t minimum_degree) {
+    CliqueBits active(adjacency.size());
+    active.set();
+    std::vector<uint64_t> degrees;
+    std::vector<uint64_t> removed;
+    for (uint64_t i = 0; i < adjacency.size(); ++i) {
+        degrees.push_back(adjacency[i].count());
+        if (degrees[i] < minimum_degree) {
+            active.reset(i);
+            removed.push_back(i);
+        }
+    }
+    for (uint64_t i = 0; i < removed.size(); ++i) {
+        const auto affected = active & adjacency[removed[i]];
+        for (auto v = affected.find_first(); v != CliqueBits::npos; v = affected.find_next(v)) {
+            if (--degrees[v] < minimum_degree) {
+                active.reset(v);
+                removed.push_back(v);
+            }
+        }
+    }
+    return active;
+}
+
+// Seek the first witness among uncovered neighbors. Every candidate in extension_order
+// can extend it, including covered and highly subscribed vertices. A zero-size witness
+// grows the seed alone at the final radius.
 template <typename PairDistance>
 std::vector<InnerIdType>
-FindMaximalSeedNeighbors(const std::vector<InnerIdType>& order,
-                         const std::vector<uint8_t>& preferred,
+FindMaximalSeedNeighbors(const std::vector<InnerIdType>& extension_order,
+                         const std::vector<InnerIdType>& witness_order,
                          const std::vector<float>& seed_distances,
                          float radius,
-                         size_t threshold,
+                         uint64_t threshold,
                          PairDistance&& distance) {
     std::vector<InnerIdType> eligible;
-    for (auto id : order) {
-        if (preferred[id] and seed_distances[id] < radius) {
+    for (auto id : witness_order) {
+        if (seed_distances[id] < radius) {
             eligible.push_back(id);
         }
     }
@@ -105,19 +134,19 @@ FindMaximalSeedNeighbors(const std::vector<InnerIdType>& order,
         return std::all_of(
             chosen.begin(), chosen.end(), [&](InnerIdType other) { return connected(id, other); });
     };
-    for (auto id : eligible) {
-        if (fits(id)) {
-            chosen.push_back(id);
-            if (chosen.size() == threshold) {
-                break;
-            }
+    for (uint64_t i = 0; chosen.size() < threshold; ++i) {
+        if (eligible.size() - i < threshold - chosen.size()) {
+            break;
+        }
+        if (fits(eligible[i])) {
+            chosen.push_back(eligible[i]);
         }
     }
     if (chosen.size() < threshold) {
         // A greedy miss does not imply that no witness exists at this radius.
         std::vector<CliqueBits> adjacency(eligible.size(), CliqueBits(eligible.size()));
-        for (size_t i = 0; i < eligible.size(); ++i) {
-            for (size_t j = 0; j < i; ++j) {
+        for (uint64_t i = 0; i < eligible.size(); ++i) {
+            for (uint64_t j = 0; j < i; ++j) {
                 if (connected(eligible[i], eligible[j])) {
                     adjacency[i].set(j);
                     adjacency[j].set(i);
@@ -125,10 +154,12 @@ FindMaximalSeedNeighbors(const std::vector<InnerIdType>& order,
             }
         }
         std::vector<size_t> positions;
-        CliqueBits possible(eligible.size());
-        possible.set();
-        if (not FindCliqueWitness(
-                adjacency, possible, CliqueBits(eligible.size()), threshold, positions)) {
+        auto possible = CliqueCore(adjacency, threshold - 1);
+        if (not FindCliqueWitness(adjacency,
+                                  std::move(possible),
+                                  CliqueBits(eligible.size()),
+                                  threshold,
+                                  positions)) {
             return {};
         }
         chosen.clear();
@@ -136,13 +167,13 @@ FindMaximalSeedNeighbors(const std::vector<InnerIdType>& order,
             chosen.push_back(eligible[pos]);
         }
     }
-    std::vector<uint8_t> included(order.size(), 0);
+    std::vector<uint8_t> included(seed_distances.size(), 0);
     for (auto id : chosen) {
         included[id] = 1;
     }
     // A vertex rejected by one member remains incompatible as the clique grows.
     // One pass therefore certifies inclusion maximality over the full pool.
-    for (auto id : order) {
+    for (auto id : extension_order) {
         if (not included[id] and seed_distances[id] < radius and fits(id)) {
             chosen.push_back(id);
         }

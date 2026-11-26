@@ -683,10 +683,14 @@ private:
     void
     remove_from_mci(const Vector<InnerIdType>& removed_inner_ids);
 
-    /// Account successful vector mutations and compact at 100. Caller holds mci_mutation_mutex_.
-    /// MARK_REMOVE accounts the complete batch after repair; FORCE_REMOVE compacts separately.
+    /// Count successful mutations under mci_mutation_mutex_. Single Add leaves compaction
+    /// to Serialize or the next qualifying batch Add or Remove.
     void
-    maybe_compact_mci(uint64_t changed_count);
+    maybe_compact_mci(uint64_t changed_count, bool defer = false);
+
+    /// Materialize single-row additions before saving or freezing. Caller holds mci_mutation_mutex_.
+    void
+    flush_pending_mci_single_adds() const;
 
     /// Recover an existing query vector and run the same MCI update as Add, without reinserting it.
     /// Non-FP32 repair scans O(N) stored-code distances per seed with O(mcs) heap storage;
@@ -751,7 +755,9 @@ private:
 
     CliqueDataCellPtr mci_cliques_{nullptr};  // companion MCI clique datacell
     HGraphMCIParameters mci_parameters_{};
-    uint64_t mci_pending_mutations_{0};  // runtime-only; guarded by mci_mutation_mutex_
+    // Runtime-only maintenance state guarded by mci_mutation_mutex_.
+    mutable uint64_t mci_pending_mutations_{0};
+    mutable bool mci_single_add_pending_{false};
 
     uint64_t ef_construct_{400};  // expansion factor during graph construction
     float alpha_{1.0};            // Relative Neighborhood Graph pruning coefficient

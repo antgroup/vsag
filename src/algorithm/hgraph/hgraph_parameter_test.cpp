@@ -296,6 +296,10 @@ TEST_CASE("HGraph MCI incremental degree targets round-trip and validate",
     REQUIRE(defaults.IncrementalDegreeTarget(0) == 0);
     REQUIRE(defaults.IncrementalDegreeTarget(1) == 0);
     REQUIRE(defaults.IncrementalDegreeTarget(2) == 1);
+    REQUIRE(defaults.IncrementalDegreeTarget(0, true) == 0);
+    REQUIRE(defaults.IncrementalDegreeTarget(1, true) == 0);
+    REQUIRE(defaults.IncrementalDegreeTarget(50, true) == 49);
+    REQUIRE(defaults.IncrementalDegreeTarget(5000000, true) == 98);
     REQUIRE(defaults.incremental_degree_min == 50);
     REQUIRE(defaults.IncrementalDegreeTarget(50) == 49);
     REQUIRE(defaults.IncrementalDegreeTarget(51) == 50);
@@ -352,6 +356,9 @@ TEST_CASE("HGraph MCI incremental degree targets round-trip and validate",
     REQUIRE(param->ToJson()["mci_incremental_degree_min"].GetInt() ==
             (key == "mci_incremental_degree_min" ? 4 : 50));
     REQUIRE(param->ToJson()[key].GetInt() == 4);
+    REQUIRE(param->mci_parameters.single_add_degree == 0);
+    REQUIRE(param->mci_parameters.IncrementalDegreeTarget(5000000, true) ==
+            param->mci_parameters.IncrementalDegreeTarget(5000000));
     auto restored = std::make_shared<vsag::HGraphParameter>(param->ToJson());
     REQUIRE(restored->CheckCompatibility(param));
     auto changed = param->ToJson();
@@ -362,6 +369,34 @@ TEST_CASE("HGraph MCI incremental degree targets round-trip and validate",
         json[key].SetInt(invalid);
         REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(json, common));
     }
+}
+
+TEST_CASE("HGraph MCI single Add degree overrides the adaptive policy",
+          "[ut][HGraphParameter][mci][degree_add]") {
+    auto json = vsag::JsonType::Parse(R"({"base_quantization_type":"fp32","graph_type":"nsw",
+        "max_degree":32,"ef_construction":100,"mci_incremental_degree_min":50,
+        "mci_incremental_degree_n_divisor":10000,"mci_incremental_degree_mcs_divisor":2})");
+    vsag::IndexCommonParam common;
+    common.dim_ = 16;
+    common.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto parse = [&]() {
+        return std::dynamic_pointer_cast<vsag::HGraphParameter>(
+            vsag::HGraph::CheckAndMappingExternalParam(json, common));
+    };
+    REQUIRE(parse()->mci_parameters.IncrementalDegreeTarget(5000000, true) == 98);
+    json["mci_incremental_degree_min"].SetInt(70);
+    json["mci_single_add_degree"].SetInt(24);
+    auto tuned = parse();
+    REQUIRE(tuned->mci_parameters.IncrementalDegreeTarget(5000000, true) == 24);
+    REQUIRE(tuned->mci_parameters.IncrementalDegreeTarget(5000000) == 100);
+    auto restored = std::make_shared<vsag::HGraphParameter>(tuned->ToJson());
+    REQUIRE(restored->CheckCompatibility(tuned));
+
+    json["mci_single_add_degree"].SetInt(0);
+    REQUIRE(parse()->mci_parameters.IncrementalDegreeTarget(5000000, true) == 100);
+    REQUIRE_FALSE(parse()->CheckCompatibility(tuned));
+    json["mci_single_add_degree"].SetInt(-1);
+    REQUIRE_THROWS(parse());
 }
 
 TEST_CASE("HGraph enables MCI from any public trigger", "[ut][HGraphParameter]") {

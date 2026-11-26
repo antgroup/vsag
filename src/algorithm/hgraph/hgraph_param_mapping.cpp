@@ -509,6 +509,7 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
                 HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY,
             },
         },
+        {HGRAPH_MCI_SINGLE_ADD_DEGREE_KEY, {HGRAPH_MCI_SINGLE_ADD_DEGREE_KEY}},
         {
             HGRAPH_MCI_INCREMENTAL_DEGREE_MIN_KEY,
             {

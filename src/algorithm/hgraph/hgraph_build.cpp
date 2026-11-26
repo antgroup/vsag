@@ -244,7 +244,7 @@ private:
                         int level,
                         InnerIdType inner_id,
                         InnerSearchParam& param,
-                        const FlattenInterfacePtr& flatten_codes) const;
+                        const add_context& context) const;
 
     bool
     publish_duplicate_if_found(const graph_add_probe_result& probe,
@@ -780,7 +780,7 @@ HGraph::AddImpl::Run(const DatasetPtr& data) {
                     index_.incremental_update_mci_clique(
                         row.inner_id, index_.get_data(data, row.input_idx), 0, single_add);
                 }
-                index_.maybe_compact_mci(1);
+                index_.maybe_compact_mci(1, single_add);
             }
             index_.mci_cliques_->MarkAvailable(index_.total_count_.load());
             logger::info("hgraph mci incremental add finished, total={}",
@@ -1042,7 +1042,7 @@ HGraph::AddImpl::insert_one_logical_point(const void* data,
     auto rlock = index_.storage_state_->AcquireReadLock(index_.global_mutex_);
 
     auto param = make_search_param();
-    auto probe = this->probe_graph_for_add(data, level, inner_id, param, context.graph_read_codes);
+    auto probe = this->probe_graph_for_add(data, level, inner_id, param, context);
     if (context.mci_candidate_scores != nullptr and probe.neighbors != nullptr and
         not probe.neighbors->Empty() and
         probe.neighbors->Size() <= context.mci_candidate_scores->capacity()) {
@@ -1188,10 +1188,17 @@ HGraph::AddImpl::probe_graph_for_add(const void* data,
                                      int level,
                                      InnerIdType inner_id,
                                      InnerSearchParam& param,
-                                     const FlattenInterfacePtr& flatten_codes) const {
+                                     const add_context& context) const {
+    const auto& flatten_codes = context.graph_read_codes;
     DistHeapPtr result = nullptr;
 
-    for (auto j = static_cast<int64_t>(index_.route_graphs_.size()) - 1; j > level; --j) {
+    // For a bottom-layer-only insertion that supplies the MCI pool, run the construction
+    // beam from the HGraph entry point. Its pre-prune result supplies both graph edges and
+    // clique candidates. Insertions into upper layers keep the usual greedy descent.
+    const auto top = context.mci_candidate_scores != nullptr and level < 0
+                         ? level
+                         : static_cast<int64_t>(index_.route_graphs_.size()) - 1;
+    for (auto j = top; j > level; --j) {
         result = index_.search_one_graph(
             data, index_.route_graphs_[j], flatten_codes, param, (VisitedListPtr) nullptr, nullptr);
         if (not result->Empty()) {
