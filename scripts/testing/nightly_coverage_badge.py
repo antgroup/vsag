@@ -8,8 +8,8 @@ import re
 from zoneinfo import ZoneInfo
 
 
-def write_badge(event_path: Path, report_path: Path, destination: Path) -> bool:
-    run = json.loads(event_path.read_text())["workflow_run"]
+def write_badge(run_path: Path, report_path: Path, destination: Path) -> bool:
+    run = json.loads(run_path.read_text())
     run_id, run_number, attempt = (run[key] for key in ("id", "run_number", "run_attempt"))
     sha = run["head_sha"]
     if any(type(value) is not int or value <= 0 for value in (run_id, run_number, attempt)):
@@ -74,8 +74,8 @@ def write_badge(event_path: Path, report_path: Path, destination: Path) -> bool:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("event", type=Path)
+    parser.add_argument("run", type=Path)
     parser.add_argument("report", type=Path)
     parser.add_argument("destination", type=Path)
     args = parser.parse_args()
-    write_badge(args.event, args.report, args.destination)
+    write_badge(args.run, args.report, args.destination)
