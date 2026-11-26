@@ -199,6 +199,11 @@ public:
         return record_size_;
     }
 
+    [[nodiscard]] uint64_t
+    EstimateMemory(uint64_t count) const {
+        return storage_->EstimateMemory(count);
+    }
+
     [[nodiscard]] InnerIdType
     Capacity() const {
         return max_capacity_;
