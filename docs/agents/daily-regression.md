@@ -55,6 +55,12 @@ build/core lane and artifact-overwriting cleanup are removed. x86's bundled-Open
 source build and MKL build remain separate because they validate different backends.
 Coverage case names and thresholds remain unchanged; four expensive HGraph functional cases use a smaller, explicitly bounded Coverage dataset as described below.
 
+macOS ASan restores the same compiler cache in Branch CI and Nightly. Only
+Branch CI on pushes to the upstream main branch can publish, once per cache
+key. A change to the top-level `CMakeLists.txt` or
+`.circleci/fresh_ci_cache.commit` rotates the key. Existing timestamped caches
+for the same key can seed the first fixed snapshot.
+
 ## Linux Python matrix
 
 Nightly builds one manylinux 2.28 `py3-none` wheel per Linux architecture
@@ -142,6 +148,15 @@ Suppression file paths must be absolute before listing or running isolated child
 No Daily environment means existing local, PR, Branch and release test behavior.
 The Examples runner now requires the generated binary manifest and propagates
 each example's exit status.
+
+## Functional ownership check
+
+The Team and Community Linux ASan builds in PR CI list the compiled
+`functests` inventory, including Daily-only cases, and validate ownership
+with the Nightly resolver. Keep the tags or explicit owners in
+`scripts/testing/daily_matrix.json` current when adding functional tests.
+The check lists registrations without running test bodies or building a
+Nightly plan.
 
 ## Parameter-adapter preflight
 

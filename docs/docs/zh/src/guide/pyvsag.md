@@ -207,7 +207,7 @@ new_index.load("index.bin")
 | `get_memory_usage()` | `int` | 索引占用的内存字节数。 |
 | `check_id_exist(id)` | `bool` | 指定 ID 当前是否存在。 |
 | `get_min_max_id()` | `(min_id, max_id)` | 操作失败时返回 `(-1, -1)`。 |
-| `calc_distances_by_id(query, ids)`（旧别名 `cal_distance_by_id`） | `numpy.ndarray` | 每个 ID 一个 float32 距离，缺失 ID 为 `-1`。 |
+| `calc_distances_by_id(query, ids)`（旧别名 `cal_distance_by_id`） | `numpy.ndarray` | 每个 ID 一个 float32 距离；缺失或已删除的 ID 为 `NaN`，可用 `numpy.isnan` 判断。 |
 
 ```python
 # 添加两条稠密向量
@@ -280,5 +280,5 @@ JSON 字段传递；C++ 新增的索引类型、量化方式和距离度量会�
 
 Node.js 的 `calcDistancesById(query, ids)` 和旧别名 `calDistanceById(query, ids)` 返回一维
 `Float32Array`。query 必须为 `Float32Array`，ID 必须为 `BigInt64Array`，其他数组类型抛出 `TypeError`；
-实际 query 长度通过 C++ Dataset API 校验，底层操作失败时抛出包含 C++ 信息的 `Error`。缺失 ID 仍返回
-`-1`，不属于操作失败。
+实际 query 长度通过 C++ Dataset API 校验，底层操作失败时抛出包含 C++ 信息的 `Error`。缺失或已删除的
+ID 返回 `NaN` 距离（可用 `Number.isNaN` 判断），不属于操作失败。

@@ -1212,11 +1212,18 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
             }
 
             float neighbor_dist = 0;
+            const auto neighbor_label = this->label_table_->GetLabelById(neighbor_inner_id);
             try {
-                neighbor_dist = this->calc_native_distance_by_id(
-                    new_base_vec, this->label_table_->GetLabelById(neighbor_inner_id), true);
-            } catch (const std::runtime_error& e) {
-                // incase that neighbor has been deleted
+                neighbor_dist =
+                    this->calc_native_distance_by_id(new_base_vec, neighbor_label, true);
+            } catch (const VsagException& e) {
+                // A mark-removed neighbor is still linked in the graph but its label can no
+                // longer be addressed. Skip it instead of failing the whole update; any other
+                // failure (including a live label) keeps propagating.
+                if (e.error_.type != ErrorType::INVALID_ARGUMENT or
+                    this->label_table_->CheckLabel(neighbor_label)) {
+                    throw;
+                }
                 continue;
             }
             if (neighbor_dist < self_dist) {

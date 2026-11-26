@@ -4436,6 +4436,36 @@ TEST_CASE("IVF dense native distance contract", "[distance_contract]") {
     }
 }
 
+TEST_CASE("IVF CalcDistancesById rejects overflowing distance buffer",
+          "[ft][ivf][distance_contract]") {
+    auto param =
+        fixtures::IVFTestIndex::GenerateIVFBuildParametersString("l2", 16, "fp32", 8, "random");
+    auto created = vsag::Factory::CreateIndex("ivf", param);
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    std::vector<float> values(64 * 16);
+    std::vector<int64_t> labels(64);
+    for (int64_t i = 0; i < 64; ++i) {
+        labels[i] = 100 + i;
+        for (int64_t j = 0; j < 16; ++j) {
+            values[i * 16 + j] = static_cast<float>((i + j) % 23) / 23.0F;
+        }
+    }
+    auto base = vsag::Dataset::Make()
+                    ->NumElements(64)
+                    ->Dim(16)
+                    ->Ids(labels.data())
+                    ->Float32Vectors(values.data())
+                    ->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+    const int64_t candidate = labels[1];
+    const int64_t overflowing_count = (int64_t{1} << 62) + 1;
+    auto public_result =
+        index->CalcDistancesById(values.data(), &candidate, overflowing_count, true, -1);
+    REQUIRE_FALSE(public_result.has_value());
+    REQUIRE(public_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+}
+
 TEST_CASE("IVF rejects unpackaged PQFS flat reorder", "[distance_contract]") {
     auto param = fixtures::IVFTestIndex::GenerateIVFBuildParametersString(
         "l2", 16, "fp32,pqfs", 8, "random");

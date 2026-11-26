@@ -151,6 +151,15 @@ def owner(test, profile):
     raise PlanError("Unclassified functional test: " + test["name"] + " " + test["tags"])
 
 
+def group_owner(group, profile):
+    assignments = [(test["name"], owner(test, profile)) for test in group]
+    owners = {value for _, value in assignments}
+    if len(owners) != 1:
+        details = ", ".join(f"{name!r} ({value})" for name, value in sorted(assignments))
+        raise PlanError("A case-insensitive Catch2 group crosses budget owners: " + details)
+    return owners.pop()
+
+
 def estimate(unit, environment, history):
     samples = [s["seconds"] for s in history["samples"]
                if s["key"] == unit["key"] and s["environment"] == environment

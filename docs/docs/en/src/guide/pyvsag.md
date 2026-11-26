@@ -234,7 +234,7 @@ including when the file cannot be opened.
 | `get_memory_usage()` | `int` | Index memory usage in bytes. |
 | `check_id_exist(id)` | `bool` | Whether an ID currently exists. |
 | `get_min_max_id()` | `(min_id, max_id)` | Returns `(-1, -1)` if the operation fails. |
-| `calc_distances_by_id(query, ids)` (legacy alias `cal_distance_by_id`) | `numpy.ndarray` | One float32 distance per ID. Missing IDs produce `-1`. |
+| `calc_distances_by_id(query, ids)` (legacy alias `cal_distance_by_id`) | `numpy.ndarray` | One float32 distance per ID. Missing or removed IDs produce `NaN`; test with `numpy.isnan`. |
 
 ```python
 # Add two dense vectors.
@@ -317,5 +317,5 @@ real libaio path, build locally with `VSAG_ENABLE_LIBAIO=ON pip install python/`
 The Node.js `calcDistancesById(query, ids)` and legacy `calDistanceById(query, ids)` return a 1D
 `Float32Array`. They require exactly `Float32Array` queries and `BigInt64Array` IDs (other array
 kinds throw `TypeError`), validate the actual query length through the C++ Dataset API, and throw
-`Error` with the C++ message on operation failure. Missing IDs still produce `-1`; they are not
-operation failures.
+`Error` with the C++ message on operation failure. Missing or removed IDs produce a `NaN`
+distance (test with `Number.isNaN`); they are not operation failures.

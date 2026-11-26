@@ -41,7 +41,8 @@
     "utils": "unit-coverage",
     "version": "unit-coverage",
     "ext": "unit-coverage",
-    "threshold": "unit-coverage"
+    "threshold": "unit-coverage",
+    "pipnn_cache": "other"
   },
   "case_owners": {
     "BruteForce dense native distance contract": "other",
