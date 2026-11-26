@@ -65,7 +65,7 @@ standard RaBitQ 路径，
 
 建库时设置 `rabitq_fused_datacell=true`、`rabitq_fused_layout="external_supplement"`、`use_reorder=true` 和 `max_degree=64`。底层热记录按 64 字节对齐，依次存邻居数、64 个邻居 ID、cluster ID、外部 label、filter 和元数据。supplement 与其元数据组成独立定长记录，复用同一内部 ID。放盘时设置 `base_io_type="block_memory_io"`、`base_supplement_io_type="async_io"` 和专用 `base_supplement_file_path`。无 libaio 时使用缓冲文件 IO。
 
-向量 KNN 先用 filter 扫描图，再按批次读取入选候选的 supplement。1 位精排会重算高位内积，多位精排可复用有效的高位内积。`hgraph.rabitq_rerank_candidates` 控制每次查询的唯一精排候选数上限，至少为 k，默认 `max(ef_search, 2*k)`。该布局要求启用精排，自动启用 filter 扫描，使用 fused 专用遍历循环。Range、iterator 和自定义距离搜索暂不支持。如果 `external_supplement` 索引已建共轭图，查询时须设置 `use_conjugate_graph_search=false`，以保证完整码读取次数在精排预算内。
+向量 KNN 按 filter 估算距离遍历图，并额外保留下界优于遍历候选堆阈值的节点。候选按 ID 去重、按下界升序排列。先对前 k 个候选算完整距离，此后按批读取 supplement；当下一个下界无法改善当前第 k 名的完整距离时停止。遇到无效下界时回退为完整评分。1 位精排会重算高位内积，多位精排可复用有效的高位内积。默认不设固定精排数上限。可显式设置 `hgraph.rabitq_rerank_candidates` 限制每次查询的完整评分数，取值至少为 k，回退时同样生效。该布局要求启用精排，自动启用 filter 扫描，使用 fused 专用遍历循环。Range、iterator 和自定义距离搜索暂不支持。如果 `external_supplement` 索引已建共轭图，查询时须设置 `use_conjugate_graph_search=false`，以保证完整码读取次数在精排预算内。
 
 单次查询使用一个线程展开图，即使设置 `parallelism>1` 也是如此。磁盘后端可以在一个批次中发起多个候选读取。启用标签过滤时同样走图扫描。该布局使用 `search_no_lock=true` 前须调用 `SetImmutable()` 并设置 `parallelism=1`。可变索引会拒绝无锁搜索，以免一次查询读到来自两次更新的 filter 和 supplement。
 

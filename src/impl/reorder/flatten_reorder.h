@@ -51,7 +51,9 @@ public:
                  QueryContext& ctx,
                  IteratorFilterContext* iter_ctx = nullptr,
                  const RaBitQCandidateVector* rabitq_lower_bound_candidates = nullptr,
-                 const std::optional<float>& distance_threshold = std::nullopt);
+                 const std::optional<float>& distance_threshold = std::nullopt,
+                 uint64_t max_evaluations = 0,
+                 const ComputerInterfacePtr& preset_computer = nullptr);
 
 private:
     void

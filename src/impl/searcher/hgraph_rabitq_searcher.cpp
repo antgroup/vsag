@@ -26,6 +26,7 @@
 #include "hash_types.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/reasoning/reasoning_context.h"
+#include "impl/reorder/flatten_reorder.h"
 #include "index_common_param.h"
 #include "simd/rabitq_simd.h"
 #include "vsag/allocator.h"
@@ -610,14 +611,11 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
         return std::make_shared<StandardHeap<true, false>>(allocator, -1);
     }
     const bool external = graph->HasExternalSupplement();
-    if (external) {
-        // The bounded queues below retain the hints for the cold phase.
-        lower_bound_candidates = nullptr;
-    }
     if (lower_bound_candidates != nullptr) {
         lower_bound_candidates->clear();
         const uint64_t reserve_hint =
-            (static_cast<uint64_t>(search_param.ef) + 4U) * graph->MaximumDegree() + 1U;
+            external ? search_param.ef
+                     : (static_cast<uint64_t>(search_param.ef) + 4U) * graph->MaximumDegree() + 1U;
         lower_bound_candidates->reserve(std::min<uint64_t>(graph->TotalCount(), reserve_hint));
     }
 
@@ -633,18 +631,9 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
         search_param.enable_rabitq_one_bit_search and search_param.enable_reorder;
     const bool deferred_rerank =
         external or (not range_search and HGraphRaBitQSearcher::ShouldDeferRerank(search_param));
-    const uint64_t default_budget = std::max<uint64_t>(search_param.ef, 2 * rerank_topk);
-    const uint64_t deferred_rerank_count =
-        external ? std::min<uint64_t>(graph->Capacity(),
-                                      search_param.rabitq_rerank_candidates == 0
-                                          ? default_budget
-                                          : search_param.rabitq_rerank_candidates)
-                 : default_budget;
-    std::optional<BoundedResults> best_bounds;
-    if (external) {
-        best_bounds.emplace(deferred_rerank_count, allocator);
-    }
-    BoundedResults results(deferred_rerank ? deferred_rerank_count : result_limit, allocator);
+    const uint64_t deferred_rerank_count = std::max<uint64_t>(search_param.ef, 2 * rerank_topk);
+    const auto estimate_limit = external ? search_param.ef : deferred_rerank_count;
+    BoundedResults results(deferred_rerank ? estimate_limit : result_limit, allocator);
     SearchBuffer candidate_set(search_param.ef, allocator);
 
     uint32_t rabitq_filter_count = 0;
@@ -680,7 +669,7 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                 if (not scorer.HasValidFilterDistance(node, *distance)) {
                     *distance = std::numeric_limits<float>::max();
                 }
-                *lower_bound = std::numeric_limits<float>::lowest();
+                *lower_bound = std::numeric_limits<float>::max();
                 *filter_inner_product = std::numeric_limits<float>::quiet_NaN();
                 return true;
             }
@@ -721,10 +710,14 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                                         float filter_inner_product,
                                         bool allowed,
                                         float full_distance) {
-        if (external and allowed) {
-            best_bounds->Insert(id, lower_bound, filter_inner_product);
-        }
         if (lower_bound_candidates == nullptr or not allowed) {
+            return K_INVALID_CANDIDATE_INDEX;
+        }
+        // As in BasicSearcher, retain additional candidates once the ef estimate heap is full.
+        // A missing bound must survive for full scoring.
+        if (external and (results.Size() < search_param.ef or
+                          (lower_bound >= results.WorstDistance() and
+                           lower_bound < std::numeric_limits<float>::max()))) {
             return K_INVALID_CANDIDATE_INDEX;
         }
         const auto candidate_index = lower_bound_candidates->size();
@@ -763,8 +756,9 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                 bool full = false;
                 if (score_node(
                         graph->GetCodeView(duplicate), &duplicate_distance, &bound, &hint, &full)) {
-                    best_bounds->Insert(duplicate, bound, hint);
-                    results.Insert(duplicate, duplicate_distance, hint);
+                    const auto index = record_lower_bound(
+                        duplicate, bound, hint, true, std::numeric_limits<float>::quiet_NaN());
+                    results.Insert(duplicate, duplicate_distance, hint, false, index);
                 }
                 continue;
             }
@@ -986,7 +980,7 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                                                                   distances[lane])) {
                                 distances[lane] = std::numeric_limits<float>::max();
                             }
-                            lower_bounds[lane] = std::numeric_limits<float>::lowest();
+                            lower_bounds[lane] = std::numeric_limits<float>::max();
                             filter_inner_products[lane] = std::numeric_limits<float>::quiet_NaN();
                             continue;
                         }
@@ -1042,53 +1036,21 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
     }
 
     if (external) {
-        Vector<BoundedResultRecord> shortlist(allocator);
-        UnorderedSet<InnerIdType> seen(allocator);
-        const auto append = [&](const BoundedResultRecord& candidate) {
-            if (shortlist.size() < deferred_rerank_count and seen.insert(candidate.id).second) {
-                shortlist.push_back(candidate);
+        // Supply the final ef survivors as well as the traversal's lower-bound candidates.
+        // Probe only survivors without a saved hint, using the hot filter even for disk layouts.
+        for (uint64_t i = 0; i < results.Size(); ++i) {
+            const auto& candidate = results[i];
+            if (candidate.CandidateIndex() != K_INVALID_CANDIDATE_INDEX) {
+                continue;
             }
-        };
-        uint64_t estimate = 0;
-        for (; estimate < std::min(results.Size(), rerank_topk); ++estimate) {
-            append(results[estimate]);
-        }
-        uint64_t bound = 0;
-        while (shortlist.size() < deferred_rerank_count and
-               (estimate < results.Size() or bound < best_bounds->Size())) {
-            if (bound < best_bounds->Size()) {
-                append((*best_bounds)[bound++]);
-            }
-            if (estimate < results.Size()) {
-                append(results[estimate++]);
+            float estimate = 0.0F;
+            float bound = 0.0F;
+            float hint = 0.0F;
+            bool full = false;
+            if (score_node(graph->GetCodeView(candidate.id), &estimate, &bound, &hint, &full)) {
+                lower_bound_candidates->push_back({bound, hint, candidate.id});
             }
         }
-        std::sort(shortlist.begin(), shortlist.end(), [](const auto& lhs, const auto& rhs) {
-            return lhs.id < rhs.id;
-        });
-        BoundedResults refined(rerank_topk, allocator);
-        const auto stride = graph->FusedSupplementCodeSize();
-        const auto batch = graph->SupplementBatchSize(shortlist.size());
-        Vector<InnerIdType> ids(batch, allocator);
-        Vector<uint8_t> codes(batch * stride, allocator);
-        for (uint64_t begin = 0; begin < shortlist.size(); begin += batch) {
-            const auto count = std::min<uint64_t>(batch, shortlist.size() - begin);
-            for (uint64_t i = 0; i < count; ++i) {
-                ids[i] = shortlist[begin + i].id;
-            }
-            graph->ReadSupplements(ids.data(), count, codes.data());
-            for (uint64_t i = 0; i < count; ++i) {
-                auto node = graph->GetCodeView(ids[i]);
-                node.supplement_code = codes.data() + i * stride;
-                float distance = 0.0F;
-                ++deferred_finalize_full_count;
-                if (refine_node(node, shortlist[begin + i].filter_inner_product, &distance)) {
-                    refined.Insert(
-                        ids[i], distance, shortlist[begin + i].filter_inner_product, true);
-                }
-            }
-        }
-        results = std::move(refined);
     } else if (deferred_rerank) {
         BoundedResults refined(rerank_topk, allocator);
         const auto has_valid_full_distance = [](float distance) {
@@ -1177,8 +1139,10 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
     }
 
     auto output = std::make_shared<StandardHeap<true, false>>(allocator, -1);
-    for (uint64_t i = 0; i < results.Size(); ++i) {
-        output->Push(results[i].distance, results[i].id);
+    if (not external) {
+        for (uint64_t i = 0; i < results.Size(); ++i) {
+            output->Push(results[i].distance, results[i].id);
+        }
     }
     if (ctx != nullptr and ctx->stats != nullptr) {
         ctx->stats->dist_cmp.fetch_add(distance_computations, std::memory_order_relaxed);
@@ -1419,17 +1383,33 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
         ctx == nullptr ? std::numeric_limits<float>::quiet_NaN() : ctx->rabitq_error_rate;
     if (has_direct_traversal_query) {
         const auto run_direct_search = [&](const auto& scorer) {
-            auto result = search_direct_fused(graph,
-                                              visited_list,
-                                              search_param,
-                                              ctx,
-                                              lower_bound_candidates,
-                                              allocator,
-                                              neighbors_mutex_,
-                                              scorer);
+            const bool external = graph->HasExternalSupplement();
+            RaBitQCandidateVector external_candidates(allocator);
+            auto result =
+                search_direct_fused(graph,
+                                    visited_list,
+                                    search_param,
+                                    ctx,
+                                    external ? &external_candidates : lower_bound_candidates,
+                                    allocator,
+                                    neighbors_mutex_,
+                                    scorer);
             if (search_finalized != nullptr) {
                 *search_finalized = graph->HasExternalSupplement() or not deferred_rerank or
                                     lower_bound_candidates != nullptr;
+            }
+            if (external) {
+                QueryContext default_ctx;
+                return FlattenReorder(flatten, allocator, graph)
+                    .ReorderFused(nullptr,
+                                  query,
+                                  rerank_topk,
+                                  ctx != nullptr ? *ctx : default_ctx,
+                                  nullptr,
+                                  &external_candidates,
+                                  search_param.distance_threshold,
+                                  search_param.rabitq_rerank_candidates,
+                                  computer);
             }
             return result;
         };

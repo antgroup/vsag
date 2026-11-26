@@ -494,6 +494,51 @@ TEST_CASE("HGraph scans hot fused records and batch reranks separate supplements
     REQUIRE((error == vsag::ErrorType::INTERNAL_ERROR or error == vsag::ErrorType::READ_ERROR));
 }
 
+TEST_CASE("External fused reranking follows the kth full distance",
+          "[ut][hgraph][external_supplement]") {
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 96;
+    auto json = MakeFusedPiPNNJson(3, 1, false);
+    json["graph_type"].SetString("nsw");
+    json["max_degree"].SetInt(64);
+    json["ef_construction"].SetInt(80);
+    json["rabitq_fused_layout"].SetString("external_supplement");
+    auto index = MakeHGraphIndex(json, MakeCommonParam(dim, 1));
+    std::vector<float> vectors(count * dim);
+    std::vector<int64_t> labels(count);
+    std::iota(labels.begin(), labels.end(), 1000);
+    for (int64_t i = 0; i < count * dim; ++i) {
+        vectors[i] = std::sin(0.017F * i) + std::cos(0.013F * (i + i / dim));
+    }
+    REQUIRE(index->Build(MakeFloatDataset(vectors, labels, dim, count)).has_value());
+    const auto query = MakeFloatQuery(vectors, dim);
+    const auto run = [&](float error_rate, uint32_t cap) {
+        auto params = vsag::JsonType::Parse(R"({"hgraph":{"ef_search":8}})");
+        params["hgraph"]["rabitq_error_rate"].SetFloat(error_rate);
+        if (cap != 0) {
+            params["hgraph"]["rabitq_rerank_candidates"].SetUint64(cap);
+        }
+        const auto result = index->KnnSearch(query, 1, params.Dump());
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 1);
+        const auto stats = vsag::JsonType::Parse(result.value()->GetStatistics());
+        const auto candidates = stats["reorder_candidate_count"].GetUint64();
+        const auto full = stats["reorder_distance_count"].GetUint64();
+        REQUIRE(full == stats["rabitq_full_count"].GetUint64());
+        return std::make_pair(full, candidates);
+    };
+    // Tight bounds let the bootstrap establish a threshold well before the explicit cap.
+    const auto [tight_full, tight_candidates] = run(0.001F, 32);
+    REQUIRE(tight_full < tight_candidates);
+    REQUIRE(tight_full < 8);
+
+    // Loose bounds require more than ef full scores unless a caller supplies a hard cap.
+    const auto [loose_full, loose_candidates] = run(100000.0F, 0);
+    REQUIRE(loose_full > 8);
+    REQUIRE(loose_full <= loose_candidates);
+    REQUIRE(run(100000.0F, 3).first == 3);
+}
+
 TEST_CASE("HGraph PiPNN encodes each fused input once and preserves compacted rows",
           "[ut][hgraph][pipnn][fused][preencode]") {
     constexpr int64_t dim = 32;

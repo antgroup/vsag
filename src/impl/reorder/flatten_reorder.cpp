@@ -159,6 +159,46 @@ add_reorder_lower_bound_probe_count(QueryContext& ctx, uint64_t count) {
     }
 }
 
+constexpr uint64_t kRerankBatchSize = 256;
+
+// Establish the kth full distance before pruning subsequent batches. Iterators also need the
+// first unscored position so they can materialize exact discard distances.
+template <typename ScoreBatch>
+uint64_t
+rerank_by_lower_bound(Vector<uint64_t>& order,
+                      const Vector<float>& lower_bounds,
+                      const DistHeapPtr& heap,
+                      uint64_t topk,
+                      uint64_t max_evaluations,
+                      ScoreBatch&& score_batch) {
+    std::sort(order.begin(), order.end(), [&](uint64_t lhs, uint64_t rhs) {
+        return lower_bounds[lhs] < lower_bounds[rhs];
+    });
+    const uint64_t limit =
+        max_evaluations == 0 ? order.size() : std::min<uint64_t>(order.size(), max_evaluations);
+    uint64_t cursor = 0;
+    while (cursor < limit) {
+        const bool heap_full = heap->Size() == topk;
+        const auto batch_size =
+            cursor == 0 and not heap_full ? topk - heap->Size() : kRerankBatchSize;
+        const auto available = std::min(batch_size, limit - cursor);
+        uint64_t count = available;
+        if (heap_full) {
+            const float threshold = heap->Top().first;
+            count = 0;
+            while (count < available and lower_bounds[order[cursor + count]] < threshold) {
+                ++count;
+            }
+            if (count == 0) {
+                break;
+            }
+        }
+        score_batch(order.data() + cursor, count);
+        cursor += count;
+    }
+    return cursor;
+}
+
 }  // namespace
 
 DistHeapPtr
@@ -333,69 +373,17 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
 
     Vector<uint64_t> order(candidate_size, query_allocator);
     std::iota(order.begin(), order.end(), 0);
-    std::sort(order.begin(), order.end(), [&lower_bounds](uint64_t lhs, uint64_t rhs) {
-        return lower_bounds[lhs] < lower_bounds[rhs];
-    });
-
-    const uint64_t bootstrap_size = std::min<uint64_t>(static_cast<uint64_t>(topk), candidate_size);
-    constexpr uint64_t batch_size = 256;
-    const auto buffer_size = std::max<uint64_t>(bootstrap_size, batch_size);
+    const auto buffer_size = std::max<uint64_t>(topk, kRerankBatchSize);
     Vector<InnerIdType> ids(buffer_size, query_allocator);
     Vector<float> dists(buffer_size, query_allocator);
     Vector<float> hint_dists(buffer_size, query_allocator);
-    Vector<uint64_t> batch_indices(buffer_size, query_allocator);
-
-    for (uint64_t i = 0; i < bootstrap_size; ++i) {
-        const auto idx = order[i];
-        ids[i] = all_ids[idx];
-        hint_dists[i] = idx < heap_unique_size ? lower_bound_probe_dists[idx]
-                                               : std::numeric_limits<float>::max();
-    }
-    add_reorder_distance_count(ctx, bootstrap_size);
-    {
-        ScopedDistancePhase scoped(ctx, DistanceEvaluationPhase::RERANK);
-        flatten_->QueryWithDistanceHint(
-            dists.data(), hint_dists.data(), computer, ids.data(), bootstrap_size, &ctx);
-    }
-    for (uint64_t i = 0; i < bootstrap_size; ++i) {
-        if (ctx.reasoning_ctx != nullptr) {
-            const auto idx = order[i];
-            ctx.reasoning_ctx->RecordReorder(
-                ids[i], lower_bound_probe_dists[idx], dists[i]);  // [reasoning]
+    const auto score_batch = [&](const uint64_t* batch_indices, uint64_t batch_count) {
+        for (uint64_t i = 0; i < batch_count; ++i) {
+            const auto idx = batch_indices[i];
+            ids[i] = all_ids[idx];
+            hint_dists[i] = idx < heap_unique_size ? lower_bound_probe_dists[idx]
+                                                   : std::numeric_limits<float>::max();
         }
-        if (not consume_if_ineligible(dists[i], ids[i])) {
-            reorder_heap->Push(dists[i], ids[i]);
-        }
-    }
-
-    uint64_t cursor = bootstrap_size;
-    while (cursor < candidate_size) {
-        if (reorder_heap->Size() == topk &&
-            lower_bounds[order[cursor]] >= reorder_heap->Top().first) {
-            break;
-        }
-
-        const auto pruning_threshold = reorder_heap->Size() == topk
-                                           ? reorder_heap->Top().first
-                                           : std::numeric_limits<float>::max();
-        uint64_t batch_count = 0;
-        while (cursor < candidate_size && batch_count < batch_size) {
-            const auto idx = order[cursor];
-            if (lower_bounds[idx] >= pruning_threshold) {
-                break;
-            }
-            ids[batch_count] = all_ids[idx];
-            hint_dists[batch_count] = idx < heap_unique_size ? lower_bound_probe_dists[idx]
-                                                             : std::numeric_limits<float>::max();
-            batch_indices[batch_count] = idx;
-            ++batch_count;
-            ++cursor;
-        }
-
-        if (batch_count == 0) {
-            break;
-        }
-
         add_reorder_distance_count(ctx, batch_count);
         {
             ScopedDistancePhase scoped(ctx, DistanceEvaluationPhase::RERANK);
@@ -425,7 +413,8 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
                 }
             }
         }
-    }
+    };
+    rerank_by_lower_bound(order, lower_bounds, reorder_heap, topk, 0, score_batch);
     return reorder_heap;
 }
 
@@ -436,7 +425,9 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
                              QueryContext& ctx,
                              IteratorFilterContext* iter_ctx,
                              const RaBitQCandidateVector* rabitq_lower_bound_candidates,
-                             const std::optional<float>& distance_threshold) {
+                             const std::optional<float>& distance_threshold,
+                             uint64_t max_evaluations,
+                             const ComputerInterfacePtr& preset_computer) {
     auto* split_codes = dynamic_cast<RaBitQSplitDataCellInterface*>(flatten_.get());
     CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
         fused_graph_ != nullptr and split_codes != nullptr,
@@ -580,7 +571,7 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
         }
     }
 
-    ComputerInterfacePtr computer{nullptr};
+    ComputerInterfacePtr computer = preset_computer;
     const auto ensure_computer = [&]() -> const ComputerInterfacePtr& {
         if (computer == nullptr) {
             computer = split_codes->FactoryFusedComputer(query);
@@ -588,6 +579,7 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
         return computer;
     };
 
+    add_reorder_candidate_count(ctx, candidate_size);
     const uint64_t unhinted_candidate_size = candidate_size - hinted_candidate_size;
     if (unhinted_candidate_size > 0) {
         add_reorder_lower_bound_probe_count(ctx, unhinted_candidate_size);
@@ -656,8 +648,11 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
         }
     }
 
-    constexpr uint64_t batch_size = 256;
-    const uint64_t missing_buffer_size = lower_bounds_available ? batch_size : candidate_size;
+    const uint64_t evaluation_limit =
+        max_evaluations == 0 ? candidate_size : std::min(candidate_size, max_evaluations);
+    const uint64_t batch_size =
+        std::min<uint64_t>(evaluation_limit, std::max<uint64_t>(topk, kRerankBatchSize));
+    const uint64_t missing_buffer_size = lower_bounds_available ? batch_size : evaluation_limit;
     Vector<InnerIdType> missing_ids(missing_buffer_size, query_allocator);
     Vector<float> missing_hints(missing_buffer_size, query_allocator);
     Vector<float> missing_dists(missing_buffer_size, query_allocator);
@@ -700,86 +695,39 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
         };
 
     if (not lower_bounds_available) {
-        compute_missing_full_distances(nullptr, candidate_size, full_distances.data());
-        for (uint64_t i = 0; i < candidate_size; ++i) {
+        compute_missing_full_distances(nullptr, evaluation_limit, full_distances.data());
+        for (uint64_t i = 0; i < evaluation_limit; ++i) {
             push_full_distance(i, full_distances[i]);
         }
         return reorder_heap;
     }
 
-    Vector<uint64_t> order(candidate_size, query_allocator);
-    std::iota(order.begin(), order.end(), 0);
-    std::sort(order.begin(), order.end(), [&lower_bounds](uint64_t lhs, uint64_t rhs) {
-        return lower_bounds[lhs] < lower_bounds[rhs];
-    });
-
-    Vector<float> batch_dists(batch_size, query_allocator);
-    Vector<uint64_t> batch_indices(batch_size, query_allocator);
-
-    // Seed the exact threshold with every full distance produced during traversal.  Missing
-    // candidates then load their supplement only while their lower bound can still enter top-k.
+    Vector<uint64_t> order(query_allocator);
+    order.reserve(candidate_size);
     for (uint64_t i = 0; i < candidate_size; ++i) {
         if (has_valid_distance(full_distances[i])) {
             push_full_distance(i, full_distances[i]);
+        } else {
+            order.push_back(i);
         }
     }
-
-    uint64_t cursor = 0;
-    while (cursor < candidate_size) {
-        while (cursor < candidate_size and has_valid_distance(full_distances[order[cursor]])) {
-            ++cursor;
+    Vector<float> batch_dists(batch_size, query_allocator);
+    const auto score_batch = [&](const uint64_t* indices, uint64_t count) {
+        compute_missing_full_distances(indices, count, batch_dists.data());
+        for (uint64_t i = 0; i < count; ++i) {
+            push_full_distance(indices[i], batch_dists[i]);
         }
-        if (cursor == candidate_size) {
-            break;
-        }
-        const bool heap_full = reorder_heap->Size() == static_cast<uint64_t>(topk);
-        const float threshold =
-            heap_full ? reorder_heap->Top().first : std::numeric_limits<float>::max();
-        if (heap_full and lower_bounds[order[cursor]] >= threshold) {
-            break;
-        }
-        const uint64_t batch_limit =
-            heap_full ? batch_size
-                      : std::min<uint64_t>(batch_size,
-                                           static_cast<uint64_t>(topk) - reorder_heap->Size());
-        uint64_t batch_count = 0;
-        while (cursor < candidate_size and batch_count < batch_limit) {
-            const auto idx = order[cursor];
-            if (has_valid_distance(full_distances[idx])) {
-                ++cursor;
-                continue;
-            }
-            if (heap_full and lower_bounds[idx] >= threshold) {
-                break;
-            }
-            batch_indices[batch_count++] = idx;
-            ++cursor;
-        }
-
-        if (batch_count == 0) {
-            break;
-        }
-
-        compute_missing_full_distances(batch_indices.data(), batch_count, batch_dists.data());
-        for (uint64_t i = 0; i < batch_count; ++i) {
-            push_full_distance(batch_indices[i], batch_dists[i]);
-        }
-    }
+    };
+    auto cursor = rerank_by_lower_bound(
+        order, lower_bounds, reorder_heap, topk, max_evaluations, score_batch);
     if (iter_ctx != nullptr) {
         // Iterator pages can later expose discard values directly (including on the final drain),
         // so every buffered candidate must carry a full distance rather than a lower bound.
-        while (cursor < candidate_size) {
-            uint64_t batch_count = 0;
-            while (cursor < candidate_size and batch_count < batch_size) {
-                const auto idx = order[cursor++];
-                if (not has_valid_distance(full_distances[idx])) {
-                    batch_indices[batch_count++] = idx;
-                }
-            }
-            if (batch_count == 0) {
-                continue;
-            }
-            compute_missing_full_distances(batch_indices.data(), batch_count, batch_dists.data());
+        while (cursor < order.size()) {
+            const auto batch_count = std::min<uint64_t>(batch_size, order.size() - cursor);
+            const auto* batch_indices = order.data() + cursor;
+            compute_missing_full_distances(batch_indices, batch_count, batch_dists.data());
+            cursor += batch_count;
             for (uint64_t i = 0; i < batch_count; ++i) {
                 const auto idx = batch_indices[i];
                 if (ctx.reasoning_ctx != nullptr) {

@@ -356,7 +356,7 @@ FP16/BF16 输入支持原来对 FP32 合法的同一组存储量化器配置，�
 | `skip_strategy` | string | `"deterministic_accumulative"` | 过滤跳过的策略。可选值：`"random"`（随机跳过）或 `"deterministic_accumulative"`（确定性累积跳过）。详见下文[过滤跳过策略](#过滤跳过策略skip_ratio-与-skip_strategy)。 |
 | `brute_force_threshold` | float | `0.0` | 选择率感知的暴搜回退开关。当取值 `> 0` 且当前 filter 的 `ValidRatio()` 小于等于 `brute_force_threshold` 时，搜索会**完全跳过图遍历**，直接在通过过滤的 id 上用最佳精度的 flatten 编码做一次暴力扫描（细节见下一节）。取值范围 `[0.0, 1.0]`；默认 `0.0` 表示关闭，保持原有行为。 |
 | `rabitq_one_bit_search` | bool | `false` | 启用 RaBitQ filter/lower-bound 路径；对 x+y split 索引会使用全部 x 个 filter bits，详见 [RaBitQ x+y Split](../quantization/rabitq_split.md)。 |
-| `rabitq_rerank_candidates` | integer | 自动 | 外置 supplement 的唯一精排候选数上限。至少为 k，默认 `max(ef_search, 2*k)`。 |
+| `rabitq_rerank_candidates` | integer | 未设置 | 外置 supplement 完整评分数的可选硬上限，至少为 k。默认根据候选下界和当前第 k 名的完整距离决定何时停止精排。 |
 | `rabitq_error_rate` | float | 索引默认值 | 本次搜索使用的正数 lower-bound 误差倍率；调整它不需要重建 split 索引。 |
 | `enable_reorder` | bool | `true` | 是否用精排编码对粗排候选做重打分。设为 `false` 跳过精排，直接返回近似结果。需在 `index_param` 中设置 `use_reorder: true` 以存储精排所需的精确编码。 |
 | `factor` | float | `0.0` | 精排候选倍率。候选池初值为 `max(ef_search, topk)`；当 `> 1.0` 时上限为 `min(max(ef_search, topk), floor(topk * factor))`，因此最终可能**低于** `ef_search`。默认 `0.0` 保持 `ef_search` 候选池。启用共轭图时最终候选池不低于其 look-at-`k` 下限。无法精排时不生效。 |
