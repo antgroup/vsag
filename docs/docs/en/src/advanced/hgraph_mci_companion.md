@@ -236,9 +236,10 @@ ADD and deletion repair follow these steps.
    with in-memory FP32 squared L2, normal vector storage, duplicate handling disabled, no reordering,
    and `ef_construction >= mci_mcs`, MCI can reuse the bottom-layer insertion candidates before edge
    pruning. A point assigned only to the bottom layer starts this beam at the HGraph entry point.
-   Points assigned an upper layer follow the usual upper-layer descent. MCI selects the closest
-   eligible IDs, breaking distance ties by ID. If the heap is
-   unavailable or has too few distinct eligible points, MCI obtains candidates with the usual
+   The same beam supplies HGraph's new bottom-layer edges, so enabling candidate reuse can also
+   change those edges. Points assigned an upper layer follow the usual upper-layer descent.
+   MCI selects the closest eligible IDs, breaking distance ties by ID. If the heap is unavailable
+   or has too few distinct eligible points, MCI obtains candidates with the usual
    HGraph search (`use_mci=false`).
 3. Single-row Add finds a clique containing the inserted point and previously
    uncovered neighbors. It extends this clique across the original candidate pool, including
@@ -268,11 +269,8 @@ candidate generation; FP32 findings do not establish RaBitQ behavior.
 | FORCE_REMOVE | Move tail points into holes; reduce slots and attempt shrinking | Snapshot, remap, repair, automatic Flush | None |
 | Internal automatic compaction | No vector deletion/movement | Merge delta, remove retired memberships, rebuild CSR | None |
 
-Add and MARK_REMOVE share a 100-successful-vector counter: Add checks per point; deletion checks
-after the complete batch is projected and repaired. Failed inserts and duplicate/missing removals
-do not count. A successful compaction, full rebuild, load, or FORCE_REMOVE end-of-batch compaction
-resets the counter. Allocation failure during automatic maintenance retains delta and retries on
-the next successful mutation. Delta remains searchable and serializable below the threshold.
+Successful single-row additions count toward the 100-vector maintenance threshold. Only multi-row
+Add and MARK_REMOVE check it. Single-row streams keep their delta searchable until compaction.
 
 MCI mutations share a serialization mutex. Physical moves and final shrinking hold exclusive
 force-remove protection. Repair releases that lock so internal HGraph queries can acquire read
@@ -446,6 +444,8 @@ Allocator retention and IO block granularity mean RSS need not fall proportional
 memory accounting.
 
 Single-row Add appends each clique to delta, where it is immediately available to searches.
+During a stream of single-row additions, delta memory grows with the pending memberships. Queries
+look up the delta rows for visited nodes and cliques. Filtering this mutable view tests members individually.
 Saving with `Serialize()` or freezing with `SetImmutable()` merges pending single-row additions
 into the two CSR arrays once.
 Queries on the resulting in-memory index and the restored snapshot can use the packed CSR path

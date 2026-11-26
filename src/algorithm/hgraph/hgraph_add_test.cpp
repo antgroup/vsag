@@ -56,9 +56,15 @@ TEST_CASE("HGraph single Add selects distinct live MCI candidates", "[hgraph][mc
         REQUIRE_FALSE(vsag::SelectMciAddCandidates(scores, 5, 5, removed, ids));
         REQUIRE(ids.empty());
     }
-    SECTION("fall back on a nonfinite distance") {
+    SECTION("reuse finite candidates after dropping nonfinite records") {
         scores.front().first = std::numeric_limits<float>::quiet_NaN();
-        REQUIRE_FALSE(vsag::SelectMciAddCandidates(scores, 5, 1, removed, ids));
+        scores.emplace_back(std::numeric_limits<float>::infinity(), 0);
+        REQUIRE(vsag::SelectMciAddCandidates(scores, 5, 3, removed, ids));
+        REQUIRE(ids == vsag::Vector<vsag::InnerIdType>({1, 2, 3}, allocator.get()));
+    }
+    SECTION("fall back when too few IDs have finite distances") {
+        scores[1].first = std::numeric_limits<float>::infinity();
+        REQUIRE_FALSE(vsag::SelectMciAddCandidates(scores, 5, 4, removed, ids));
         REQUIRE(ids.empty());
     }
 }

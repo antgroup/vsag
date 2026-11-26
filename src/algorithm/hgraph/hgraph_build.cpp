@@ -21,6 +21,7 @@
 #include <future>
 #include <limits>
 #include <numeric>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -44,6 +45,7 @@
 #include "simd/fp32_simd.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
+#include "utils/byte_buffer.h"
 #include "utils/util_functions.h"
 #include "vsag/options.h"
 
@@ -835,8 +837,11 @@ HGraph::AddImpl::build_single_add_cliques(InnerIdType seed, const Vector<InnerId
 
     Vector<InnerIdType> ids(index_.allocator_);
     UnorderedSet<InnerIdType> seen(index_.allocator_);
-    std::vector<float> seed_distances;
-    std::vector<size_t> memberships;
+    Vector<float> seed_distances(index_.allocator_);
+    Vector<size_t> memberships(index_.allocator_);
+    ids.reserve(knn_ids.size());
+    seed_distances.reserve(knn_ids.size());
+    memberships.reserve(knn_ids.size());
     Vector<InnerIdType> incident(index_.allocator_);
     for (auto id : knn_ids) {
         if (id >= seed or index_.label_table_->IsRemoved(id) or not seen.insert(id).second) {
@@ -856,32 +861,34 @@ HGraph::AddImpl::build_single_add_cliques(InnerIdType seed, const Vector<InnerId
     // Reuse pair distances across radius retries, witness extension and successive
     // cliques for this seed. Large user-supplied pools use the same uncached metric.
     constexpr size_t max_cached_candidates = 1024;
-    std::vector<float> cache;
-    std::vector<uint8_t> known;
-    if (ids.size() <= max_cached_candidates) {
-        cache.resize(ids.size() * (ids.size() + 1) / 2);
-        known.resize(cache.size());
+    std::optional<ByteBuffer> cache;
+    Vector<bool> known(index_.allocator_);
+    if (ids.size() > 1 and ids.size() <= max_cached_candidates) {
+        const auto pairs = ids.size() * (ids.size() + 1) / 2;
+        cache.emplace(pairs * sizeof(float), index_.allocator_);
+        known.resize(pairs);
     }
+    auto* distances = cache ? reinterpret_cast<float*>(cache->data) : nullptr;
     auto pair_distance = [&](size_t a, size_t b) {
         if (a < b) {
             std::swap(a, b);
         }
-        if (cache.empty()) {
+        if (distances == nullptr) {
             return stored_distance(ids[a], ids[b]);
         }
         const size_t offset = a * (a + 1) / 2 + b;
         if (not known[offset]) {
-            cache[offset] = stored_distance(ids[a], ids[b]);
-            known[offset] = 1;
+            distances[offset] = stored_distance(ids[a], ids[b]);
+            known[offset] = true;
         }
-        return cache[offset];
+        return distances[offset];
     };
 
     // The seed is the only vertex requiring its first membership. A candidate with
     // no memberships has the same priority as one with a single membership.
     auto coverage = [&](InnerIdType id) { return std::max<size_t>(1, memberships[id]); };
     const auto node_limit = std::max<uint64_t>(3, total / 100);
-    std::vector<InnerIdType> local_ids(ids.size());
+    Vector<InnerIdType> local_ids(ids.size(), index_.allocator_);
     while (neighbors.size() < degree_target) {
         // The local builder numbers uncovered candidates first, preserving candidate
         // order in both partitions. Keep that order for tied distances and coverage.
@@ -897,7 +904,7 @@ HGraph::AddImpl::build_single_add_cliques(InnerIdType seed, const Vector<InnerId
             std::min<uint64_t>({degree_target - neighbors.size(),
                                 index_.mci_parameters_.incremental_clique_max - 1,
                                 uncovered});
-        std::vector<InnerIdType> witness_order(local_ids.begin(), covered);
+        Vector<InnerIdType> witness_order(local_ids.begin(), covered, index_.allocator_);
         const auto saturated =
             std::stable_partition(witness_order.begin(), witness_order.end(), [&](auto i) {
                 return coverage(i) < node_limit;
@@ -928,6 +935,9 @@ HGraph::AddImpl::build_single_add_cliques(InnerIdType seed, const Vector<InnerId
             return seed_distances[a] < seed_distances[b];
         });
         std::vector<InnerIdType> chosen;
+        // At the retry limit, relax only the witness size so the seed still grows to a
+        // maximal clique in this pool at the final radius. Batch Add's coverage fallback
+        // can emit a group without checking pair distances.
         float alpha = index_.mci_parameters_.alpha;
         for (;;) {
             const float radius = mci::ExpandSeedRadius(nearest, alpha, index_.metric_);
@@ -940,8 +950,9 @@ HGraph::AddImpl::build_single_add_cliques(InnerIdType seed, const Vector<InnerId
                 index_.metric_ == MetricType::METRIC_TYPE_COSINE and radius > 0 and radius < 2;
             if ((alpha > 100.0F and not expand_cosine) or
                 alpha >= std::numeric_limits<float>::max() / 2) {
+                witness_order.clear();
                 chosen = mci::FindMaximalSeedNeighbors(
-                    local_ids, {}, seed_distances, radius, 0, pair_distance);
+                    local_ids, witness_order, seed_distances, radius, 0, pair_distance);
                 break;
             }
             alpha *= 2.0F;

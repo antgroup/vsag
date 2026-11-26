@@ -24,16 +24,13 @@ SelectMciAddCandidates(Vector<DistanceHeap::DistanceRecord>& scores,
     if (k == 0 or scores.size() < k) {
         return false;
     }
-    scores.erase(
-        std::remove_if(scores.begin(),
-                       scores.end(),
-                       [&](const auto& p) { return p.second >= row or is_removed(p.second); }),
-        scores.end());
-    for (const auto& record : scores) {
-        if (not IsFiniteFloatBits(record.first)) {
-            return false;
-        }
-    }
+    scores.erase(std::remove_if(scores.begin(),
+                                scores.end(),
+                                [&](const auto& p) {
+                                    return p.second >= row or not IsFiniteFloatBits(p.first) or
+                                           is_removed(p.second);
+                                }),
+                 scores.end());
     std::sort(scores.begin(), scores.end(), [](const auto& a, const auto& b) {
         return a.second == b.second ? a.first < b.first : a.second < b.second;
     });

@@ -120,11 +120,11 @@ CliqueCore(const std::vector<CliqueBits>& adjacency, uint64_t minimum_degree) {
 // Seek the first witness among uncovered neighbors. Every candidate in extension_order
 // can extend it, including covered and highly subscribed vertices. A zero-size witness
 // grows the seed alone at the final radius.
-template <typename PairDistance>
+template <typename IdAllocator, typename DistanceAllocator, typename PairDistance>
 std::vector<InnerIdType>
-FindMaximalSeedNeighbors(const std::vector<InnerIdType>& extension_order,
-                         const std::vector<InnerIdType>& witness_order,
-                         const std::vector<float>& seed_distances,
+FindMaximalSeedNeighbors(const std::vector<InnerIdType, IdAllocator>& extension_order,
+                         const std::vector<InnerIdType, IdAllocator>& witness_order,
+                         const std::vector<float, DistanceAllocator>& seed_distances,
                          float radius,
                          uint64_t threshold,
                          PairDistance&& distance) {
