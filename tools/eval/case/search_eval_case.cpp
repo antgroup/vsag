@@ -30,6 +30,7 @@
 #include "../monitor/latency_monitor.h"
 #include "../monitor/memory_peak_monitor.h"
 #include "../monitor/recall_monitor.h"
+#include "search_metrics_names.h"
 #include "search_timing.h"
 #include "typing.h"
 #include "vsag/filter.h"
@@ -488,7 +489,8 @@ SearchEvalCase::record_statistics(const vsag::DatasetPtr& result) {
                                                kRabitqFullCount,
                                                kRabitqFilterFallbackFullCount,
                                                kRabitqReorderHintFullCount,
-                                               kRabitqReorderFallbackFullCount});
+                                               kRabitqReorderFallbackFullCount,
+                                               EARLY_STOP_COUNT_KEY});
     this->statistics_dist_cmp_.fetch_add(parse_stat_value(values[0]), std::memory_order_relaxed);
     this->statistics_hops_.fetch_add(parse_stat_value(values[1]), std::memory_order_relaxed);
     this->statistics_io_cnt_.fetch_add(parse_stat_value(values[2]), std::memory_order_relaxed);
@@ -508,6 +510,8 @@ SearchEvalCase::record_statistics(const vsag::DatasetPtr& result) {
     this->statistics_rabitq_reorder_fallback_full_count_.fetch_add(parse_stat_value(values[10]),
                                                                    std::memory_order_relaxed);
     this->statistics_query_count_.fetch_add(1, std::memory_order_relaxed);
+    this->statistics_early_stop_count_.fetch_add(parse_stat_value(values[11]),
+                                                 std::memory_order_relaxed);
 }
 
 JsonType
@@ -515,6 +519,9 @@ SearchEvalCase::statistics_total_json() const {
     JsonType json;
     set_stat_value(json, "dist_cmp", this->statistics_dist_cmp_.load());
     set_stat_value(json, "hops", this->statistics_hops_.load());
+    if (const auto early_stops = statistics_early_stop_count_.load(); early_stops != 0) {
+        set_stat_value(json, EARLY_STOP_COUNT_KEY, early_stops);
+    }
     set_stat_value(json, "io_cnt", this->statistics_io_cnt_.load());
     set_stat_value(json, "io_time_ms", this->statistics_io_time_ms_.load());
     set_stat_value(json, "reorder_distance_count", this->statistics_reorder_distance_count_.load());
@@ -541,6 +548,9 @@ SearchEvalCase::statistics_avg_json() const {
     const auto count = this->statistics_query_count_.load();
     set_avg_stat_value(json, "dist_cmp", this->statistics_dist_cmp_.load(), count);
     set_avg_stat_value(json, "hops", this->statistics_hops_.load(), count);
+    if (const auto early_stops = statistics_early_stop_count_.load(); early_stops != 0) {
+        set_avg_stat_value(json, EARLY_STOP_COUNT_KEY, early_stops, count);
+    }
     set_avg_stat_value(json, "io_cnt", this->statistics_io_cnt_.load(), count);
     set_avg_stat_value(json, "io_time_ms", this->statistics_io_time_ms_.load(), count);
     set_avg_stat_value(

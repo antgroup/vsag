@@ -72,6 +72,22 @@ TEST_CASE("Legacy search statistics keeps integer accessor compatibility", "[ut]
     CHECK(json["hops"].GetUint64() == std::numeric_limits<uint32_t>::max());
 }
 
+TEST_CASE("Search statistics report early_stop_count only when the rule ran",
+          "[ut][search_metrics][distance_early_stop]") {
+    vsag::SearchMetrics disabled;
+    CHECK_FALSE(disabled.base.ToJson().Contains("early_stop_count"));
+    CHECK(std::move(disabled).Snapshot().Extensions().count("early_stop_count") == 0);
+
+    // Armed but never fired: the count is reported as zero, unlike a search without the rule.
+    vsag::SearchMetrics armed;
+    armed.base.early_stop_armed.store(true, std::memory_order_relaxed);
+    CHECK(armed.base.ToJson()["early_stop_count"].GetUint64() == 0);
+    armed.base.early_stop_count.store(3, std::memory_order_relaxed);
+    auto snapshot = std::move(armed).Snapshot();
+    CHECK(std::get<uint32_t>(snapshot.Extensions().at("early_stop_count")) == 3);
+    CHECK(vsag::JsonType::Parse(snapshot.Dump())["early_stop_count"].GetUint64() == 3);
+}
+
 TEST_CASE("Search metrics serializes uint32 fields without signed overflow",
           "[ut][search_metrics]") {
     vsag::SearchResultMetrics metrics;

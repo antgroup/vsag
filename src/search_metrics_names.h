@@ -18,6 +18,10 @@
 
 namespace vsag {
 
+// Number of queries the distance early stop ended; reported only when the rule ran, so it is not
+// a field of MetricsSchema::Base().
+inline constexpr const char* EARLY_STOP_COUNT_KEY = "early_stop_count";
+
 inline const char*
 DistanceEvaluationPhaseName(DistanceEvaluationPhase phase) {
     switch (phase) {

@@ -47,6 +47,9 @@ struct QueryContext {
     bool track_distance_evaluations = true;
     bool enable_rabitq_reorder = true;
     QueryComputerPool* computer_pool = nullptr;
+    // Above 0, the KNN traversals of BasicSearcher and ParallelSearcher run the distance early
+    // stop with this alpha.
+    float distance_early_stop_alpha = 0.0F;
 };
 
 class ScopedDistancePhase {
@@ -178,6 +181,9 @@ public:
         j["is_timeout"].SetBool(is_timeout.load(std::memory_order_relaxed));
         j["dist_cmp"].SetUint64(dist_cmp.load(std::memory_order_relaxed));
         j["hops"].SetUint64(hops.load(std::memory_order_relaxed));
+        if (early_stop_armed.load(std::memory_order_relaxed)) {
+            j[EARLY_STOP_COUNT_KEY].SetUint64(early_stop_count.load(std::memory_order_relaxed));
+        }
         j["io_cnt"].SetUint64(io_cnt.load(std::memory_order_relaxed));
         j["io_time_ms"].SetUint64(io_time_ms.load(std::memory_order_relaxed));
         j["reorder_distance_count"].SetUint64(
@@ -244,6 +250,10 @@ public:
     std::atomic<uint32_t> mv_candidate_count{0};
     std::atomic<uint64_t> mv_io_bytes{0};
     std::atomic<bool> complete{true};
+    // early_stop_count is reported only when a traversal ran the distance early stop, so 0 means
+    // the rule ran and never fired.
+    std::atomic<bool> early_stop_armed{false};
+    std::atomic<uint32_t> early_stop_count{0};
 };
 
 class SearchMetrics {
@@ -303,6 +313,10 @@ public:
         }
         result.complete = base.complete.load(std::memory_order_relaxed);
         result.extensions_ = std::move(extensions_);
+        if (base.early_stop_armed.load(std::memory_order_relaxed)) {
+            result.extensions_.emplace(EARLY_STOP_COUNT_KEY,
+                                       base.early_stop_count.load(std::memory_order_relaxed));
+        }
         return result;
     }
 

@@ -18,12 +18,14 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <future>
 #include <iostream>
 #include <limits>
 #include <mutex>
+#include <numeric>
 #include <random>
 #include <set>
 #include <sstream>
@@ -7558,4 +7560,262 @@ TEST_CASE("(PR) HGraph iterator search via SearchWithRequest with k>1 paging",
     }
 
     delete iter_ctx;
+}
+
+namespace {
+
+// Gaussian clusters: a query's nearest neighbours sit clearly closer than the rest of the base,
+// as in embedding data, so the distance early stop has something to cut.
+struct EarlyStopData {
+    static constexpr int64_t kDim = 32;
+    static constexpr int64_t kBaseCount = 2000;
+    static constexpr int64_t kQueryCount = 40;
+    std::vector<float> base;
+    std::vector<float> queries;
+    std::vector<int64_t> ids;
+};
+
+const EarlyStopData&
+GetEarlyStopData() {
+    static const EarlyStopData data = []() {
+        EarlyStopData result;
+        constexpr int64_t kClusters = 40;
+        std::mt19937 rng(20261023);
+        std::normal_distribution<float> normal(0.0F, 1.0F);
+        std::vector<float> centers(kClusters * EarlyStopData::kDim);
+        for (auto& value : centers) {
+            value = normal(rng);
+        }
+        auto sample = [&](std::vector<float>& out, int64_t count) {
+            out.resize(count * EarlyStopData::kDim);
+            for (int64_t i = 0; i < count; ++i) {
+                const auto cluster = static_cast<int64_t>(rng() % kClusters);
+                for (int64_t d = 0; d < EarlyStopData::kDim; ++d) {
+                    out[i * EarlyStopData::kDim + d] =
+                        centers[cluster * EarlyStopData::kDim + d] + 0.35F * normal(rng);
+                }
+            }
+        };
+        sample(result.base, EarlyStopData::kBaseCount);
+        sample(result.queries, EarlyStopData::kQueryCount);
+        result.ids.resize(EarlyStopData::kBaseCount);
+        std::iota(result.ids.begin(), result.ids.end(), 1000);
+        return result;
+    }();
+    return data;
+}
+
+float
+EarlyStopDistance(const float* a, const float* b, const std::string& metric) {
+    double dot = 0;
+    double norm_a = 0;
+    double norm_b = 0;
+    double l2 = 0;
+    for (int64_t d = 0; d < EarlyStopData::kDim; ++d) {
+        dot += static_cast<double>(a[d]) * b[d];
+        norm_a += static_cast<double>(a[d]) * a[d];
+        norm_b += static_cast<double>(b[d]) * b[d];
+        l2 += (static_cast<double>(a[d]) - b[d]) * (static_cast<double>(a[d]) - b[d]);
+    }
+    if (metric == "cosine") {
+        return static_cast<float>(1.0 - dot / std::sqrt(norm_a * norm_b));
+    }
+    return static_cast<float>(l2);
+}
+
+std::vector<std::vector<int64_t>>
+EarlyStopTruth(const std::string& metric, int64_t k) {
+    const auto& data = GetEarlyStopData();
+    std::vector<std::vector<int64_t>> truth(EarlyStopData::kQueryCount);
+    for (int64_t q = 0; q < EarlyStopData::kQueryCount; ++q) {
+        std::vector<std::pair<float, int64_t>> scored(EarlyStopData::kBaseCount);
+        for (int64_t i = 0; i < EarlyStopData::kBaseCount; ++i) {
+            scored[i] = {EarlyStopDistance(data.queries.data() + q * EarlyStopData::kDim,
+                                           data.base.data() + i * EarlyStopData::kDim,
+                                           metric),
+                         data.ids[i]};
+        }
+        std::partial_sort(scored.begin(), scored.begin() + k, scored.end());
+        for (int64_t i = 0; i < k; ++i) {
+            truth[q].push_back(scored[i].second);
+        }
+    }
+    return truth;
+}
+
+vsag::IndexPtr
+BuildEarlyStopIndex(const std::string& metric,
+                    const std::string& index_param,
+                    int64_t base_count = EarlyStopData::kBaseCount) {
+    const auto& data = GetEarlyStopData();
+    auto params = vsag::JsonType::Parse(R"({"dtype":"float32","dim":32})");
+    params["metric_type"].SetString(metric);
+    params["index_param"].SetJson(vsag::JsonType::Parse(index_param));
+    auto created = vsag::Factory::CreateIndex("hgraph", params.Dump());
+    REQUIRE(created.has_value());
+    auto base = vsag::Dataset::Make()
+                    ->NumElements(base_count)
+                    ->Dim(EarlyStopData::kDim)
+                    ->Ids(data.ids.data())
+                    ->Float32Vectors(data.base.data())
+                    ->Owner(false);
+    REQUIRE(created.value()->Build(base).has_value());
+    return created.value();
+}
+
+vsag::DatasetPtr
+EarlyStopQuery(int64_t q) {
+    return vsag::Dataset::Make()
+        ->NumElements(1)
+        ->Dim(EarlyStopData::kDim)
+        ->Float32Vectors(GetEarlyStopData().queries.data() + q * EarlyStopData::kDim)
+        ->Owner(false);
+}
+
+std::string
+EarlyStopParams(const std::string& extra) {
+    return R"({"hgraph":{"ef_search":100)" + extra + "}}";
+}
+
+const std::string kEarlyStopDefault = R"(,"early_stop":{"type":"distance"})";
+const std::string kEarlyStopTight = R"(,"early_stop":{"type":"distance","alpha":1.1})";
+
+// Recall over all queries, and how many searches the rule ended. Every search must report the
+// count exactly when the rule is armed.
+struct EarlyStopRun {
+    double recall{0};
+    uint64_t stops{0};
+};
+
+EarlyStopRun
+RunEarlyStopQueries(const vsag::IndexPtr& index,
+                    const std::string& params,
+                    const std::vector<std::vector<int64_t>>& truth,
+                    bool armed) {
+    constexpr int64_t k = 10;
+    EarlyStopRun run;
+    uint64_t hits = 0;
+    for (int64_t q = 0; q < EarlyStopData::kQueryCount; ++q) {
+        auto result = index->KnnSearch(EarlyStopQuery(q), k, params);
+        REQUIRE(result.has_value());
+        const auto count = result.value()->GetStatistics({"early_stop_count"})[0];
+        REQUIRE(count.empty() == not armed);
+        if (armed) {
+            run.stops += std::stoull(count);
+        }
+        for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+            hits += std::count(truth[q].begin(), truth[q].end(), result.value()->GetIds()[i]);
+        }
+    }
+    run.recall = static_cast<double>(hits) / static_cast<double>(k * EarlyStopData::kQueryCount);
+    return run;
+}
+
+class EarlyStopValidIdsFilter : public vsag::Filter {
+public:
+    explicit EarlyStopValidIdsFilter(std::vector<int64_t> ids) : ids_(std::move(ids)) {
+    }
+
+    bool
+    CheckValid(int64_t id) const override {
+        return std::binary_search(ids_.begin(), ids_.end(), id);
+    }
+
+    float
+    ValidRatio() const override {
+        return 0.5F;
+    }
+
+    void
+    GetValidIds(const int64_t** valid_ids, int64_t& count) const override {
+        *valid_ids = ids_.data();
+        count = static_cast<int64_t>(ids_.size());
+    }
+
+private:
+    std::vector<int64_t> ids_;
+};
+
+}  // namespace
+
+TEST_CASE("(PR) HGraph distance early stop keeps recall on clustered data",
+          "[ft][hgraph][distance_early_stop][pr]") {
+    const auto metric = GENERATE(std::string("l2"), std::string("cosine"));
+    CAPTURE(metric);
+    auto index = BuildEarlyStopIndex(
+        metric, R"({"base_quantization_type":"fp32","max_degree":16,"ef_construction":100})");
+    const auto truth = EarlyStopTruth(metric, 10);
+    const auto fixed = RunEarlyStopQueries(index, EarlyStopParams(""), truth, false);
+    const auto by_default =
+        RunEarlyStopQueries(index, EarlyStopParams(kEarlyStopDefault), truth, true);
+    const auto tight = RunEarlyStopQueries(index, EarlyStopParams(kEarlyStopTight), truth, true);
+    CAPTURE(fixed.recall, by_default.recall, by_default.stops, tight.recall, tight.stops);
+    REQUIRE(fixed.recall >= 0.9);
+    REQUIRE(by_default.recall >= fixed.recall - 0.02);
+    REQUIRE(tight.recall >= fixed.recall - 0.05);
+    REQUIRE(tight.stops > 0);
+    REQUIRE(tight.stops >= by_default.stops);
+}
+
+TEST_CASE("(PR) HGraph distance early stop runs on RaBitQ codes with reordering",
+          "[ft][hgraph][distance_early_stop][pr]") {
+    auto index = BuildEarlyStopIndex("l2",
+                                     R"({"base_quantization_type":"rabitq","use_reorder":true,
+        "precise_quantization_type":"fp32","max_degree":16,"ef_construction":100})");
+    const auto quantized = RunEarlyStopQueries(
+        index, EarlyStopParams(kEarlyStopTight), EarlyStopTruth("l2", 10), true);
+    CAPTURE(quantized.recall, quantized.stops);
+    REQUIRE(quantized.recall > 0.5);
+}
+
+TEST_CASE("(PR) HGraph distance early stop is rejected on fused RaBitQ split storage",
+          "[ft][hgraph][distance_early_stop][pr]") {
+    constexpr int64_t k = 10;
+    auto index = BuildEarlyStopIndex(
+        "l2",
+        R"({"base_quantization_type":"rabitq","precise_quantization_type":"rabitq",
+        "rabitq_bits_per_dim_base":1,"rabitq_bits_per_dim_precise":7,"rabitq_fused_datacell":true,
+        "base_io_type":"memory_io","graph_io_type":"memory_io","graph_storage_type":"flat",
+        "use_reorder":true,"reorder_source":"base","max_degree":16,"ef_construction":100})",
+        200);
+    // The index answers the same search without the option, so the error is the option's.
+    REQUIRE(index->KnnSearch(EarlyStopQuery(0), k, EarlyStopParams("")).has_value());
+    auto rejected = index->KnnSearch(EarlyStopQuery(0), k, EarlyStopParams(kEarlyStopTight));
+    REQUIRE_FALSE(rejected.has_value());
+    REQUIRE(rejected.error().message.find("fused RaBitQ split storage") != std::string::npos);
+}
+
+TEST_CASE("(PR) HGraph distance early stop reports only the traversals it ran on",
+          "[ft][hgraph][distance_early_stop][mci][pr]") {
+    constexpr int64_t k = 10;
+    constexpr int64_t kBaseCount = 400;
+    auto index = BuildEarlyStopIndex("l2",
+                                     R"({"base_quantization_type":"fp32","graph_type":"odescent",
+        "max_degree":12,"alpha":1.2,"graph_iter_turn":6,"neighbor_sample_rate":0.3,
+        "mci_mcs":8,"mci_clique_max":4,"mci_incremental_clique_max":4,"mci_alpha":1.2})",
+                                     kBaseCount);
+    std::vector<int64_t> valid_ids;
+    for (int64_t i = 0; i < kBaseCount; i += 2) {
+        valid_ids.push_back(GetEarlyStopData().ids[i]);
+    }
+    auto filter = std::make_shared<EarlyStopValidIdsFilter>(valid_ids);
+    auto search = [&](const std::string& extra) {
+        auto result = index->KnnSearch(EarlyStopQuery(0), k, EarlyStopParams(extra), filter);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() > 0);
+        return vsag::JsonType::Parse(result.value()->GetStatistics());
+    };
+    // Routes that do not traverse the graph run as before and report no count.
+    for (const auto& [extra, route] : std::vector<std::pair<std::string, std::string>>{
+             {R"(,"use_mci":true,"hgraph_valid_ratio_threshold":1.0)", "mci"},
+             {R"(,"use_mci":false,"use_hybrid_traversal":true)", "hybrid"},
+             {R"(,"brute_force_threshold":1.0)", "brute_force"}}) {
+        CAPTURE(extra);
+        auto stats = search(extra + kEarlyStopTight);
+        REQUIRE(stats["mci_hybrid_route"].GetString() == route);
+        REQUIRE_FALSE(stats.Contains("early_stop_count"));
+    }
+    auto graph = search(R"(,"use_mci":true,"hgraph_valid_ratio_threshold":0.0)" + kEarlyStopTight);
+    REQUIRE(graph["mci_hybrid_route"].GetString() == "hgraph");
+    REQUIRE(graph.Contains("early_stop_count"));
 }
