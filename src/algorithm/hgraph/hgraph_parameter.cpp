@@ -92,6 +92,16 @@ HGraphParameter::FromJson(const JsonType& json) {
     if (json.Contains(HGRAPH_RABITQ_FUSED_DATACELL_KEY)) {
         this->rabitq_fused_datacell = json[HGRAPH_RABITQ_FUSED_DATACELL_KEY].GetBool();
     }
+    external_fused_supplement = false;
+    if (json.Contains(HGRAPH_RABITQ_FUSED_LAYOUT_KEY)) {
+        const auto layout = json[HGRAPH_RABITQ_FUSED_LAYOUT_KEY].GetString();
+        CHECK_ARGUMENT(layout == "inline" or layout == "external_supplement",
+                       "unknown rabitq_fused_layout");
+        this->external_fused_supplement = layout == "external_supplement";
+    }
+    if (external_fused_supplement) {
+        CHECK_ARGUMENT(rabitq_fused_datacell, "external_supplement requires rabitq_fused_datacell");
+    }
 
     CHECK_ARGUMENT(json.Contains(BASE_CODES_KEY),
                    fmt::format("hgraph parameters must contains {}", BASE_CODES_KEY));
@@ -266,9 +276,16 @@ HGraphParameter::FromJson(const JsonType& json) {
         const auto supplement_io = this->base_codes_param->supplement_io_parameter;
         const auto supplement_io_type =
             supplement_io == nullptr ? io_type : supplement_io->GetTypeName();
-        CHECK_ARGUMENT(supplement_io_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO or
-                           supplement_io_type == IO_TYPE_VALUE_MEMORY_IO,
-                       "rabitq_fused_datacell only supports in-memory supplement IO");
+        const bool in_memory = supplement_io_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO or
+                               supplement_io_type == IO_TYPE_VALUE_MEMORY_IO;
+        const bool external_disk = external_fused_supplement and
+                                   io_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO and
+                                   (supplement_io_type == IO_TYPE_VALUE_ASYNC_IO
+#if !HAVE_LIBAIO
+                                    or supplement_io_type == IO_TYPE_VALUE_BUFFER_IO
+#endif
+                                   );
+        CHECK_ARGUMENT(in_memory or external_disk, "unsupported fused RaBitQ supplement IO");
     }
 }
 
@@ -282,6 +299,9 @@ HGraphParameter::ToJson() const {
     json[HGRAPH_USE_ELP_OPTIMIZER_KEY].SetBool(this->use_elp_optimizer);
     json[HGRAPH_IGNORE_REORDER_KEY].SetBool(this->ignore_reorder);
     json[HGRAPH_RABITQ_FUSED_DATACELL_KEY].SetBool(this->rabitq_fused_datacell);
+    if (external_fused_supplement) {
+        json[HGRAPH_RABITQ_FUSED_LAYOUT_KEY].SetString("external_supplement");
+    }
     json[REORDER_SOURCE_KEY].SetString(this->reorder_source);
     json[BASE_CODES_KEY].SetJson(this->base_codes_param->ToJson());
     auto graph_json = this->bottom_graph_param->ToJson();
@@ -346,6 +366,7 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
     CHECK_FIELD_EQ(*this, *p, duplicate_distance_threshold);
     CHECK_FIELD_EQ(*this, *p, support_force_remove);
     CHECK_FIELD_EQ(*this, *p, rabitq_fused_datacell);
+    CHECK_FIELD_EQ(*this, *p, external_fused_supplement);
     CHECK_FIELD_EQ(*this, *p, pipnn_param.adaptive_pruning);
     if (this->pipnn_param.adaptive_pruning) {
         CHECK_FIELD_EQ(*this, *p, graph_type);
@@ -484,7 +505,12 @@ HGraphSearchParameters::FromParsedJson(const JsonType& params) {
 
     read_optional_uint32(hgraph, HGRAPH_PARAMETER_HOPS_LIMIT, obj.hops_limit);
     read_optional_bool(hgraph, HGRAPH_USE_EXTRA_INFO_FILTER, obj.use_extra_info_filter);
-    read_optional_bool(hgraph, HGRAPH_PARAMETER_RABITQ_ONE_BIT_SEARCH, obj.rabitq_one_bit_search);
+    obj.has_rabitq_one_bit_search = read_optional_bool(
+        hgraph, HGRAPH_PARAMETER_RABITQ_ONE_BIT_SEARCH, obj.rabitq_one_bit_search);
+    if (read_optional_uint32(hgraph, "rabitq_rerank_candidates", obj.rabitq_rerank_candidates)) {
+        CHECK_ARGUMENT(obj.rabitq_rerank_candidates > 0,
+                       "rabitq_rerank_candidates must be positive");
+    }
     read_optional_bool(hgraph, HGRAPH_USE_MCI, obj.use_mci);
     read_optional_bool(hgraph, HGRAPH_USE_HYBRID_TRAVERSAL, obj.use_hybrid_traversal);
 

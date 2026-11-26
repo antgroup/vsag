@@ -24,6 +24,7 @@
 #include <string>
 #include <vector>
 
+#include "core/temp_dir.h"
 #include "hgraph.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/thread_pool/default_thread_pool.h"
@@ -283,6 +284,22 @@ MakeIoTypeHGraphJson(const std::string& io_type, const std::string& tag) {
         hgraph_json["precise_file_path"].SetString(prefix + "_precise");
     }
     return hgraph_json;
+}
+
+vsag::JsonType
+MakeExternalSupplementHGraphJson() {
+    auto json = MakeHGraphJson();
+    json["max_degree"].SetInt(64);
+    json["ef_construction"].SetInt(80);
+    json["use_reorder"].SetBool(true);
+    json["base_quantization_type"].SetString("rabitq");
+    json["precise_quantization_type"].SetString("rabitq");
+    json["rabitq_bits_per_dim_base"].SetUint64(3);
+    json["rabitq_bits_per_dim_precise"].SetUint64(5);
+    json["rabitq_fused_datacell"].SetBool(true);
+    json["rabitq_fused_layout"].SetString("external_supplement");
+    json["base_io_type"].SetString("block_memory_io");
+    return json;
 }
 
 // conjugate graph enabled so the serialized index carries the
@@ -895,6 +912,57 @@ FeedConjugateEdges(const std::shared_ptr<vsag::IndexImpl<vsag::HGraph>>& index, 
         inserted += result.value();
     }
     return inserted;
+}
+
+TEST_CASE("HGraph restores a framed external supplement without seeking",
+          "[ut][hgraph][external_supplement][parallel_deserialize]") {
+    auto data = MakeTestData(64, 96);
+    auto json = MakeExternalSupplementHGraphJson();
+    auto index = MakeHGraphIndex(MakeCommonParam(data.dim), json);
+    REQUIRE(index->Build(MakeDataset(data)).has_value());
+    FrameSerializeWriter writer;
+    REQUIRE(index->Serialize(writer, 4096).has_value());
+
+    const bool disk_destination = GENERATE(false, true);
+    fixtures::TempDir dir("hgraph_framed_external");
+    if (disk_destination) {
+        json["base_supplement_io_type"].SetString("async_io");
+        json["base_supplement_file_path"].SetString(dir.GenerateRandomFile(false));
+    }
+    FrameMemoryReader reader(writer.buffer_);
+    auto restored = MakeHGraphIndex(MakeCommonParam(data.dim, MakeThreadPool(2)), json);
+    const auto result = restored->ParallelDeserialize(reader);
+    INFO((result.has_value() ? "" : result.error().message));
+    REQUIRE(result.has_value());
+    REQUIRE(restored->GetNumElements() == data.count);
+    RequireSameKnnResults(index, restored, data);
+    REQUIRE(restored->CalcDistanceById(data.vectors.data(), data.ids.back()).value() ==
+            index->CalcDistanceById(data.vectors.data(), data.ids.back()).value());
+}
+
+TEST_CASE("HGraph external supplement budget excludes conjugate enhancement",
+          "[ut][hgraph][external_supplement][conjugate_graph]") {
+    auto data = MakeTestData(64, 96);
+    auto json = MakeExternalSupplementHGraphJson();
+    json["use_conjugate_graph"].SetBool(true);
+    auto index = MakeHGraphIndex(MakeCommonParam(data.dim), json);
+    REQUIRE(index->Build(MakeDataset(data)).has_value());
+    auto query = MakeDataset(data);
+    query->NumElements(1);
+    const auto bounded = R"({"hgraph":{"ef_search":32,"rabitq_rerank_candidates":1,
+                                      "use_conjugate_graph_search":false}})";
+    auto feedback = index->Feedback(query, 1, bounded, data.ids.back());
+    REQUIRE(feedback.has_value());
+    REQUIRE(feedback.value() == 1);
+    const auto enhanced =
+        index->KnnSearch(query, 1, R"({"hgraph":{"ef_search":32,"rabitq_rerank_candidates":1}})");
+    REQUIRE_FALSE(enhanced.has_value());
+    REQUIRE(enhanced.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    const auto result = index->KnnSearch(query, 1, bounded);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 1);
+    const auto stats = vsag::JsonType::Parse(result.value()->GetStatistics());
+    REQUIRE(stats["rabitq_full_count"].GetUint64() == 1);
 }
 
 TEST_CASE("HGraph ParallelDeserialize Conjugate Graph Round-Trip",

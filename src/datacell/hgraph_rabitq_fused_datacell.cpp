@@ -18,9 +18,11 @@
 #include <cstring>
 #include <limits>
 #include <mutex>
+#include <numeric>
 
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
+#include "utils/byte_buffer.h"
 
 namespace vsag {
 
@@ -29,6 +31,7 @@ constexpr uint64_t K_CACHE_LINE_SIZE = 64;
 constexpr uint64_t K_COUNT_OFFSET = 0;
 constexpr uint64_t K_HEADER_SIZE = sizeof(uint32_t);
 constexpr uint32_t K_SERIALIZATION_VERSION = 2;
+constexpr uint32_t K_EXTERNAL_SUPPLEMENT_VERSION = 3;
 
 struct FusedWireLayout {
     uint64_t record_size{0};
@@ -68,11 +71,15 @@ HGraphRaBitQFusedDataCell::AlignUp(uint64_t value, uint64_t alignment) {
     return (value + alignment - 1) / alignment * alignment;
 }
 
-HGraphRaBitQFusedDataCell::HGraphRaBitQFusedDataCell(const GraphDataCellParamPtr& graph_param,
-                                                     uint64_t one_bit_code_size,
-                                                     uint64_t supplement_code_size,
-                                                     const IndexCommonParam& common_param)
-    : one_bit_code_size_(one_bit_code_size),
+HGraphRaBitQFusedDataCell::HGraphRaBitQFusedDataCell(
+    const GraphDataCellParamPtr& graph_param,
+    uint64_t one_bit_code_size,
+    uint64_t supplement_code_size,
+    const IndexCommonParam& common_param,
+    std::shared_ptr<FusedSupplementStorage> external_supplement)
+    : external_supplement_(std::move(external_supplement)),
+      failed_updates_(common_param.allocator_.get()),
+      one_bit_code_size_(one_bit_code_size),
       supplement_code_size_(supplement_code_size),
       dim_(common_param.dim_) {
     CHECK_ARGUMENT(graph_param != nullptr, "fused graph parameter must not be null");
@@ -93,7 +100,9 @@ HGraphRaBitQFusedDataCell::HGraphRaBitQFusedDataCell(const GraphDataCellParamPtr
     label_offset_ = AlignUp(cluster_id_offset_ + sizeof(uint32_t), alignof(LabelType));
     one_bit_offset_ = label_offset_ + sizeof(LabelType);
     supplement_offset_ = one_bit_offset_ + one_bit_code_size_;
-    record_size_ = AlignUp(supplement_offset_ + supplement_code_size_, K_CACHE_LINE_SIZE);
+    record_size_ =
+        AlignUp(supplement_offset_ + (HasExternalSupplement() ? 0 : supplement_code_size_),
+                K_CACHE_LINE_SIZE);
     CHECK_ARGUMENT(
         max_capacity_ <=
             (std::numeric_limits<uint64_t>::max() - (K_CACHE_LINE_SIZE - 1)) / record_size_,
@@ -108,6 +117,9 @@ HGraphRaBitQFusedDataCell::HGraphRaBitQFusedDataCell(const GraphDataCellParamPtr
 
 void
 HGraphRaBitQFusedDataCell::Reallocate(InnerIdType new_capacity) {
+    if (external_supplement_ != nullptr) {
+        external_supplement_->ResizeSupplement(new_capacity);
+    }
     storage_->Reserve(new_capacity);
     max_capacity_ = new_capacity;
     if (duplicate_tracker_ != nullptr) {
@@ -128,11 +140,6 @@ HGraphRaBitQFusedDataCell::GetNeighborData(const uint8_t* record) const {
 const uint8_t*
 HGraphRaBitQFusedDataCell::GetOneBitCode(const uint8_t* record) const {
     return record + one_bit_offset_;
-}
-
-const uint8_t*
-HGraphRaBitQFusedDataCell::GetSupplementCode(const uint8_t* record) const {
-    return record + supplement_offset_;
 }
 
 LabelType
@@ -181,9 +188,53 @@ HGraphRaBitQFusedDataCell::SetNodeCodes(InnerIdType id,
                                         LabelType label,
                                         uint32_t cluster_id,
                                         const uint8_t* one_bit_code,
-                                        const uint8_t* supplement_code) {
+                                        const uint8_t* supplement_code,
+                                        bool replacing) {
+    const bool guard_update = replacing and HasExternalSupplement() and not HasMemorySupplement();
+    if (guard_update and failed_updates_.find(id) == failed_updates_.end()) {
+        auto backup = std::make_shared<ByteBuffer>(supplement_code_size_, allocator_);
+        ReadSupplements(&id, 1, backup->data);
+        failed_updates_.emplace(id, std::move(backup));
+    }
     SetFusedCodes(id, cluster_id, one_bit_code, supplement_code);
     std::memcpy(MutableNodeRecord(id) + label_offset_, &label, sizeof(label));
+    if (guard_update) {
+        failed_updates_.erase(id);
+    }
+}
+
+void
+HGraphRaBitQFusedDataCell::ReadSupplements(const InnerIdType* ids,
+                                           uint64_t count,
+                                           uint8_t* codes) const {
+    if (failed_updates_.empty()) {
+        external_supplement_->ReadSupplements(ids, count, codes);
+        return;
+    }
+    uint64_t begin = 0;
+    for (uint64_t i = 0; i < count; ++i) {
+        const auto found = failed_updates_.find(ids[i]);
+        if (found == failed_updates_.end()) {
+            continue;
+        }
+        if (i > begin) {
+            external_supplement_->ReadSupplements(
+                ids + begin, i - begin, codes + begin * supplement_code_size_);
+        }
+        std::memcpy(codes + i * supplement_code_size_, found->second->data, supplement_code_size_);
+        begin = i + 1;
+    }
+    if (count > begin) {
+        external_supplement_->ReadSupplements(
+            ids + begin, count - begin, codes + begin * supplement_code_size_);
+    }
+}
+
+RaBitQFusedCodeView
+HGraphRaBitQFusedDataCell::GetFullCodeView(InnerIdType id) const {
+    RaBitQFusedCodeView view;
+    CHECK_ARGUMENT(GetFusedCodeView(id, view), "invalid fused record id");
+    return view;
 }
 
 void
@@ -203,7 +254,13 @@ HGraphRaBitQFusedDataCell::GetFusedCodeView(InnerIdType id, RaBitQFusedCodeView&
     }
     const auto* record = GetNodeRecord(id);
     view.one_bit_code = record + one_bit_offset_;
-    view.supplement_code = record + supplement_offset_;
+    if (external_supplement_ != nullptr) {
+        view.owned_supplement = std::make_shared<ByteBuffer>(supplement_code_size_, allocator_);
+        ReadSupplements(&id, 1, view.owned_supplement->data);
+        view.supplement_code = view.owned_supplement->data;
+    } else {
+        view.supplement_code = record + supplement_offset_;
+    }
     std::memcpy(&view.cluster_id, record + cluster_id_offset_, sizeof(view.cluster_id));
     return true;
 }
@@ -220,9 +277,13 @@ HGraphRaBitQFusedDataCell::SetFusedCodes(InnerIdType id,
         Resize(id + 1);
     }
     auto* record = MutableNodeRecord(id);
+    if (external_supplement_ != nullptr) {
+        external_supplement_->WriteSupplement(id, supplement_code);
+    } else {
+        std::memcpy(record + supplement_offset_, supplement_code, supplement_code_size_);
+    }
     std::memcpy(record + cluster_id_offset_, &cluster_id, sizeof(cluster_id));
     std::memcpy(record + one_bit_offset_, one_bit_code, one_bit_code_size_);
-    std::memcpy(record + supplement_offset_, supplement_code, supplement_code_size_);
 }
 
 void
@@ -238,7 +299,7 @@ HGraphRaBitQFusedDataCell::PrefetchFusedCodes(InnerIdType id, bool include_suppl
         }
     };
     prefetch_l1(record + one_bit_offset_, one_bit_code_size_);
-    if (include_supplement) {
+    if (include_supplement and not HasExternalSupplement()) {
         prefetch_l1(record + supplement_offset_, supplement_code_size_);
     }
 }
@@ -298,7 +359,8 @@ HGraphRaBitQFusedDataCell::Prefetch(InnerIdType id, uint32_t neighbor_i) {
 void
 HGraphRaBitQFusedDataCell::Serialize(StreamWriter& writer) {
     GraphInterface::Serialize(writer);
-    StreamWriter::WriteObj(writer, K_SERIALIZATION_VERSION);
+    StreamWriter::WriteObj(
+        writer, HasExternalSupplement() ? K_EXTERNAL_SUPPLEMENT_VERSION : K_SERIALIZATION_VERSION);
     StreamWriter::WriteObj(writer, record_size_);
     StreamWriter::WriteObj(writer, neighbors_offset_);
     StreamWriter::WriteObj(writer, cluster_id_offset_);
@@ -311,6 +373,22 @@ HGraphRaBitQFusedDataCell::Serialize(StreamWriter& writer) {
     const uint64_t bytes = static_cast<uint64_t>(max_capacity_) * record_size_;
     StreamWriter::WriteObj(writer, bytes);
     storage_->WriteRecords(writer, max_capacity_);
+    if (not failed_updates_.empty()) {
+        // Write a canonical snapshot even when a previously published file row needs repair.
+        const auto size = static_cast<uint64_t>(max_capacity_) * supplement_code_size_;
+        StreamWriter::WriteObj(writer, size);
+        const uint64_t batch = std::max<uint64_t>(1, 65536 / supplement_code_size_);
+        Vector<InnerIdType> ids(batch, allocator_);
+        ByteBuffer buffer(batch * supplement_code_size_, allocator_);
+        for (uint64_t first = 0; first < max_capacity_; first += batch) {
+            const auto count = std::min<uint64_t>(batch, max_capacity_ - first);
+            std::iota(ids.data(), ids.data() + count, static_cast<InnerIdType>(first));
+            ReadSupplements(ids.data(), count, buffer.data);
+            writer.Write(reinterpret_cast<const char*>(buffer.data), count * supplement_code_size_);
+        }
+    } else if (external_supplement_ != nullptr) {
+        external_supplement_->SerializeSupplement(writer);
+    }
 }
 
 void
@@ -328,7 +406,8 @@ HGraphRaBitQFusedDataCell::Deserialize(StreamReader& reader) {
     GraphInterface::Deserialize(reader);
     uint32_t version = 0;
     StreamReader::ReadObj(reader, version);
-    CHECK_ARGUMENT(version == K_SERIALIZATION_VERSION,
+    CHECK_ARGUMENT(version == (HasExternalSupplement() ? K_EXTERNAL_SUPPLEMENT_VERSION
+                                                       : K_SERIALIZATION_VERSION),
                    "unsupported fused graph serialization version");
 
     FusedWireLayout layout;
@@ -373,7 +452,8 @@ HGraphRaBitQFusedDataCell::Deserialize(StreamReader& reader) {
         "invalid fused graph supplement offset");
     CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
         layout.record_size >= layout.supplement_offset and
-            layout.supplement_code_size <= layout.record_size - layout.supplement_offset,
+            (HasExternalSupplement() or
+             layout.supplement_code_size <= layout.record_size - layout.supplement_offset),
         "invalid fused graph code bounds");
 
     CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
@@ -415,6 +495,15 @@ HGraphRaBitQFusedDataCell::Deserialize(StreamReader& reader) {
     auto replacement = std::make_unique<AlignedBlockLayout>(record_size_, allocator_);
     replacement->Reserve(max_capacity_);
     replacement->ReadRecords(reader, max_capacity_);
+    if (external_supplement_ != nullptr) {
+        const bool valid_extent =
+            supplement_code_size_ != 0 and
+            max_capacity_ <= std::numeric_limits<uint64_t>::max() / supplement_code_size_;
+        CHECK_ARGUMENT(valid_extent, "invalid external supplement extent");
+        external_supplement_->DeserializeSupplement(
+            reader, static_cast<uint64_t>(max_capacity_) * supplement_code_size_);
+        failed_updates_.clear();
+    }
 
     codec_model_ = std::move(codec_model);
     storage_ = std::move(replacement);
@@ -425,7 +514,8 @@ HGraphRaBitQFusedDataCell::Deserialize(StreamReader& reader) {
 
 uint64_t
 HGraphRaBitQFusedDataCell::GetMemoryUsage() const {
-    return sizeof(*this) + storage_->GetMemoryUsage() + codec_model_.capacity();
+    return sizeof(*this) + storage_->GetMemoryUsage() + codec_model_.capacity() +
+           failed_updates_.size() * (sizeof(ByteBuffer) + supplement_code_size_);
 }
 
 DuplicateTrackerPtr

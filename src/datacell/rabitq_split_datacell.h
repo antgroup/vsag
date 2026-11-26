@@ -122,7 +122,7 @@ struct RaBitQFusedTraversalQuery {
     bool filter_inner_product_is_exact{false};
 };
 
-class RaBitQSplitDataCellInterface {
+class RaBitQSplitDataCellInterface : public FusedSupplementStorage {
 public:
     virtual ~RaBitQSplitDataCellInterface() = default;
 
@@ -1994,39 +1994,19 @@ public:
 
     void
     InitIO(const IOParamPtr& io_param) override {
-        if (this->fused_code_storage_ != nullptr) {
-            CHECK_ARGUMENT(OneBitIOTmpl::InMemory and SupplementIOTmpl::InMemory,
-                           "fused RaBitQ code storage requires memory IO");
+        // ReaderSet supplies a snapshot reader after Deserialize has already populated the
+        // external supplement store. Its reader describes the snapshot, not the destination.
+        if (this->fused_code_storage_ != nullptr and
+            this->fused_code_storage_->HasExternalSupplement() and io_param != nullptr and
+            io_param->GetTypeName() == IO_TYPE_VALUE_READER_IO) {
             return;
         }
-        const bool shares_io_param = this->supplement_io_type_.empty();
-        this->x_bit_layout_->InitIO(SuffixIOParam(io_param, "_onebit", shares_io_param));
-        // In hybrid mode (one-bit and supplement use different IO backends)
-        // the caller-facing `io_param` is the one-bit IO parameter type and
-        // cannot be passed directly to `supplement_layout_`. Rebuild a fresh
-        // IOParameter of the recorded supplement type so the underlying IO
-        // implementation receives the correct parameter subclass.
-        this->supplement_layout_->InitIO(RebuildSupplementIOParam(io_param));
+        init_split_io(io_param, nullptr, this->supplement_io_type_.empty());
     }
 
     void
     InitIO(const IOParamPtr& one_bit_io_param, const IOParamPtr& supplement_io_param) {
-        if (this->fused_code_storage_ != nullptr) {
-            CHECK_ARGUMENT(OneBitIOTmpl::InMemory and SupplementIOTmpl::InMemory,
-                           "fused RaBitQ code storage requires memory IO");
-            return;
-        }
-        const bool shares_io_param = supplement_io_param == nullptr;
-        this->x_bit_layout_->InitIO(SuffixIOParam(one_bit_io_param, "_onebit", shares_io_param));
-        if (supplement_io_param != nullptr) {
-            // Refresh the recorded supplement type so subsequent
-            // single-parameter InitIO calls (e.g. from Deserialize) can
-            // reconstruct the same IO subtype.
-            this->supplement_io_type_ = supplement_io_param->GetTypeName();
-            this->supplement_layout_->InitIO(supplement_io_param);
-        } else {
-            this->supplement_layout_->InitIO(RebuildSupplementIOParam(one_bit_io_param));
-        }
+        init_split_io(one_bit_io_param, supplement_io_param, supplement_io_param == nullptr);
     }
 
     IndexCommonParam
@@ -2059,6 +2039,43 @@ public:
         return supplement_code_size_;
     }
 
+    void
+    ResizeSupplement(InnerIdType capacity) override {
+        supplement_layout_->Resize(capacity);
+    }
+
+    void
+    WriteSupplement(InnerIdType id, const uint8_t* code) override {
+        supplement_layout_->Write(id, code);
+    }
+
+    void
+    ReadSupplements(const InnerIdType* ids, uint64_t count, uint8_t* codes) const override {
+        if (not supplement_layout_->MultiRead(ids, count, codes, allocator_)) {
+            throw VsagException(ErrorType::READ_ERROR, "failed to read fused supplement records");
+        }
+    }
+
+    void
+    SerializeSupplement(StreamWriter& writer) override {
+        supplement_layout_->Serialize(writer);
+    }
+
+    void
+    DeserializeSupplement(StreamReader& reader, uint64_t expected_size) override {
+        uint64_t size = 0;
+        StreamReader::ReadObj(reader, size);
+        CHECK_ARGUMENT(size == expected_size and reader.GetCursor() <= reader.Length() and
+                           size <= reader.Length() - reader.GetCursor(),
+                       "invalid external fused supplement payload length");
+        supplement_layout_->DeserializePayload(reader, size);
+    }
+
+    bool
+    SupplementInMemory() const override {
+        return SupplementIOTmpl::InMemory;
+    }
+
     [[nodiscard]] uint32_t
     FusedFilterBits() const override {
         return bottom_quantizer().FilterBits();
@@ -2084,7 +2101,9 @@ public:
                        "fused RaBitQ code sizes do not match the split model");
         fused_code_storage_ = storage;
         x_bit_layout_->Shrink(0);
-        supplement_layout_->Shrink(0);
+        if (not storage->HasExternalSupplement()) {
+            supplement_layout_->Shrink(0);
+        }
     }
 
     [[nodiscard]] bool
@@ -2851,6 +2870,27 @@ public:
     uint64_t optimized_build_prefetch_bytes_{0};
 
 private:
+    void
+    init_split_io(const IOParamPtr& one_bit_io_param,
+                  const IOParamPtr& supplement_io_param,
+                  bool shares_io_param) {
+        if (this->fused_code_storage_ == nullptr) {
+            this->x_bit_layout_->InitIO(
+                SuffixIOParam(one_bit_io_param, "_onebit", shares_io_param));
+        } else if (not this->fused_code_storage_->HasExternalSupplement()) {
+            CHECK_ARGUMENT(OneBitIOTmpl::InMemory and SupplementIOTmpl::InMemory,
+                           "fused RaBitQ code storage requires memory IO");
+            return;
+        }
+
+        if (supplement_io_param != nullptr) {
+            this->supplement_layout_->InitIO(supplement_io_param);
+            this->supplement_io_type_ = supplement_io_param->GetTypeName();
+        } else {
+            this->supplement_layout_->InitIO(RebuildSupplementIOParam(one_bit_io_param));
+        }
+    }
+
     // Insert/update callers hold mutex_; other callers already require exclusive access.
     void
     restore_deferred_split_layouts() {

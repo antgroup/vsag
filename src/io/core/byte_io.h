@@ -202,6 +202,12 @@ public:
     Deserialize(StreamReader& reader) {
         uint64_t size = 0;
         StreamReader::ReadObj(reader, size);
+        DeserializePayload(reader, size);
+    }
+
+    // The caller has consumed the serialized length; the cursor is at the first payload byte.
+    void
+    DeserializePayload(StreamReader& reader, uint64_t size) {
         const uint64_t serialized_start = reader.GetCursor();
         if constexpr (SkipDeserialize) {
             const uint64_t serialized_end = CheckedEnd(serialized_start, size);

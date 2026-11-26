@@ -1070,7 +1070,7 @@ HGraph::insert_fused_optimized_build_codes(const void* data, InnerIdType inner_i
 }
 
 void
-HGraph::sync_fused_node_codes(InnerIdType inner_id, const void* data) {
+HGraph::sync_fused_node_codes(InnerIdType inner_id, const void* data, bool replacing) {
     if (rabitq_fused_datacell_ == nullptr) {
         return;
     }
@@ -1085,7 +1085,7 @@ HGraph::sync_fused_node_codes(InnerIdType inner_id, const void* data) {
             fused_float_input(data, 1, scratch), one_bit.data, supplement.data, &cluster_id),
         "failed to encode fused RaBitQ node codes");
     rabitq_fused_datacell_->SetNodeCodes(
-        inner_id, label, cluster_id, one_bit.data, supplement.data);
+        inner_id, label, cluster_id, one_bit.data, supplement.data, replacing);
 }
 
 void

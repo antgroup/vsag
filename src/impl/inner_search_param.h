@@ -47,6 +47,8 @@ public:
     // Result count the filtered KNN search tries to reach by re-expanding filter-rejected bridges.
     uint64_t min_results{0};
     int64_t rerank_topk{0};
+    // Maximum unique records read in the external supplement phase; zero derives it from ef and k.
+    uint32_t rabitq_rerank_candidates{0};
     float radius{0.0F};
     InnerIdType ep{0};
     uint64_t ef{10};

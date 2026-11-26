@@ -176,6 +176,11 @@ public:
         io_->Deserialize(reader);
     }
 
+    void
+    DeserializePayload(StreamReader& reader, uint64_t size) {
+        io_->DeserializePayload(reader, size);
+    }
+
     [[nodiscard]] uint64_t
     GetIOSize() const {
         return io_->Size();

@@ -197,6 +197,8 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             inner_json[HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY].SetJson(value);
         } else if (key == HGRAPH_RABITQ_FUSED_DATACELL) {
             inner_json[HGRAPH_RABITQ_FUSED_DATACELL_KEY].SetJson(value);
+        } else if (key == HGRAPH_RABITQ_FUSED_LAYOUT_KEY) {
+            inner_json[HGRAPH_RABITQ_FUSED_LAYOUT_KEY].SetJson(value);
         } else if (key == USE_ATTRIBUTE_FILTER) {
             inner_json[USE_ATTRIBUTE_FILTER_KEY].SetJson(value);
         } else if (key == HGRAPH_BASE_QUANTIZATION_TYPE) {
@@ -402,6 +404,10 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
         const auto graph_param =
             std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_parameter->bottom_graph_param);
         CHECK_ARGUMENT(graph_param != nullptr, "rabitq_fused_datacell requires flat graph storage");
+        if (hgraph_parameter->external_fused_supplement) {
+            CHECK_ARGUMENT(graph_param->max_degree_ == 64,
+                           "external_supplement requires max_degree=64");
+        }
         const auto graph_io_type = graph_param->io_parameter_->GetTypeName();
         CHECK_ARGUMENT(graph_io_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO or
                            graph_io_type == IO_TYPE_VALUE_MEMORY_IO,

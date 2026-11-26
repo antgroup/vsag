@@ -14,15 +14,18 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <shared_mutex>
 #include <string>
 #include <utility>
 
+#include "common.h"
 #include "dense_duplicate_tracker.h"
 #include "graph_datacell_parameter.h"
 #include "graph_interface.h"
+#include "hash_types.h"
 #include "index_common_param.h"
 #include "layout/aligned_block_layout.h"
 #include "rabitq_fused_code_storage.h"
@@ -46,10 +49,25 @@ public:
         uint32_t cluster_id;
     };
 
-    HGraphRaBitQFusedDataCell(const GraphDataCellParamPtr& graph_param,
-                              uint64_t one_bit_code_size,
-                              uint64_t supplement_code_size,
-                              const IndexCommonParam& common_param);
+    HGraphRaBitQFusedDataCell(
+        const GraphDataCellParamPtr& graph_param,
+        uint64_t one_bit_code_size,
+        uint64_t supplement_code_size,
+        const IndexCommonParam& common_param,
+        std::shared_ptr<FusedSupplementStorage> external_supplement = nullptr);
+
+    bool
+    HasExternalSupplement() const override {
+        return external_supplement_ != nullptr;
+    }
+
+    bool
+    HasMemorySupplement() const {
+        return external_supplement_ != nullptr and external_supplement_->SupplementInMemory();
+    }
+
+    void
+    ReadSupplements(const InnerIdType* ids, uint64_t count, uint8_t* codes) const;
 
     void
     InsertNeighborsById(InnerIdType id, const Vector<InnerIdType>& neighbor_ids) override;
@@ -86,13 +104,17 @@ public:
                  LabelType label,
                  uint32_t cluster_id,
                  const uint8_t* one_bit_code,
-                 const uint8_t* supplement_code);
+                 const uint8_t* supplement_code,
+                 bool replacing = false);
 
     void
     SetLabel(InnerIdType id, LabelType label);
 
     [[nodiscard]] bool
     GetFusedCodeView(InnerIdType id, RaBitQFusedCodeView& view) const override;
+
+    [[nodiscard]] RaBitQFusedCodeView
+    GetFullCodeView(InnerIdType id) const;
 
     void
     SetFusedCodes(InnerIdType id,
@@ -122,6 +144,9 @@ public:
 
     void
     PrefetchFusedSupplement(InnerIdType id) const {
+        if (HasExternalSupplement()) {
+            return;
+        }
         PrefetchRange(GetNodeRecord(id) + supplement_offset_, supplement_code_size_, 2);
     }
 
@@ -163,7 +188,9 @@ public:
     GetOneBitCode(const uint8_t* record) const;
 
     [[nodiscard]] const uint8_t*
-    GetSupplementCode(const uint8_t* record) const;
+    GetSupplementCode(const uint8_t* record) const {
+        return HasExternalSupplement() ? nullptr : record + supplement_offset_;
+    }
 
     [[nodiscard]] LabelType
     GetLabel(const uint8_t* record) const;
@@ -181,7 +208,7 @@ public:
         return {record,
                 reinterpret_cast<const InnerIdType*>(record + neighbors_offset_),
                 record + one_bit_offset_,
-                record + supplement_offset_,
+                GetSupplementCode(record),
                 neighbor_count,
                 cluster_id};
     }
@@ -191,7 +218,44 @@ public:
         const auto* record = GetNodeRecord(id);
         uint32_t cluster_id = 0;
         std::memcpy(&cluster_id, record + cluster_id_offset_, sizeof(cluster_id));
-        return {record + one_bit_offset_, record + supplement_offset_, cluster_id};
+        return {record + one_bit_offset_, GetSupplementCode(record), cluster_id};
+    }
+
+    [[nodiscard]] uint64_t
+    SupplementBatchSize(uint64_t count) const {
+        constexpr uint64_t max_batch_bytes = 256 * 1024;
+        return std::min(count, std::max<uint64_t>(1, max_batch_bytes / supplement_code_size_));
+    }
+
+    // A view borrows the hot record and (for external full codes) the current batch buffer.
+    template <typename Visitor>
+    void
+    VisitCodeViews(const InnerIdType* ids,
+                   uint64_t count,
+                   bool need_supplement,
+                   Allocator* allocator,
+                   Visitor&& visit) const {
+        for (uint64_t i = 0; i < count; ++i) {
+            CHECK_ARGUMENT(ids[i] < Capacity(), "invalid fused record id");
+        }
+        if (count == 0 or not need_supplement or not HasExternalSupplement()) {
+            for (uint64_t i = 0; i < count; ++i) {
+                visit(i, GetCodeView(ids[i]));
+            }
+            return;
+        }
+
+        const auto batch = SupplementBatchSize(count);
+        Vector<uint8_t> codes(batch * supplement_code_size_, allocator);
+        for (uint64_t begin = 0; begin < count; begin += batch) {
+            const auto size = std::min(batch, count - begin);
+            ReadSupplements(ids + begin, size, codes.data());
+            for (uint64_t i = 0; i < size; ++i) {
+                auto view = GetCodeView(ids[begin + i]);
+                view.supplement_code = codes.data() + i * supplement_code_size_;
+                visit(begin + i, view);
+            }
+        }
     }
 
     [[nodiscard]] uint64_t
@@ -261,6 +325,10 @@ private:
 
 private:
     std::unique_ptr<AlignedBlockLayout> storage_;
+    std::shared_ptr<FusedSupplementStorage> external_supplement_;
+    // Retain the last published bytes if a disk update fails after a partial write.
+    // HGraph holds its global exclusive lock while replacing a published node.
+    UnorderedMap<InnerIdType, std::shared_ptr<ByteBuffer>> failed_updates_;
     uint64_t record_size_{0};
     uint64_t neighbors_offset_{0};
     uint64_t cluster_id_offset_{0};

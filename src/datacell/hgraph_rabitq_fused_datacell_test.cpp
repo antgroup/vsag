@@ -27,6 +27,131 @@
 
 namespace vsag {
 
+namespace {
+class FaultingSupplement final : public FusedSupplementStorage {
+public:
+    static constexpr uint64_t STRIDE = 620;
+    bool fail_write{false};
+    mutable uint64_t reads{0};
+    std::vector<uint8_t> bytes;
+
+    void
+    ResizeSupplement(InnerIdType capacity) override {
+        bytes.resize(capacity * STRIDE);
+    }
+    void
+    WriteSupplement(InnerIdType id, const uint8_t* code) override {
+        auto* row = bytes.data() + id * STRIDE;
+        if (fail_write) {
+            std::memcpy(row, code, STRIDE / 2);
+            throw std::runtime_error("injected partial write");
+        }
+        std::memcpy(row, code, STRIDE);
+    }
+    void
+    ReadSupplements(const InnerIdType* ids, uint64_t count, uint8_t* codes) const override {
+        ++reads;
+        for (uint64_t i = 0; i < count; ++i) {
+            std::memcpy(codes + i * STRIDE, bytes.data() + ids[i] * STRIDE, STRIDE);
+        }
+    }
+    void
+    SerializeSupplement(StreamWriter& writer) override {
+        StreamWriter::WriteObj(writer, static_cast<uint64_t>(bytes.size()));
+        writer.Write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    }
+    void
+    DeserializeSupplement(StreamReader& reader, uint64_t expected) override {
+        uint64_t actual = 0;
+        StreamReader::ReadObj(reader, actual);
+        REQUIRE(actual == expected);
+        bytes.resize(expected);
+        reader.Read(reinterpret_cast<char*>(bytes.data()), expected);
+    }
+    bool
+    SupplementInMemory() const override {
+        return false;
+    }
+};
+}  // namespace
+
+TEST_CASE("External fused records keep published bytes across a partial supplement write",
+          "[ut][external_supplement][HGraphRaBitQFusedDataCell]") {
+    IndexCommonParam common;
+    common.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    common.dim_ = 960;
+    auto param = std::make_shared<GraphDataCellParameter>();
+    param->max_degree_ = 64;
+    param->init_max_capacity_ = 4;
+    auto cold = std::make_shared<FaultingSupplement>();
+    HGraphRaBitQFusedDataCell graph(param, 376, cold->STRIDE, common, cold);
+    std::vector<uint8_t> filter(376, 5), old(cold->STRIDE, 1), next(cold->STRIDE, 2);
+    graph.SetNodeCodes(1, 42, 3, filter.data(), old.data());
+    REQUIRE(graph.RecordSize() == 704);
+    REQUIRE(graph.GetCodeView(1).supplement_code == nullptr);
+    REQUIRE(graph.GetNodeView(1).supplement_code == nullptr);
+    graph.PrefetchFusedCodes(1, true);
+    REQUIRE(cold->reads == 0);
+    cold->fail_write = true;
+    REQUIRE_THROWS(graph.SetNodeCodes(1, 43, 4, filter.data(), next.data(), true));
+    REQUIRE(graph.GetLabel(graph.GetNodeRecord(1)) == 42);
+    auto saved = graph.GetFullCodeView(1);
+    REQUIRE(saved.cluster_id == 3);
+    REQUIRE(std::memcmp(saved.supplement_code, old.data(), old.size()) == 0);
+    auto other = std::make_shared<FaultingSupplement>();
+    HGraphRaBitQFusedDataCell restored(param, 376, other->STRIDE, common, other);
+    test_serializion(graph, restored);
+    auto recovered = restored.GetFullCodeView(1);
+    REQUIRE(std::memcmp(recovered.supplement_code, old.data(), old.size()) == 0);
+    cold->fail_write = false;
+    graph.SetNodeCodes(1, 43, 4, filter.data(), next.data(), true);
+    auto updated = graph.GetFullCodeView(1);
+    REQUIRE(updated.cluster_id == 4);
+    REQUIRE(std::memcmp(updated.supplement_code, next.data(), next.size()) == 0);
+}
+
+TEST_CASE("External fused code visits read only the requested supplement batches",
+          "[ut][external_supplement][HGraphRaBitQFusedDataCell]") {
+    IndexCommonParam common;
+    common.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    common.dim_ = 960;
+    auto param = std::make_shared<GraphDataCellParameter>();
+    param->max_degree_ = 64;
+    param->init_max_capacity_ = 3;
+    auto cold = std::make_shared<FaultingSupplement>();
+    HGraphRaBitQFusedDataCell graph(param, 376, cold->STRIDE, common, cold);
+    for (InnerIdType id = 0; id < 3; ++id) {
+        std::vector<uint8_t> filter(376, id + 1), supplement(cold->STRIDE, id + 4);
+        graph.SetNodeCodes(id, id, id, filter.data(), supplement.data());
+    }
+    const auto batch = graph.SupplementBatchSize(1000);
+    REQUIRE(batch > 1);
+    std::vector<InnerIdType> ids(batch + 1);
+    for (size_t i = 0; i < ids.size(); ++i) {
+        ids[i] = 2 - i % 3;
+    }
+    for (bool full : {false, true}) {
+        uint64_t visited = 0;
+        graph.VisitCodeViews(ids.data(),
+                             ids.size(),
+                             full,
+                             common.allocator_.get(),
+                             [&](uint64_t i, const auto& code) {
+                                 REQUIRE(i == visited);
+                                 ++visited;
+                                 REQUIRE(code.cluster_id == ids[i]);
+                                 REQUIRE(code.one_bit_code[0] == ids[i] + 1);
+                                 if (full) {
+                                     REQUIRE(code.supplement_code[cold->STRIDE - 1] == ids[i] + 4);
+                                 } else {
+                                     REQUIRE(code.supplement_code == nullptr);
+                                 }
+                             });
+        REQUIRE(visited == ids.size());
+        REQUIRE(cold->reads == (full ? 2 : 0));
+    }
+}
+
 TEST_CASE("HGraph RaBitQ fused node layout and serialization", "[ut][HGraphRaBitQFusedDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;

@@ -15,10 +15,33 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 
 #include "basic_types.h"
 
 namespace vsag {
+
+class ByteBuffer;
+class StreamReader;
+class StreamWriter;
+
+// The split datacell owns the fixed-size supplement layout and its selected IO backend.
+class FusedSupplementStorage {
+public:
+    virtual ~FusedSupplementStorage() = default;
+    virtual void
+    ResizeSupplement(InnerIdType capacity) = 0;
+    virtual void
+    WriteSupplement(InnerIdType id, const uint8_t* code) = 0;
+    virtual void
+    ReadSupplements(const InnerIdType* ids, uint64_t count, uint8_t* codes) const = 0;
+    virtual void
+    SerializeSupplement(StreamWriter& writer) = 0;
+    virtual void
+    DeserializeSupplement(StreamReader& reader, uint64_t expected_size) = 0;
+    virtual bool
+    SupplementInMemory() const = 0;
+};
 
 inline constexpr uint32_t K_FUSED_CLUSTER_COUNT = 16;
 
@@ -26,6 +49,7 @@ struct RaBitQFusedCodeView {
     const uint8_t* one_bit_code{nullptr};
     const uint8_t* supplement_code{nullptr};
     uint32_t cluster_id{0};
+    std::shared_ptr<ByteBuffer> owned_supplement{};
 };
 
 /**
@@ -38,6 +62,11 @@ struct RaBitQFusedCodeView {
 class RabitQFusedInterface {
 public:
     virtual ~RabitQFusedInterface() = default;
+
+    virtual bool
+    HasExternalSupplement() const {
+        return false;
+    }
 
     [[nodiscard]] virtual bool
     GetFusedCodeView(InnerIdType id, RaBitQFusedCodeView& view) const = 0;
