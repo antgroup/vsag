@@ -15,9 +15,10 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 
-/// The optional CUDA backend: finding a device, binding one, and the three
-/// compute-heavy passes of a k-means build.
+/// The optional CUDA backend: device management, the compute-heavy passes of a
+/// k-means build, and batched IVF query routing.
 ///
 /// With ENABLE_CUDA off a stub exporting the same symbols is compiled instead and
 /// every entry point returns false, so callers link unconditionally and decide at
@@ -34,6 +35,55 @@
 ///   * `min_work` is the smallest `rows * k * dim` worth offloading; 0 selects
 ///     the calibrated default.
 namespace vsag::gpu {
+
+class CudaRabitqIndex {
+public:
+    virtual ~CudaRabitqIndex() = default;
+};
+
+struct CudaRabitqBuildData {
+    const uint64_t* bucket_offsets{nullptr};
+    const uint8_t* filter_codes{nullptr};
+    const uint8_t* supplement_codes{nullptr};
+    const uint64_t* inner_ids{nullptr};
+    const float* filter_adds{nullptr};
+    const float* filter_scales{nullptr};
+    const float* filter_norm_codes{nullptr};
+    const float* full_adds{nullptr};
+    const float* full_norm_codes{nullptr};
+    const float* base_norms{nullptr};
+    const float* base_errors{nullptr};
+    uint64_t bucket_count{0};
+    uint64_t record_count{0};
+    uint64_t dim{0};
+    uint64_t filter_code_size{0};
+    uint64_t supplement_code_size{0};
+    uint32_t filter_bits{0};
+    uint32_t supplement_bits{0};
+};
+
+/// Builds the device-resident half of an IVF RaBitQ split index. The host
+/// buffers are copied before this function returns.
+std::shared_ptr<CudaRabitqIndex>
+CudaCreateRabitqIndex(const CudaRabitqBuildData& data, uint64_t budget_bytes);
+
+/// Runs the complete split-code search pass: LUT filter scan, device candidate
+/// selection, supplement refinement, and final top-k. Bucket ids are laid out
+/// query-major (`query_count * nprobe`).
+bool
+CudaSearchRabitq(const std::shared_ptr<CudaRabitqIndex>& index,
+                 const float* normalized_queries,
+                 const float* query_norms,
+                 const float* query_sums,
+                 const int32_t* bucket_ids,
+                 const float* query_bucket_norm_sqrs,
+                 uint64_t query_count,
+                 uint32_t nprobe,
+                 uint32_t candidate_count,
+                 uint32_t topk,
+                 uint64_t* inner_ids,
+                 float* distances,
+                 uint64_t budget_bytes);
 
 /// True when this build has the CUDA backend and the machine has at least one
 /// usable device.
@@ -107,6 +157,24 @@ CudaAssignNearest(const float* query,
                   double* error,
                   uint64_t budget_bytes,
                   uint64_t min_work);
+
+/// Batched nearest-centroid selection for IVF search.
+///
+/// Computes squared-L2 routing keys for `query_count` rows and writes the
+/// `select_count` nearest centroid ids for each row in ascending-distance order.
+/// Query norms are omitted because they do not change that order. The dense
+/// query-centroid product is evaluated by cuBLAS in budgeted chunks; only each
+/// finished chunk's routing keys cross back to the host for the small top-k.
+bool
+CudaSelectNearestCentroids(const float* query,
+                           uint64_t query_count,
+                           const float* centroids,
+                           uint64_t centroid_count,
+                           int32_t dim,
+                           uint32_t select_count,
+                           int32_t* labels,
+                           uint64_t budget_bytes,
+                           uint64_t min_query_count);
 
 /// k-means++ seeding.
 ///

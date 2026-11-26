@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cmath>
 #include <random>
+#include <utility>
 #include <vector>
 
 #include "cuda_backend.h"
@@ -65,6 +66,11 @@ TEST_CASE("A pass that refuses leaves the caller's buffers alone", "[ut][gpu_pas
         data.data(), rows, centroids.data(), k, dim, labels.data(), &error, 1ULL << 30, 0));
     REQUIRE(std::all_of(labels.begin(), labels.end(), [](int32_t v) { return v == -7; }));
     REQUIRE(error == -1.0);
+
+    std::vector<int32_t> selected(rows * 2, -7);
+    REQUIRE_FALSE(CudaSelectNearestCentroids(
+        data.data(), rows, centroids.data(), k, dim, 2, selected.data(), 1ULL << 30, rows + 1));
+    REQUIRE(std::all_of(selected.begin(), selected.end(), [](int32_t v) { return v == -7; }));
 
     std::vector<float> seeds(static_cast<uint64_t>(k) * dim, -7.0F);
     const std::vector<float> uniforms(2 * static_cast<uint64_t>(k), 0.5F);
@@ -138,6 +144,26 @@ TEST_CASE("A null or degenerate argument is refused", "[ut][gpu_pass]") {
                                           kForceOffload));
     REQUIRE_FALSE(CudaAccumulateCentroids(
         data.data(), rows, dim, labels.data(), k, out.data(), nullptr, 1ULL << 30, kForceOffload));
+
+    const CudaRabitqBuildData empty_rabitq;
+    REQUIRE(CudaCreateRabitqIndex(empty_rabitq, 1ULL << 30) == nullptr);
+    std::vector<uint64_t> rabitq_ids(1, 77);
+    std::vector<float> rabitq_distances(1, -7.0F);
+    REQUIRE_FALSE(CudaSearchRabitq(nullptr,
+                                   data.data(),
+                                   out.data(),
+                                   out.data(),
+                                   labels.data(),
+                                   out.data(),
+                                   1,
+                                   1,
+                                   1,
+                                   1,
+                                   rabitq_ids.data(),
+                                   rabitq_distances.data(),
+                                   1ULL << 30));
+    REQUIRE(rabitq_ids[0] == 77);
+    REQUIRE(rabitq_distances[0] == -7.0F);
 }
 
 #ifdef VSAG_ENABLE_CUDA
@@ -231,6 +257,130 @@ TEST_CASE("Assignment picks the centroid the host would", "[ut][gpu_pass]") {
                               CudaSuggestedBudget(kChunkedBudgetCap),
                               kForceOffload));
     REQUIRE(labels == expected);
+}
+
+TEST_CASE("Search selection returns ordered nearest centroids", "[ut][gpu_pass]") {
+    if (NoDevice()) {
+        SKIP("no CUDA device on this machine");
+    }
+    const int32_t dim = 16;
+    const uint64_t rows = 257;
+    const uint64_t centroid_count = 48;
+    const uint32_t select_count = 5;
+    std::vector<float> centroids(centroid_count * static_cast<uint64_t>(dim));
+    for (uint64_t centroid = 0; centroid < centroid_count; ++centroid) {
+        for (int32_t j = 0; j < dim; ++j) {
+            centroids[centroid * dim + j] =
+                static_cast<float>(centroid) * 100.0F + static_cast<float>(j);
+        }
+    }
+    std::vector<float> query(rows * static_cast<uint64_t>(dim));
+    for (uint64_t row = 0; row < rows; ++row) {
+        const uint64_t owner = row % centroid_count;
+        std::copy_n(centroids.data() + owner * dim, dim, query.data() + row * dim);
+    }
+
+    std::vector<int32_t> labels(rows * select_count, -1);
+    REQUIRE(CudaSelectNearestCentroids(query.data(),
+                                       rows,
+                                       centroids.data(),
+                                       centroid_count,
+                                       dim,
+                                       select_count,
+                                       labels.data(),
+                                       CudaSuggestedBudget(kChunkedBudgetCap),
+                                       1));
+    for (uint64_t row = 0; row < rows; ++row) {
+        std::vector<std::pair<double, int32_t>> expected;
+        expected.reserve(centroid_count);
+        for (uint64_t centroid = 0; centroid < centroid_count; ++centroid) {
+            expected.emplace_back(
+                SquaredDistance(query.data() + row * dim, centroids.data() + centroid * dim, dim),
+                static_cast<int32_t>(centroid));
+        }
+        std::partial_sort(expected.begin(), expected.begin() + select_count, expected.end());
+        std::vector<int32_t> selected;
+        selected.reserve(select_count);
+        for (uint32_t rank = 0; rank < select_count; ++rank) {
+            const int32_t label = labels[row * select_count + rank];
+            REQUIRE(label >= 0);
+            REQUIRE(static_cast<uint64_t>(label) < centroid_count);
+            REQUIRE(std::find(selected.begin(), selected.end(), label) == selected.end());
+            selected.push_back(label);
+            const double selected_distance =
+                SquaredDistance(query.data() + row * dim,
+                                centroids.data() + static_cast<uint64_t>(label) * dim,
+                                dim);
+            // The host reference accumulates in double while routing uses an FP32 SGEMM.
+            // Mathematically tied centroids may therefore swap order, but every returned rank
+            // must still have the same exact reference distance as the corresponding optimum.
+            REQUIRE(std::abs(selected_distance - expected[rank].first) <= 1e-6);
+        }
+    }
+}
+
+TEST_CASE("RaBitQ search filters and refines split codes on device", "[ut][gpu_pass]") {
+    if (NoDevice()) {
+        SKIP("no CUDA device on this machine");
+    }
+    const std::vector<uint64_t> bucket_offsets{0, 2};
+    // Two filter planes, one byte per plane and record. Record 0 has x=1 at
+    // dimension zero; record 1 has x=2.
+    const std::vector<uint8_t> filter_codes{0, 1, 1, 0};
+    // Two supplement planes. Record 0 has y=3; record 1 has y=0.
+    const std::vector<uint8_t> supplement_codes{1, 1, 0, 0};
+    const std::vector<uint64_t> index_ids{100, 200};
+    const std::vector<float> filter_adds{0.0F, 0.0F};
+    const std::vector<float> filter_scales{-1.0F, -1.0F};
+    const std::vector<float> filter_norm_codes{1.0F, 1.0F};
+    const std::vector<float> full_adds{1.0F, 1.0F};
+    const std::vector<float> full_norm_codes{1.0F, 1.0F};
+    const std::vector<float> base_norms{1.0F, 1.0F};
+    const std::vector<float> base_errors{1.0F, 1.0F};
+    const CudaRabitqBuildData data{bucket_offsets.data(),
+                                   filter_codes.data(),
+                                   supplement_codes.data(),
+                                   index_ids.data(),
+                                   filter_adds.data(),
+                                   filter_scales.data(),
+                                   filter_norm_codes.data(),
+                                   full_adds.data(),
+                                   full_norm_codes.data(),
+                                   base_norms.data(),
+                                   base_errors.data(),
+                                   1,
+                                   2,
+                                   4,
+                                   2,
+                                   2,
+                                   2,
+                                   2};
+    const uint64_t budget = CudaSuggestedBudget(kChunkedBudgetCap);
+    auto index = CudaCreateRabitqIndex(data, budget);
+    REQUIRE(index != nullptr);
+
+    const std::vector<float> query{1.0F, 0.0F, 0.0F, 0.0F};
+    const std::vector<float> query_norm{1.0F};
+    const std::vector<float> query_sum{1.0F};
+    const std::vector<int32_t> buckets{0};
+    const std::vector<float> bucket_norm{0.0F};
+    std::vector<uint64_t> ids(1, 0);
+    std::vector<float> distances(1, -1.0F);
+    REQUIRE(CudaSearchRabitq(index,
+                             query.data(),
+                             query_norm.data(),
+                             query_sum.data(),
+                             buckets.data(),
+                             bucket_norm.data(),
+                             1,
+                             1,
+                             2,
+                             1,
+                             ids.data(),
+                             distances.data(),
+                             budget));
+    REQUIRE(ids[0] == 200);
+    REQUIRE(std::fabs(distances[0]) < 1e-5F);
 }
 
 TEST_CASE("Every pass runs at the smallest legal shape", "[ut][gpu_pass]") {

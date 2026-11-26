@@ -64,6 +64,8 @@ public:
     bool disable_bucket_scan{false};
     float first_order_scan_ratio{1.0F};
     int64_t ef_search{100};
+    bool enable_gpu_search{false};
+    int64_t gpu_min_batch{32};
 
 private:
     IVFSearchParameters() {
