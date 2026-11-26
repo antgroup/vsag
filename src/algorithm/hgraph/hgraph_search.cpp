@@ -792,6 +792,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     auto params = HGraphSearchParameters::FromJson(request.params_str_);
     const bool external =
         rabitq_fused_datacell_ != nullptr and rabitq_fused_datacell_->HasExternalSupplement();
+    const bool conjugate_enhancement = use_conjugate_graph_ and params.use_conjugate_graph_search;
     if (external) {
         const bool vector_knn = not is_range and not use_custom_distance;
         const bool protected_read =
@@ -804,6 +805,9 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         CHECK_ARGUMENT(protected_read,
                        "mutable external_supplement searches require the index read lock");
         CHECK_ARGUMENT(two_stage, "external_supplement requires filter scanning and reranking");
+        CHECK_ARGUMENT(not conjugate_enhancement,
+                       "external_supplement requires use_conjugate_graph_search=false when a "
+                       "conjugate graph is enabled");
         CHECK_ARGUMENT(valid_budget, "rabitq_rerank_candidates must be at least k");
         params.rabitq_one_bit_search = true;
     }
@@ -957,7 +961,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     base_search_param.is_inner_id_allowed = ft;
     base_search_param.distance_threshold = request.threshold_;
     base_search_param.ef = std::max(params.ef_search, k);
-    if (this->use_conjugate_graph_ and params.use_conjugate_graph_search) {
+    if (conjugate_enhancement) {
         base_search_param.ef = std::max(base_search_param.ef, static_cast<uint64_t>(LOOK_AT_K));
     }
     base_search_param.topk = static_cast<int64_t>(base_search_param.ef);
@@ -969,7 +973,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             std::min(base_search_param.topk,
                      static_cast<int64_t>(static_cast<float>(k) * params.topk_factor));
     }
-    if (this->use_conjugate_graph_ and params.use_conjugate_graph_search) {
+    if (conjugate_enhancement) {
         base_search_param.topk = std::max(base_search_param.topk, LOOK_AT_K);
     }
     base_search_param.consider_duplicate = this->support_duplicate_;
@@ -1271,7 +1275,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         if (not fused_search_already_reranked && mci_result.route != "mci" && !brute_force_used &&
             use_reorder_ && search_param.enable_reorder) {
             auto reorder_limit = k;
-            if (this->use_conjugate_graph_ and params.use_conjugate_graph_search) {
+            if (conjugate_enhancement) {
                 reorder_limit = std::max(reorder_limit, LOOK_AT_K);
             }
             this->reorder(raw_query,
@@ -1286,7 +1290,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                    !brute_force_used && search_param.enable_reorder &&
                    params.rabitq_one_bit_search) {
             auto reorder_limit = k;
-            if (this->use_conjugate_graph_ and params.use_conjugate_graph_search) {
+            if (conjugate_enhancement) {
                 reorder_limit = std::max(reorder_limit, LOOK_AT_K);
             }
             this->reorder(raw_query,
@@ -1299,8 +1303,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                           request.threshold_);
         }
 
-        if (this->use_conjugate_graph_ and params.use_conjugate_graph_search and
-            not search_result->Empty()) {
+        if (conjugate_enhancement and not search_result->Empty()) {
             std::priority_queue<std::pair<float, LabelType>> label_results;
             auto label_lock = make_search_read_lock(this->label_lookup_mutex_);
             while (not search_result->Empty()) {

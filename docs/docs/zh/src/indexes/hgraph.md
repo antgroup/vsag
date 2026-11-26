@@ -363,7 +363,7 @@ FP16/BF16 输入支持原来对 FP32 合法的同一组存储量化器配置，�
 | `parallelism` | int | `1` | 单次 HGraph 搜索的并行 worker 数。`<= 0` 的值在解析时重置为 `1`；并行执行需要已配置的执行器，否则搜索回退为顺序执行。 |
 | `timeout_ms` | int | 不限 | 每次查询的墙上时间超时（毫秒）。计时器在路由完成后启动；超时后搜索返回当前前沿。仅尽最大努力——不会中断正在执行的距离计算批次。 |
 | `use_extra_info_filter` | bool | `false` | 从 extra-info 构造查询 filter，而非基于普通 label 成员关系。需在构建时配置对应 extra-info 列。 |
-| `use_conjugate_graph_search` | bool | `true` | 搜索增强阶段。当构建时 `use_conjugate_graph: true` 时，通过共轭图扩展结果以提升召回；设为 `false` 跳过。仅在已构建共轭图时生效。 |
+| `use_conjugate_graph_search` | bool | `true` | 搜索增强阶段。当构建时 `use_conjugate_graph: true` 时，通过共轭图扩展结果以提升召回；设为 `false` 跳过。仅在已构建共轭图时生效。如果 `external_supplement` 索引已建共轭图，查询时须设置 `use_conjugate_graph_search=false`，以保证完整码读取次数在精排预算内。 |
 | `use_mci` | bool | `true` | 遍历时使用已构建的 MCI 路由阶段。索引需启用 MCI，否则该开关无副作用 |
 | `use_hybrid_traversal` | bool | `false` | 将 MCI 路由与图遍历混合执行，而不是二选一 |
 | `search_no_lock` | bool | `false` | 跳过检索侧加锁。要求 `parallelism` 为 `1`，并由调用方保证查询期间不会并发修改或销毁索引。使用 `external_supplement` 时还须先调用 `SetImmutable()`。 |

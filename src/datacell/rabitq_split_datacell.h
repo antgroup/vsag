@@ -2063,14 +2063,12 @@ public:
 
     void
     DeserializeSupplement(StreamReader& reader, uint64_t expected_size) override {
-        const auto cursor = reader.GetCursor();
         uint64_t size = 0;
         StreamReader::ReadObj(reader, size);
         CHECK_ARGUMENT(size == expected_size and reader.GetCursor() <= reader.Length() and
                            size <= reader.Length() - reader.GetCursor(),
                        "invalid external fused supplement payload length");
-        reader.Seek(cursor);
-        supplement_layout_->Deserialize(reader);
+        supplement_layout_->DeserializePayload(reader, size);
     }
 
     bool
