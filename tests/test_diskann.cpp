@@ -222,6 +222,52 @@ TEST_CASE_METHOD(fixtures::DiskANNTestIndex,
 }
 
 TEST_CASE_METHOD(fixtures::DiskANNTestIndex,
+                 "diskann cal distance by id after index destroyed",
+                 "[ft][diskann][pr]") {
+    constexpr int64_t dim = 128;
+    constexpr uint64_t count = 200;
+    const std::string name = "diskann";
+    const std::string metric_type = "l2";
+    auto param = GenerateDiskANNBuildParametersString(metric_type, dim, false, true);
+    auto dataset = pool.GetDatasetAndCreate(dim, count, metric_type);
+    auto* query = dataset->query_->GetFloat32Vectors();
+    const auto* gt_ids = dataset->ground_truth_->GetIds();
+    int64_t valid_a = gt_ids[0];
+    int64_t valid_b = gt_ids[1];
+    int64_t missing = fixtures::get_missing_id(dataset->base_);
+    std::vector<int64_t> ids = {valid_a, missing, valid_b};
+
+    auto index = TestFactory(name, param, true);
+    TestBuildIndex(index, dataset, true);
+    REQUIRE(index->CheckFeature(vsag::SUPPORT_CAL_DISTANCE_BY_ID));
+    auto single_a = index->CalcDistanceById(query, valid_a, true);
+    auto single_b = index->CalcDistanceById(query, valid_b, true);
+    REQUIRE(single_a.has_value());
+    REQUIRE(single_b.has_value());
+
+    auto batch = index->CalDistanceById(query, ids.data(), 3, true);
+    REQUIRE(batch.has_value());
+
+    // drop the only reference to the index: the returned result must stay valid afterwards
+    index.reset();
+
+    auto result = batch.value();
+    REQUIRE(result->GetNumElements() == 3);
+    REQUIRE(result->GetDim() == 1);
+    const auto* dists = result->GetDistances();
+    const auto* valids = result->GetValids();
+    REQUIRE(valids != nullptr);
+    REQUIRE(valids[0]);
+    REQUIRE(std::isfinite(dists[0]));
+    REQUIRE_FALSE(valids[1]);
+    REQUIRE(std::isnan(dists[1]));
+    REQUIRE(valids[2]);
+    REQUIRE(std::isfinite(dists[2]));
+    REQUIRE(dists[0] == single_a.value());
+    REQUIRE(dists[2] == single_b.value());
+}
+
+TEST_CASE_METHOD(fixtures::DiskANNTestIndex,
                  "diskann cal distance by id without feature",
                  "[ft][diskann][pr]") {
     constexpr int64_t dim = 128;
