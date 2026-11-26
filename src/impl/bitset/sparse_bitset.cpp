@@ -16,6 +16,7 @@
 #include "sparse_bitset.h"
 
 #include <cstdint>
+#include <limits>
 #include <mutex>
 
 namespace vsag {
@@ -39,6 +40,31 @@ SparseBitset::Test(int64_t pos) const {
 uint64_t
 SparseBitset::Count() {
     return r_.cardinality();
+}
+
+void
+SparseBitset::GetSetBits(uint64_t limit, Vector<InnerIdType>& ids) const {
+    (void)this->TryGetSetBits(limit, std::numeric_limits<uint64_t>::max(), ids);
+}
+
+bool
+SparseBitset::TryGetSetBits(uint64_t limit, uint64_t max_ids, Vector<InnerIdType>& ids) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    ids.clear();
+    if (r_.cardinality() != 0 and r_.maximum() < limit and r_.cardinality() > max_ids) {
+        return false;
+    }
+    for (const auto id : r_) {
+        if (id >= limit) {
+            break;
+        }
+        if (ids.size() == max_ids) {
+            ids.clear();
+            return false;
+        }
+        ids.push_back(id);
+    }
+    return true;
 }
 
 std::string

@@ -39,6 +39,10 @@ Timer::CheckOvertime() {
     if (threshold_ == std::numeric_limits<double>::max()) {
         return false;
     }
+    // A zero budget is expired even when Reset and this check share a clock tick.
+    if (threshold_ <= 0.0) {
+        return true;
+    }
     double duration = Record();
     return duration > threshold_;
 }

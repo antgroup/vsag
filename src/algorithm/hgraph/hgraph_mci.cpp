@@ -628,6 +628,18 @@ HGraph::MCIHybridSearchResult::MakeStatistics(const SearchStatistics& stats) con
     return json;
 }
 
+bool
+HGraph::can_use_mci(const SearchRequest& request,
+                    const HGraphSearchParameters& params,
+                    const InnerSearchParam& search_param) const {
+    return params.use_mci and this->mci_parameters_.enabled and
+           not request.enable_attribute_filter_ and not request.enable_bitset_filter_ and
+           search_param.executors.empty() and
+           (has_valid_id_source(request.filter_) or has_bitset_source(request.filter_)) and
+           this->mci_cliques_ != nullptr and
+           this->mci_cliques_->HasCliqueIndex(this->total_count_.load());
+}
+
 HGraph::MCIHybridSearchResult
 HGraph::try_mci_search(const SearchRequest& request,
                        const HGraphSearchParameters& params,
@@ -637,12 +649,9 @@ HGraph::try_mci_search(const SearchRequest& request,
                        QueryContext* ctx) const {
     MCIHybridSearchResult result(params, inner_filter);
     const bool bitset_seed_source = has_bitset_source(request.filter_);
-    const bool can_use_mci = params.use_mci and this->mci_parameters_.enabled and
-                             search_param.executors.empty() and
-                             (has_valid_id_source(request.filter_) or bitset_seed_source) and
-                             this->mci_cliques_ != nullptr and
-                             this->mci_cliques_->HasCliqueIndex(this->total_count_.load());
-    if (not can_use_mci) {
+    // MCI's seeds and packed/bitmap fast paths describe request.filter_, not additional
+    // attribute or request-bitset predicates. Keep those queries on the composed HGraph path.
+    if (not this->can_use_mci(request, params, search_param)) {
         return result;
     }
 
@@ -710,6 +719,13 @@ HGraph::try_mci_search(const SearchRequest& request,
 
     auto codes_lock = make_search_read_lock(this->persistent_codes_mutex_);
     auto precise_flatten = this->get_precise_codes();
+    if (precise_flatten.get() == this->basic_flatten_codes_.get() and
+        this->rabitq_split_codes_ != nullptr and this->use_reorder_ and
+        params.rabitq_one_bit_search and not this->support_duplicate_ and
+        not(this->use_conjugate_graph_ and params.use_conjugate_graph_search)) {
+        mci_param.fused_refinement = this->rabitq_split_codes_.get();
+        mci_param.fused_refinement_topk = request.topk_;
+    }
     if (precise_flatten != nullptr) {
         uint64_t precise_vector_stride = 0;
         mci_param.precise_vectors =
@@ -1082,11 +1098,9 @@ HGraph::build_mci_clique_index(const void* vectors) {
         } else if (contiguous_vectors != nullptr) {
             query = contiguous_vectors + static_cast<uint64_t>(inner_id) * contiguous_stride;
         } else {
-            auto codes = precise_codes->AcquireCodesById(inner_id);
-            CHECK_ARGUMENT(codes, "failed to read hgraph mci query vector");
-            const auto decoded =
-                precise_codes->Decode(codes.Data(), decoded_queries[worker_id].data());
-            CHECK_ARGUMENT(decoded, "failed to decode hgraph mci query vector");
+            // Finalized fused records have no standalone split-code buffer. This accessor
+            // handles fused decoding and keeps skipped-label builds mapped by inner id.
+            this->GetVectorByInnerId(inner_id, decoded_queries[worker_id].data());
             query = decoded_queries[worker_id].data();
         }
         CHECK_ARGUMENT(query != nullptr, "failed to prepare hgraph mci query vector");

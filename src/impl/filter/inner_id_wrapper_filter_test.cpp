@@ -121,3 +121,37 @@ TEST_CASE("InnerIdWrapperFilter forwards a bitmap only for identity labels",
         REQUIRE(size == 0);
     }
 }
+
+TEST_CASE("InnerIdWrapperFilter bounds a bitmap before a label is appended",
+          "[ut][InnerIdWrapperFilter]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    LabelTable labels(allocator.get());
+    for (InnerIdType id = 0; id < 8; ++id) {
+        labels.Insert(id, id);
+    }
+    class AppendingBitmapFilter final : public BitmapWhitelistFilter {
+    public:
+        explicit AppendingBitmapFilter(LabelTable& labels)
+            : BitmapWhitelistFilter(1024), labels_(labels) {
+        }
+        const uint8_t*
+        GetValidBitmap(uint64_t* size) const override {
+            // Deterministic interleaving: append after the wrapper checks identity.
+            labels_.Insert(8, 1000000);
+            return BitmapWhitelistFilter::GetValidBitmap(size);
+        }
+
+    private:
+        LabelTable& labels_;
+    };
+    auto filter = std::make_shared<AppendingBitmapFilter>(labels);
+    InnerIdWrapperFilter wrapped(filter, labels);
+    uint64_t size = 0;
+    const auto* bitmap = wrapped.GetValidBitmap(&size);
+    REQUIRE(bitmap != nullptr);
+    REQUIRE(size == 8);
+    CHECK(bitmap[8] == 1);
+    CHECK_FALSE(wrapped.CheckValid(8));
+    CHECK(wrapped.GetValidBitmap(&size) == nullptr);
+    CHECK(size == 0);
+}

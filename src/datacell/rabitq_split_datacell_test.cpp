@@ -21,6 +21,7 @@
 #include <limits>
 #include <memory>
 #include <numeric>
+#include <thread>
 
 #include "allocator/memory_record_allocator.h"
 #include "flatten_datacell_parameter.h"
@@ -28,6 +29,7 @@
 #include "hgraph_rabitq_fused_datacell.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/distance_provider_for_graph.h"
+#include "impl/searcher/mci_searcher.h"
 #include "index_common_param.h"
 #include "io/memory_io/memory_io_parameter.h"
 #include "unittest.h"
@@ -225,9 +227,15 @@ TEST_CASE("RaBitQ fused pair distances match reconstructed vectors",
             graph->SetNodeCodes(id, id, clusters[id], filter_code.data(), supplement_code.data());
             REQUIRE(split->DecodeFusedById(id, decoded.data() + static_cast<uint64_t>(id) * dim));
         }
+        std::array<InnerIdType, count> pair_ids;
+        for (InnerIdType id = 0; id < count; ++id) {
+            pair_ids[id] = id;
+        }
         uint64_t same_cluster_pairs = 0;
         uint64_t cross_cluster_pairs = 0;
         for (InnerIdType i = 0; i < count; ++i) {
+            std::array<float, count> pair_distances;
+            flatten->QueryById(pair_distances.data(), i, pair_ids.data(), count);
             for (InnerIdType j = i; j < count; ++j) {
                 CAPTURE(i, j, clusters[i], clusters[j]);
                 double expected = metric == MetricType::METRIC_TYPE_IP ? 1.0 : 0.0;
@@ -237,6 +245,7 @@ TEST_CASE("RaBitQ fused pair distances match reconstructed vectors",
                     expected += metric == MetricType::METRIC_TYPE_IP ? -x * y : (x - y) * (x - y);
                 }
                 const double tolerance = 2e-4 * std::max(1.0, std::abs(expected));
+                REQUIRE(std::abs(pair_distances[j] - expected) <= tolerance);
                 REQUIRE(std::abs(flatten->ComputePairVectors(i, j) - expected) <= tolerance);
                 REQUIRE(std::abs(flatten->ComputePairVectors(j, i) - expected) <= tolerance);
                 if (i != j) {
@@ -271,6 +280,427 @@ TEST_CASE("RaBitQ fused pair distances match reconstructed vectors",
     // Retraining must refresh the same cache too.
     split->TrainFusedCodec(other_vectors.data(), count, cluster_count);
     check_pairs(flatten, other_vectors.data());
+}
+
+TEST_CASE("Fused full batches and deferred traversal preparation match scalar scoring",
+          "[ut][RaBitQSplitDataCell][fused_full_batch]") {
+    const auto metric = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP);
+    const uint64_t dim = GENERATE(65, 128, 960);
+    CAPTURE(metric, dim);
+    constexpr InnerIdType count = 96;
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto json = JsonType::Parse(R"({"codes_type":"rabitq_split",
+        "io_params":{"type":"memory_io"},"quantization_params":{"type":"rabitq",
+        "rabitq_version":"split","rabitq_bits_per_dim_query":32,
+        "rabitq_bits_per_dim_base":8,"rabitq_bits_per_dim_filter":3,"use_fht":true}})");
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(json);
+    IndexCommonParam common;
+    common.allocator_ = allocator;
+    common.dim_ = static_cast<int64_t>(dim);
+    common.metric_ = metric;
+    auto vectors = fixtures::generate_vectors(count, dim, false, 91);
+    auto flatten = FlattenInterface::MakeInstance(param, common);
+    flatten->Train(vectors.data(), count);
+    auto split = std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(flatten);
+    REQUIRE(split != nullptr);
+    split->TrainFusedCodec(vectors.data(), count, 16);
+    auto graph_param = std::make_shared<GraphDataCellParameter>();
+    graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+    graph_param->max_degree_ = 8;
+    graph_param->init_max_capacity_ = count;
+    auto graph = std::make_shared<HGraphRaBitQFusedDataCell>(
+        graph_param, split->OneBitCodeSize(), split->SupplementCodeSize(), common);
+    split->AttachFusedCodeStorage(graph.get());
+    flatten->Resize(count);
+    Vector<uint8_t> filter(split->OneBitCodeSize(), allocator.get());
+    Vector<uint8_t> supplement(split->SupplementCodeSize(), allocator.get());
+    std::array<RaBitQFusedCodeView, count> views;
+    std::array<InnerIdType, count> ids;
+    for (InnerIdType id = 0; id < count; ++id) {
+        flatten->InsertVector(vectors.data() + static_cast<uint64_t>(id) * dim, id);
+        uint32_t cluster = 0;
+        REQUIRE(split->EncodeFused(vectors.data() + static_cast<uint64_t>(id) * dim,
+                                   filter.data(),
+                                   supplement.data(),
+                                   &cluster));
+        graph->SetNodeCodes(id, id, cluster, filter.data(), supplement.data());
+        REQUIRE(graph->GetFusedCodeView(id, views[id]));
+        ids[id] = id;
+    }
+    const auto reference_computer = split->FactoryFusedComputer(vectors.data());
+    std::array<float, count> expected;
+    for (InnerIdType id = 0; id < count; ++id) {
+        REQUIRE(split->ComputeFusedFull(reference_computer,
+                                        views[id].cluster_id,
+                                        views[id].one_bit_code,
+                                        views[id].supplement_code,
+                                        expected.data() + id,
+                                        nullptr));
+    }
+    const auto check = [&](const ComputerInterfacePtr& computer) {
+        for (const InnerIdType n : {0, 1, 2, 3, 4, 5, 7, 16, 32, 63, 64, 65, 96}) {
+            std::array<float, count> actual{};
+            SearchStatistics stats;
+            QueryContext ctx;
+            ctx.stats = &stats;
+            flatten->Query(actual.data(), computer, ids.data(), n, &ctx);
+            CHECK(stats.rabitq_full_count.load() == n);
+            for (InnerIdType id = 0; id < n; ++id) {
+                CHECK(std::abs(actual[id] - expected[id]) <=
+                      2e-4F * std::max(1.0F, std::abs(expected[id])));
+            }
+        }
+    };
+    // Refine must prepare its own computer even when the coarse hints came from another one.
+    std::array<float, count> coarse;
+    std::array<float, count> bounds;
+    std::array<float, count> hints;
+    std::array<float, count> refined;
+    split->QueryFusedMCICoarse(
+        coarse.data(), bounds.data(), hints.data(), reference_computer, ids.data(), count, nullptr);
+    auto refine_only = flatten->FactoryComputer(vectors.data());
+    split->QueryFusedMCIRefine(
+        refined.data(), hints.data(), refine_only, ids.data(), count, nullptr);
+    for (InnerIdType id = 0; id < count; ++id) {
+        CHECK(std::abs(refined[id] - expected[id]) <=
+              2e-4F * std::max(1.0F, std::abs(expected[id])));
+    }
+    const auto computer = flatten->FactoryComputer(vectors.data());
+    check(computer);
+    RaBitQFusedTraversalQuery traversal;
+    RaBitQFusedTraversalQuery reference;
+    REQUIRE(split->GetFusedTraversalQuery(computer, &traversal));
+    REQUIRE(split->GetFusedTraversalQuery(reference_computer, &reference));
+    CHECK(traversal.query_sum == reference.query_sum);
+    for (uint32_t i = 0; i < traversal.cluster_count; ++i) {
+        CHECK(std::abs(traversal.cluster_g_add[i] - reference.cluster_g_add[i]) <=
+              2e-4F * std::max(1.0F, std::abs(reference.cluster_g_add[i])));
+        CHECK(std::abs(traversal.cluster_g_error[i] - reference.cluster_g_error[i]) <=
+              2e-4F * std::max(1.0F, std::abs(reference.cluster_g_error[i])));
+    }
+    check(computer);
+
+    const auto partial = flatten->FactoryComputer(vectors.data());
+    float first_distance = 0.0F;
+    flatten->Query(&first_distance, partial, ids.data(), 1, nullptr);
+    RaBitQFusedTraversalQuery late;
+    REQUIRE(split->GetFusedTraversalQuery(partial, &late));
+    for (uint32_t i = 0; i < late.cluster_count; ++i) {
+        CHECK(std::abs(late.cluster_g_add[i] - reference.cluster_g_add[i]) <=
+              2e-4F * std::max(1.0F, std::abs(reference.cluster_g_add[i])));
+    }
+    check(partial);
+
+    // BasicSearcher workers may share a computer. Full scoring must not race with the
+    // one-time creation of traversal-only fields on that same computer.
+    const auto shared = flatten->FactoryComputer(vectors.data());
+    std::array<bool, 4> ok{};
+    std::vector<std::thread> workers;
+    workers.reserve(4);
+    for (uint32_t i = 0; i < 4; ++i) {
+        workers.emplace_back([&, i]() {
+            bool valid = true;
+            for (uint32_t repeat = 0; repeat < 16; ++repeat) {
+                if (i % 2 == 0) {
+                    std::array<float, count> actual{};
+                    flatten->Query(actual.data(), shared, ids.data(), count, nullptr);
+                    for (InnerIdType id = 0; id < count; ++id) {
+                        valid = valid and std::isfinite(actual[id]) and
+                                std::abs(actual[id] - expected[id]) <=
+                                    2e-4F * std::max(1.0F, std::abs(expected[id]));
+                    }
+                } else {
+                    RaBitQFusedTraversalQuery prepared;
+                    valid = valid and split->GetFusedTraversalQuery(shared, &prepared) and
+                            prepared.query_sum == reference.query_sum;
+                }
+            }
+            ok[i] = valid;
+        });
+    }
+    for (auto& worker : workers) {
+        worker.join();
+    }
+    for (const bool valid : ok) {
+        CHECK(valid);
+    }
+}
+
+}  // namespace vsag
+
+namespace vsag {
+
+template <MetricType metric>
+class FusedMCIStageTestCell : public RaBitQSplitDataCell<metric, MemoryIO> {
+public:
+    using RaBitQSplitDataCell<metric, MemoryIO>::RaBitQSplitDataCell;
+    // Run the staged MCI algorithm with generic kernels on ARM test hosts too.
+    [[nodiscard]] bool
+    SupportsFusedMCIRefinement() const override {
+        return true;
+    }
+};
+
+TEST_CASE("MCI fused refinement preserves full-code results and rebuilds legacy bounds",
+          "[ut][RaBitQSplitDataCell][MCISearcher][mci_fused_refinement]") {
+    const auto metric = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP);
+    const uint64_t dim = GENERATE(65, 128, 960);
+    CAPTURE(metric, dim);
+    constexpr InnerIdType count = 96;
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto json = JsonType::Parse(R"({"codes_type":"rabitq_split",
+        "io_params":{"type":"memory_io"},"quantization_params":{"type":"rabitq",
+        "rabitq_version":"split","rabitq_bits_per_dim_query":32,
+        "rabitq_bits_per_dim_base":8,"rabitq_bits_per_dim_filter":3,"use_fht":true}})");
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(json);
+    IndexCommonParam common;
+    common.allocator_ = allocator;
+    common.dim_ = static_cast<int64_t>(dim);
+    common.metric_ = metric;
+    auto vectors = fixtures::generate_vectors(count, dim, false, 91);
+    FlattenInterfacePtr flatten;
+    if (metric == MetricType::METRIC_TYPE_L2SQR) {
+        flatten = std::make_shared<FusedMCIStageTestCell<MetricType::METRIC_TYPE_L2SQR>>(
+            param->quantizer_parameter, param->io_parameter, common);
+    } else {
+        flatten = std::make_shared<FusedMCIStageTestCell<MetricType::METRIC_TYPE_IP>>(
+            param->quantizer_parameter, param->io_parameter, common);
+    }
+    flatten->Train(vectors.data(), count);
+    auto split = std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(flatten);
+    REQUIRE(split != nullptr);
+    split->TrainFusedCodec(vectors.data(), count, 16);
+    auto graph_param = std::make_shared<GraphDataCellParameter>();
+    graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+    graph_param->max_degree_ = 8;
+    graph_param->init_max_capacity_ = count;
+    auto graph = std::make_shared<HGraphRaBitQFusedDataCell>(
+        graph_param, split->OneBitCodeSize(), split->SupplementCodeSize(), common);
+    split->AttachFusedCodeStorage(graph.get());
+    flatten->Resize(count);
+    Vector<uint8_t> filter(split->OneBitCodeSize(), allocator.get());
+    Vector<uint8_t> supplement(split->SupplementCodeSize(), allocator.get());
+    std::array<RaBitQFusedCodeView, count> views;
+    std::array<InnerIdType, count> ids;
+    for (InnerIdType id = 0; id < count; ++id) {
+        flatten->InsertVector(vectors.data() + static_cast<uint64_t>(id) * dim, id);
+        uint32_t cluster = 0;
+        REQUIRE(split->EncodeFused(vectors.data() + static_cast<uint64_t>(id) * dim,
+                                   filter.data(),
+                                   supplement.data(),
+                                   &cluster));
+        graph->SetNodeCodes(id, id, cluster, filter.data(), supplement.data());
+        REQUIRE(graph->GetFusedCodeView(id, views[id]));
+        ids[id] = id;
+    }
+
+    auto cliques = std::make_shared<CliqueDataCell>(allocator.get());
+    Vector<InnerIdType> offsets({0, count}, allocator.get());
+    Vector<InnerIdType> members(allocator.get());
+    Vector<InnerIdType> inverse_offsets(allocator.get());
+    Vector<InnerIdType> inverse(allocator.get());
+    for (InnerIdType id = 0; id < count; ++id) {
+        members.push_back(id);
+        inverse_offsets.push_back(id);
+        inverse.push_back(0);
+    }
+    inverse_offsets.push_back(count);
+    cliques->Assign(std::move(offsets),
+                    std::move(members),
+                    std::move(inverse_offsets),
+                    std::move(inverse),
+                    count);
+    cliques->MarkAvailable(count);
+    MCISearcher searcher(common);
+    Vector<InnerIdType> seeds(allocator.get());
+    for (InnerIdType id = 0; id < count; ++id) {
+        seeds.push_back(id);
+    }
+    std::array<uint8_t, count> bitmap;
+    bitmap.fill(1);
+    const auto queries = fixtures::generate_vectors(8, dim, false, 635);
+    class SeedPredicate final : public Filter {
+    public:
+        bool reject{false};
+        mutable std::array<uint32_t, count> checks{};
+        bool
+        CheckValid(int64_t id) const override {
+            ++checks[id];
+            return not reject or id % 7 != 0;
+        }
+    };
+    const auto check = [&]() {
+        for (int predicate : {0, 1, 2}) {
+            for (bool complete : {true, false}) {
+                for (uint64_t topk : {1, 10, 96}) {
+                    for (uint64_t ef : {10, 100}) {
+                        MCISearcherParam params;
+                        params.revalidate_predicate = predicate != 0;
+                        params.valid_bitmap = bitmap.data();
+                        params.valid_bitmap_size = count;
+                        params.seed_inner_ids = &seeds;
+                        params.seed_count = complete ? count : 1;
+                        params.enumerated_valid_count = complete ? count : 0;
+                        for (uint64_t q = 0; q < 8; ++q) {
+                            CAPTURE(metric, dim, complete, topk, ef, q, predicate);
+                            InnerSearchParam search;
+                            search.topk = static_cast<int64_t>(std::max(topk, ef));
+                            params.fused_refinement_topk = static_cast<int64_t>(topk);
+                            search.ef = ef;
+                            auto filter = std::make_shared<SeedPredicate>();
+                            filter->reject = predicate == 2;
+                            if (predicate != 0) {
+                                search.is_inner_id_allowed = filter;
+                            }
+                            params.fused_refinement = nullptr;
+                            auto baseline = searcher.Search(cliques,
+                                                            flatten,
+                                                            queries.data() + q * dim,
+                                                            search,
+                                                            params,
+                                                            nullptr);
+                            while (baseline->Size() > topk) {
+                                baseline->Pop();
+                            }
+                            const auto baseline_checks = filter->checks;
+                            filter->checks.fill(0);
+                            params.fused_refinement = split.get();
+                            SearchStatistics stats;
+                            QueryContext ctx;
+                            ctx.stats = &stats;
+                            auto actual = searcher.Search(
+                                cliques, flatten, queries.data() + q * dim, search, params, &ctx);
+                            CHECK(filter->checks == baseline_checks);
+                            for (const auto checks : filter->checks) {
+                                CHECK(checks <= 1);
+                            }
+                            while (actual->Size() > topk) {
+                                actual->Pop();
+                            }
+                            REQUIRE(actual->Size() == baseline->Size());
+                            while (not actual->Empty()) {
+                                CHECK(actual->Top().second == baseline->Top().second);
+                                CHECK(std::abs(actual->Top().first - baseline->Top().first) <=
+                                      2e-4F * std::max(1.0F, std::abs(baseline->Top().first)));
+                                actual->Pop();
+                                baseline->Pop();
+                            }
+                            if (topk >= count) {
+                                CHECK(stats.rabitq_filter_count.load() == 0);
+                            }
+                            if (complete and predicate != 2 and topk < count and
+                                split->SupportsFusedMCIRefinement()) {
+                                CHECK(stats.rabitq_filter_count.load() == count);
+                                CHECK(stats.rabitq_reorder_hint_full_count.load() > 0);
+                                CHECK(stats.dist_cmp.load() == stats.rabitq_full_count.load());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+    check();
+    // Old affine records contain native metadata in these unused words, not MCI projections.
+    // Import must regenerate it before MCI can prune using the restored codec.
+    auto codec = split->ExportFusedCodec();
+    uint32_t codec_version = 0;
+    std::memcpy(&codec_version, codec.data(), sizeof(codec_version));
+    REQUIRE(codec_version == 2);
+    // A current payload must not rewrite already valid record bytes during import.
+    REQUIRE(split->CopySplitCodes(0, filter.data(), supplement.data()));
+    const auto original_filter = filter;
+    const auto original_supplement = supplement;
+    split->ImportFusedCodec(codec);
+    REQUIRE(split->CopySplitCodes(0, filter.data(), supplement.data()));
+    CHECK(filter == original_filter);
+    CHECK(supplement == original_supplement);
+    const uint32_t legacy_version = 1;
+    std::memcpy(codec.data(), &legacy_version, sizeof(legacy_version));
+    for (InnerIdType id = 0; id < count; ++id) {
+        REQUIRE(split->CopySplitCodes(id, filter.data(), supplement.data()));
+        const auto aligned =
+            split->OneBitCodeSize() - (metric == MetricType::METRIC_TYPE_IP ? 20 : 16);
+        const float legacy = 0.5F;
+        std::memcpy(filter.data() + aligned + 12, &legacy, sizeof(legacy));
+        graph->SetNodeCodes(id, id, views[id].cluster_id, filter.data(), supplement.data());
+    }
+    split->ImportFusedCodec(codec);
+    check();
+    // Bounds must enclose canonical full scoring across query scales and centroids.
+    for (float scale : {0.0F, 1e-4F, 1.0F, 10000.0F}) {
+        auto query = queries;
+        for (auto& value : query) {
+            value *= scale;
+        }
+        auto computer = flatten->FactoryComputer(query.data());
+        std::array<float, count> coarse;
+        std::array<float, count> bounds;
+        std::array<float, count> ips;
+        std::array<float, count> full;
+        std::array<float, count> refined;
+        split->QueryFusedMCICoarse(
+            coarse.data(), bounds.data(), ips.data(), computer, ids.data(), count, nullptr);
+        flatten->Query(full.data(), computer, ids.data(), count, nullptr);
+        split->QueryFusedMCIRefine(
+            refined.data(), ips.data(), computer, ids.data(), count, nullptr);
+        for (InnerIdType id = 0; id < count; ++id) {
+            CAPTURE(metric, dim, scale, id, bounds[id], full[id]);
+            CHECK(bounds[id] <= full[id]);
+            CHECK(std::abs(refined[id] - full[id]) <= 2e-4F * std::max(1.0F, std::abs(full[id])));
+        }
+    }
+    const auto shared = flatten->FactoryComputer(queries.data());
+    std::array<bool, 4> ok{};
+    std::vector<std::thread> workers;
+    workers.reserve(4);
+    workers.reserve(4);
+    for (uint32_t worker = 0; worker < 4; ++worker) {
+        workers.emplace_back([&, worker]() {
+            bool valid = true;
+            for (uint32_t repeat = 0; repeat < 8; ++repeat) {
+                std::array<float, count> coarse;
+                std::array<float, count> bounds;
+                std::array<float, count> ips;
+                std::array<float, count> full;
+                std::array<float, count> refined;
+                split->QueryFusedMCICoarse(
+                    coarse.data(), bounds.data(), ips.data(), shared, ids.data(), count, nullptr);
+                flatten->Query(full.data(), shared, ids.data(), count, nullptr);
+                split->QueryFusedMCIRefine(
+                    refined.data(), ips.data(), shared, ids.data(), count, nullptr);
+                for (InnerIdType id = 0; id < count; ++id) {
+                    valid = valid and bounds[id] <= full[id] and
+                            std::abs(refined[id] - full[id]) <=
+                                2e-4F * std::max(1.0F, std::abs(full[id]));
+                }
+            }
+            ok[worker] = valid;
+        });
+    }
+    for (auto& worker : workers) {
+        worker.join();
+    }
+    for (const bool valid : ok) {
+        CHECK(valid);
+    }
+    const auto other = fixtures::generate_vectors(count, dim, false, 747);
+    split->TrainFusedCodec(other.data(), count, 16);
+    check();
+    REQUIRE(split->CopySplitCodes(0, filter.data(), supplement.data()));
+    graph->SetNodeCodes(0, 0, 16, filter.data(), supplement.data());
+    const auto invalid_computer = flatten->FactoryComputer(queries.data());
+    float distance = 0;
+    float bound = 0;
+    float hint = 0;
+    CHECK_THROWS_AS(split->QueryFusedMCICoarse(
+                        &distance, &bound, &hint, invalid_computer, ids.data(), 1, nullptr),
+                    VsagException);
+    CHECK_THROWS_AS(
+        split->QueryFusedMCIRefine(&distance, &hint, invalid_computer, ids.data(), 1, nullptr),
+        VsagException);
 }
 
 TEST_CASE("RaBitQ split cached pair distances preserve persisted distances",

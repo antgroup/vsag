@@ -67,8 +67,20 @@ public:
         if (id + 1 > label_table_.size()) {
             label_table_.resize(id + 1);
         }
+        // Appending an identity label preserves a valid identity cache in O(1).
+        // Other mutations retain the normal versioned invalidation and lazy recomputation.
+        const bool extends_identity =
+            id == static_cast<uint64_t>(total_count_.load(std::memory_order_relaxed)) and
+            label == static_cast<LabelType>(id) and
+            labels_version_.load(std::memory_order_relaxed) ==
+                identity_version_.load(std::memory_order_relaxed) and
+            identity_mapping_.load(std::memory_order_relaxed);
         label_table_[id] = label;
         MarkLabelsMutated();
+        if (extends_identity) {
+            identity_version_.store(labels_version_.load(std::memory_order_relaxed),
+                                    std::memory_order_release);
+        }
         if (label == -1 && deleted_ids_.count(id) == 0) {
             active_padding_label_ids_.insert(id);
         } else if (was_padding_label) {
@@ -344,7 +356,7 @@ public:
     TrimUnusedSlots(uint64_t valid_count);
 
     int64_t
-    GetTotalCount() {
+    GetTotalCount() const {
         return total_count_;
     }
 

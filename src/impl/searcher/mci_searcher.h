@@ -28,8 +28,12 @@
 namespace vsag {
 
 DEFINE_POINTER(MCISearcher);
+class RaBitQSplitDataCellInterface;
 
 struct MCISearcherParam {
+    // Direct HGraph MCI queries may return topk only; hybrid consumers keep the old heap.
+    const RaBitQSplitDataCellInterface* fused_refinement{nullptr};
+    int64_t fused_refinement_topk{0};
     uint64_t seed_count{500};
     bool packed_filter{true};
     // Mapped labels may change during a locked query on a mutable index.

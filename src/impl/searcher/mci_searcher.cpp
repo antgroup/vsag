@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "container_types.h"
+#include "datacell/rabitq_split_datacell.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/query_computer_pool.h"
 #include "impl/searcher/searcher_utils.h"
@@ -157,6 +158,69 @@ mci_precise_float_distance(const float* query,
     return 1.0F - similarity;
 }
 
+void
+score_complete_fused_mci(const RaBitQSplitDataCellInterface& refinement,
+                         const ComputerInterfacePtr& computer,
+                         const InnerIdType* candidate_ids,
+                         uint64_t count,
+                         int64_t result_limit,
+                         const InnerSearchParam& inner_search_param,
+                         const DistHeapPtr& result_heap,
+                         QueryContext* ctx,
+                         Allocator* allocator) {
+    Vector<float> coarse(count, 0, allocator);
+    Vector<float> bounds(count, 0, allocator);
+    Vector<float> ips(count, 0, allocator);
+    refinement.QueryFusedMCICoarse(
+        coarse.data(), bounds.data(), ips.data(), computer, candidate_ids, count, ctx);
+    Vector<uint64_t> order(allocator);
+    order.resize(count);
+    for (uint64_t i = 0; i < count; ++i) {
+        order[i] = i;
+    }
+    std::sort(order.begin(), order.end(), [&](uint64_t a, uint64_t b) {
+        const auto da =
+            std::isfinite(coarse[a]) ? coarse[a] : std::numeric_limits<float>::infinity();
+        const auto db =
+            std::isfinite(coarse[b]) ? coarse[b] : std::numeric_limits<float>::infinity();
+        return da != db ? da < db : a < b;
+    });
+    std::array<InnerIdType, 4> ids;
+    std::array<float, 4> hints;
+    std::array<float, 4> distances;
+    uint32_t pending = 0;
+    uint64_t refined_count = 0;
+    const auto flush = [&]() {
+        refinement.QueryFusedMCIRefine(
+            distances.data(), hints.data(), computer, ids.data(), pending, ctx);
+        for (uint32_t i = 0; i < pending; ++i) {
+            if (is_result_distance_eligible<KNN_SEARCH>(distances[i], inner_search_param)) {
+                result_heap->Push(distances[i], ids[i]);
+            }
+        }
+        refined_count += pending;
+        pending = 0;
+    };
+    for (const auto i : order) {
+        // Strict comparison retains ties; invalid bounds force refinement.
+        if (result_heap->Size() >= static_cast<uint64_t>(result_limit) and
+            bounds[i] > result_heap->Top().first) {
+            continue;
+        }
+        ids[pending] = candidate_ids[i];
+        hints[pending++] = ips[i];
+        if (pending == 4) {
+            flush();
+        }
+    }
+    if (pending != 0) {
+        flush();
+    }
+    if (ctx != nullptr and ctx->stats != nullptr) {
+        ctx->stats->dist_cmp.fetch_add(refined_count, std::memory_order_relaxed);
+    }
+}
+
 template <bool use_raw_float>
 DistHeapPtr
 search_clique_view(const CliqueDataCellSearchView& view,
@@ -173,6 +237,15 @@ search_clique_view(const CliqueDataCellSearchView& view,
                    Allocator* allocator) {
     const auto candidate_limit =
         std::max<int64_t>(inner_search_param.topk, static_cast<int64_t>(inner_search_param.ef));
+    const auto* refinement = use_raw_float ? nullptr : mci_param.fused_refinement;
+    if (refinement != nullptr and (inner_search_param.topk <= 0 or not mci_param.batch_distance or
+                                   not refinement->SupportsFusedMCIRefinement())) {
+        refinement = nullptr;
+    }
+    const auto refinement_topk =
+        mci_param.fused_refinement_topk > 0
+            ? std::min(mci_param.fused_refinement_topk, inner_search_param.topk)
+            : inner_search_param.topk;
     const auto* valid_bitmap =
         mci_param.valid_bitmap_size >= total ? mci_param.valid_bitmap : nullptr;
     if (mci_param.used_bitmap_fast_path != nullptr) {
@@ -195,20 +268,28 @@ search_clique_view(const CliqueDataCellSearchView& view,
                       supplied_seeds != nullptr and mci_param.enumerated_valid_count != 0 and
                       supplied_seeds->size() == mci_param.enumerated_valid_count and
                       mci_param.seed_count >= supplied_seeds->size();
+    uint64_t validated_seed_prefix = 0;
+    bool rejected_seed_predicate = false;
     if (scan_seeds) {
         // Validate before scoring or shrinking the result heap. A stale, mutable predicate
         // must fall back to normal traversal, without discarding its original candidate budget.
         for (uint64_t i = 0; i < supplied_seeds->size(); ++i) {
             const auto id = (*supplied_seeds)[i];
-            if ((i != 0 and (*supplied_seeds)[i - 1] >= id) or not valid_id(id, false) or
-                not passes_predicate(id, false)) {
+            if ((i != 0 and (*supplied_seeds)[i - 1] >= id) or not valid_id(id, false)) {
                 scan_seeds = false;
                 break;
             }
+            if (not passes_predicate(id, false)) {
+                rejected_seed_predicate = true;
+                scan_seeds = false;
+                break;
+            }
+            ++validated_seed_prefix;
         }
     }
     const auto result_limit =
-        scan_seeds and not inner_search_param.consider_duplicate and
+        refinement != nullptr ? refinement_topk
+        : scan_seeds and not inner_search_param.consider_duplicate and
                 inner_search_param.rerank_topk > 0
             ? std::min<int64_t>(candidate_limit, inner_search_param.rerank_topk)
             : candidate_limit;
@@ -226,34 +307,85 @@ search_clique_view(const CliqueDataCellSearchView& view,
         metric == MetricType::METRIC_TYPE_COSINE and precise_vector_stride > dim;
     std::array<InnerIdType, 64> batch_ids{};
     std::array<float, 64> batch_distances{};
+    std::array<float, 64> batch_bounds{};
+    std::array<float, 64> batch_ips{};
     uint64_t batch_count = 0;
     uint64_t accepted = 0;
     uint32_t batch_depth = 1;
     uint32_t dist_cmp = 0;
-    const auto score_batch =
-        [&](const InnerIdType* ids, uint64_t count, uint32_t depth, bool update_frontier) {
-            if constexpr (use_raw_float) {
+    const auto score_batch = [&](const InnerIdType* ids,
+                                 uint64_t count,
+                                 uint32_t depth,
+                                 bool update_frontier) {
+        if constexpr (use_raw_float) {
+            for (uint64_t i = 0; i < count; ++i) {
+                const auto* vector =
+                    precise_vectors + static_cast<uint64_t>(ids[i]) * precise_vector_stride;
+                batch_distances[i] = mci_precise_float_distance(
+                    query, vector, dim, metric, cosine_query_inv_norm, cosine_hold_mold);
+            }
+        } else {
+            const bool coarse = refinement != nullptr and update_frontier and
+                                count > static_cast<uint64_t>(result_limit);
+            if (coarse) {
+                refinement->QueryFusedMCICoarse(batch_distances.data(),
+                                                batch_bounds.data(),
+                                                batch_ips.data(),
+                                                computer,
+                                                ids,
+                                                count,
+                                                ctx);
+                std::array<InnerIdType, 4> refine_ids;
+                std::array<float, 4> hints;
+                std::array<float, 4> distances;
+                std::array<uint64_t, 4> offsets;
+                uint32_t pending = 0;
+                const auto refine = [&]() {
+                    refinement->QueryFusedMCIRefine(
+                        distances.data(), hints.data(), computer, refine_ids.data(), pending, ctx);
+                    for (uint32_t j = 0; j < pending; ++j) {
+                        batch_distances[offsets[j]] = distances[j];
+                    }
+                    pending = 0;
+                };
                 for (uint64_t i = 0; i < count; ++i) {
-                    const auto* vector =
-                        precise_vectors + static_cast<uint64_t>(ids[i]) * precise_vector_stride;
-                    batch_distances[i] = mci_precise_float_distance(
-                        query, vector, dim, metric, cosine_query_inv_norm, cosine_hold_mold);
+                    // Keep full-score navigation and rejected-bridge recovery intact.
+                    if (candidates.Size() >= static_cast<uint64_t>(candidate_limit) and
+                        result_heap->Size() >= static_cast<uint64_t>(result_limit) and
+                        batch_bounds[i] > candidates.Data()[candidates.Size() - 1].distance and
+                        batch_bounds[i] > result_heap->Top().first) {
+                        batch_distances[i] = std::numeric_limits<float>::infinity();
+                        continue;
+                    }
+                    refine_ids[pending] = ids[i];
+                    hints[pending] = batch_ips[i];
+                    offsets[pending++] = i;
+                    if (pending == 4) {
+                        refine();
+                    }
+                }
+                if (pending != 0) {
+                    refine();
                 }
             } else {
                 flatten->Query(batch_distances.data(), computer, ids, count, ctx);
             }
-            for (uint64_t i = 0; i < count; ++i) {
-                const auto distance = batch_distances[i];
-                ++dist_cmp;
-                if (update_frontier and candidates.CanUpdate(distance)) {
-                    candidates.Insert(distance, ids[i], depth);
-                    ++accepted;
-                }
-                if (is_result_distance_eligible<KNN_SEARCH>(distance, inner_search_param)) {
-                    result_heap->Push(distance, ids[i]);
-                }
+        }
+        for (uint64_t i = 0; i < count; ++i) {
+            const auto distance = batch_distances[i];
+            if (refinement != nullptr and not std::isfinite(distance)) {
+                continue;
             }
-        };
+            ++dist_cmp;
+            if (update_frontier and candidates.CanUpdate(distance)) {
+                candidates.Insert(distance, ids[i], depth);
+                ++accepted;
+            }
+            if (is_result_distance_eligible<KNN_SEARCH>(distance, inner_search_param)) {
+                result_heap->Push(distance, ids[i]);
+            }
+        }
+    };
     const auto finish = [&](uint32_t hops) {
         if (ctx != nullptr and ctx->stats != nullptr) {
             ctx->stats->dist_cmp.fetch_add(dist_cmp, std::memory_order_relaxed);
@@ -267,6 +399,19 @@ search_clique_view(const CliqueDataCellSearchView& view,
         return result_heap;
     };
     if (scan_seeds) {
+        if (refinement != nullptr and
+            supplied_seeds->size() > static_cast<uint64_t>(result_limit)) {
+            score_complete_fused_mci(*refinement,
+                                     computer,
+                                     supplied_seeds->data(),
+                                     supplied_seeds->size(),
+                                     result_limit,
+                                     inner_search_param,
+                                     result_heap,
+                                     ctx,
+                                     allocator);
+            return finish(0);
+        }
         const uint64_t batch_size = mci_param.batch_distance ? batch_ids.size() : 1;
         for (uint64_t i = 0; i < supplied_seeds->size(); i += batch_size) {
             score_batch(supplied_seeds->data() + i,
@@ -286,26 +431,30 @@ search_clique_view(const CliqueDataCellSearchView& view,
             batch_count = 0;
         }
     };
-    auto try_visit = [&](InnerIdType id, uint32_t depth, bool known_valid = false) {
-        // Reject sparse byte predicates before touching the larger epoch array. A compact
-        // CSR without tombstones proves liveness, so its hot path needs no second bitmap.
-        if (not valid_id(id, known_valid) or visited_nodes.Get(id) or
-            (not view.static_csr and not view.IsLiveNode(id))) {
-            return false;
-        }
-        // Remember rejected fallback IDs too: overlapping cliques must not repeat user
-        // callbacks or deletion lookups. Byte/packed rejection above remains a cheap probe.
-        visited_nodes.Set(id);
-        if (not passes_predicate(id, known_valid)) {
-            return false;
-        }
-        batch_depth = depth;
-        batch_ids[batch_count++] = id;
-        if (not mci_param.batch_distance or batch_count == batch_ids.size()) {
-            flush();
-        }
-        return true;
-    };
+    auto try_visit =
+        [&](InnerIdType id, uint32_t depth, bool known_valid = false, int predicate_status = 0) {
+            // Reject sparse byte predicates before touching the larger epoch array. A compact
+            // CSR without tombstones proves liveness, so its hot path needs no second bitmap.
+            if (not valid_id(id, known_valid) or visited_nodes.Get(id) or
+                (not view.static_csr and not view.IsLiveNode(id))) {
+                return false;
+            }
+            // Remember rejected fallback IDs too: overlapping cliques must not repeat user
+            // callbacks or deletion lookups. Byte/packed rejection above remains a cheap probe.
+            visited_nodes.Set(id);
+            // Reuse validation of the complete-seed prefix when its scan fast path declined.
+            // Overlapping cliques and fallback seeds must not repeat mutable callbacks.
+            if (predicate_status < 0 or
+                (predicate_status == 0 and not passes_predicate(id, known_valid))) {
+                return false;
+            }
+            batch_depth = depth;
+            batch_ids[batch_count++] = id;
+            if (not mci_param.batch_distance or batch_count == batch_ids.size()) {
+                flush();
+            }
+            return true;
+        };
     const auto seed_target = std::min<uint64_t>(mci_param.seed_count, total);
     const bool check_overtime = inner_search_param.time_cost != nullptr;
     uint64_t seeds = 0;
@@ -319,7 +468,12 @@ search_clique_view(const CliqueDataCellSearchView& view,
                 break;
             }
             const auto offset = sampled == count ? i : i * count / sampled;
-            seeds += try_visit((*mci_param.seed_inner_ids)[offset], 1) ? 1 : 0;
+            const int predicate_status =
+                offset < validated_seed_prefix                                ? 1
+                : offset == validated_seed_prefix and rejected_seed_predicate ? -1
+                                                                              : 0;
+            seeds +=
+                try_visit((*mci_param.seed_inner_ids)[offset], 1, false, predicate_status) ? 1 : 0;
         }
     } else {
         for (InnerIdType id = 0; id < total and seeds < seed_target; ++id) {

@@ -25,6 +25,24 @@
 using namespace roaring;
 using namespace vsag;
 
+TEST_CASE("SparseBitset enumerates set bits within a bounded domain", "[ut][bitset][enumerate]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    SparseBitset bits;
+    Vector<InnerIdType> ids(allocator.get());
+    bits.Set(0, true);
+    bits.Set(63, true);
+    bits.Set(64, true);
+    bits.Set(129, true);
+    bits.GetSetBits(64, ids);
+    CHECK(ids == Vector<InnerIdType>({0, 63}, allocator.get()));
+    bits.GetSetBits(65, ids);
+    CHECK(ids == Vector<InnerIdType>({0, 63, 64}, allocator.get()));
+    bits.GetSetBits(130, ids);
+    CHECK(ids == Vector<InnerIdType>({0, 63, 64, 129}, allocator.get()));
+    bits.GetSetBits(0, ids);
+    CHECK(ids.empty());
+}
+
 TEST_CASE("SparseBitset Test", "[ut][bitset]") {
     SparseBitset bitset;
     // empty
@@ -379,4 +397,21 @@ TEST_CASE("Roaring Bitmap Test", "[ut][bitset]") {
     Roaring rogue(5, manyvalues);
     Roaring::const_iterator j = rogue.begin();
     j.equalorlarger(4);  // *j == 4
+}
+
+TEST_CASE("SparseBitset bounds enumeration before materializing dense matches",
+          "[ut][bitset][bounded_enumeration]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    SparseBitset bits;
+    Vector<InnerIdType> ids(allocator.get());
+    bits.Set(0, true);
+    bits.Set(63, true);
+    bits.Set(64, true);
+    CHECK_FALSE(bits.TryGetSetBits(65, 2, ids));
+    CHECK(ids.empty());
+    CHECK(ids.capacity() == 0);
+    REQUIRE(bits.TryGetSetBits(64, 2, ids));
+    CHECK(ids == Vector<InnerIdType>({0, 63}, allocator.get()));
+    REQUIRE(bits.TryGetSetBits(0, 0, ids));
+    CHECK(ids.empty());
 }

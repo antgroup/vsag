@@ -21,6 +21,7 @@
 #include "simd/kernels/kernels.h"
 #include "simd/kernels/rabitq_compute.h"
 #include "simd/kernels/rabitq_pack.h"
+#include "simd/rabitq_refine_simd.h"
 #include "simd/traits/simd_traits_generic.h"
 #include "sq4_local_simd.h"
 #include "sq8_local_simd.h"
@@ -1466,6 +1467,39 @@ FHTRotate(float* data, uint64_t dim_) {
     }
 }
 
+void
+rabitq_three_bit_centered_batch4(const float* query,
+                                 const uint8_t* const* codes,
+                                 uint64_t dim,
+                                 uint32_t count,
+                                 float /*query_sum*/,
+                                 float* results) {
+    for (uint32_t i = 0; i < count; ++i) {
+        results[i] = RaBitQFloatThreeBitCenteredIP(query, codes[i], dim);
+    }
+}
+
+void
+rabitq_five_bit_centered_batch4(const float* query,
+                                const uint8_t* const* codes,
+                                uint64_t dim,
+                                uint32_t count,
+                                float /*query_sum*/,
+                                float* results) {
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    for (uint32_t i = 0; i < count; ++i) {
+        float sum = 0.0F;
+        for (uint64_t d = 0; d < dim; ++d) {
+            uint32_t code = 0;
+            for (uint32_t bit = 0; bit < 5; ++bit) {
+                code |= ((codes[i][bit * plane_bytes + (d >> 3)] >> (d & 7)) & 1U) << bit;
+            }
+            sum += query[d] * (static_cast<float>(code) - 15.5F);
+        }
+        results[i] = sum;
+    }
+}
+
 }  // namespace vsag::generic
 
 namespace vsag::generic {
@@ -1512,4 +1546,19 @@ SQ4LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
     return simd::LocalSQCompute<simd::SQ8Traits<simd::GenericSQ8Tag>, false, 4, true>(
         nullptr, a, b, dim);
 }
+void
+RaBitQFloatThreePlusFiveBitIPBatch4(const float* query,
+                                    const uint8_t* const* filter_codes,
+                                    const uint8_t* const* supplement_codes,
+                                    uint64_t dim,
+                                    uint32_t count,
+                                    float query_sum,
+                                    float* results) {
+    for (uint32_t i = 0; i < count; ++i) {
+        const float filter_ip = RaBitQFloatThreeBitCenteredIP(query, filter_codes[i], dim);
+        const float supplement_ip = RaBitQFloatSupplementCodeIP(query, supplement_codes[i], dim, 5);
+        results[i] = 32.0F * filter_ip + supplement_ip - 15.5F * query_sum;
+    }
+}
+
 }  // namespace vsag::generic

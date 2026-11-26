@@ -48,6 +48,7 @@
 #include "rabitq_fused_code_storage.h"
 #include "simd/bf16_simd.h"
 #include "simd/fp16_simd.h"
+#include "simd/rabitq_refine_simd.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "type_helpers.h"
@@ -169,6 +170,26 @@ public:
                           const InnerIdType* idx,
                           InnerIdType id_count,
                           QueryContext* ctx = nullptr) = 0;
+
+    [[nodiscard]] virtual bool
+    SupportsFusedMCIRefinement() const = 0;
+
+    virtual void
+    QueryFusedMCICoarse(float* distances,
+                        float* lower_bounds,
+                        float* inner_products,
+                        const ComputerInterfacePtr& computer,
+                        const InnerIdType* ids,
+                        InnerIdType count,
+                        QueryContext* ctx) const = 0;
+
+    virtual void
+    QueryFusedMCIRefine(float* distances,
+                        const float* inner_products,
+                        const ComputerInterfacePtr& computer,
+                        const InnerIdType* ids,
+                        InnerIdType count,
+                        QueryContext* ctx) const = 0;
 
     virtual bool
     ComputeOneBitWithFilterIP(const ComputerInterfacePtr& computer,
@@ -335,10 +356,7 @@ public:
     class FusedComputer final : public ComputerInterface {
     public:
         explicit FusedComputer(Allocator* allocator)
-            : transformed_query_(allocator),
-              hnsw_query_planes_(allocator),
-              hnsw_g_add_(allocator),
-              hnsw_g_error_(allocator) {
+            : transformed_query_(allocator), hnsw_query_planes_(allocator) {
         }
 
         Vector<float> transformed_query_;
@@ -346,10 +364,14 @@ public:
         float hnsw_query_delta_{0.0F};
         float hnsw_query_vl_{0.0F};
         float hnsw_query_sum_{0.0F};
-        Vector<float> hnsw_g_add_;
-        Vector<float> hnsw_g_error_;
+        std::array<float, K_FUSED_CLUSTER_COUNT> hnsw_g_add_{};
+        std::array<float, K_FUSED_CLUSTER_COUNT> hnsw_g_error_{};
         float query_raw_norm_{0.0F};
         typename RaBitQuantizer<metric>::norm_type mrq_norm_sqr_{0.0F};
+        bool traversal_prepared_{false};
+        std::once_flag traversal_once_;
+        std::mutex full_terms_mutex_;
+        uint32_t prepared_clusters_{0};
     };
 
     RaBitQSplitDataCell() = default;
@@ -1067,6 +1089,13 @@ public:
               const InnerIdType* idx,
               InnerIdType id_count,
               QueryContext* ctx = nullptr) override {
+        if (this->fused_code_storage_ != nullptr and not this->optimized_build_active_) {
+            for (InnerIdType i = 0; i < id_count; ++i) {
+                result_dists[i] = this->ComputePairVectors(query_id, idx[i]);
+            }
+            this->add_distance_evaluations(ctx, id_count);
+            return;
+        }
         if (not this->optimized_build_active_) {
             // Persisted split storage has no temporary scalar codes. Merge the query once and
             // reuse its full code; optimized builds use the scalar-code path below.
@@ -1459,6 +1488,9 @@ public:
     ComputerInterfacePtr
     FactoryComputer(const void* query) override {
         if (fused_code_storage_ != nullptr) {
+            if (this->has_fast_fused_full_batch()) {
+                return this->make_fused_computer<true>(query);
+            }
             return this->FactoryFusedComputer(query);
         }
         auto computer = this->quantizer_->FactoryComputer();
@@ -2229,6 +2261,7 @@ public:
             fused_quantizers_.push_back(std::move(quantizer));
         }
         refresh_fused_cluster_stats();
+        refresh_fused_refinement_bounds();
     }
 
     bool
@@ -2261,45 +2294,134 @@ public:
         return true;
     }
 
+    [[nodiscard]] bool
+    SupportsFusedMCIRefinement() const override {
+        return this->UsesExternalFusedCodeStorage() and this->has_fast_fused_full_batch();
+    }
+
+    void
+    QueryFusedMCICoarse(float* distances,
+                        float* lower_bounds,
+                        float* inner_products,
+                        const ComputerInterfacePtr& computer,
+                        const InnerIdType* ids,
+                        InnerIdType count,
+                        QueryContext* ctx) const override {
+        auto& comp = *static_cast<FusedComputer*>(computer.get());
+        this->prepare_fused_traversal(comp);
+        const auto dim = bottom_quantizer().GetDim();
+        const float query_norm_sqrt_dim = std::sqrt(
+            FP32ComputeIP(comp.transformed_query_.data(), comp.transformed_query_.data(), dim) *
+            dim);
+        const auto meta = bottom_quantizer().OneBitRecordNormOffset();
+        const auto full_meta = bottom_quantizer().SupplementMetaOffset();
+        constexpr InnerIdType block_size = 64;
+        std::array<RaBitQFusedCodeView, block_size> views;
+        for (InnerIdType block = 0; block < count; block += block_size) {
+            const auto block_count = std::min<InnerIdType>(block_size, count - block);
+            for (InnerIdType j = 0; j < block_count; ++j) {
+                views[j] = this->get_fused_code_view(ids[block + j]);
+                CHECK_ARGUMENT(views[j].cluster_id < K_FUSED_CLUSTER_COUNT,
+                               "failed to compute fused RaBitQ distance");
+            }
+            this->prefetch_fused_codes(ids + block, block_count, false);
+            for (InnerIdType j = 0; j < std::min<InnerIdType>(prefetch_stride_code_, block_count);
+                 ++j) {
+                vsag::Prefetch(views[j].supplement_code + full_meta);
+            }
+            for (InnerIdType i = 0; i < block_count; i += 4) {
+                const auto n = std::min<InnerIdType>(4, block_count - i);
+                const uint8_t* codes[4]{};
+                for (InnerIdType j = 0; j < n; ++j) {
+                    codes[j] = views[i + j].one_bit_code;
+                    const auto next = i + j + prefetch_stride_code_;
+                    if (next < block_count) {
+                        fused_code_storage_->PrefetchFusedCodes(ids[block + next], false);
+                        vsag::Prefetch(views[next].supplement_code + full_meta);
+                    }
+                }
+                float ips[4];
+                rabitq_three_bit_centered_batch4(
+                    comp.transformed_query_.data(), codes, dim, n, comp.hnsw_query_sum_, ips);
+                for (InnerIdType j = 0; j < n; ++j) {
+                    float add, slope, norm, full_add, full_scale;
+                    std::memcpy(&slope, codes[j] + meta + 12, 4);
+                    std::memcpy(&add, views[i + j].supplement_code + full_meta + 8, 4);
+                    std::memcpy(&norm, views[i + j].supplement_code + full_meta + 12, 4);
+                    std::memcpy(&full_add, views[i + j].supplement_code + full_meta, 4);
+                    std::memcpy(&full_scale, views[i + j].supplement_code + full_meta + 4, 4);
+                    const auto cluster = views[i + j].cluster_id;
+                    const float coarse = add + comp.hnsw_g_add_[cluster] + slope * ips[j];
+                    const float error = norm * comp.hnsw_g_error_[cluster];
+                    // Cauchy bounds the uncomputed residual. The margin also covers
+                    // FP32 reductions, centroid terms and rounding the projected add.
+                    const float magnitude =
+                        std::fabs(add) + std::fabs(full_add) +
+                        2 * std::fabs(comp.hnsw_g_add_[cluster]) + 1 +
+                        (3.5F * std::fabs(slope) + 127.5F * std::fabs(full_scale)) *
+                            query_norm_sqrt_dim +
+                        norm * (2 * comp.hnsw_g_error_[cluster] + query_norm_sqrt_dim);
+                    const float margin = 8 * std::numeric_limits<float>::epsilon() *
+                                         ((dim + 15) / 16 + 32) * magnitude;
+                    distances[block + i + j] = coarse;
+                    inner_products[block + i + j] = ips[j];
+                    const float bound = coarse - error - margin;
+                    lower_bounds[block + i + j] =
+                        std::isfinite(bound) ? bound : -std::numeric_limits<float>::infinity();
+                }
+            }
+        }
+        this->add_filter_count(ctx, count);
+    }
+
+    void
+    QueryFusedMCIRefine(float* distances,
+                        const float* inner_products,
+                        const ComputerInterfacePtr& computer,
+                        const InnerIdType* ids,
+                        InnerIdType count,
+                        QueryContext* ctx) const override {
+        auto& comp = *static_cast<FusedComputer*>(computer.get());
+        this->prepare_fused_traversal(comp);
+        uint64_t fallback_count = 0;
+        const auto meta = bottom_quantizer().SupplementMetaOffset();
+        for (InnerIdType i = 0; i < count; i += 4) {
+            const auto n = std::min<InnerIdType>(4, count - i);
+            RaBitQFusedCodeView views[4];
+            const uint8_t* codes[4]{};
+            for (InnerIdType j = 0; j < n; ++j) {
+                views[j] = this->get_fused_code_view(ids[i + j]);
+                CHECK_ARGUMENT(views[j].cluster_id < K_FUSED_CLUSTER_COUNT,
+                               "failed to compute fused RaBitQ distance");
+                codes[j] = views[j].supplement_code;
+            }
+            float ips[4];
+            rabitq_five_bit_centered_batch4(comp.transformed_query_.data(),
+                                            codes,
+                                            bottom_quantizer().GetDim(),
+                                            n,
+                                            comp.hnsw_query_sum_,
+                                            ips);
+            for (InnerIdType j = 0; j < n; ++j) {
+                float add, scale;
+                std::memcpy(&add, codes[j] + meta, 4);
+                std::memcpy(&scale, codes[j] + meta + 4, 4);
+                distances[i + j] = add + comp.hnsw_g_add_[views[j].cluster_id] +
+                                   scale * (32 * inner_products[i + j] + ips[j]);
+                if (not std::isfinite(distances[i + j])) {
+                    ++fallback_count;
+                    this->query_fused_full(distances + i + j, computer, ids + i + j, 1, ctx);
+                }
+            }
+        }
+        this->add_full_count(ctx, count - fallback_count);
+        this->add_reorder_hint_full_count(ctx, count - fallback_count);
+        this->add_reorder_fallback_full_count(ctx, fallback_count);
+    }
+
     ComputerInterfacePtr
     FactoryFusedComputer(const void* query) const override {
-        auto result = std::make_shared<FusedComputer>(allocator_);
-        if (fused_quantizers_.empty()) {
-            return result;
-        }
-        result->transformed_query_.resize(fused_quantizers_.front()->GetDim());
-        Vector<float> input_scratch(this->allocator_);
-        const float* input = this->prepare_dense_input(query, 1, input_scratch);
-        for (uint64_t i = 0; i < static_cast<uint64_t>(common_param_.dim_); ++i) {
-            if (not std::isfinite(input[i])) {
-                throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                    "RaBitQ query must contain only finite values");
-            }
-        }
-        fused_quantizers_.front()->TransformFusedQuery(
-            input, result->transformed_query_, result->query_raw_norm_, result->mrq_norm_sqr_);
-        if (bottom_quantizer().FilterBits() == 1) {
-            fused_quantizers_.front()->PrepareHnswFourBitQuery(result->transformed_query_.data(),
-                                                               result->hnsw_query_planes_,
-                                                               result->hnsw_query_delta_,
-                                                               result->hnsw_query_vl_,
-                                                               result->hnsw_query_sum_);
-        } else {
-            double query_sum = 0.0;
-            for (const float value : result->transformed_query_) {
-                query_sum += static_cast<double>(value);
-            }
-            result->hnsw_query_sum_ = static_cast<float>(query_sum);
-        }
-        result->hnsw_g_add_.resize(fused_quantizers_.size());
-        result->hnsw_g_error_.resize(fused_quantizers_.size());
-        for (uint64_t cluster_id = 0; cluster_id < fused_quantizers_.size(); ++cluster_id) {
-            fused_quantizers_[cluster_id]->ComputeHnswCentroidTerms(
-                result->transformed_query_.data(),
-                result->hnsw_g_add_[cluster_id],
-                result->hnsw_g_error_[cluster_id]);
-        }
-        return result;
+        return this->make_fused_computer<false>(query);
     }
 
     bool
@@ -2313,6 +2435,7 @@ public:
         if (fused_computer == nullptr or fused_quantizers_.empty()) {
             return false;
         }
+        this->prepare_fused_traversal(*fused_computer);
         const auto filter_bits = bottom_quantizer().FilterBits();
         query->query_planes =
             filter_bits == 1 ? fused_computer->hnsw_query_planes_.data() : nullptr;
@@ -2351,6 +2474,7 @@ public:
         if (fused_computer == nullptr or cluster_id >= fused_quantizers_.size()) {
             return false;
         }
+        this->prepare_fused_traversal(*fused_computer);
         this->add_filter_count(ctx, 1);
         if (filter_inner_product != nullptr) {
             *filter_inner_product = std::numeric_limits<float>::quiet_NaN();
@@ -2413,6 +2537,7 @@ public:
         if (fused_computer == nullptr or cluster_id >= fused_quantizers_.size()) {
             return false;
         }
+        this->prepare_fused_traversal(*fused_computer);
         this->add_full_count(ctx, 1);
         bool computed = false;
         if (not IsLegacyHnswFusedCodec() and bottom_quantizer().FilterBits() >= 2) {
@@ -2444,6 +2569,7 @@ public:
         if (fused_computer == nullptr or cluster_id >= fused_quantizers_.size()) {
             return false;
         }
+        this->prepare_fused_traversal(*fused_computer);
         this->add_full_count(ctx, 1);
         if (not IsLegacyHnswFusedCodec()) {
             return fused_quantizers_[cluster_id]->ComputeFusedAffineFullDirect(
@@ -2481,7 +2607,7 @@ public:
         }
         std::stringstream output;
         IOStreamWriter writer(output);
-        constexpr uint32_t version = 1;
+        constexpr uint32_t version = 2;
         StreamWriter::WriteObj(writer, version);
         StreamWriter::WriteVector(writer, fused_centroids_);
         const auto cluster_count = static_cast<uint32_t>(fused_quantizers_.size());
@@ -2513,7 +2639,7 @@ public:
         IOStreamReader reader(input);
         uint32_t version = 0;
         StreamReader::ReadObj(reader, version);
-        CHECK_ARGUMENT(version == 1, "unsupported fused RaBitQ codec version");
+        CHECK_ARGUMENT(version == 1 or version == 2, "unsupported fused RaBitQ codec version");
         uint64_t centroid_count = 0;
         StreamReader::ReadObj(reader, centroid_count);
         CHECK_ARGUMENT(centroid_count == expected_centroid_count,
@@ -2539,6 +2665,9 @@ public:
             fused_quantizers_.push_back(std::move(quantizer));
         }
         refresh_fused_cluster_stats();
+        if (version == 1) {
+            refresh_fused_refinement_bounds();
+        }
     }
 
     bool
@@ -3178,11 +3307,230 @@ private:
     }
 
     void
+    refresh_fused_refinement_bounds() {
+        if (this->UsesExternalFusedCodeStorage() and not IsLegacyHnswFusedCodec() and
+            bottom_quantizer().FilterBits() == 3 and bottom_quantizer().ReorderBits() == 5) {
+            // Training and version-1 deserialization own the slab exclusively. Version-2
+            // records already contain these bounds and are loaded without rewriting the slab.
+            for (InnerIdType id = 0; id < this->TotalCount(); ++id) {
+                const auto view = this->get_fused_code_view(id);
+                if (view.cluster_id < fused_quantizers_.size()) {
+                    fused_quantizers_[view.cluster_id]->PrepareFusedRefinementBounds(
+                        const_cast<uint8_t*>(view.one_bit_code),
+                        const_cast<uint8_t*>(view.supplement_code));
+                }
+            }
+        }
+    }
+
+    [[nodiscard]] bool
+    has_fast_fused_full_batch() const {
+        // Staged MCI refinement is enabled only with the measured AVX-512 implementation.
+        // Generic kernels preserve portability/correctness; scalar staging is not a speedup.
+        return not IsLegacyHnswFusedCodec() and bottom_quantizer().FilterBits() == 3 and
+               bottom_quantizer().ReorderBits() == 5 and fused_quantizers_.size() == 16 and
+               fused_rotated_centroids_.size() == 16 * static_cast<uint64_t>(common_param_.dim_) and
+               RaBitQFloatThreePlusFiveBitIPBatch4 != generic::RaBitQFloatThreePlusFiveBitIPBatch4;
+    }
+
+    template <bool full_only>
+    ComputerInterfacePtr
+    make_fused_computer(const void* query) const {
+        auto result = std::make_shared<FusedComputer>(allocator_);
+        if (fused_quantizers_.empty()) {
+            return result;
+        }
+        result->transformed_query_.resize(fused_quantizers_.front()->GetDim());
+        Vector<float> input_scratch(this->allocator_);
+        const float* input = this->prepare_dense_input(query, 1, input_scratch);
+        for (uint64_t i = 0; i < static_cast<uint64_t>(common_param_.dim_); ++i) {
+            if (not std::isfinite(input[i])) {
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    "RaBitQ query must contain only finite values");
+            }
+        }
+        fused_quantizers_.front()->TransformFusedQuery(
+            input, result->transformed_query_, result->query_raw_norm_, result->mrq_norm_sqr_);
+        if constexpr (full_only) {
+            return result;
+        }
+        if (bottom_quantizer().FilterBits() == 1) {
+            fused_quantizers_.front()->PrepareHnswFourBitQuery(result->transformed_query_.data(),
+                                                               result->hnsw_query_planes_,
+                                                               result->hnsw_query_delta_,
+                                                               result->hnsw_query_vl_,
+                                                               result->hnsw_query_sum_);
+        } else {
+            double query_sum = 0.0;
+            for (const float value : result->transformed_query_) {
+                query_sum += static_cast<double>(value);
+            }
+            result->hnsw_query_sum_ = static_cast<float>(query_sum);
+        }
+        for (uint64_t cluster_id = 0; cluster_id < fused_quantizers_.size(); ++cluster_id) {
+            fused_quantizers_[cluster_id]->ComputeHnswCentroidTerms(
+                result->transformed_query_.data(),
+                result->hnsw_g_add_[cluster_id],
+                result->hnsw_g_error_[cluster_id]);
+        }
+        result->traversal_prepared_ = true;
+        return result;
+    }
+
+    void
+    prepare_fused_full_terms(FusedComputer& computer, uint32_t needed_clusters) const {
+        if (computer.traversal_prepared_) {
+            return;
+        }
+        std::lock_guard<std::mutex> lock(computer.full_terms_mutex_);
+        needed_clusters &= ~computer.prepared_clusters_;
+        const uint64_t dim = common_param_.dim_;
+        const auto* centroids = fused_rotated_centroids_.data();
+        std::array<uint32_t, 4> clusters{};
+        uint32_t count = 0;
+        const auto compute_batch = [&]() {
+            for (uint32_t i = count; i < 4; ++i) {
+                clusters[i] = clusters[0];
+            }
+            float adds[4]{};
+            if constexpr (metric == MetricType::METRIC_TYPE_IP) {
+                FP32ComputeIPBatch4(computer.transformed_query_.data(),
+                                    dim,
+                                    centroids + clusters[0] * dim,
+                                    centroids + clusters[1] * dim,
+                                    centroids + clusters[2] * dim,
+                                    centroids + clusters[3] * dim,
+                                    adds[0],
+                                    adds[1],
+                                    adds[2],
+                                    adds[3]);
+                for (uint32_t i = 0; i < count; ++i) {
+                    adds[i] = -adds[i];
+                }
+            } else {
+                FP32ComputeL2SqrBatch4(computer.transformed_query_.data(),
+                                       dim,
+                                       centroids + clusters[0] * dim,
+                                       centroids + clusters[1] * dim,
+                                       centroids + clusters[2] * dim,
+                                       centroids + clusters[3] * dim,
+                                       adds[0],
+                                       adds[1],
+                                       adds[2],
+                                       adds[3]);
+            }
+            for (uint32_t i = 0; i < count; ++i) {
+                computer.hnsw_g_add_[clusters[i]] = adds[i];
+            }
+            count = 0;
+        };
+        for (uint32_t cluster = 0; cluster < K_FUSED_CLUSTER_COUNT; ++cluster) {
+            if ((needed_clusters & (1U << cluster)) == 0)
+                continue;
+            clusters[count++] = cluster;
+            if (count == 4)
+                compute_batch();
+        }
+        if (count > 0)
+            compute_batch();
+        computer.prepared_clusters_ |= needed_clusters;
+    }
+
+    void
+    prepare_fused_traversal(FusedComputer& computer) const {
+        if (computer.traversal_prepared_) {
+            return;
+        }
+        // Full-distance MCI/scans need neither the filter sum nor error bounds. If the same
+        // computer later serves traversal, initialize only those extras once, safely for workers.
+        std::call_once(computer.traversal_once_, [&]() {
+            this->prepare_fused_full_terms(computer, (1U << K_FUSED_CLUSTER_COUNT) - 1U);
+            double sum = 0.0;
+            for (const float value : computer.transformed_query_) {
+                sum += static_cast<double>(value);
+            }
+            computer.hnsw_query_sum_ = static_cast<float>(sum);
+            const uint64_t dim = common_param_.dim_;
+            for (uint64_t i = 0; i < fused_quantizers_.size(); ++i) {
+                const float norm_sqr =
+                    metric == MetricType::METRIC_TYPE_IP
+                        ? FP32ComputeL2Sqr(computer.transformed_query_.data(),
+                                           fused_rotated_centroids_.data() + i * dim,
+                                           dim)
+                        : computer.hnsw_g_add_[i];
+                computer.hnsw_g_error_[i] = std::sqrt(norm_sqr);
+            }
+        });
+    }
+
+    void
     query_fused_full(float* result_dists,
                      const ComputerInterfacePtr& computer,
                      const InnerIdType* ids,
                      InnerIdType id_count,
                      QueryContext* ctx) const {
+        if (id_count > 0 and this->has_fast_fused_full_batch()) {
+            auto* fused = static_cast<FusedComputer*>(computer.get());
+            CHECK_ARGUMENT(fused != nullptr, "failed to compute fused RaBitQ distance");
+            const auto metadata_offset = bottom_quantizer().SupplementMetaOffset();
+            const float query_sum =
+                FP32ReduceAdd(fused->transformed_query_.data(), bottom_quantizer().GetDim());
+            constexpr InnerIdType block_size = 64;
+            std::array<RaBitQFusedCodeView, block_size> views;
+            for (InnerIdType block = 0; block < id_count; block += block_size) {
+                const auto block_count = std::min<InnerIdType>(block_size, id_count - block);
+                uint32_t needed_clusters = 0;
+                for (InnerIdType i = 0; i < block_count; ++i) {
+                    views[i] = this->get_fused_code_view(ids[block + i]);
+                    CHECK_ARGUMENT(views[i].cluster_id < K_FUSED_CLUSTER_COUNT,
+                                   "failed to compute fused RaBitQ distance");
+                    needed_clusters |= 1U << views[i].cluster_id;
+                }
+                // Prepare only centroids represented in this distance batch. The lock also
+                // publishes each cached term to other workers sharing this computer.
+                this->prepare_fused_full_terms(*fused, needed_clusters);
+                this->prefetch_fused_codes(ids + block, block_count, true);
+                for (InnerIdType i = 0; i < block_count; i += 4) {
+                    const auto count = std::min<InnerIdType>(4, block_count - i);
+                    const uint8_t* filter_codes[4]{};
+                    const uint8_t* supplements[4]{};
+                    for (InnerIdType lane = 0; lane < count; ++lane) {
+                        if (i + lane + prefetch_stride_code_ < block_count) {
+                            fused_code_storage_->PrefetchFusedCodes(
+                                ids[block + i + lane + prefetch_stride_code_], true);
+                        }
+                        filter_codes[lane] = views[i + lane].one_bit_code;
+                        supplements[lane] = views[i + lane].supplement_code;
+                    }
+                    float inner_products[4]{};
+                    RaBitQFloatThreePlusFiveBitIPBatch4(fused->transformed_query_.data(),
+                                                        filter_codes,
+                                                        supplements,
+                                                        bottom_quantizer().GetDim(),
+                                                        count,
+                                                        query_sum,
+                                                        inner_products);
+                    for (InnerIdType lane = 0; lane < count; ++lane) {
+                        float add = 0.0F;
+                        float rescale = 0.0F;
+                        std::memcpy(&add, supplements[lane] + metadata_offset, sizeof(add));
+                        std::memcpy(&rescale,
+                                    supplements[lane] + metadata_offset + sizeof(float),
+                                    sizeof(rescale));
+                        const float distance = add +
+                                               fused->hnsw_g_add_[views[i + lane].cluster_id] +
+                                               rescale * inner_products[lane];
+                        CHECK_ARGUMENT(IsFiniteRaBitQValue(add) and IsFiniteRaBitQValue(rescale) and
+                                           IsFiniteRaBitQValue(inner_products[lane]) and
+                                           IsFiniteRaBitQValue(distance),
+                                       "failed to compute fused RaBitQ distance");
+                        result_dists[block + i + lane] = distance;
+                    }
+                    this->add_full_count(ctx, count);
+                }
+            }
+            return;
+        }
         this->prefetch_fused_codes(ids, id_count, true);
         for (InnerIdType i = 0; i < id_count; ++i) {
             if (i + prefetch_stride_code_ < id_count) {

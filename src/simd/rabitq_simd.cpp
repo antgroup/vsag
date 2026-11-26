@@ -14,9 +14,31 @@
 
 #include "rabitq_simd.h"
 
+#include "simd/rabitq_refine_simd.h"
 #include "simd_dispatch.h"
 
 namespace vsag {
+static RaBitQRefineBatch4
+get_three_bit_refine_batch4() {
+#if defined(ENABLE_AVX512)
+    if (SimdStatus::SupportAVX512()) {
+        return avx512::rabitq_three_bit_centered_batch4;
+    }
+#endif
+    return generic::rabitq_three_bit_centered_batch4;
+}
+RaBitQRefineBatch4 rabitq_three_bit_centered_batch4 = get_three_bit_refine_batch4();
+
+static RaBitQRefineBatch4
+get_five_bit_refine_batch4() {
+#if defined(ENABLE_AVX512)
+    if (SimdStatus::SupportAVX512()) {
+        return avx512::rabitq_five_bit_centered_batch4;
+    }
+#endif
+    return generic::rabitq_five_bit_centered_batch4;
+}
+RaBitQRefineBatch4 rabitq_five_bit_centered_batch4 = get_five_bit_refine_batch4();
 
 VSAG_DEFINE_SIMD_DISPATCH(RaBitQFloatBinaryIP, RaBitQFloatBinaryType);
 VSAG_DEFINE_SIMD_DISPATCH(RaBitQFloatBinaryIPBatch4, RaBitQFloatBinaryBatch4Type);
@@ -394,5 +416,17 @@ GetFlipSign() {
     return generic::FlipSign;
 }
 FlipSignType FlipSign = GetFlipSign();
+
+static RaBitQFloatThreePlusFiveBitBatch4Type
+get_ra_bit_q_float_three_plus_five_bit_ip_batch4() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::RaBitQFloatThreePlusFiveBitIPBatch4;
+#endif
+    }
+    return generic::RaBitQFloatThreePlusFiveBitIPBatch4;
+}
+RaBitQFloatThreePlusFiveBitBatch4Type RaBitQFloatThreePlusFiveBitIPBatch4 =
+    get_ra_bit_q_float_three_plus_five_bit_ip_batch4();
 
 }  // namespace vsag
