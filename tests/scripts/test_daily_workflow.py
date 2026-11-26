@@ -40,7 +40,11 @@ class DailyWorkflowTests(unittest.TestCase):
         self.assertIn("daily-extra-x86", summary)
         self.assertIn("--extra-proposal", summary)
         download = summary.split("- name: Download extra quota plan\n", 1)[1].split("- name:", 1)[0]
-        self.assertIn("if: ${{ always() && needs.daily-extra-plan.result != 'skipped' }}", download)
+        self.assertIn(
+            "if: ${{ always() && needs.daily-extra-plan.result != 'skipped' "
+            "&& needs.daily-extra-plan.result != 'cancelled' }}",
+            download,
+        )
         self.assertNotIn("continue-on-error", download)
         self.assertIn("--job-reports", summary)
 

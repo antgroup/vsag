@@ -268,9 +268,16 @@ def main():
         results = [dp.load(path) for path in paths]
         needs = json.loads(os.environ.get("NEEDS_JSON", "{}"))
         extra_jobs = {"daily-extra-plan", "daily-extra-x86"}
+        planner_result = needs.get("daily-extra-plan", {}).get("result")
+        extra_result = needs.get("daily-extra-x86", {}).get("result")
+        extra_lane = re.compile(r"daily-extra-x86-functests-shard[0-9]+")
         extra_blocked = (
-            all(needs.get(name, {}).get("result") == "skipped" for name in extra_jobs)
+            planner_result == extra_result == "skipped"
             and any(job.get("result") in {"failure", "cancelled"} for job in needs.values())
+        ) or (
+            planner_result == "cancelled"
+            and extra_result in {"skipped", "cancelled"}
+            and not any(extra_lane.fullmatch(result["lane"]) for result in results)
         )
         evidence_gaps = []
         if args.expected_file:
@@ -282,8 +289,7 @@ def main():
         if args.expected_lanes:
             actual = Counter(r["lane"] for r in results)
             expected = Counter(lane for lane in args.expected_lanes
-                               if not (extra_blocked and re.fullmatch(
-                                   r"daily-extra-x86-functests-shard[0-9]+", lane)))
+                               if not (extra_blocked and extra_lane.fullmatch(lane)))
             if actual != expected:
                 lane_error = ("Selected workflow lanes did not all report; missing=" +
                               str(list((expected - actual).elements())) + "; unexpected=" +
@@ -297,10 +303,11 @@ def main():
         if extra_blocked:
             report["extra_coverage_blocked"] = True
         for name, job in needs.items():
-            if extra_blocked and name in extra_jobs:
+            result = job.get("result")
+            if extra_blocked and name in extra_jobs and result == "skipped":
                 continue
-            if job.get("result") != "success":
-                report["failures"].append("Workflow dependency " + name + ": " + str(job.get("result")))
+            if result != "success":
+                report["failures"].append("Workflow dependency " + name + ": " + str(result))
                 report["status"] = "failed"
         metrics = None
         if args.metrics:
@@ -323,7 +330,7 @@ def main():
         if report["coverage_gaps"]:
             report["incomplete"] = True
             report["status"] = "failed"
-        if args.extra_proposal and needs.get("daily-extra-plan", {}).get("result") != "skipped":
+        if args.extra_proposal and planner_result not in {"skipped", "cancelled"}:
             import daily_extra
             try:
                 proposal = dp.load(args.extra_proposal)

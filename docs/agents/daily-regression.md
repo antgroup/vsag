@@ -250,9 +250,12 @@ contains the same `case_counts` values for local analysis.
 
 When a required job fails or is cancelled and both x86 supplemental jobs are
 skipped, Nightly Summary reports the supplemental stage as skipped. It retains
-the required job failure. Missing required results, missing evidence from an
-attempted supplemental stage, and unexplained supplemental skips still fail
-reconciliation.
+the required job failure. When the planner is cancelled, Summary records the
+cancellation and skips its quota plan lookup. If there is no supplemental
+execution evidence and the dependent jobs are skipped or cancelled, Summary
+also omits those unstarted shards from reconciliation. Missing required results,
+missing evidence from an attempted supplemental stage, and unexplained
+supplemental skips still fail reconciliation.
 
 A per-case timeout in the base x86 OpenBLAS functional rotation is advisory
 when captured evidence contains no assertion or sanitizer failure. The

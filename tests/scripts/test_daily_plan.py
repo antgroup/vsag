@@ -857,7 +857,7 @@ class DailyNamedCountTests(unittest.TestCase):
         self.assertEqual(counts["selected"], 0)
         self.assertEqual(counts["command_groups"], {"linux": "passed"})
 
-    def test_summary_requires_extra_proposal_when_planner_succeeded(self):
+    def test_summary_skips_extra_proposal_for_skipped_or_cancelled_planner(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             dp.write(root / "result.json", self.named_result())
@@ -865,13 +865,16 @@ class DailyNamedCountTests(unittest.TestCase):
                        str(root / "result.json"), "--expected-lanes", "x86",
                        "--extra-proposal", str(root / "missing-proposal.json"),
                        "--summary", str(root / "summary.md"), "--json", str(root / "summary.json")]
-            for planner_result in ("skipped", "success"):
+            for base_result, planner_result, extra_result, failure in (
+                    ("failure", "skipped", "skipped", "daily_test_asan_x86: failure"),
+                    ("success", "cancelled", "cancelled", "daily-extra-plan: cancelled"),
+                    ("success", "failure", "skipped", "daily-extra-plan: failure"),
+                    ("success", "success", "success", None)):
                 with self.subTest(planner_result=planner_result):
-                    base_result = "failure" if planner_result == "skipped" else "success"
                     env = {**os.environ, "NEEDS_JSON": json.dumps({
                         "daily_test_asan_x86": {"result": base_result},
                         "daily-extra-plan": {"result": planner_result},
-                        "daily-extra-x86": {"result": "skipped" if base_result == "failure" else "success"},
+                        "daily-extra-x86": {"result": extra_result},
                     })}
                     process = subprocess.run(command, env=env, capture_output=True)
                     self.assertEqual(process.returncode, 1, process.stderr)
@@ -879,8 +882,9 @@ class DailyNamedCountTests(unittest.TestCase):
                     self.assertEqual(summary["status"], "failed")
                     self.assertEqual(summary["case_counts"]["selected"], 1)
                     self.assertNotIn("extra_coverage", summary)
-                    if planner_result == "skipped":
-                        self.assertIn("Workflow dependency daily_test_asan_x86: failure", summary["failures"])
+                    if failure is not None:
+                        self.assertIn("Workflow dependency " + failure, summary["failures"])
+                    if planner_result in ("skipped", "cancelled"):
                         self.assertEqual(summary["coverage_gaps"], [])
                         self.assertFalse(summary["incomplete"])
                     else:
@@ -943,6 +947,50 @@ class DailyNamedCountTests(unittest.TestCase):
                         if supplemental != "success":
                             self.assertIn("Workflow dependency daily-extra-x86: " + supplemental,
                                           result["failures"])
+
+    def test_summary_reconciles_manifest_after_planner_cancellation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dp.write(root / "result.json", self.named_result())
+            extra_lanes = [f"daily-extra-x86-functests-shard{i}" for i in range(4)]
+            command = [sys.executable, str(ROOT / "scripts/testing/daily_report.py"),
+                       str(root / "result.json"), "--expected-file", str(root / "expected.json"),
+                       "--extra-proposal", str(root / "missing-proposal.json"),
+                       "--summary", str(root / "summary.md"), "--json", str(root / "summary.json")]
+            for supplemental, has_extra, missing_base in (
+                    ("skipped", False, False),
+                    ("cancelled", False, True),
+                    ("cancelled", True, False)):
+                with self.subTest(supplemental=supplemental, has_extra=has_extra, missing_base=missing_base):
+                    mandatory = ["x86", "required-lane"] if missing_base else ["x86"]
+                    dp.write(root / "expected.json", mandatory + extra_lanes)
+                    args = command.copy()
+                    if has_extra:
+                        dp.write(root / "extra.json", self.named_result(extra_lanes[0]))
+                        args.insert(3, str(root / "extra.json"))
+                    env = {**os.environ, "NEEDS_JSON": json.dumps({
+                        "daily_test_asan_x86": {"result": "cancelled" if missing_base else "success"},
+                        "daily-extra-plan": {"result": "cancelled"},
+                        "daily-extra-x86": {"result": supplemental},
+                    })}
+                    process = subprocess.run(args, env=env, capture_output=True)
+                    self.assertEqual(process.returncode, 1, process.stderr)
+                    result = dp.load(root / "summary.json")
+                    self.assertEqual(result["status"], "failed")
+                    self.assertEqual(result["case_counts"]["selected"], 1)
+                    self.assertEqual(result.get("extra_coverage_blocked", False), not has_extra)
+                    self.assertEqual(result["incomplete"], has_extra or missing_base)
+                    gaps = " ".join(result["coverage_gaps"])
+                    self.assertNotIn("missing-proposal.json", gaps)
+                    self.assertEqual("required-lane" in gaps, missing_base)
+                    self.assertNotIn(extra_lanes[0], gaps)
+                    for lane in extra_lanes[1:]:
+                        self.assertEqual(lane in gaps, has_extra)
+                    self.assertIn("Workflow dependency daily-extra-plan: cancelled", result["failures"])
+                    self.assertEqual("Workflow dependency daily-extra-x86: cancelled" in result["failures"],
+                                     supplemental == "cancelled")
+                    self.assertEqual("Skipped after a required job" in (root / "summary.md").read_text(),
+                                     not has_extra)
 
     def test_missing_lane_preserves_counts_and_fails(self):
         with tempfile.TemporaryDirectory() as directory:
