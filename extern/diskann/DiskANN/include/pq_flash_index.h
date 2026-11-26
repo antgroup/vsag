@@ -24,7 +24,7 @@ namespace diskann
 template <typename T, typename LabelT = uint32_t> class PQFlashIndex
 {
   public:
-    DISKANN_DLLEXPORT PQFlashIndex(std::shared_ptr<LocalFileReader> &fileReader, diskann::Metric m, size_t len, size_t dim, bool use_bsa = false);
+    DISKANN_DLLEXPORT PQFlashIndex(std::shared_ptr<LocalFileReader> &fileReader, diskann::Metric m, size_t len, size_t dim, bool use_bsa = false, bool support_calc_distance_by_ids = false);
     DISKANN_DLLEXPORT ~PQFlashIndex();
 
 #ifdef EXEC_ENV_OLS
@@ -102,6 +102,8 @@ template <typename T, typename LabelT = uint32_t> class PQFlashIndex
     DISKANN_DLLEXPORT diskann::Metric get_metric();
 
     DISKANN_DLLEXPORT int64_t get_memory_usage();
+
+    DISKANN_DLLEXPORT void cal_distance_by_ids(const float *query, const int64_t *ids, int64_t count, float *distances, bool use_reorder = true);
 
   protected:
     DISKANN_DLLEXPORT void use_medoids_data_as_centroids();
@@ -198,7 +200,8 @@ template <typename T, typename LabelT = uint32_t> class PQFlashIndex
     bool reorder_data_exists = false;
     uint64_t reoreder_data_offset = 0;
 
-
+    bool support_calc_distance_by_ids = false;
+    std::unordered_map<uint32_t, int64_t > tag_to_id_map;
 
     // Graph related data structures
     int64_t graph_size = 0;

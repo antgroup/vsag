@@ -95,23 +95,37 @@ public:
     }
 
     tl::expected<float, Error>
-    CalcDistanceById(const DatasetPtr& vector, int64_t id) const override {
-        SAFE_CALL(return this->inner_index_->CalcDistanceById(vector, id));
+    CalcDistanceById(const DatasetPtr& vector,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override {
+        SAFE_CALL(
+            return this->inner_index_->CalcDistanceById(vector, id, calculate_precise_distance));
     }
 
     tl::expected<float, Error>
-    CalcDistanceById(const float* vector, int64_t id) const override {
-        SAFE_CALL(return this->inner_index_->CalcDistanceById(vector, id));
+    CalcDistanceById(const float* vector,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override {
+        SAFE_CALL(
+            return this->inner_index_->CalcDistanceById(vector, id, calculate_precise_distance));
     }
 
     tl::expected<DatasetPtr, Error>
-    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override {
-        SAFE_CALL(return this->inner_index_->CalDistanceById(query, ids, count));
+    CalDistanceById(const float* query,
+                    const int64_t* ids,
+                    int64_t count,
+                    bool calculate_precise_distance = true) const override {
+        SAFE_CALL(return this->inner_index_->CalDistanceById(
+            query, ids, count, calculate_precise_distance));
     }
 
     tl::expected<DatasetPtr, Error>
-    CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count) const override {
-        SAFE_CALL(return this->inner_index_->CalDistanceById(query, ids, count));
+    CalDistanceById(const DatasetPtr& query,
+                    const int64_t* ids,
+                    int64_t count,
+                    bool calculate_precise_distance = true) const override {
+        SAFE_CALL(return this->inner_index_->CalDistanceById(
+            query, ids, count, calculate_precise_distance));
     }
 
     [[nodiscard]] bool

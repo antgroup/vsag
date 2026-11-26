@@ -1005,7 +1005,10 @@ IVF::GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const {
 }
 
 DatasetPtr
-IVF::CalDistanceById(const float* query, const int64_t* ids, int64_t count) const {
+IVF::CalDistanceById(const float* query,
+                     const int64_t* ids,
+                     int64_t count,
+                     bool calculate_precise_distance) const {
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
     if (count <= 0) {
@@ -1036,7 +1039,7 @@ IVF::CalDistanceById(const float* query, const int64_t* ids, int64_t count) cons
     }
     if (not inner_ids.empty()) {
         const auto valid_count = static_cast<int64_t>(inner_ids.size());
-        if (this->use_reorder_) {
+        if (this->use_reorder_ && calculate_precise_distance) {
             auto computer = this->reorder_codes_->FactoryComputer(query);
             Vector<float> valid_distances(valid_count, 0.0F, allocator_);
             this->reorder_codes_->Query(
@@ -1058,7 +1061,7 @@ IVF::CalDistanceById(const float* query, const int64_t* ids, int64_t count) cons
 }
 
 float
-IVF::CalcDistanceById(const float* query, int64_t id) const {
+IVF::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_distance) const {
     InnerIdType inner_id = 0;
     {
         std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
@@ -1068,7 +1071,7 @@ IVF::CalcDistanceById(const float* query, int64_t id) const {
         }
         inner_id = found_id;
     }
-    if (this->use_reorder_) {
+    if (this->use_reorder_ && calculate_precise_distance) {
         float dist = 0.0F;
         auto computer = this->reorder_codes_->FactoryComputer(query);
         this->reorder_codes_->Query(&dist, computer, &inner_id, 1);

@@ -420,11 +420,17 @@ public:
      *
      * @param vector is the embedding of query
      * @param id is the unique identifier of the vector to be calculated in the index.
+     * @param calculate_precise_distance If true, the function will attempt to use high-precision
+     *        vectors (e.g., full-precision float32) for distance computation, even if it requires
+     *        loading data from disk, which may incur I/O overhead. If false, the implementation may
+     *        use quantized or approximate representations for faster computation.
      * @return result is the distance between the query and the vector of the given ID. Returns an
      * error with ErrorType::INVALID_ARGUMENT if the ID does not exist or is removed.
      */
     virtual tl::expected<float, Error>
-    CalcDistanceById(const float* vector, int64_t id) const {
+    CalcDistanceById(const float* vector,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const {
         throw std::runtime_error("Index doesn't support get distance by id");
     };
 
@@ -433,11 +439,17 @@ public:
      *
      * @param vector is the embedding of query
      * @param id is the unique identifier of the vector to be calculated in the index.
+     * @param calculate_precise_distance If true, the function will attempt to use high-precision
+     *        vectors (e.g., full-precision float32) for distance computation, even if it requires
+     *        loading data from disk, which may incur I/O overhead. If false, the implementation may
+     *        use quantized or approximate representations for faster computation.
      * @return result is the distance between the query and the vector of the given ID. Returns an
      * error with ErrorType::INVALID_ARGUMENT if the ID does not exist or is removed.
      */
     virtual tl::expected<float, Error>
-    CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
+    CalcDistanceById(const DatasetPtr& vector,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const {
         throw std::runtime_error("Index doesn't support get distance by id");
     };
 
@@ -447,11 +459,18 @@ public:
      * @param query is the embedding of query
      * @param ids is the unique identifier of the vector to be calculated in the index.
      * @param count is the count of ids
+     * @param calculate_precise_distance If true, the function will attempt to use high-precision
+     *        vectors (e.g., full-precision float32) for distance computation, even if it requires
+     *        loading data from disk, which may incur I/O overhead. If false, the implementation may
+     *        use quantized or approximate representations for faster computation.
      * @return result is the distances of input ids. Missing or removed IDs have a NaN distance and
      * a false entry in result->GetValids().
      */
     virtual tl::expected<DatasetPtr, Error>
-    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const {
+    CalDistanceById(const float* query,
+                    const int64_t* ids,
+                    int64_t count,
+                    bool calculate_precise_distance = true) const {
         throw std::runtime_error("Index doesn't support get distance by id");
     };
 
@@ -461,11 +480,18 @@ public:
      * @param query is the embedding of query
      * @param ids is the unique identifier of the vector to be calculated in the index.
      * @param count is the count of ids
+     * @param calculate_precise_distance If true, the function will attempt to use high-precision
+     *        vectors (e.g., full-precision float32) for distance computation, even if it requires
+     *        loading data from disk, which may incur I/O overhead. If false, the implementation may
+     *        use quantized or approximate representations for faster computation.
      * @return result is the distances of input ids. Missing or removed IDs have a NaN distance and
      * a false entry in result->GetValids().
      */
     virtual tl::expected<DatasetPtr, Error>
-    CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count) const {
+    CalDistanceById(const DatasetPtr& query,
+                    const int64_t* ids,
+                    int64_t count,
+                    bool calculate_precise_distance = true) const {
         throw std::runtime_error("Index doesn't support get distance by id");
     };
 
