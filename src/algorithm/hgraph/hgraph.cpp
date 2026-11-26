@@ -588,9 +588,12 @@ HGraph::SetImmutable() {
     std::unique_lock<std::mutex> mci_mutation_lock(this->mci_mutation_mutex_, std::defer_lock);
     if (this->mci_parameters_.enabled) {
         mci_mutation_lock.lock();
-        this->flush_pending_mci_single_adds();
+        this->storage_state_->FlushPendingMCISingleAdds(*this);
     }
     std::scoped_lock<std::shared_mutex> add_lock(this->add_mutex_);
+    if (this->immutable_.load(std::memory_order_acquire)) {
+        return;
+    }
     std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
     auto empty_mutex = std::make_shared<EmptyMutex>();
     this->searcher_->SetMutexArray(empty_mutex);

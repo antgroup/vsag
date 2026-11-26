@@ -3842,6 +3842,11 @@ TEST_CASE("HGraph MCI automatically compacts after one hundred successful mutati
         auto bytes = index->Serialize();
         REQUIRE(bytes.has_value());
         REQUIRE(delta_memberships() == 0);
+        // Saving a mutable index starts a new interval for subsequent batch writes to it.
+        add(base + 101, 98);
+        REQUIRE(delta_memberships() > 0);
+        add(base + 199, 2);
+        REQUIRE(delta_memberships() == 0);
         auto restored = vsag::Factory::CreateIndex("hgraph", params.Dump()).value();
         REQUIRE(restored->Deserialize(bytes.value()).has_value());
         index = restored;

@@ -79,6 +79,32 @@ public:
     void
     EnsurePhysicalCapacityUnlocked(HGraph& index, CodeSlotIdType required_capacity);
 
+    // A public writer may pass the initial immutable check before SetImmutable runs.
+    // Recheck while holding the same mutex that publishes the frozen MCI.
+    static std::unique_lock<std::mutex>
+    LockMutableMCI(HGraph& index) {
+        std::unique_lock<std::mutex> lock(index.mci_mutation_mutex_, std::defer_lock);
+        if (index.mci_parameters_.enabled) {
+            lock.lock();
+            if (index.immutable_.load(std::memory_order_acquire)) {
+                throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "cannot modify an immutable HGraph index");
+            }
+        }
+        return lock;
+    }
+
+    // Guarded by HGraph::mci_mutation_mutex_. Only changes since the last CSR flush count
+    // toward the next automatic compaction. A const Serialize may start a fresh interval.
+    enum class MCIPendingChanges { NONE, BATCH_ONLY, HAS_SINGLE_ADD };
+    MCIPendingChanges mci_pending_changes_{MCIPendingChanges::NONE};
+
+    void
+    RecordMCIMutation(HGraph& index, uint64_t changed_count, bool single_add);
+
+    void
+    FlushPendingMCISingleAdds(const HGraph& index);
+
     std::shared_ptr<CodeSlotMap> code_slot_map_;
     mutable std::shared_mutex storage_mutation_mutex_;
     mutable std::mutex physical_code_resize_mutex_;

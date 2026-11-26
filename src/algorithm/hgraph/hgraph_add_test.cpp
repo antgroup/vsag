@@ -277,6 +277,25 @@ private:
     mutable std::atomic<bool> first_search_{true};
 };
 
+class PausedMCIMutationHGraph : public vsag::HGraph {
+public:
+    using vsag::HGraph::HGraph;
+
+    std::vector<int64_t>
+    Add(const vsag::DatasetPtr& data) override {
+        before_mutation();
+        return HGraph::Add(data);
+    }
+
+    uint32_t
+    Remove(const std::vector<int64_t>& ids, vsag::RemoveMode mode) override {
+        before_mutation();
+        return HGraph::Remove(ids, mode);
+    }
+
+    std::function<void()> before_mutation = [] {};
+};
+
 class PausedUpdateAllocator : public vsag::Allocator {
 public:
     PausedUpdateAllocator() : resume_(resume_promise_.get_future().share()) {
@@ -338,6 +357,60 @@ const std::string kBruteForceSearchParams =
     R"({"hgraph": {"ef_search": 32, "brute_force_threshold": 1.0}})";
 
 }  // namespace
+
+TEST_CASE("MCI rejects a mutation that passed the public check before freezing",
+          "[ut][hgraph][mci][freeze_mutation]") {
+    const std::string operation =
+        GENERATE("add", "initial pipnn add", "mark remove", "force remove");
+    CAPTURE(operation);
+    const bool initial = operation == "initial pipnn add";
+    constexpr int64_t dim = 4;
+    auto parameters = MakeFp32HGraphJson(false);
+    parameters["graph_type"].SetString(initial ? "pipnn" : "nsw");
+    parameters["support_duplicate"].SetBool(false);
+    parameters["support_force_remove"].SetBool(operation == "force remove");
+    parameters["mci_mcs"].SetInt(8);
+    const auto common = MakeCommonParam(dim, 1);
+    auto inner = std::make_shared<PausedMCIMutationHGraph>(
+        vsag::HGraph::CheckAndMappingExternalParam(parameters, common), common);
+    vsag::IndexImpl<vsag::HGraph> index(inner, common);
+    std::vector<int64_t> ids{10, 20, 30};
+    std::vector<float> vectors{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0};
+    const auto base = MakeFloatDataset(vectors, ids, dim, ids.size());
+    if (not initial) {
+        REQUIRE(index.Build(base).has_value());
+    }
+    const auto before = index.GetNumElements();
+    bool frozen = false;
+    inner->before_mutation = [&] {
+        // IndexImpl already accepted the write. Freeze before the real HGraph writer takes
+        // its mutation lock, deterministically exercising the losing side of the race.
+        frozen =
+            std::async(std::launch::async, [&] { return index.SetImmutable(); }).get().has_value();
+    };
+    const auto check_rejected = [](const auto& result) {
+        CHECK_FALSE(result.has_value());
+        if (not result.has_value()) {
+            CHECK(result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+        }
+    };
+    std::vector<int64_t> new_id{40};
+    if (initial) {
+        check_rejected(index.Add(base));
+    } else if (operation == "add") {
+        check_rejected(index.Add(MakeFloatDataset(vectors, new_id, dim, 1)));
+    } else {
+        auto mode = operation == "mark remove" ? vsag::RemoveMode::MARK_REMOVE
+                                               : vsag::RemoveMode::FORCE_REMOVE;
+        check_rejected(index.Remove({ids.front()}, mode));
+    }
+    REQUIRE(frozen);
+    CHECK(index.GetNumElements() == before);
+    CHECK_FALSE(index.CheckIdExist(new_id.front()));
+    for (auto id : ids) {
+        CHECK(index.CheckIdExist(id) == not initial);
+    }
+}
 
 TEST_CASE("HGraph exact duplicate fallback supports every dense data type",
           "[ut][hgraph][duplicate][data_type]") {

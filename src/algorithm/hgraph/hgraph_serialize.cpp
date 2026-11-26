@@ -439,7 +439,7 @@ HGraph::Serialize(StreamWriter& writer) const {
     std::unique_lock<std::mutex> mci_mutation_lock(this->mci_mutation_mutex_, std::defer_lock);
     if (this->mci_parameters_.enabled) {
         mci_mutation_lock.lock();
-        this->flush_pending_mci_single_adds();
+        this->storage_state_->FlushPendingMCISingleAdds(*this);
     }
     this->serialize_label_info(writer);
     if (this->storage_state_->deduplicate_storage_) {
@@ -1101,7 +1101,7 @@ HGraph::deserialize_mci_cliques(StreamReader& reader, const JsonType& basic_info
     // Parallel component tasks must not read or modify the label table here.
     this->mci_cliques_->Deserialize(reader, version, total);
     this->mci_pending_mutations_ = 0;
-    this->mci_single_add_pending_ = false;
+    this->storage_state_->mci_pending_changes_ = StorageState::MCIPendingChanges::NONE;
 }
 
 void

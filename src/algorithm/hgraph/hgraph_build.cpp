@@ -20,9 +20,11 @@
 #include <fstream>
 #include <future>
 #include <limits>
+#include <numeric>
 #include <unordered_map>
 #include <unordered_set>
 
+#include "algorithm/mci/mci_seed_clique.h"
 #include "datacell/code_slot_flatten_adapter.h"
 #include "datacell/flatten_build_utils.h"
 #include "datacell/flatten_datacell_parameter.h"
@@ -39,6 +41,7 @@
 #include "mci_add_candidates.h"
 #include "pipnn_storage_build.h"
 #include "quantization/scalar_quantization/scalar_quantizer_parameter.h"
+#include "simd/fp32_simd.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "utils/util_functions.h"
@@ -131,6 +134,9 @@ public:
     Train(const DatasetPtr& base);
 
 private:
+    void
+    build_single_add_cliques(InnerIdType seed, const Vector<InnerIdType>& knn_ids);
+
     [[nodiscard]] DatasetPtr
     sample_train_dataset(const DatasetPtr& base) const;
 
@@ -658,6 +664,8 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
 
 std::vector<int64_t>
 HGraph::AddImpl::Run(const DatasetPtr& data) {
+    // The first PiPNN Add delegates to Build before reaching incremental insertion.
+    auto mci_mutation_lock = StorageState::LockMutableMCI(index_);
     // Initial Add owns private temporary codes. Later dedup batches can overlap, but
     // UpdateVector must exclude all probes/publications while checking and changing a slot.
     std::shared_lock<std::shared_mutex> storage_read;
@@ -712,10 +720,6 @@ HGraph::AddImpl::Run(const DatasetPtr& data) {
             }
         }
     }
-    std::unique_lock<std::mutex> mci_mutation_lock(index_.mci_mutation_mutex_, std::defer_lock);
-    if (index_.mci_parameters_.enabled) {
-        mci_mutation_lock.lock();
-    }
     const auto mci_start_total = index_.total_count_.load();
     const bool had_mci_clique_index = index_.mci_parameters_.enabled and
                                       index_.mci_cliques_ != nullptr and
@@ -760,27 +764,31 @@ HGraph::AddImpl::Run(const DatasetPtr& data) {
         if (had_mci_clique_index) {
             logger::info("hgraph mci incremental add started, added={}", batch.rows.size());
             for (const auto& row : batch.rows) {
-                bool reuse = false;
-                if (context.mci_candidate_scores and row.inner_id == mci_start_total) {
-                    const auto k = std::min<uint64_t>(mci_start_total, index_.mci_parameters_.mcs);
-                    auto label_lock = std::shared_lock(index_.label_lookup_mutex_);
-                    reuse = SelectMciAddCandidates(
-                        scores,
-                        row.inner_id,
-                        k,
-                        [&](InnerIdType id) { return index_.label_table_->IsRemoved(id); },
-                        candidate_ids);
-                }
-                if (reuse) {
-                    index_.incremental_update_mci_clique(row.inner_id,
-                                                         candidate_ids,
-                                                         static_cast<uint64_t>(row.inner_id) + 1,
-                                                         single_add);
+                if (single_add) {
+                    bool reuse = false;
+                    if (context.mci_candidate_scores and row.inner_id == mci_start_total) {
+                        const auto k =
+                            std::min<uint64_t>(mci_start_total, index_.mci_parameters_.mcs);
+                        auto label_lock = std::shared_lock(index_.label_lookup_mutex_);
+                        reuse = SelectMciAddCandidates(
+                            scores,
+                            row.inner_id,
+                            k,
+                            [&](InnerIdType id) { return index_.label_table_->IsRemoved(id); },
+                            candidate_ids);
+                    }
+                    if (not reuse) {
+                        candidate_ids =
+                            index_.search_mci_knn(row.inner_id,
+                                                  index_.get_data(data, row.input_idx),
+                                                  static_cast<uint64_t>(row.inner_id) + 1);
+                    }
+                    this->build_single_add_cliques(row.inner_id, candidate_ids);
                 } else {
-                    index_.incremental_update_mci_clique(
-                        row.inner_id, index_.get_data(data, row.input_idx), 0, single_add);
+                    index_.incremental_update_mci_clique(row.inner_id,
+                                                         index_.get_data(data, row.input_idx));
                 }
-                index_.maybe_compact_mci(1, single_add);
+                index_.storage_state_->RecordMCIMutation(index_, 1, single_add);
             }
             index_.mci_cliques_->MarkAvailable(index_.total_count_.load());
             logger::info("hgraph mci incremental add finished, total={}",
@@ -799,6 +807,167 @@ HGraph::AddImpl::Run(const DatasetPtr& data) {
         index_.mark_memory_usage_dirty();
     }
     return batch.failed_ids;
+}
+
+// Build seeded cliques against one immutable insertion-prefix candidate pool. Each
+// round needs an uncovered witness to make progress. Already covered vertices still
+// participate in the maximality test at the chosen radius.
+void
+HGraph::AddImpl::build_single_add_cliques(InnerIdType seed, const Vector<InnerIdType>& knn_ids) {
+    // Single-row Add allocated this ID at the tail; it has no earlier memberships.
+    const auto total = static_cast<uint64_t>(seed) + 1;
+    const auto degree_target = index_.mci_parameters_.IncrementalDegreeTarget(
+        static_cast<uint64_t>(index_.GetNumElements()), true);
+    UnorderedSet<InnerIdType> neighbors(index_.allocator_);
+    // Keep the distance cache and raw FP32 reads consistent with concurrent UpdateVector.
+    std::shared_lock codes_lock(index_.persistent_codes_mutex_);
+    const auto codes = index_.get_precise_codes();
+    uint64_t stride = 0;
+    const auto* raw = index_.metric_ == MetricType::METRIC_TYPE_L2SQR
+                          ? codes->TryGetContiguousRawFloatData(&stride)
+                          : nullptr;
+    auto stored_distance = [&](InnerIdType lhs, InnerIdType rhs) {
+        if (raw != nullptr and stride >= index_.dim_) {
+            return FP32ComputeL2Sqr(raw + lhs * stride, raw + rhs * stride, index_.dim_);
+        }
+        return codes->ComputePairVectors(lhs, rhs);
+    };
+
+    Vector<InnerIdType> ids(index_.allocator_);
+    UnorderedSet<InnerIdType> seen(index_.allocator_);
+    std::vector<float> seed_distances;
+    std::vector<size_t> memberships;
+    Vector<InnerIdType> incident(index_.allocator_);
+    for (auto id : knn_ids) {
+        if (id >= seed or index_.label_table_->IsRemoved(id) or not seen.insert(id).second) {
+            continue;
+        }
+        const auto dist = stored_distance(seed, id);
+        if (not IsFiniteFloatBits(dist)) {
+            continue;
+        }
+        ids.push_back(id);
+        seed_distances.push_back(dist);
+        incident.clear();
+        index_.mci_cliques_->CollectNodeCliqueIds(id, incident);
+        memberships.push_back(incident.size());
+    }
+
+    // Reuse pair distances across radius retries, witness extension and successive
+    // cliques for this seed. Large user-supplied pools use the same uncached metric.
+    constexpr size_t max_cached_candidates = 1024;
+    std::vector<float> cache;
+    std::vector<uint8_t> known;
+    if (ids.size() <= max_cached_candidates) {
+        cache.resize(ids.size() * (ids.size() + 1) / 2);
+        known.resize(cache.size());
+    }
+    auto pair_distance = [&](size_t a, size_t b) {
+        if (a < b) {
+            std::swap(a, b);
+        }
+        if (cache.empty()) {
+            return stored_distance(ids[a], ids[b]);
+        }
+        const size_t offset = a * (a + 1) / 2 + b;
+        if (not known[offset]) {
+            cache[offset] = stored_distance(ids[a], ids[b]);
+            known[offset] = 1;
+        }
+        return cache[offset];
+    };
+
+    // The seed is the only vertex requiring its first membership. A candidate with
+    // no memberships has the same priority as one with a single membership.
+    auto coverage = [&](InnerIdType id) { return std::max<size_t>(1, memberships[id]); };
+    const auto node_limit = std::max<uint64_t>(3, total / 100);
+    std::vector<InnerIdType> local_ids(ids.size());
+    while (neighbors.size() < degree_target) {
+        // The local builder numbers uncovered candidates first, preserving candidate
+        // order in both partitions. Keep that order for tied distances and coverage.
+        std::iota(local_ids.begin(), local_ids.end(), 0);
+        const auto covered = std::stable_partition(local_ids.begin(), local_ids.end(), [&](auto i) {
+            return neighbors.find(ids[i]) == neighbors.end();
+        });
+        const auto uncovered = static_cast<uint64_t>(covered - local_ids.begin());
+        if (uncovered == 0) {
+            break;
+        }
+        const auto threshold =
+            std::min<uint64_t>({degree_target - neighbors.size(),
+                                index_.mci_parameters_.incremental_clique_max - 1,
+                                uncovered});
+        std::vector<InnerIdType> witness_order(local_ids.begin(), covered);
+        const auto saturated =
+            std::stable_partition(witness_order.begin(), witness_order.end(), [&](auto i) {
+                return coverage(i) < node_limit;
+            });
+        if (static_cast<uint64_t>(saturated - witness_order.begin()) >= threshold) {
+            witness_order.erase(saturated, witness_order.end());
+        }
+        std::sort(witness_order.begin(), witness_order.end(), [&](auto a, auto b) {
+            return seed_distances[a] < seed_distances[b];
+        });
+        float nearest = seed_distances[witness_order.front()];
+        // Coincident vectors still form a clique. An open zero radius would exclude
+        // those vectors at every alpha and prevent the seed from acquiring neighbors.
+        if (nearest <= 0 and index_.metric_ != MetricType::METRIC_TYPE_IP) {
+            const auto positive = std::find_if(witness_order.begin(),
+                                               witness_order.end(),
+                                               [&](auto i) { return seed_distances[i] > 0; });
+            nearest = positive == witness_order.end() ? std::numeric_limits<float>::min()
+                                                      : seed_distances[*positive];
+        }
+        std::stable_sort(witness_order.begin(), witness_order.end(), [&](auto a, auto b) {
+            return coverage(a) < coverage(b);
+        });
+        std::stable_sort(local_ids.begin(), local_ids.end(), [&](auto a, auto b) {
+            if (coverage(a) != coverage(b)) {
+                return coverage(a) < coverage(b);
+            }
+            return seed_distances[a] < seed_distances[b];
+        });
+        std::vector<InnerIdType> chosen;
+        float alpha = index_.mci_parameters_.alpha;
+        for (;;) {
+            const float radius = mci::ExpandSeedRadius(nearest, alpha, index_.metric_);
+            chosen = mci::FindMaximalSeedNeighbors(
+                local_ids, witness_order, seed_distances, radius, threshold, pair_distance);
+            if (not chosen.empty()) {
+                break;
+            }
+            const bool expand_cosine =
+                index_.metric_ == MetricType::METRIC_TYPE_COSINE and radius > 0 and radius < 2;
+            if ((alpha > 100.0F and not expand_cosine) or
+                alpha >= std::numeric_limits<float>::max() / 2) {
+                chosen = mci::FindMaximalSeedNeighbors(
+                    local_ids, {}, seed_distances, radius, 0, pair_distance);
+                break;
+            }
+            alpha *= 2.0F;
+        }
+        if (chosen.empty()) {
+            break;
+        }
+        const auto previous_degree = neighbors.size();
+        Vector<InnerIdType> clique(index_.allocator_);
+        clique.reserve(chosen.size() + 1);
+        clique.push_back(seed);
+        for (auto local : chosen) {
+            clique.push_back(ids[local]);
+            ++memberships[local];
+            neighbors.insert(ids[local]);
+        }
+        index_.mci_cliques_->AppendNewClique(clique, total);
+        if (neighbors.size() == previous_degree) {
+            break;
+        }
+    }
+    if (neighbors.empty()) {
+        Vector<InnerIdType> singleton(index_.allocator_);
+        singleton.push_back(seed);
+        index_.mci_cliques_->AppendNewClique(singleton, total);
+    }
 }
 
 void

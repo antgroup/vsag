@@ -21,11 +21,23 @@
 #include <vector>
 
 #include "basic_types.h"
+#include "metric_type.h"
 #include "utils/float_utils.h"
 
 namespace vsag::mci {
 
 using CliqueBits = boost::dynamic_bitset<uint64_t>;
+
+inline float
+ExpandSeedRadius(float nearest_distance, float alpha, MetricType metric) {
+    if (metric != MetricType::METRIC_TYPE_IP) {
+        return nearest_distance * alpha;
+    }
+    const auto nearest_similarity = 1.0F - nearest_distance;
+    const auto similarity_limit =
+        nearest_similarity >= 0.0F ? nearest_similarity / alpha : nearest_similarity * alpha;
+    return 1.0F - similarity_limit;
+}
 
 // Find a threshold-sized witness in the seed's induced neighborhood. Positions are
 // in coverage priority order. A greedy coloring bounds the largest possible extension.

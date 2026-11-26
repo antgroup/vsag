@@ -668,14 +668,12 @@ private:
     void
     incremental_update_mci_clique(InnerIdType node_id,
                                   const void* vector,
-                                  uint64_t visible_total = 0,
-                                  bool maximal = false);
+                                  uint64_t visible_total = 0);
 
     void
     incremental_update_mci_clique(InnerIdType node_id,
                                   const Vector<InnerIdType>& knn_ids,
-                                  uint64_t visible_total,
-                                  bool maximal = false);
+                                  uint64_t visible_total);
 
     /// Apply deletion to MCI only, retiring small cliques and repairing under-covered survivors.
     /// Uses unchanged inner IDs; does not remove vectors, remap graph IDs or shrink storage.
@@ -683,14 +681,10 @@ private:
     void
     remove_from_mci(const Vector<InnerIdType>& removed_inner_ids);
 
-    /// Count successful mutations under mci_mutation_mutex_. Single Add leaves compaction
-    /// to Serialize or the next qualifying batch Add or Remove.
+    /// Account successful vector mutations and compact at 100. Caller holds mci_mutation_mutex_.
+    /// MARK_REMOVE accounts the complete batch after repair; FORCE_REMOVE compacts separately.
     void
-    maybe_compact_mci(uint64_t changed_count, bool defer = false);
-
-    /// Materialize single-row additions before saving or freezing. Caller holds mci_mutation_mutex_.
-    void
-    flush_pending_mci_single_adds() const;
+    maybe_compact_mci(uint64_t changed_count);
 
     /// Recover an existing query vector and run the same MCI update as Add, without reinserting it.
     /// Non-FP32 repair scans O(N) stored-code distances per seed with O(mcs) heap storage;
@@ -711,13 +705,6 @@ private:
                         const Vector<InnerIdType>& knn_ids,
                         uint64_t degree_target,
                         UnorderedSet<InnerIdType>& neighbors);
-
-    void
-    build_maximal_mci_cliques(InnerIdType seed,
-                              const Vector<InnerIdType>& knn_ids,
-                              uint64_t visible_total,
-                              uint64_t degree_target,
-                              UnorderedSet<InnerIdType>& neighbors);
 
     void
     build_incremental_mci_clique(InnerIdType new_inner_id,
@@ -755,9 +742,7 @@ private:
 
     CliqueDataCellPtr mci_cliques_{nullptr};  // companion MCI clique datacell
     HGraphMCIParameters mci_parameters_{};
-    // Runtime-only maintenance state guarded by mci_mutation_mutex_.
-    mutable uint64_t mci_pending_mutations_{0};
-    mutable bool mci_single_add_pending_{false};
+    uint64_t mci_pending_mutations_{0};  // runtime-only; guarded by mci_mutation_mutex_
 
     uint64_t ef_construct_{400};  // expansion factor during graph construction
     float alpha_{1.0};            // Relative Neighborhood Graph pruning coefficient
