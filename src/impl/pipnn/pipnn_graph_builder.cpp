@@ -21,12 +21,14 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <exception>
 #include <functional>
 #include <future>
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <numeric>
 #include <random>
@@ -142,6 +144,73 @@ distance_from_order_key(uint16_t key) {
 }
 
 uint64_t
+mix64(uint64_t value) {
+    value ^= value >> 30;
+    value *= 0xbf58476d1ce4e5b9ULL;
+    value ^= value >> 27;
+    value *= 0x94d049bb133111ebULL;
+    value ^= value >> 31;
+    return value;
+}
+
+uint64_t
+fingerprint_fp32_row(const float* data, uint64_t dimensions) {
+    const auto* bytes = reinterpret_cast<const char*>(data);
+    uint64_t h0 = 0x9e3779b97f4a7c15ULL ^ (dimensions * 0xbf58476d1ce4e5b9ULL);
+    uint64_t h1 = 0xbf58476d1ce4e5b9ULL;
+    uint64_t h2 = 0x94d049bb133111ebULL;
+    uint64_t h3 = 0xd6e8feb86659fd93ULL;
+    uint64_t offset = 0;
+    const uint64_t total_bytes = dimensions * sizeof(float);
+    while (offset + 32 <= total_bytes) {
+        uint64_t w0 = 0;
+        uint64_t w1 = 0;
+        uint64_t w2 = 0;
+        uint64_t w3 = 0;
+        std::memcpy(&w0, bytes + offset, sizeof(w0));
+        std::memcpy(&w1, bytes + offset + 8, sizeof(w1));
+        std::memcpy(&w2, bytes + offset + 16, sizeof(w2));
+        std::memcpy(&w3, bytes + offset + 24, sizeof(w3));
+        h0 = (h0 ^ w0) * 0x9e3779b97f4a7c15ULL;
+        h1 = (h1 ^ w1) * 0xbf58476d1ce4e5b9ULL;
+        h2 = (h2 ^ w2) * 0x94d049bb133111ebULL;
+        h3 = (h3 ^ w3) * 0xd6e8feb86659fd93ULL;
+        offset += 32;
+    }
+    while (offset + 8 <= total_bytes) {
+        uint64_t word = 0;
+        std::memcpy(&word, bytes + offset, sizeof(word));
+        h0 = (h0 ^ word) * 0x9e3779b97f4a7c15ULL;
+        offset += 8;
+    }
+    if (offset + 4 <= total_bytes) {
+        uint32_t tail = 0;
+        std::memcpy(&tail, bytes + offset, sizeof(tail));
+        h1 = (h1 ^ static_cast<uint64_t>(tail)) * 0xbf58476d1ce4e5b9ULL;
+    }
+    return mix64(h0 ^ std::rotl(h1, 13) ^ std::rotl(h2, 29) ^ std::rotl(h3, 47));
+}
+
+uint64_t
+hash_source_id(std::string_view text) {
+    uint64_t hash =
+        0x9e3779b97f4a7c15ULL ^ (static_cast<uint64_t>(text.size()) * 0xbf58476d1ce4e5b9ULL);
+    uint64_t offset = 0;
+    while (offset + 8 <= text.size()) {
+        uint64_t word = 0;
+        std::memcpy(&word, text.data() + offset, sizeof(word));
+        hash = mix64(hash ^ word);
+        offset += 8;
+    }
+    if (offset < text.size()) {
+        uint64_t tail = 0;
+        std::memcpy(&tail, text.data() + offset, text.size() - offset);
+        hash = mix64(hash ^ tail);
+    }
+    return hash;
+}
+
+uint64_t
 id_gap(InnerIdType first, InnerIdType second) {
     const uint64_t left = first;
     const uint64_t right = second;
@@ -228,14 +297,152 @@ struct SplitResult {
     Leaves finished;
 };
 
+struct CertifiedEdge {
+    uint32_t target{0};
+    uint32_t old_target{0};
+    uint16_t distance{0};
+    uint64_t new_gap{0};
+    InnerIdType new_id{0};
+    uint64_t old_gap{0};
+    InnerIdType old_id{0};
+};
+
 struct PruneScratch {
     explicit PruneScratch(Allocator* allocator)
-        : ordered(allocator), selected(allocator), neighbors(allocator) {
+        : ordered(allocator),
+          selected(allocator),
+          neighbors(allocator),
+          certified_edges(allocator),
+          selected_flags(allocator) {
     }
 
     Vector<std::pair<float, uint32_t>> ordered;
     Vector<uint32_t> selected;
     Vector<InnerIdType> neighbors;
+    Vector<CertifiedEdge> certified_edges;
+    Vector<uint8_t> selected_flags;
+};
+
+class PagedReservoirArena {
+public:
+    static constexpr uint64_t PAGE_ROWS = 2048;
+    static constexpr uint32_t UNALLOCATED_SLOT = std::numeric_limits<uint32_t>::max();
+
+    explicit PagedReservoirArena(Allocator* allocator)
+        : allocator_(allocator), row_slots_(allocator) {
+    }
+
+    ~PagedReservoirArena() {
+        Reset();
+    }
+
+    PagedReservoirArena(const PagedReservoirArena&) = delete;
+    PagedReservoirArena&
+    operator=(const PagedReservoirArena&) = delete;
+
+    void
+    Init(uint64_t total_rows, uint64_t reservoir_size) {
+        Reset();
+        total_rows_ = total_rows;
+        reservoir_size_ = reservoir_size;
+        if (total_rows_ == 0 or reservoir_size_ == 0) {
+            return;
+        }
+        num_pages_ = (total_rows_ + PAGE_ROWS - 1) / PAGE_ROWS;
+        const uint64_t table_bytes = checked_product(
+            num_pages_, sizeof(std::atomic<ReservoirEntry*>), "reservoir page table");
+        pages_ = static_cast<std::atomic<ReservoirEntry*>*>(allocator_->Allocate(table_bytes));
+        if (pages_ == nullptr) {
+            throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                                "PiPNN failed to allocate reservoir page table");
+        }
+        for (uint64_t page = 0; page < num_pages_; ++page) {
+            new (&pages_[page]) std::atomic<ReservoirEntry*>(nullptr);
+        }
+        row_slots_.assign(total_rows_, UNALLOCATED_SLOT);
+        next_slot_.store(0, std::memory_order_relaxed);
+    }
+
+    void
+    Reset() {
+        if (pages_ != nullptr) {
+            for (uint64_t page = 0; page < num_pages_; ++page) {
+                ReservoirEntry* ptr = pages_[page].load(std::memory_order_relaxed);
+                if (ptr != nullptr) {
+                    allocator_->Deallocate(ptr);
+                }
+                std::destroy_at(&pages_[page]);
+            }
+            allocator_->Deallocate(pages_);
+            pages_ = nullptr;
+        }
+        num_pages_ = 0;
+        total_rows_ = 0;
+        reservoir_size_ = 0;
+        next_slot_.store(0, std::memory_order_relaxed);
+        Vector<uint32_t>(allocator_).swap(row_slots_);
+    }
+
+    [[nodiscard]] bool
+    Active() const {
+        return pages_ != nullptr;
+    }
+
+    [[nodiscard]] const ReservoirEntry*
+    RowOrNull(uint32_t source) const {
+        if (pages_ == nullptr) {
+            return nullptr;
+        }
+        const uint32_t slot = row_slots_[source];
+        if (slot == UNALLOCATED_SLOT) {
+            return nullptr;
+        }
+        const uint64_t page_index = static_cast<uint64_t>(slot) / PAGE_ROWS;
+        const uint64_t row_offset = static_cast<uint64_t>(slot) % PAGE_ROWS;
+        const ReservoirEntry* page = pages_[page_index].load(std::memory_order_acquire);
+        return page == nullptr ? nullptr : page + row_offset * reservoir_size_;
+    }
+
+    ReservoirEntry*
+    EnsureRow(uint32_t source) {
+        uint32_t slot = row_slots_[source];
+        if (slot == UNALLOCATED_SLOT) {
+            slot = next_slot_.fetch_add(1, std::memory_order_relaxed);
+            row_slots_[source] = slot;
+        }
+        const uint64_t page_index = static_cast<uint64_t>(slot) / PAGE_ROWS;
+        const uint64_t row_offset = static_cast<uint64_t>(slot) % PAGE_ROWS;
+        ReservoirEntry* page = pages_[page_index].load(std::memory_order_acquire);
+        if (page == nullptr) {
+            std::scoped_lock lock(page_mutex_);
+            page = pages_[page_index].load(std::memory_order_relaxed);
+            if (page == nullptr) {
+                const uint64_t rows_in_page =
+                    std::min<uint64_t>(PAGE_ROWS, total_rows_ - page_index * PAGE_ROWS);
+                const uint64_t entry_count =
+                    checked_product(rows_in_page, reservoir_size_, "reservoir page");
+                const uint64_t bytes =
+                    checked_product(entry_count, sizeof(ReservoirEntry), "reservoir page bytes");
+                page = static_cast<ReservoirEntry*>(allocator_->Allocate(bytes));
+                if (page == nullptr) {
+                    throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                                        "PiPNN failed to allocate reservoir page");
+                }
+                pages_[page_index].store(page, std::memory_order_release);
+            }
+        }
+        return page + row_offset * reservoir_size_;
+    }
+
+private:
+    Allocator* allocator_;
+    std::atomic<ReservoirEntry*>* pages_{nullptr};
+    uint64_t num_pages_{0};
+    uint64_t total_rows_{0};
+    uint64_t reservoir_size_{0};
+    Vector<uint32_t> row_slots_;
+    std::atomic<uint32_t> next_slot_{0};
+    std::mutex page_mutex_;
 };
 
 class PointLockGuard {
@@ -280,7 +487,9 @@ public:
           fingerprints_(allocator),
           cached_rows_(allocator),
           ids_(allocator),
+          hyperplanes_(allocator),
           reservoirs_(allocator),
+          paged_reservoirs_(allocator),
           reservoir_states_(allocator) {
     }
 
@@ -305,26 +514,25 @@ public:
           fingerprints_(allocator),
           cached_rows_(allocator),
           ids_(allocator),
+          hyperplanes_(allocator),
           reservoirs_(allocator),
+          paged_reservoirs_(allocator),
           reservoir_states_(allocator) {
     }
 
     void
-    ConfigureCache(const std::vector<std::string>* source_ids,
+    ConfigureCache(const std::string* source_ids,
+                   uint64_t source_id_count,
                    const PiPNNBuildCache* imported,
                    std::shared_ptr<PiPNNBuildCache>* exported) {
         source_ids_ = source_ids;
+        source_id_count_ = source_id_count;
         imported_cache_ = imported;
         exported_cache_ = exported;
     }
 
     ~PiPNNPipeline() {
-        if (norms_ != nullptr) {
-            allocator_->Deallocate(norms_);
-        }
-        if (sketches_ != nullptr) {
-            allocator_->Deallocate(sketches_);
-        }
+        release_sketch_buffers();
     }
 
     void
@@ -335,7 +543,16 @@ private:
     prepare(const Vector<InnerIdType>& ids_sequence);
 
     void
-    prepare_sketches();
+    prepare_sketches(bool compute_norms, bool compute_sketches, bool compute_fingerprints);
+
+    void
+    release_sketch_buffers();
+
+    bool
+    validate_and_index_source_ids(Vector<uint64_t>& source_hashes,
+                                  Vector<uint32_t>& hash_table,
+                                  uint64_t& table_mask,
+                                  bool compute_fingerprints);
 
     void
     restore_cache();
@@ -373,6 +590,8 @@ private:
     void
     select_leaders(uint32_t source,
                    const Vector<uint32_t>& leaders,
+                   const Vector<InnerIdType>& leader_ids,
+                   const Vector<float>& leader_norms,
                    const float* dots,
                    uint64_t fanout,
                    Vector<std::pair<float, uint32_t>>& candidates) const;
@@ -429,7 +648,7 @@ private:
     seed_cached_row(uint32_t source);
 
     [[nodiscard]] bool
-    certify_cached_graph(uint32_t source) const;
+    certify_cached_graph(uint32_t source, PruneScratch& scratch) const;
 
     void
     write_graph_row(uint32_t source, PruneScratch& scratch);
@@ -438,6 +657,25 @@ private:
     parallel_for(uint64_t total,
                  uint64_t block_size,
                  const std::function<void(uint64_t, uint64_t)>& task) const;
+
+    ReservoirEntry*
+    ensure_reservoir_row(uint32_t source) {
+        if (paged_reservoirs_.Active()) {
+            return paged_reservoirs_.EnsureRow(source);
+        }
+        return reservoirs_.data() + static_cast<uint64_t>(source) * reservoir_size_;
+    }
+
+    [[nodiscard]] const ReservoirEntry*
+    reservoir_row_or_null(uint32_t source) const {
+        if (paged_reservoirs_.Active()) {
+            return paged_reservoirs_.RowOrNull(source);
+        }
+        if (reservoirs_.empty()) {
+            return nullptr;
+        }
+        return reservoirs_.data() + static_cast<uint64_t>(source) * reservoir_size_;
+    }
 
     [[nodiscard]] bool
     native_half() const {
@@ -487,15 +725,21 @@ private:
     const Vector<const float*>* rows_{nullptr};
     const Vector<const uint16_t*>* half_rows_{nullptr};
     DataTypes data_type_{DataTypes::DATA_TYPE_FLOAT};
-    const std::vector<std::string>* source_ids_{nullptr};
+    const std::string* source_ids_{nullptr};
+    uint64_t source_id_count_{0};
     const PiPNNBuildCache* imported_cache_{nullptr};
     std::shared_ptr<PiPNNBuildCache>* exported_cache_{nullptr};
     Vector<uint64_t> fingerprints_;
     Vector<uint8_t> cached_rows_;
     bool warm_build_{false};
     bool reuse_graph_{false};
+    bool ids_are_strictly_increasing_{false};
+    bool ids_are_identity_{false};
+    uint64_t reusable_count_{0};
+    uint64_t clean_graph_count_{0};
     std::vector<uint32_t> old_to_new_;
     std::vector<uint32_t> new_to_old_;
+    std::vector<uint16_t> surviving_counts_;
     std::vector<uint8_t> seeded_rows_;
     std::vector<uint8_t> clean_graph_rows_;
     std::vector<uint8_t> reused_graph_rows_;
@@ -503,13 +747,28 @@ private:
     uint64_t hyperplane_signature_{14695981039346656037ULL};
     uint64_t reservoir_size_{0};
     Vector<InnerIdType> ids_;
+    Vector<float> hyperplanes_;
     float* norms_{nullptr};
     float* sketches_{nullptr};
     Vector<ReservoirEntry> reservoirs_;
+    PagedReservoirArena paged_reservoirs_;
     Vector<ReservoirState> reservoir_states_;
     std::unique_ptr<PointsMutex> point_locks_;
     uint32_t point_lock_count_{0};
 };
+
+void
+PiPNNPipeline::release_sketch_buffers() {
+    if (norms_ != nullptr) {
+        allocator_->Deallocate(norms_);
+        norms_ = nullptr;
+    }
+    if (sketches_ != nullptr) {
+        allocator_->Deallocate(sketches_);
+        sketches_ = nullptr;
+    }
+    Vector<float>(allocator_).swap(hyperplanes_);
+}
 
 void
 PiPNNPipeline::Build(const Vector<InnerIdType>& ids_sequence, DuplicatePairs* duplicates) {
@@ -526,28 +785,95 @@ PiPNNPipeline::Build(const Vector<InnerIdType>& ids_sequence, DuplicatePairs* du
         return;
     }
 
-    prepare_sketches();
-    finish_phase(0);
-    restore_cache();
-    finish_phase(1);
-    auto leaves = partition();
-    Vector<uint32_t> representatives(allocator_);
-    if (duplicates != nullptr) {
-        group_near_duplicates(leaves, *duplicates, representatives);
-    }
-    finish_phase(2);
-    parallel_for(leaves.size(), 1, [&](uint64_t begin, uint64_t end) {
-        for (uint64_t leaf = begin; leaf < end; ++leaf) {
-            if (warm_build_) {
-                build_missing_leaf(leaves[leaf]);
+    bool skip_leaf_pipeline = false;
+    if (imported_cache_ != nullptr and not native_half()) {
+        finish_phase(0);
+        restore_cache();
+        skip_leaf_pipeline =
+            warm_build_ and reusable_count_ == ids_.size() and duplicates == nullptr;
+        const bool all_clean_graph = skip_leaf_pipeline and reuse_graph_ and
+                                     not parameter_.adaptive_pruning and
+                                     clean_graph_count_ == ids_.size();
+        const bool need_norms = metric_ != MetricType::METRIC_TYPE_IP and not all_clean_graph;
+        const bool need_sketches = not skip_leaf_pipeline;
+        if (need_norms or need_sketches) {
+            prepare_sketches(need_norms, need_sketches, false);
+        }
+        if (not all_clean_graph) {
+            reservoir_states_.resize(ids_.size());
+            if (warm_build_ and reuse_graph_) {
+                paged_reservoirs_.Init(ids_.size(), reservoir_size_);
             } else {
-                build_leaf(leaves[leaf]);
+                const uint64_t reservoir_count =
+                    checked_product(ids_.size(), reservoir_size_, "reservoir");
+                require_argument(reservoir_count <= reservoirs_.max_size(),
+                                 "PiPNN reservoir exceeds the allocator limit");
+                reservoirs_.resize(reservoir_count);
+                if (warm_build_) {
+                    parallel_for(ids_.size(), 256, [&](uint64_t begin, uint64_t end) {
+                        for (uint64_t source = begin; source < end; ++source) {
+                            if (cached_rows_[source] != 0) {
+                                seed_cached_row(static_cast<uint32_t>(source));
+                            }
+                        }
+                    });
+                }
             }
         }
-    });
-    finish_phase(3);
+        finish_phase(1);
+    } else {
+        if (exported_cache_ != nullptr) {
+            exported_cache_->reset();
+        }
+        bool compute_fingerprints = false;
+        if (source_ids_ != nullptr and not native_half() and exported_cache_ != nullptr) {
+            Vector<uint64_t> source_hashes(allocator_);
+            Vector<uint32_t> hash_table(allocator_);
+            uint64_t table_mask = 0;
+            compute_fingerprints =
+                validate_and_index_source_ids(source_hashes, hash_table, table_mask, false);
+            if (not compute_fingerprints) {
+                source_ids_ = nullptr;
+                source_id_count_ = 0;
+            }
+        }
+        const uint64_t reservoir_count = checked_product(ids_.size(), reservoir_size_, "reservoir");
+        require_argument(reservoir_count <= reservoirs_.max_size(),
+                         "PiPNN reservoir exceeds the allocator limit");
+        reservoirs_.resize(reservoir_count);
+        reservoir_states_.resize(ids_.size());
+        if (compute_fingerprints) {
+            fingerprints_.resize(ids_.size());
+        }
+        prepare_sketches(metric_ != MetricType::METRIC_TYPE_IP, true, compute_fingerprints);
+        finish_phase(0);
+        finish_phase(1);
+    }
+
+    Vector<uint32_t> representatives(allocator_);
+    if (not skip_leaf_pipeline) {
+        auto leaves = partition();
+        if (duplicates != nullptr) {
+            group_near_duplicates(leaves, *duplicates, representatives);
+        }
+        finish_phase(2);
+        parallel_for(leaves.size(), 1, [&](uint64_t begin, uint64_t end) {
+            for (uint64_t leaf = begin; leaf < end; ++leaf) {
+                if (warm_build_) {
+                    build_missing_leaf(leaves[leaf]);
+                } else {
+                    build_leaf(leaves[leaf]);
+                }
+            }
+        });
+        finish_phase(3);
+    } else {
+        finish_phase(2);
+        finish_phase(3);
+    }
     write_graph(representatives);
     finish_phase(4);
+    release_sketch_buffers();
     capture_cache();
     finish_phase(5);
     if (exported_cache_ != nullptr and *exported_cache_ != nullptr) {
@@ -557,7 +883,7 @@ PiPNNPipeline::Build(const Vector<InnerIdType>& ids_sequence, DuplicatePairs* du
 
 std::string
 PiPNNPipeline::cache_policy() const {
-    return "pipnn-reservoir-v3/" + std::to_string(dimensions_) + "/" +
+    return "pipnn-reservoir-v4/" + std::to_string(dimensions_) + "/" +
            std::to_string(static_cast<int>(metric_)) + "/" +
            std::to_string(graph_->MaximumDegree()) + "/" +
            std::to_string(std::bit_cast<uint32_t>(parameter_.alpha)) + "/" +
@@ -566,15 +892,57 @@ PiPNNPipeline::cache_policy() const {
 
 uint64_t
 PiPNNPipeline::fingerprint(uint32_t source) const {
-    uint64_t hash = 14695981039346656037ULL;
-    for (uint64_t dimension = 0; dimension < dimensions_; ++dimension) {
-        const auto bits = std::bit_cast<uint32_t>((*rows_)[source][dimension]);
-        for (uint64_t byte = 0; byte < sizeof(bits); ++byte) {
-            hash ^= (bits >> (byte * 8)) & 0xffU;
-            hash *= 1099511628211ULL;
-        }
+    return fingerprint_fp32_row((*rows_)[source], dimensions_);
+}
+
+bool
+PiPNNPipeline::validate_and_index_source_ids(Vector<uint64_t>& source_hashes,
+                                             Vector<uint32_t>& hash_table,
+                                             uint64_t& table_mask,
+                                             bool compute_fingerprints) {
+    if (source_ids_ == nullptr or source_id_count_ != ids_.size()) {
+        return false;
     }
-    return hash;
+    const uint64_t count = ids_.size();
+    source_hashes.resize(count);
+    if (compute_fingerprints) {
+        fingerprints_.resize(count);
+    }
+    std::atomic<bool> has_empty{false};
+    parallel_for(count, 256, [&](uint64_t begin, uint64_t end) {
+        for (uint64_t source = begin; source < end; ++source) {
+            const auto& id = source_ids_[source];
+            if (id.empty()) {
+                has_empty.store(true, std::memory_order_relaxed);
+                continue;
+            }
+            source_hashes[source] = hash_source_id(id);
+            if (compute_fingerprints) {
+                fingerprints_[source] = fingerprint(static_cast<uint32_t>(source));
+            }
+        }
+    });
+    if (has_empty.load(std::memory_order_relaxed)) {
+        return false;
+    }
+    constexpr uint32_t missing = std::numeric_limits<uint32_t>::max();
+    const uint64_t cap = std::bit_ceil(std::max<uint64_t>(8, count * 2));
+    table_mask = cap - 1;
+    hash_table.assign(cap, missing);
+    for (uint64_t source = 0; source < count; ++source) {
+        const uint64_t h = source_hashes[source];
+        const auto& id = source_ids_[source];
+        uint64_t slot = h & table_mask;
+        while (hash_table[slot] != missing) {
+            const uint32_t existing = hash_table[slot];
+            if (source_hashes[existing] == h and source_ids_[existing] == id) {
+                return false;
+            }
+            slot = (slot + 1) & table_mask;
+        }
+        hash_table[slot] = static_cast<uint32_t>(source);
+    }
+    return true;
 }
 
 void
@@ -582,20 +950,13 @@ PiPNNPipeline::restore_cache() {
     if (exported_cache_ != nullptr) {
         exported_cache_->reset();
     }
-    if (source_ids_ == nullptr or source_ids_->size() != ids_.size()) {
+    Vector<uint64_t> source_hashes(allocator_);
+    Vector<uint32_t> hash_table(allocator_);
+    uint64_t table_mask = 0;
+    if (not validate_and_index_source_ids(source_hashes, hash_table, table_mask, true)) {
         source_ids_ = nullptr;
-        return;
-    }
-    UnorderedMap<std::string, uint32_t> current(allocator_);
-    current.reserve(ids_.size());
-    fingerprints_.resize(ids_.size());
-    for (uint64_t source = 0; source < ids_.size(); ++source) {
-        const auto& id = (*source_ids_)[source];
-        if (id.empty() or not current.emplace(id, static_cast<uint32_t>(source)).second) {
-            source_ids_ = nullptr;
-            return;  // Partial/ambiguous source identities take the ordinary cold path.
-        }
-        fingerprints_[source] = fingerprint(static_cast<uint32_t>(source));
+        source_id_count_ = 0;
+        return;  // Partial/ambiguous source identities take the ordinary cold path.
     }
     if (imported_cache_ == nullptr or imported_cache_->policy != cache_policy() or
         imported_cache_->hashes.size() != imported_cache_->targets.size() or
@@ -606,40 +967,66 @@ PiPNNPipeline::restore_cache() {
     const auto& cache = *imported_cache_;
     constexpr uint32_t missing = std::numeric_limits<uint32_t>::max();
     std::vector<uint32_t> remap(cache.source_ids.size(), missing);
-    for (uint64_t old = 0; old < cache.source_ids.size(); ++old) {
-        const auto it = current.find(cache.source_ids[old]);
-        if (it != current.end() and fingerprints_[it->second] == cache.fingerprints[old]) {
-            remap[old] = it->second;
-        }
-    }
-    cached_rows_.assign(ids_.size(), 0);
-    for (uint64_t old = 0; old < remap.size(); ++old) {
-        if (remap[old] == missing or cache.offsets[old] == cache.offsets[old + 1]) {
-            continue;
-        }
-        require_argument(cache.offsets[old + 1] - cache.offsets[old] <= reservoir_size_,
-                         "PiPNN cached reservoir exceeds the configured capacity");
-        require_argument(
-            cache.graph_offsets[old + 1] - cache.graph_offsets[old] <= graph_->MaximumDegree(),
-            "PiPNN cached graph exceeds maximum degree");
-        uint64_t live = 0;
-        for (uint64_t edge = cache.offsets[old]; edge < cache.offsets[old + 1]; ++edge) {
-            if (remap[cache.targets[edge]] != missing) {
-                ++live;
+    parallel_for(cache.source_ids.size(), 512, [&](uint64_t begin, uint64_t end) {
+        for (uint64_t old = begin; old < end; ++old) {
+            const auto& old_id = cache.source_ids[old];
+            if (old_id.empty()) {
+                continue;
+            }
+            const uint64_t h = hash_source_id(old_id);
+            uint64_t slot = h & table_mask;
+            while (hash_table[slot] != missing) {
+                const uint32_t candidate = hash_table[slot];
+                if (source_hashes[candidate] == h and source_ids_[candidate] == old_id) {
+                    if (fingerprints_[candidate] == cache.fingerprints[old]) {
+                        remap[old] = candidate;
+                    }
+                    break;
+                }
+                slot = (slot + 1) & table_mask;
             }
         }
-        const uint64_t minimum = std::min<uint64_t>(graph_->MaximumDegree(),
-                                                    cache.offsets[old + 1] - cache.offsets[old]);
-        if (live >= minimum) {
-            cached_rows_[remap[old]] = 1;
+    });
+    cached_rows_.assign(ids_.size(), 0);
+    surviving_counts_.assign(ids_.size(), 0);
+    const uint64_t max_degree = graph_->MaximumDegree();
+    std::atomic<uint64_t> reusable_total{0};
+    parallel_for(remap.size(), 512, [&](uint64_t begin, uint64_t end) {
+        uint64_t local_reusable = 0;
+        for (uint64_t old = begin; old < end; ++old) {
+            const uint32_t source = remap[old];
+            if (source == missing or cache.offsets[old] == cache.offsets[old + 1]) {
+                continue;
+            }
+            const uint64_t cand_len = cache.offsets[old + 1] - cache.offsets[old];
+            require_argument(cand_len <= reservoir_size_,
+                             "PiPNN cached reservoir exceeds the configured capacity");
+            require_argument(cache.graph_offsets[old + 1] - cache.graph_offsets[old] <= max_degree,
+                             "PiPNN cached graph exceeds maximum degree");
+            uint64_t live = 0;
+            for (uint64_t edge = cache.offsets[old]; edge < cache.offsets[old + 1]; ++edge) {
+                if (remap[cache.targets[edge]] != missing) {
+                    ++live;
+                }
+            }
+            surviving_counts_[source] = static_cast<uint16_t>(live);
+            const uint64_t minimum = std::min<uint64_t>(max_degree, cand_len);
+            if (live >= minimum) {
+                cached_rows_[source] = 1;
+                ++local_reusable;
+            }
         }
-    }
-    const auto reusable =
-        static_cast<uint64_t>(std::count(cached_rows_.begin(), cached_rows_.end(), uint8_t{1}));
+        if (local_reusable > 0) {
+            reusable_total.fetch_add(local_reusable, std::memory_order_relaxed);
+        }
+    });
+    reusable_count_ = reusable_total.load(std::memory_order_relaxed);
     constexpr uint64_t minimum_cache_percent = 80;
-    warm_build_ = reusable > 0 and reusable * 100 >= ids_.size() * minimum_cache_percent;
+    warm_build_ =
+        reusable_count_ > 0 and reusable_count_ * 100 >= ids_.size() * minimum_cache_percent;
     if (not warm_build_) {
         std::fill(cached_rows_.begin(), cached_rows_.end(), 0);
+        reusable_count_ = 0;
         return;
     }
     old_to_new_ = std::move(remap);
@@ -649,61 +1036,84 @@ PiPNNPipeline::restore_cache() {
     reused_graph_rows_.assign(ids_.size(), 0);
     certificate_rows_.assign(ids_.size(), 0);
     reuse_graph_ = cache.reuse_final_graph;
-    for (uint64_t old = 0; old < old_to_new_.size(); ++old) {
-        const auto source = old_to_new_[old];
-        if (source == missing) {
-            continue;
-        }
-        new_to_old_[source] = static_cast<uint32_t>(old);
-        if (cached_rows_[source] == 0) {
-            continue;
-        }
-        seeded_rows_[source] = 0;
-        bool complete = cache.graph_offsets[old] != cache.graph_offsets[old + 1];
-        for (uint64_t edge = cache.graph_offsets[old]; edge < cache.graph_offsets[old + 1];
-             ++edge) {
-            if (old_to_new_[cache.graph_targets[edge]] == missing) {
-                complete = false;
-                break;
-            }
-        }
-        // Removing rejected candidates preserves pruning, but remapping graph IDs may
-        // change BF16-distance tie order. Preserve the old proof only if every selected
-        // neighbor retains its ordering relative to every surviving tied candidate.
-        for (uint64_t candidate = cache.offsets[old];
-             complete and candidate < cache.offsets[old + 1];
-             ++candidate) {
-            const auto old_target = cache.targets[candidate];
-            const auto target = old_to_new_[old_target];
-            if (target == missing) {
+    std::atomic<uint64_t> clean_total{0};
+    parallel_for(old_to_new_.size(), 256, [&](uint64_t begin, uint64_t end) {
+        uint64_t local_clean = 0;
+        for (uint64_t old = begin; old < end; ++old) {
+            const auto source = old_to_new_[old];
+            if (source == missing) {
                 continue;
             }
-            for (uint64_t edge = cache.graph_offsets[old]; edge < cache.graph_offsets[old + 1];
-                 ++edge) {
-                if (cache.distances[candidate] != cache.graph_distances[edge]) {
-                    continue;
-                }
-                const auto old_selected = cache.graph_targets[edge];
-                const auto selected = old_to_new_[old_selected];
-                const bool old_before =
-                    std::make_pair(id_gap(cache.inner_ids[old], cache.inner_ids[old_selected]),
-                                   cache.inner_ids[old_selected]) <
-                    std::make_pair(id_gap(cache.inner_ids[old], cache.inner_ids[old_target]),
-                                   cache.inner_ids[old_target]);
-                const bool new_before =
-                    std::make_pair(id_gap(ids_[source], ids_[selected]), ids_[selected]) <
-                    std::make_pair(id_gap(ids_[source], ids_[target]), ids_[target]);
-                if (old_before != new_before) {
+            new_to_old_[source] = static_cast<uint32_t>(old);
+            if (cached_rows_[source] == 0) {
+                continue;
+            }
+            seeded_rows_[source] = 0;
+            const uint64_t g_begin = cache.graph_offsets[old];
+            const uint64_t g_end = cache.graph_offsets[old + 1];
+            bool complete = g_begin != g_end;
+            uint16_t min_graph_dist = std::numeric_limits<uint16_t>::max();
+            uint16_t max_graph_dist = 0;
+            for (uint64_t edge = g_begin; edge < g_end; ++edge) {
+                if (old_to_new_[cache.graph_targets[edge]] == missing) {
                     complete = false;
                     break;
                 }
+                const uint16_t d = cache.graph_distances[edge];
+                min_graph_dist = std::min(min_graph_dist, d);
+                max_graph_dist = std::max(max_graph_dist, d);
+            }
+            // Removing rejected candidates preserves pruning, but remapping graph IDs may
+            // change BF16-distance tie order. Preserve the old proof only if every selected
+            // neighbor retains its ordering relative to every surviving tied candidate.
+            const auto old_source_id = cache.inner_ids[old];
+            const auto new_source_id = ids_[source];
+            for (uint64_t candidate = cache.offsets[old];
+                 complete and candidate < cache.offsets[old + 1];
+                 ++candidate) {
+                const uint16_t cand_dist = cache.distances[candidate];
+                if (cand_dist < min_graph_dist or cand_dist > max_graph_dist) {
+                    continue;
+                }
+                const auto old_target = cache.targets[candidate];
+                const auto target = old_to_new_[old_target];
+                if (target == missing) {
+                    continue;
+                }
+                const auto old_target_id = cache.inner_ids[old_target];
+                const auto new_target_id = ids_[target];
+                const auto old_target_key =
+                    std::make_pair(id_gap(old_source_id, old_target_id), old_target_id);
+                const auto new_target_key =
+                    std::make_pair(id_gap(new_source_id, new_target_id), new_target_id);
+                for (uint64_t edge = g_begin; edge < g_end; ++edge) {
+                    if (cand_dist != cache.graph_distances[edge]) {
+                        continue;
+                    }
+                    const auto old_selected = cache.graph_targets[edge];
+                    const auto selected = old_to_new_[old_selected];
+                    const auto old_selected_id = cache.inner_ids[old_selected];
+                    const auto new_selected_id = ids_[selected];
+                    const bool old_before = std::make_pair(id_gap(old_source_id, old_selected_id),
+                                                           old_selected_id) < old_target_key;
+                    const bool new_before = std::make_pair(id_gap(new_source_id, new_selected_id),
+                                                           new_selected_id) < new_target_key;
+                    if (old_before != new_before) {
+                        complete = false;
+                        break;
+                    }
+                }
+            }
+            if (complete) {
+                clean_graph_rows_[source] = 1;
+                ++local_clean;
             }
         }
-        clean_graph_rows_[source] = complete ? 1 : 0;
-        if (not reuse_graph_) {
-            seed_cached_row(source);
+        if (local_clean > 0) {
+            clean_total.fetch_add(local_clean, std::memory_order_relaxed);
         }
-    }
+    });
+    clean_graph_count_ = clean_total.load(std::memory_order_relaxed);
 }
 
 void
@@ -714,7 +1124,7 @@ PiPNNPipeline::seed_cached_row(uint32_t source) {
     seeded_rows_[source] = 1;
     const auto old = new_to_old_[source];
     const auto& cache = *imported_cache_;
-    auto* row = reservoirs_.data() + static_cast<uint64_t>(source) * reservoir_size_;
+    auto* row = ensure_reservoir_row(source);
     auto& state = reservoir_states_[source];
     for (uint64_t edge = cache.offsets[old]; edge < cache.offsets[old + 1]; ++edge) {
         const auto target = old_to_new_[cache.targets[edge]];
@@ -730,66 +1140,157 @@ PiPNNPipeline::capture_cache() {
     if (source_ids_ == nullptr or exported_cache_ == nullptr) {
         return;
     }
+    const uint64_t count = ids_.size();
     auto snapshot = std::make_shared<PiPNNBuildCache>(allocator_);
     snapshot->policy = cache_policy();
-    snapshot->source_ids.assign(source_ids_->begin(), source_ids_->end());
     snapshot->fingerprints = std::move(fingerprints_);
-    snapshot->inner_ids.assign(ids_.begin(), ids_.end());
-    snapshot->offsets.reserve(ids_.size() + 1);
-    snapshot->graph_offsets.reserve(ids_.size() + 1);
-    snapshot->offsets.push_back(0);
-    snapshot->graph_offsets.push_back(0);
-    UnorderedMap<InnerIdType, uint32_t> local_ids(allocator_);
-    local_ids.reserve(ids_.size());
-    for (uint64_t source = 0; source < ids_.size(); ++source) {
-        local_ids.emplace(ids_[source], static_cast<uint32_t>(source));
+    snapshot->source_ids.resize(count);
+    snapshot->inner_ids.resize(count);
+    snapshot->offsets.resize(count + 1, 0);
+    snapshot->graph_offsets.resize(count + 1, 0);
+
+    constexpr uint32_t missing = std::numeric_limits<uint32_t>::max();
+    const uint64_t graph_cap = graph_->MaxCapacity();
+    const bool use_identity = ids_are_identity_;
+    const bool use_dense =
+        not use_identity and graph_cap <= checked_product(std::max<uint64_t>(count, 1), 4, "id");
+    Vector<uint32_t> dense_local_ids(allocator_);
+    Vector<std::pair<InnerIdType, uint32_t>> sorted_local_ids(allocator_);
+    if (use_dense) {
+        dense_local_ids.assign(graph_cap, missing);
+        parallel_for(count, 256, [&](uint64_t begin, uint64_t end) {
+            for (uint64_t source = begin; source < end; ++source) {
+                dense_local_ids[ids_[source]] = static_cast<uint32_t>(source);
+            }
+        });
+    } else if (not use_identity and not ids_are_strictly_increasing_) {
+        sorted_local_ids.resize(count);
+        for (uint64_t source = 0; source < count; ++source) {
+            sorted_local_ids[source] = {ids_[source], static_cast<uint32_t>(source)};
+        }
+        std::sort(sorted_local_ids.begin(),
+                  sorted_local_ids.end(),
+                  [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
     }
-    Vector<ReservoirEntry> entries(allocator_);
-    Vector<InnerIdType> adjacency(allocator_);
-    entries.reserve(reservoir_size_);
-    for (uint64_t source = 0; source < ids_.size(); ++source) {
-        entries.clear();
-        if (reuse_graph_ and seeded_rows_[source] == 0) {
-            const auto old = new_to_old_[source];
-            const auto& cache = *imported_cache_;
-            for (uint64_t edge = cache.offsets[old]; edge < cache.offsets[old + 1]; ++edge) {
-                const auto target = old_to_new_[cache.targets[edge]];
-                if (target != std::numeric_limits<uint32_t>::max()) {
-                    entries.emplace_back(target, cache.hashes[edge], cache.distances[edge]);
+    auto lookup_local_id = [&](InnerIdType neighbor) -> uint32_t {
+        if (use_identity) {
+            return static_cast<uint32_t>(neighbor);
+        }
+        if (use_dense) {
+            require_argument(neighbor < dense_local_ids.size(),
+                             "PiPNN neighbor exceeds local ID map capacity");
+            const uint32_t target = dense_local_ids[neighbor];
+            require_argument(target != missing, "PiPNN neighbor is missing from local IDs");
+            return target;
+        }
+        if (ids_are_strictly_increasing_) {
+            const auto it = std::lower_bound(ids_.begin(), ids_.end(), neighbor);
+            require_argument(it != ids_.end() and *it == neighbor,
+                             "PiPNN neighbor is missing from sorted IDs");
+            return static_cast<uint32_t>(it - ids_.begin());
+        }
+        const auto it = std::lower_bound(
+            sorted_local_ids.begin(),
+            sorted_local_ids.end(),
+            neighbor,
+            [](const auto& item, InnerIdType value) { return item.first < value; });
+        require_argument(it != sorted_local_ids.end() and it->first == neighbor,
+                         "PiPNN neighbor is missing from local IDs");
+        return it->second;
+    };
+
+    parallel_for(count, 256, [&](uint64_t begin, uint64_t end) {
+        for (uint64_t source = begin; source < end; ++source) {
+            snapshot->source_ids[source] = source_ids_[source];
+            snapshot->inner_ids[source] = ids_[source];
+            uint64_t cand_count = 0;
+            if (warm_build_ and reuse_graph_ and seeded_rows_[source] == 0) {
+                cand_count = surviving_counts_[source];
+            } else if (not reservoir_states_.empty()) {
+                cand_count = reservoir_states_[source].size;
+            }
+            snapshot->offsets[source + 1] = cand_count;
+            snapshot->graph_offsets[source + 1] = graph_->GetNeighborSize(ids_[source]);
+        }
+    });
+    std::partial_sum(snapshot->offsets.begin(), snapshot->offsets.end(), snapshot->offsets.begin());
+    std::partial_sum(snapshot->graph_offsets.begin(),
+                     snapshot->graph_offsets.end(),
+                     snapshot->graph_offsets.begin());
+
+    snapshot->targets.resize(snapshot->offsets.back());
+    snapshot->distances.resize(snapshot->offsets.back());
+    snapshot->hashes.resize(snapshot->offsets.back());
+    snapshot->graph_targets.resize(snapshot->graph_offsets.back());
+    snapshot->graph_distances.resize(snapshot->graph_offsets.back());
+
+    std::atomic<uint64_t> reused_rows{0};
+    std::atomic<uint64_t> reused_graph_rows{0};
+    std::atomic<uint64_t> certificate_rows{0};
+    parallel_for(count, 256, [&](uint64_t begin, uint64_t end) {
+        Vector<ReservoirEntry> entries(allocator_);
+        Vector<InnerIdType> adjacency(allocator_);
+        entries.reserve(reservoir_size_);
+        uint64_t local_reused = 0;
+        uint64_t local_reused_graph = 0;
+        uint64_t local_cert = 0;
+        for (uint64_t source = begin; source < end; ++source) {
+            entries.clear();
+            if (warm_build_ and reuse_graph_ and seeded_rows_[source] == 0) {
+                const auto old = new_to_old_[source];
+                const auto& cache = *imported_cache_;
+                for (uint64_t edge = cache.offsets[old]; edge < cache.offsets[old + 1]; ++edge) {
+                    const auto target = old_to_new_[cache.targets[edge]];
+                    if (target != missing) {
+                        entries.emplace_back(target, cache.hashes[edge], cache.distances[edge]);
+                    }
+                }
+            } else if (not reservoir_states_.empty()) {
+                const uint16_t size = reservoir_states_[source].size;
+                if (size > 0) {
+                    const auto* row = reservoir_row_or_null(static_cast<uint32_t>(source));
+                    entries.assign(row, row + size);
                 }
             }
-        } else {
-            const auto* row = reservoirs_.data() + source * reservoir_size_;
-            entries.assign(row, row + reservoir_states_[source].size);
+            std::sort(entries.begin(), entries.end(), [](const auto& lhs, const auto& rhs) {
+                return lhs.neighbor < rhs.neighbor;
+            });
+            const uint64_t cand_base = snapshot->offsets[source];
+            for (uint64_t i = 0; i < entries.size(); ++i) {
+                snapshot->targets[cand_base + i] = entries[i].neighbor;
+                snapshot->distances[cand_base + i] = entries[i].distance;
+                snapshot->hashes[cand_base + i] = entries[i].hash;
+            }
+            graph_->GetNeighbors(ids_[source], adjacency);
+            const uint64_t graph_base = snapshot->graph_offsets[source];
+            require_argument(graph_base + adjacency.size() == snapshot->graph_offsets[source + 1],
+                             "PiPNN graph neighbor count changed during snapshot capture");
+            for (uint64_t i = 0; i < adjacency.size(); ++i) {
+                const auto target = lookup_local_id(adjacency[i]);
+                const auto it = std::lower_bound(
+                    entries.begin(), entries.end(), target, [](const auto& entry, uint32_t id) {
+                        return entry.neighbor < id;
+                    });
+                require_argument(it != entries.end() and it->neighbor == target,
+                                 "PiPNN final neighbor is absent from the reservoir");
+                snapshot->graph_targets[graph_base + i] = target;
+                snapshot->graph_distances[graph_base + i] = it->distance;
+            }
+            if (warm_build_ and cached_rows_[source] != 0) {
+                ++local_reused;
+                local_reused_graph += reused_graph_rows_[source];
+                local_cert += certificate_rows_[source];
+            }
         }
-        std::sort(entries.begin(), entries.end(), [](const auto& lhs, const auto& rhs) {
-            return lhs.neighbor < rhs.neighbor;
-        });
-        for (const auto& entry : entries) {
-            snapshot->targets.push_back(entry.neighbor);
-            snapshot->distances.push_back(entry.distance);
-            snapshot->hashes.push_back(entry.hash);
+        if (local_reused > 0) {
+            reused_rows.fetch_add(local_reused, std::memory_order_relaxed);
+            reused_graph_rows.fetch_add(local_reused_graph, std::memory_order_relaxed);
+            certificate_rows.fetch_add(local_cert, std::memory_order_relaxed);
         }
-        snapshot->offsets.push_back(snapshot->targets.size());
-        graph_->GetNeighbors(ids_[source], adjacency);
-        for (const auto neighbor : adjacency) {
-            const auto target = local_ids.at(neighbor);
-            const auto it = std::lower_bound(
-                entries.begin(), entries.end(), target, [](const auto& entry, uint32_t id) {
-                    return entry.neighbor < id;
-                });
-            require_argument(it != entries.end() and it->neighbor == target,
-                             "PiPNN final neighbor is absent from the reservoir");
-            snapshot->graph_targets.push_back(target);
-            snapshot->graph_distances.push_back(it->distance);
-        }
-        snapshot->graph_offsets.push_back(snapshot->graph_targets.size());
-        if (warm_build_ and cached_rows_[source] != 0) {
-            ++snapshot->reused_rows;
-            snapshot->reused_graph_rows += reused_graph_rows_[source];
-            snapshot->certificate_rows += certificate_rows_[source];
-        }
-    }
+    });
+    snapshot->reused_rows = reused_rows.load(std::memory_order_relaxed);
+    snapshot->reused_graph_rows = reused_graph_rows.load(std::memory_order_relaxed);
+    snapshot->certificate_rows = certificate_rows.load(std::memory_order_relaxed);
     snapshot->reuse_mask = std::move(cached_rows_);
     *exported_cache_ = std::move(snapshot);
 }
@@ -804,72 +1305,196 @@ PiPNNPipeline::build_missing_leaf(const Leaf& leaf) {
             ? std::max(parameter_.leaf_neighbor_count, MIN_UNDERSIZED_LEAF_NEIGHBOR_COUNT)
             : parameter_.leaf_neighbor_count;
     const uint64_t k = std::min<uint64_t>(requested, leaf.size() - 1);
-    Vector<uint32_t> missing(allocator_);
+    Vector<uint32_t> ordered(allocator_);
+    ordered.reserve(leaf.size());
     for (const auto source : leaf) {
         if (cached_rows_[source] == 0) {
-            missing.push_back(source);
+            ordered.push_back(source);
         }
     }
-    if (missing.empty()) {
+    const uint64_t missing_count = ordered.size();
+    if (missing_count == 0) {
         return;
     }
-    // Rectangular GEMM computes only missing rows, retaining BLAS throughput at high overlap.
-    UninitializedFloatBuffer points(
-        checked_product(leaf.size(), dimensions_, "cache points"), allocator_, "cache points");
-    UninitializedFloatBuffer queries(
-        checked_product(missing.size(), dimensions_, "cache queries"), allocator_, "cache queries");
-    for (uint64_t i = 0; i < leaf.size(); ++i) {
-        std::copy_n((*rows_)[leaf[i]], dimensions_, points.Data() + i * dimensions_);
+    if (missing_count == leaf.size()) {
+        build_leaf(leaf);
+        return;
     }
-    for (uint64_t i = 0; i < missing.size(); ++i) {
-        std::copy_n((*rows_)[missing[i]], dimensions_, queries.Data() + i * dimensions_);
+    for (const auto source : leaf) {
+        if (cached_rows_[source] != 0) {
+            ordered.push_back(source);
+        }
     }
-    UninitializedFloatBuffer dots(
-        checked_product(missing.size(), leaf.size(), "cache dots"), allocator_, "cache dots");
-    BlasFunction::Sgemm(BlasFunction::RowMajor,
-                        BlasFunction::NoTrans,
-                        BlasFunction::Trans,
-                        static_cast<int32_t>(missing.size()),
-                        static_cast<int32_t>(leaf.size()),
-                        static_cast<int32_t>(dimensions_),
-                        1.0F,
-                        queries.Data(),
-                        static_cast<int32_t>(dimensions_),
-                        points.Data(),
-                        static_cast<int32_t>(dimensions_),
-                        0.0F,
-                        dots.Data(),
-                        static_cast<int32_t>(leaf.size()));
-    Vector<std::pair<float, uint32_t>> nearest(allocator_);
-    nearest.reserve(k);
-    for (uint64_t row = 0; row < missing.size(); ++row) {
-        const auto source = missing[row];
-        nearest.clear();
-        const auto less = [&](const auto& lhs, const auto& rhs) {
-            return std::make_tuple(
-                       lhs.first, id_gap(ids_[source], ids_[lhs.second]), ids_[lhs.second]) <
-                   std::make_tuple(
-                       rhs.first, id_gap(ids_[source], ids_[rhs.second]), ids_[rhs.second]);
-        };
-        for (uint64_t column = 0; column < leaf.size(); ++column) {
-            const auto target = leaf[column];
-            if (source == target) {
-                continue;
-            }
-            const auto candidate = std::make_pair(
-                distance_from_dot(source, target, dots.Data()[row * leaf.size() + column]), target);
-            if (nearest.size() < k) {
-                nearest.push_back(candidate);
-                std::push_heap(nearest.begin(), nearest.end(), less);
-            } else if (less(candidate, nearest.front())) {
-                std::pop_heap(nearest.begin(), nearest.end(), less);
-                nearest.back() = candidate;
-                std::push_heap(nearest.begin(), nearest.end(), less);
+    // Pack missing rows first and cached rows second when falling back to Sgemm;
+    // for small FP32 missing counts, compute batched dot products zero-copy via SIMD.
+    constexpr uint64_t small_missing_threshold = 16;
+    constexpr uint64_t stack_dots_capacity = 2048;
+    const uint64_t dot_count = checked_product(missing_count, leaf.size(), "cache dots");
+    std::array<float, stack_dots_capacity> small_dots{};
+    Vector<float> heap_dots(allocator_);
+    float* dot_data = small_dots.data();
+    if (dot_count > stack_dots_capacity) {
+        heap_dots.resize(dot_count);
+        dot_data = heap_dots.data();
+    }
+    if (not native_half() and missing_count <= small_missing_threshold) {
+        std::array<const float*, small_missing_threshold> missing_ptrs{};
+        for (uint64_t row = 0; row < missing_count; ++row) {
+            missing_ptrs[row] = vector_by_local_id(ordered[row]);
+        }
+        uint64_t column = 0;
+        for (; column + 4 <= leaf.size(); column += 4) {
+            const float* t0 = vector_by_local_id(ordered[column + 0]);
+            const float* t1 = vector_by_local_id(ordered[column + 1]);
+            const float* t2 = vector_by_local_id(ordered[column + 2]);
+            const float* t3 = vector_by_local_id(ordered[column + 3]);
+            for (uint64_t row = 0; row < missing_count; ++row) {
+                float d0 = 0.0F;
+                float d1 = 0.0F;
+                float d2 = 0.0F;
+                float d3 = 0.0F;
+                FP32ComputeIPBatch4(missing_ptrs[row], dimensions_, t0, t1, t2, t3, d0, d1, d2, d3);
+                float* out = dot_data + row * leaf.size() + column;
+                out[0] = d0;
+                out[1] = d1;
+                out[2] = d2;
+                out[3] = d3;
             }
         }
-        std::sort(nearest.begin(), nearest.end(), less);
-        for (const auto& [distance, target] : nearest) {
-            insert_bidirectional(source, target, distance);
+        for (; column < leaf.size(); ++column) {
+            const float* target = vector_by_local_id(ordered[column]);
+            for (uint64_t row = 0; row < missing_count; ++row) {
+                dot_data[row * leaf.size() + column] =
+                    FP32ComputeIP(missing_ptrs[row], target, dimensions_);
+            }
+        }
+    } else {
+        UninitializedFloatBuffer points(
+            checked_product(leaf.size(), dimensions_, "cache points"), allocator_, "cache points");
+        for (uint64_t i = 0; i < leaf.size(); ++i) {
+            gather_row(ordered[i], points, i);
+        }
+        BlasFunction::Sgemm(BlasFunction::RowMajor,
+                            BlasFunction::NoTrans,
+                            BlasFunction::Trans,
+                            static_cast<int32_t>(missing_count),
+                            static_cast<int32_t>(leaf.size()),
+                            static_cast<int32_t>(dimensions_),
+                            1.0F,
+                            points.Data(),
+                            static_cast<int32_t>(dimensions_),
+                            points.Data(),
+                            static_cast<int32_t>(dimensions_),
+                            0.0F,
+                            dot_data,
+                            static_cast<int32_t>(leaf.size()));
+    }
+
+    Vector<std::pair<float, uint32_t>> nearest(allocator_);
+    if (k > SMALL_TOP_K_LIMIT) {
+        nearest.reserve(k);
+    }
+    std::array<std::pair<float, uint32_t>, SMALL_TOP_K_LIMIT> small_nearest{};
+    for (uint64_t row = 0; row < missing_count; ++row) {
+        const auto source = ordered[row];
+        const auto source_id = ids_[source];
+        const auto less = [&](const auto& lhs, const auto& rhs) {
+            if (lhs.first != rhs.first) {
+                return lhs.first < rhs.first;
+            }
+            const auto lhs_gap = id_gap(source_id, ids_[lhs.second]);
+            const auto rhs_gap = id_gap(source_id, ids_[rhs.second]);
+            if (lhs_gap != rhs_gap) {
+                return lhs_gap < rhs_gap;
+            }
+            return ids_[lhs.second] < ids_[rhs.second];
+        };
+        const float* dot_row = dot_data + row * leaf.size();
+        bool has_best_cached = false;
+        std::pair<float, uint32_t> best_cached{0.0F, 0};
+        if (k <= SMALL_TOP_K_LIMIT) {
+            uint64_t retained = 0;
+            float worst_distance = std::numeric_limits<float>::infinity();
+            for (uint64_t column = 0; column < leaf.size(); ++column) {
+                if (column == row) {
+                    continue;
+                }
+                const auto target = ordered[column];
+                const float distance = distance_from_dot(source, target, dot_row[column]);
+                const auto candidate = std::make_pair(distance, target);
+                if (column >= missing_count) {
+                    if (not has_best_cached or less(candidate, best_cached)) {
+                        best_cached = candidate;
+                        has_best_cached = true;
+                    }
+                }
+                if (retained < k) {
+                    uint64_t pos = retained;
+                    while (pos > 0 and less(candidate, small_nearest[pos - 1])) {
+                        small_nearest[pos] = small_nearest[pos - 1];
+                        --pos;
+                    }
+                    small_nearest[pos] = candidate;
+                    ++retained;
+                    if (retained == k) {
+                        worst_distance = small_nearest[k - 1].first;
+                    }
+                } else if (distance <= worst_distance and less(candidate, small_nearest[k - 1])) {
+                    uint64_t pos = k - 1;
+                    while (pos > 0 and less(candidate, small_nearest[pos - 1])) {
+                        small_nearest[pos] = small_nearest[pos - 1];
+                        --pos;
+                    }
+                    small_nearest[pos] = candidate;
+                    worst_distance = small_nearest[k - 1].first;
+                }
+            }
+            bool bridged_to_cached = false;
+            for (uint64_t i = 0; i < retained; ++i) {
+                const auto& [distance, target] = small_nearest[i];
+                if (cached_rows_[target] != 0) {
+                    bridged_to_cached = true;
+                }
+                insert_bidirectional(source, target, distance);
+            }
+            if (has_best_cached and not bridged_to_cached) {
+                insert_bidirectional(source, best_cached.second, best_cached.first);
+            }
+        } else {
+            nearest.clear();
+            for (uint64_t column = 0; column < leaf.size(); ++column) {
+                if (column == row) {
+                    continue;
+                }
+                const auto target = ordered[column];
+                const float distance = distance_from_dot(source, target, dot_row[column]);
+                const auto candidate = std::make_pair(distance, target);
+                if (column >= missing_count) {
+                    if (not has_best_cached or less(candidate, best_cached)) {
+                        best_cached = candidate;
+                        has_best_cached = true;
+                    }
+                }
+                if (nearest.size() < k) {
+                    nearest.push_back(candidate);
+                    std::push_heap(nearest.begin(), nearest.end(), less);
+                } else if (distance <= nearest.front().first and less(candidate, nearest.front())) {
+                    std::pop_heap(nearest.begin(), nearest.end(), less);
+                    nearest.back() = candidate;
+                    std::push_heap(nearest.begin(), nearest.end(), less);
+                }
+            }
+            std::sort(nearest.begin(), nearest.end(), less);
+            bool bridged_to_cached = false;
+            for (const auto& [distance, target] : nearest) {
+                if (cached_rows_[target] != 0) {
+                    bridged_to_cached = true;
+                }
+                insert_bidirectional(source, target, distance);
+            }
+            if (has_best_cached and not bridged_to_cached) {
+                insert_bidirectional(source, best_cached.second, best_cached.first);
+            }
         }
     }
 }
@@ -886,12 +1511,14 @@ PiPNNPipeline::prepare(const Vector<InnerIdType>& ids_sequence) {
     }
 
     const uint64_t graph_capacity = graph_->MaxCapacity();
-    const bool ids_are_strictly_increasing =
+    ids_are_strictly_increasing_ =
         std::adjacent_find(ids_.begin(), ids_.end(), [](InnerIdType lhs, InnerIdType rhs) {
             return lhs >= rhs;
         }) == ids_.end();
+    ids_are_identity_ =
+        ids_are_strictly_increasing_ and ids_.front() == 0 and ids_.back() == ids_.size() - 1;
     UnorderedSet<InnerIdType> seen_ids(allocator_);
-    if (not ids_are_strictly_increasing) {
+    if (not ids_are_strictly_increasing_) {
         seen_ids.reserve(ids_.size());
         for (uint64_t local_id = 0; local_id < ids_.size(); ++local_id) {
             const auto id = ids_[local_id];
@@ -917,97 +1544,130 @@ PiPNNPipeline::prepare(const Vector<InnerIdType>& ids_sequence) {
 
     reservoir_size_ =
         std::max(parameter_.reservoir_size, static_cast<uint64_t>(graph_->MaximumDegree()));
-    const uint64_t reservoir_count = checked_product(ids_.size(), reservoir_size_, "reservoir");
-    require_argument(reservoir_count <= reservoirs_.max_size(),
-                     "PiPNN reservoir exceeds the allocator limit");
+    if (thread_pool_ != nullptr and thread_count_ > 1) {
+        point_lock_count_ =
+            static_cast<uint32_t>(std::min<uint64_t>(ids_.size(), MAX_POINT_LOCK_COUNT));
+        point_locks_ = std::make_unique<PointsMutex>(point_lock_count_, allocator_);
+    }
 
-    if (metric_ != MetricType::METRIC_TYPE_IP) {
+    const uint64_t plane_values =
+        checked_product(parameter_.hash_plane_count, dimensions_, "hyperplane");
+    hyperplanes_.resize(plane_values);
+    std::mt19937_64 random(42);
+    std::normal_distribution<float> normal(0.0F, 1.0F);
+    for (auto& value : hyperplanes_) {
+        value = normal(random);
+        hyperplane_signature_ ^= std::bit_cast<uint32_t>(value);
+        hyperplane_signature_ *= 1099511628211ULL;
+    }
+}
+
+void
+PiPNNPipeline::prepare_sketches(bool compute_norms,
+                                bool compute_sketches,
+                                bool compute_fingerprints) {
+    if (compute_norms and norms_ == nullptr) {
         const uint64_t norm_bytes = checked_product(ids_.size(), sizeof(float), "norm bytes");
         norms_ = static_cast<float*>(allocator_->Allocate(norm_bytes));
         if (norms_ == nullptr) {
             throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "PiPNN failed to allocate norms");
         }
     }
-    reservoirs_.resize(reservoir_count);
-    reservoir_states_.resize(ids_.size());
-    if (thread_pool_ != nullptr and thread_count_ > 1) {
-        point_lock_count_ =
-            static_cast<uint32_t>(std::min<uint64_t>(ids_.size(), MAX_POINT_LOCK_COUNT));
-        point_locks_ = std::make_unique<PointsMutex>(point_lock_count_, allocator_);
-    }
-}
-
-void
-PiPNNPipeline::prepare_sketches() {
-    const uint64_t plane_values =
-        checked_product(parameter_.hash_plane_count, dimensions_, "hyperplane");
-    const uint64_t sketch_values =
-        checked_product(ids_.size(), parameter_.hash_plane_count, "sketch");
-    Vector<float> hyperplanes(plane_values, allocator_);
-    const uint64_t sketch_bytes = checked_product(sketch_values, sizeof(float), "sketch bytes");
-    sketches_ = static_cast<float*>(allocator_->Allocate(sketch_bytes));
-    if (sketches_ == nullptr) {
-        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "PiPNN failed to allocate sketches");
-    }
-
-    std::mt19937_64 random(42);
-    std::normal_distribution<float> normal(0.0F, 1.0F);
-    for (auto& value : hyperplanes) {
-        value = normal(random);
-        hyperplane_signature_ ^= std::bit_cast<uint32_t>(value);
-        hyperplane_signature_ *= 1099511628211ULL;
+    if (compute_sketches and sketches_ == nullptr) {
+        const uint64_t sketch_values =
+            checked_product(ids_.size(), parameter_.hash_plane_count, "sketch");
+        const uint64_t sketch_bytes = checked_product(sketch_values, sizeof(float), "sketch bytes");
+        sketches_ = static_cast<float*>(allocator_->Allocate(sketch_bytes));
+        if (sketches_ == nullptr) {
+            throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "PiPNN failed to allocate sketches");
+        }
     }
 
     parallel_for(ids_.size(), 64, [&](uint64_t begin, uint64_t end) {
         for (uint64_t local_id = begin; local_id < end; ++local_id) {
             if (native_half()) {
                 const auto* vector = half_row(static_cast<uint32_t>(local_id));
-                if (metric_ != MetricType::METRIC_TYPE_IP) {
+                float norm_scale = 0.0F;
+                if (compute_norms) {
                     const float norm =
                         pipnn_half::Preparation(vector, nullptr, dimensions_, half_format());
                     if (metric_ == MetricType::METRIC_TYPE_COSINE) {
                         const float length = std::sqrt(std::max(0.0F, norm));
-                        norms_[local_id] =
-                            length > 0.0F and std::isfinite(length) ? 1.0F / length : 0.0F;
+                        norm_scale = length > 0.0F and std::isfinite(length) ? 1.0F / length : 0.0F;
+                        norms_[local_id] = norm_scale;
                     } else {
                         norms_[local_id] = norm;
                     }
+                } else if (metric_ == MetricType::METRIC_TYPE_COSINE and norms_ != nullptr) {
+                    norm_scale = norms_[local_id];
                 }
-                for (uint64_t plane = 0; plane < parameter_.hash_plane_count; ++plane) {
-                    const auto* hyperplane = hyperplanes.data() + plane * dimensions_;
-                    float dot =
-                        pipnn_half::Preparation(vector, hyperplane, dimensions_, half_format());
-                    if (metric_ == MetricType::METRIC_TYPE_COSINE) {
-                        dot *= norms_[local_id];
+                if (compute_sketches) {
+                    for (uint64_t plane = 0; plane < parameter_.hash_plane_count; ++plane) {
+                        const auto* hyperplane = hyperplanes_.data() + plane * dimensions_;
+                        float dot =
+                            pipnn_half::Preparation(vector, hyperplane, dimensions_, half_format());
+                        if (metric_ == MetricType::METRIC_TYPE_COSINE) {
+                            dot *= norm_scale;
+                        }
+                        sketches_[local_id * parameter_.hash_plane_count + plane] = dot;
                     }
-                    sketches_[local_id * parameter_.hash_plane_count + plane] = dot;
                 }
                 continue;
             }
             const auto* vector = vector_by_local_id(static_cast<uint32_t>(local_id));
-            if (metric_ != MetricType::METRIC_TYPE_IP) {
-                float norm = 0.0F;
-                for (uint64_t dim = 0; dim < dimensions_; ++dim) {
-                    norm += vector[dim] * vector[dim];
-                }
+            if (compute_fingerprints) {
+                fingerprints_[local_id] = fingerprint_fp32_row(vector, dimensions_);
+            }
+            float norm_scale = 0.0F;
+            if (compute_norms) {
+                const float norm = FP32ComputeIP(vector, vector, dimensions_);
                 if (metric_ == MetricType::METRIC_TYPE_COSINE) {
                     const float length = std::sqrt(std::max(0.0F, norm));
-                    norms_[local_id] =
-                        length > 0.0F and std::isfinite(length) ? 1.0F / length : 0.0F;
+                    norm_scale = length > 0.0F and std::isfinite(length) ? 1.0F / length : 0.0F;
+                    norms_[local_id] = norm_scale;
                 } else {
                     norms_[local_id] = norm;
                 }
+            } else if (metric_ == MetricType::METRIC_TYPE_COSINE and norms_ != nullptr) {
+                norm_scale = norms_[local_id];
             }
-            for (uint64_t plane = 0; plane < parameter_.hash_plane_count; ++plane) {
-                const auto* hyperplane = hyperplanes.data() + plane * dimensions_;
-                float dot = 0.0F;
-                for (uint64_t dim = 0; dim < dimensions_; ++dim) {
-                    dot += vector[dim] * hyperplane[dim];
+            if (compute_sketches) {
+                uint64_t plane = 0;
+                for (; plane + 4 <= parameter_.hash_plane_count; plane += 4) {
+                    float d0 = 0.0F;
+                    float d1 = 0.0F;
+                    float d2 = 0.0F;
+                    float d3 = 0.0F;
+                    FP32ComputeIPBatch4(vector,
+                                        dimensions_,
+                                        hyperplanes_.data() + (plane + 0) * dimensions_,
+                                        hyperplanes_.data() + (plane + 1) * dimensions_,
+                                        hyperplanes_.data() + (plane + 2) * dimensions_,
+                                        hyperplanes_.data() + (plane + 3) * dimensions_,
+                                        d0,
+                                        d1,
+                                        d2,
+                                        d3);
+                    if (metric_ == MetricType::METRIC_TYPE_COSINE) {
+                        d0 *= norm_scale;
+                        d1 *= norm_scale;
+                        d2 *= norm_scale;
+                        d3 *= norm_scale;
+                    }
+                    const uint64_t base = local_id * parameter_.hash_plane_count + plane;
+                    sketches_[base + 0] = d0;
+                    sketches_[base + 1] = d1;
+                    sketches_[base + 2] = d2;
+                    sketches_[base + 3] = d3;
                 }
-                if (metric_ == MetricType::METRIC_TYPE_COSINE) {
-                    dot *= norms_[local_id];
+                for (; plane < parameter_.hash_plane_count; ++plane) {
+                    float dot = FP32ComputeIP(
+                        vector, hyperplanes_.data() + plane * dimensions_, dimensions_);
+                    if (metric_ == MetricType::METRIC_TYPE_COSINE) {
+                        dot *= norm_scale;
+                    }
+                    sketches_[local_id * parameter_.hash_plane_count + plane] = dot;
                 }
-                sketches_[local_id * parameter_.hash_plane_count + plane] = dot;
             }
         }
     });
@@ -1216,6 +1876,8 @@ PiPNNPipeline::sample_leaders(const WorkItem& item) const {
 void
 PiPNNPipeline::select_leaders(uint32_t source,
                               const Vector<uint32_t>& leaders,
+                              const Vector<InnerIdType>& leader_ids,
+                              const Vector<float>& leader_norms,
                               const float* dots,
                               uint64_t fanout,
                               Vector<std::pair<float, uint32_t>>& candidates) const {
@@ -1223,27 +1885,47 @@ PiPNNPipeline::select_leaders(uint32_t source,
         if (lhs.first != rhs.first) {
             return lhs.first < rhs.first;
         }
-        return ids_[leaders[lhs.second]] < ids_[leaders[rhs.second]];
+        return leader_ids[lhs.second] < leader_ids[rhs.second];
+    };
+    auto compute_distance = [&](uint64_t leader) -> float {
+        const float dot = dots[leader];
+        if (metric_ == MetricType::METRIC_TYPE_L2SQR) {
+            const float sum = norms_[source] + leader_norms[leader];
+            return std::max(0.0F, sanitize_distance(sum - dot - dot));
+        }
+        if (metric_ == MetricType::METRIC_TYPE_IP) {
+            return sanitize_distance(1.0F - dot);
+        }
+        const float similarity =
+            std::clamp(dot * norms_[source] * leader_norms[leader], -1.0F, 1.0F);
+        return sanitize_distance(1.0F - similarity);
     };
     candidates.clear();
     if (fanout <= SMALL_TOP_K_LIMIT) {
         uint64_t farthest = 0;
+        float worst_distance = std::numeric_limits<float>::infinity();
         for (uint64_t leader = 0; leader < leaders.size(); ++leader) {
-            const auto candidate =
-                std::make_pair(distance_from_dot(source, leaders[leader], dots[leader]),
-                               static_cast<uint32_t>(leader));
+            const float distance = compute_distance(leader);
             if (candidates.size() < fanout) {
+                const auto candidate = std::make_pair(distance, static_cast<uint32_t>(leader));
                 candidates.emplace_back(candidate);
                 if (less(candidates[farthest], candidate)) {
                     farthest = candidates.size() - 1;
                 }
-            } else if (less(candidate, candidates[farthest])) {
-                candidates[farthest] = candidate;
-                farthest = 0;
-                for (uint64_t selected = 1; selected < fanout; ++selected) {
-                    if (less(candidates[farthest], candidates[selected])) {
-                        farthest = selected;
+                if (candidates.size() == fanout) {
+                    worst_distance = candidates[farthest].first;
+                }
+            } else if (distance <= worst_distance) {
+                const auto candidate = std::make_pair(distance, static_cast<uint32_t>(leader));
+                if (less(candidate, candidates[farthest])) {
+                    candidates[farthest] = candidate;
+                    farthest = 0;
+                    for (uint64_t selected = 1; selected < fanout; ++selected) {
+                        if (less(candidates[farthest], candidates[selected])) {
+                            farthest = selected;
+                        }
                     }
+                    worst_distance = candidates[farthest].first;
                 }
             }
         }
@@ -1251,8 +1933,7 @@ PiPNNPipeline::select_leaders(uint32_t source,
         return;
     }
     for (uint64_t leader = 0; leader < leaders.size(); ++leader) {
-        candidates.emplace_back(distance_from_dot(source, leaders[leader], dots[leader]),
-                                static_cast<uint32_t>(leader));
+        candidates.emplace_back(compute_distance(leader), static_cast<uint32_t>(leader));
     }
     std::partial_sort(candidates.begin(),
                       candidates.begin() + static_cast<int64_t>(fanout),
@@ -1274,8 +1955,16 @@ PiPNNPipeline::assign_to_leaders(const WorkItem& item,
     const uint64_t leader_value_count =
         checked_product(leaders.size(), dimensions_, "leader matrix");
     UninitializedFloatBuffer leader_values(leader_value_count, allocator_, "leader matrix");
+    Vector<InnerIdType> leader_ids(leaders.size(), allocator_);
+    Vector<float> leader_norms(metric_ != MetricType::METRIC_TYPE_IP ? leaders.size() : 0,
+                               allocator_);
     for (uint64_t leader = 0; leader < leaders.size(); ++leader) {
-        gather_row(leaders[leader], leader_values, leader);
+        const uint32_t leader_local = leaders[leader];
+        gather_row(leader_local, leader_values, leader);
+        leader_ids[leader] = ids_[leader_local];
+        if (metric_ != MetricType::METRIC_TYPE_IP) {
+            leader_norms[leader] = norms_[leader_local];
+        }
     }
 
     if (allow_parallelism and thread_pool_ != nullptr and thread_count_ > 1 and
@@ -1349,6 +2038,8 @@ PiPNNPipeline::assign_to_leaders(const WorkItem& item,
                         const uint32_t local_id = item.points[point_index];
                         select_leaders(local_id,
                                        leaders,
+                                       leader_ids,
+                                       leader_norms,
                                        dots.Data() + point * leaders.size(),
                                        fanout,
                                        candidates);
@@ -1427,8 +2118,13 @@ PiPNNPipeline::assign_to_leaders(const WorkItem& item,
 
         for (uint64_t point = 0; point < stripe_size; ++point) {
             const uint32_t local_id = item.points[begin + point];
-            select_leaders(
-                local_id, leaders, dots.Data() + point * leaders.size(), fanout, candidates);
+            select_leaders(local_id,
+                           leaders,
+                           leader_ids,
+                           leader_norms,
+                           dots.Data() + point * leaders.size(),
+                           fanout,
+                           candidates);
             for (uint64_t selected = 0; selected < fanout; ++selected) {
                 clusters[candidates[selected].second].emplace_back(local_id);
             }
@@ -2004,7 +2700,7 @@ PiPNNPipeline::insert_candidate(uint32_t source,
     if (reuse_graph_) {
         clean_graph_rows_[source] = 0;
     }
-    auto* row = reservoirs_.data() + static_cast<uint64_t>(source) * reservoir_size_;
+    auto* row = ensure_reservoir_row(source);
 
     auto& state = reservoir_states_[source];
 
@@ -2066,7 +2762,11 @@ PiPNNPipeline::insert_candidate(uint32_t source,
 void
 PiPNNPipeline::update_farthest(uint32_t source) {
     auto& state = reservoir_states_[source];
-    auto* row = reservoirs_.data() + static_cast<uint64_t>(source) * reservoir_size_;
+    if (state.size == 0) {
+        state.farthest = 0;
+        return;
+    }
+    const auto* row = reservoir_row_or_null(source);
     state.farthest = 0;
     for (uint16_t index = 1; index < state.size; ++index) {
         const auto& candidate = row[index];
@@ -2190,7 +2890,7 @@ PiPNNPipeline::robust_prune(uint32_t source,
 }
 
 bool
-PiPNNPipeline::certify_cached_graph(uint32_t source) const {
+PiPNNPipeline::certify_cached_graph(uint32_t source, PruneScratch& scratch) const {
     if (parameter_.adaptive_pruning or cached_rows_[source] == 0) {
         return false;
     }
@@ -2201,83 +2901,128 @@ PiPNNPipeline::certify_cached_graph(uint32_t source) const {
     if (begin == end) {
         return false;
     }
-    const auto* row = reservoirs_.data() + static_cast<uint64_t>(source) * reservoir_size_;
+    const auto* row = reservoir_row_or_null(source);
     const auto size = reservoir_states_[source].size;
-    auto less = [&](uint32_t lhs, uint16_t lhs_key, uint32_t rhs, uint16_t rhs_key) {
-        return std::make_tuple(lhs_key, id_gap(ids_[source], ids_[lhs]), ids_[lhs]) <
-               std::make_tuple(rhs_key, id_gap(ids_[source], ids_[rhs]), ids_[rhs]);
+    if (row == nullptr or size == 0) {
+        return false;
+    }
+    scratch.certified_edges.clear();
+    scratch.selected_flags.assign(size, 0);
+    const auto source_new_id = ids_[source];
+    const auto source_old_id = cache.inner_ids[old];
+    auto less = [](uint64_t lhs_gap,
+                   InnerIdType lhs_id,
+                   uint16_t lhs_key,
+                   uint64_t rhs_gap,
+                   InnerIdType rhs_id,
+                   uint16_t rhs_key) {
+        return std::tie(lhs_key, lhs_gap, lhs_id) < std::tie(rhs_key, rhs_gap, rhs_id);
     };
+    constexpr uint32_t missing = std::numeric_limits<uint32_t>::max();
     for (uint64_t edge = begin; edge < end; ++edge) {
-        const auto selected = old_to_new_[cache.graph_targets[edge]];
-        if (selected == std::numeric_limits<uint32_t>::max()) {
+        const auto old_selected = cache.graph_targets[edge];
+        const auto selected = old_to_new_[old_selected];
+        if (selected == missing) {
             return false;
         }
         const auto distance = cache.graph_distances[edge];
-        if (std::none_of(row, row + size, [&](const auto& entry) {
-                return entry.neighbor == selected and entry.distance == distance;
-            })) {
-            return false;
-        }
-        if (edge > begin and not less(old_to_new_[cache.graph_targets[edge - 1]],
-                                      cache.graph_distances[edge - 1],
-                                      selected,
-                                      distance)) {
-            return false;
-        }
-    }
-    const auto old_begin = cache.targets.begin() + static_cast<int64_t>(cache.offsets[old]);
-    const auto old_end = cache.targets.begin() + static_cast<int64_t>(cache.offsets[old + 1]);
-    for (uint64_t i = 0; i < size; ++i) {
-        const auto candidate = row[i].neighbor;
-        const auto distance = row[i].distance;
-        if (end - begin == graph_->MaximumDegree() and
-            less(old_to_new_[cache.graph_targets[end - 1]],
-                 cache.graph_distances[end - 1],
-                 candidate,
-                 distance)) {
-            continue;
-        }
-        bool selected_itself = false;
-        for (uint64_t edge = begin; edge < end; ++edge) {
-            if (old_to_new_[cache.graph_targets[edge]] == candidate) {
-                selected_itself = true;
+        uint16_t found_pos = size;
+        for (uint16_t pos = 0; pos < size; ++pos) {
+            if (row[pos].neighbor == selected and row[pos].distance == distance) {
+                found_pos = pos;
                 break;
             }
         }
-        if (selected_itself) {
+        if (found_pos == size) {
+            return false;
+        }
+        scratch.selected_flags[found_pos] = 1;
+        const auto new_id = ids_[selected];
+        const auto new_gap = id_gap(source_new_id, new_id);
+        const auto old_id = cache.inner_ids[old_selected];
+        const auto old_gap = id_gap(source_old_id, old_id);
+        if (not scratch.certified_edges.empty()) {
+            const auto& prev = scratch.certified_edges.back();
+            if (not less(prev.new_gap, prev.new_id, prev.distance, new_gap, new_id, distance)) {
+                return false;
+            }
+        }
+        scratch.certified_edges.push_back(
+            CertifiedEdge{selected, old_selected, distance, new_gap, new_id, old_gap, old_id});
+    }
+    const auto& last_edge = scratch.certified_edges.back();
+    const bool full_degree = scratch.certified_edges.size() == graph_->MaximumDegree();
+    const auto old_begin = cache.targets.begin() + static_cast<int64_t>(cache.offsets[old]);
+    const auto old_end = cache.targets.begin() + static_cast<int64_t>(cache.offsets[old + 1]);
+    for (uint64_t i = 0; i < size; ++i) {
+        if (scratch.selected_flags[i] != 0) {
+            continue;
+        }
+        const auto candidate = row[i].neighbor;
+        const auto distance = row[i].distance;
+        const auto cand_new_id = ids_[candidate];
+        const auto cand_new_gap = id_gap(source_new_id, cand_new_id);
+        if (full_degree and less(last_edge.new_gap,
+                                 last_edge.new_id,
+                                 last_edge.distance,
+                                 cand_new_gap,
+                                 cand_new_id,
+                                 distance)) {
             continue;
         }
         // Previously rejected candidates retain their proof if their relative order
         // against every selected neighbor survives inner-ID remapping.
         const auto old_target = new_to_old_[candidate];
-        const auto found = std::lower_bound(old_begin, old_end, old_target);
-        bool old_proof = found != old_end and *found == old_target;
-        if (old_proof) {
-            const auto position = static_cast<uint64_t>(found - cache.targets.begin());
-            old_proof = cache.distances[position] == distance;
-        }
-        for (uint64_t edge = begin; old_proof and edge < end; ++edge) {
-            const auto old_selected = cache.graph_targets[edge];
-            const auto selected = old_to_new_[old_selected];
-            const auto selected_distance = cache.graph_distances[edge];
-            const bool earlier =
-                std::make_tuple(selected_distance,
-                                id_gap(cache.inner_ids[old], cache.inner_ids[old_selected]),
-                                cache.inner_ids[old_selected]) <
-                std::make_tuple(distance,
-                                id_gap(cache.inner_ids[old], cache.inner_ids[old_target]),
-                                cache.inner_ids[old_target]);
-            old_proof = earlier == less(selected, selected_distance, candidate, distance);
+        bool old_proof = false;
+        if (old_target != missing) {
+            const auto found = std::lower_bound(old_begin, old_end, old_target);
+            old_proof = found != old_end and *found == old_target;
+            if (old_proof) {
+                const auto position = static_cast<uint64_t>(found - cache.targets.begin());
+                old_proof = cache.distances[position] == distance;
+            }
+            if (old_proof) {
+                const auto cand_old_id = cache.inner_ids[old_target];
+                const auto cand_old_gap = id_gap(source_old_id, cand_old_id);
+                for (const auto& edge : scratch.certified_edges) {
+                    const bool earlier = less(edge.old_gap,
+                                              edge.old_id,
+                                              edge.distance,
+                                              cand_old_gap,
+                                              cand_old_id,
+                                              distance);
+                    const bool new_earlier = less(edge.new_gap,
+                                                  edge.new_id,
+                                                  edge.distance,
+                                                  cand_new_gap,
+                                                  cand_new_id,
+                                                  distance);
+                    if (earlier != new_earlier) {
+                        old_proof = false;
+                        break;
+                    }
+                }
+            }
         }
         if (old_proof) {
             continue;
         }
+        if (not native_half()) {
+            const auto* future = vector_by_local_id(candidate);
+            for (uint64_t dim = 0; dim < dimensions_; dim += 16) {
+                Prefetch(future + dim);
+            }
+        }
         bool blocked = false;
-        for (uint64_t edge = begin; edge < end; ++edge) {
-            const auto selected = old_to_new_[cache.graph_targets[edge]];
-            if (less(selected, cache.graph_distances[edge], candidate, distance) and
-                parameter_.alpha * pair_distance(selected, candidate) <
-                    distance_from_order_key(distance)) {
+        const float cand_dist = distance_from_order_key(distance);
+        for (const auto& edge : scratch.certified_edges) {
+            if (less(edge.new_gap,
+                     edge.new_id,
+                     edge.distance,
+                     cand_new_gap,
+                     cand_new_id,
+                     distance) and
+                parameter_.alpha * pair_distance(edge.target, candidate) < cand_dist) {
                 blocked = true;
                 break;
             }
@@ -2297,7 +3042,7 @@ PiPNNPipeline::write_graph_row(uint32_t source, PruneScratch& scratch) {
         reuse_graph_ and not parameter_.adaptive_pruning and clean_graph_rows_[source] != 0;
     if (not reuse) {
         seed_cached_row(source);
-        reuse = reuse_graph_ and certify_cached_graph(source);
+        reuse = reuse_graph_ and certify_cached_graph(source, scratch);
         if (reuse) {
             certificate_rows_[source] = 1;
         }
@@ -2312,9 +3057,9 @@ PiPNNPipeline::write_graph_row(uint32_t source, PruneScratch& scratch) {
         }
         reused_graph_rows_[source] = 1;
     } else {
-        const auto& state = reservoir_states_[source];
-        const auto* row = reservoirs_.data() + static_cast<uint64_t>(source) * reservoir_size_;
-        robust_prune(source, row, state.size, scratch);
+        const auto size = reservoir_states_.empty() ? uint16_t{0} : reservoir_states_[source].size;
+        const auto* row = size == 0 ? nullptr : reservoir_row_or_null(source);
+        robust_prune(source, row, size, scratch);
     }
     graph_->InsertNeighborsById(ids_[source], scratch.neighbors);
 }
@@ -2508,12 +3253,30 @@ PiPNNGraphBuilder::Build(const GraphInterfacePtr& graph,
                          const std::vector<std::string>* source_ids,
                          const PiPNNBuildCache* imported_cache,
                          std::shared_ptr<PiPNNBuildCache>* exported_cache) const {
+    Build(graph,
+          ids_sequence,
+          rows,
+          source_ids == nullptr ? nullptr : source_ids->data(),
+          source_ids == nullptr ? 0 : source_ids->size(),
+          imported_cache,
+          exported_cache);
+}
+
+void
+PiPNNGraphBuilder::Build(const GraphInterfacePtr& graph,
+                         const Vector<InnerIdType>& ids_sequence,
+                         const Vector<const float*>& rows,
+                         const std::string* source_ids,
+                         uint64_t source_id_count,
+                         const PiPNNBuildCache* imported_cache,
+                         std::shared_ptr<PiPNNBuildCache>* exported_cache) const {
     // Keep the imported snapshot alive in the caller when input and output share storage.
     build_typed(graph,
                 ids_sequence,
                 rows,
                 DataTypes::DATA_TYPE_FLOAT,
                 source_ids,
+                source_id_count,
                 imported_cache,
                 exported_cache);
 }
@@ -2526,7 +3289,7 @@ PiPNNGraphBuilder::Build(const GraphInterfacePtr& graph,
     require_argument(
         data_type == DataTypes::DATA_TYPE_FP16 or data_type == DataTypes::DATA_TYPE_BF16,
         "PiPNN native half rows require FP16 or BF16");
-    build_typed(graph, ids_sequence, rows, data_type, nullptr, nullptr, nullptr);
+    build_typed(graph, ids_sequence, rows, data_type, nullptr, 0, nullptr, nullptr);
 }
 
 template <typename ElementType>
@@ -2535,7 +3298,8 @@ PiPNNGraphBuilder::build_typed(const GraphInterfacePtr& graph,
                                const Vector<InnerIdType>& ids_sequence,
                                const Vector<const ElementType*>& rows,
                                DataTypes data_type,
-                               const std::vector<std::string>* source_ids,
+                               const std::string* source_ids,
+                               uint64_t source_id_count,
                                const PiPNNBuildCache* imported_cache,
                                std::shared_ptr<PiPNNBuildCache>* exported_cache) const {
     require_argument(graph != nullptr, "PiPNN graph must not be null");
@@ -2554,7 +3318,8 @@ PiPNNGraphBuilder::build_typed(const GraphInterfacePtr& graph,
                                    graph,
                                    input_rows);
             if (use_cache) {
-                pipeline.ConfigureCache(source_ids, imported_cache, exported_cache);
+                pipeline.ConfigureCache(
+                    source_ids, source_id_count, imported_cache, exported_cache);
             }
             pipeline.Build(ids, near_duplicates);
         } else {

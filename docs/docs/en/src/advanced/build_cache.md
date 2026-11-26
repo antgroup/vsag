@@ -148,10 +148,10 @@ PiPNN exports a versioned reservoir snapshot containing stable source IDs, 64-bi
 of the original FP32 input, candidate IDs and BF16 distance keys, plus the final adjacency and its source-distance keys. Input order and numeric labels
 may change. Removed or modified candidates are discarded; new/modified sources and rows with
 too few surviving candidates compute their leaf neighbors again. Reusable rows skip leaf Top-K;
-missing rows use rectangular GEMM and update both candidate reservoirs. Untouched valid adjacency
+missing rows use rectangular GEMM, update both candidate reservoirs, and bridge tight new micro-clusters to their nearest cached neighbor in shared leaves. Untouched valid adjacency
 is reused directly. Changed rows can reuse a fixed-alpha pruning certificate; other rows are
 pruned again. Cached reservoirs are materialized lazily when an incoming candidate needs them.
-Partitioning runs on the current data. This is approximate incremental construction: it does not
+When all rows in a graph are eligible and non-duplicated, partitioning and leaf Top-K are skipped directly; otherwise partitioning runs on the current data. This is approximate incremental construction: it does not
 promise the same graph or Recall as a cold build. Measure Recall and QPS on the target workload.
 
 Dimensions, metric, maximum degree, random projection signature and all PiPNN policy parameters must match. Missing/ambiguous

@@ -1524,3 +1524,229 @@ TEST_CASE("PiPNN final graph reuse matches full pruning with stable graph IDs",
         REQUIRE(actual == expected);
     }
 }
+
+TEST_CASE("PiPNN warm build bridges a tight new micro-cluster within a shared leaf",
+          "[ut][pipnn_cache]") {
+    constexpr uint64_t dimensions = 8;
+    constexpr uint64_t cached_count = 120;
+    constexpr uint64_t new_count = 12;
+    constexpr uint64_t total_count = cached_count + new_count;
+    constexpr uint64_t max_degree = 8;
+    auto common = MakeCommonParam(dimensions);
+    auto* allocator = common.allocator_.get();
+
+    std::vector<float> vectors(total_count * dimensions);
+    std::mt19937 generator(77);
+    std::uniform_real_distribution<float> base_dist(0.0F, 1.0F);
+    std::uniform_real_distribution<float> cluster_dist(100.0F, 100.01F);
+    for (uint64_t i = 0; i < cached_count; ++i) {
+        for (uint64_t d = 0; d < dimensions; ++d) {
+            vectors[i * dimensions + d] = base_dist(generator);
+        }
+    }
+    for (uint64_t i = cached_count; i < total_count; ++i) {
+        for (uint64_t d = 0; d < dimensions; ++d) {
+            vectors[i * dimensions + d] = cluster_dist(generator);
+        }
+    }
+
+    vsag::Vector<vsag::InnerIdType> base_ids(allocator);
+    std::vector<std::string> base_sources;
+    for (uint32_t i = 0; i < cached_count; ++i) {
+        base_ids.push_back(i);
+        base_sources.push_back("source-" + std::to_string(i));
+    }
+    auto base_rows = MakeRows(vectors, base_ids, dimensions, allocator);
+
+    vsag::PiPNNGraphBuilderParameter parameter;
+    parameter.max_leaf_size = 256;
+    parameter.min_leaf_size = 4;
+    parameter.leaf_neighbor_count = 5;
+    parameter.reservoir_size = 32;
+    vsag::PiPNNGraphBuilder builder(parameter, dimensions, common.metric_, allocator);
+
+    auto original = MakeGraph(common, total_count, max_degree);
+    std::shared_ptr<vsag::PiPNNBuildCache> snapshot;
+    builder.Build(original, base_ids, base_rows, &base_sources, nullptr, &snapshot);
+    REQUIRE(snapshot != nullptr);
+
+    vsag::Vector<vsag::InnerIdType> warm_ids(allocator);
+    std::vector<std::string> warm_sources;
+    for (uint32_t i = 0; i < total_count; ++i) {
+        warm_ids.push_back(i);
+        warm_sources.push_back("source-" + std::to_string(i));
+    }
+    auto warm_rows = MakeRows(vectors, warm_ids, dimensions, allocator);
+    auto reused = MakeGraph(common, total_count, max_degree);
+    auto reference = MakeGraph(common, total_count, max_degree);
+    std::shared_ptr<vsag::PiPNNBuildCache> warm_snapshot;
+    builder.Build(reused, warm_ids, warm_rows, &warm_sources, snapshot.get(), &warm_snapshot);
+    snapshot->reuse_final_graph = false;
+    builder.Build(reference, warm_ids, warm_rows, &warm_sources, snapshot.get());
+
+    RequireGraphInvariants(reused, warm_ids, max_degree, allocator);
+    for (const auto id : warm_ids) {
+        vsag::Vector<vsag::InnerIdType> actual(allocator), expected(allocator);
+        reused->GetNeighbors(id, actual);
+        reference->GetNeighbors(id, expected);
+        REQUIRE(actual == expected);
+    }
+
+    std::set<vsag::InnerIdType> visited{warm_ids.front()};
+    std::vector<vsag::InnerIdType> pending{warm_ids.front()};
+    for (uint64_t cursor = 0; cursor < pending.size(); ++cursor) {
+        vsag::Vector<vsag::InnerIdType> neighbors(allocator);
+        reused->GetNeighbors(pending[cursor], neighbors);
+        for (const auto neighbor : neighbors) {
+            if (visited.emplace(neighbor).second) {
+                pending.push_back(neighbor);
+            }
+        }
+    }
+    REQUIRE(visited.size() == total_count);
+}
+
+TEST_CASE("PiPNN paged reservoir arena and parallel cache round trip free all memory",
+          "[ut][pipnn_cache]") {
+    class TrackingAllocator : public vsag::Allocator {
+    public:
+        ~TrackingAllocator() override = default;
+
+        std::string
+        Name() override {
+            return "TrackingAllocator";
+        }
+
+        void*
+        Allocate(uint64_t size) override {
+            if (size == 0) {
+                return nullptr;
+            }
+            void* ptr = std::malloc(size + sizeof(uint64_t));
+            if (ptr == nullptr) {
+                return nullptr;
+            }
+            *static_cast<uint64_t*>(ptr) = size;
+            current_bytes_.fetch_add(size, std::memory_order_relaxed);
+            return static_cast<char*>(ptr) + sizeof(uint64_t);
+        }
+
+        void
+        Deallocate(void* ptr) override {
+            if (ptr == nullptr) {
+                return;
+            }
+            void* base = static_cast<char*>(ptr) - sizeof(uint64_t);
+            const uint64_t size = *static_cast<uint64_t*>(base);
+            current_bytes_.fetch_sub(size, std::memory_order_relaxed);
+            std::free(base);
+        }
+
+        void*
+        Reallocate(void* ptr, uint64_t size) override {
+            if (ptr == nullptr) {
+                return Allocate(size);
+            }
+            void* next = Allocate(size);
+            if (next != nullptr) {
+                const uint64_t old_size =
+                    *reinterpret_cast<uint64_t*>(static_cast<char*>(ptr) - sizeof(uint64_t));
+                std::memcpy(next, ptr, std::min(old_size, size));
+                Deallocate(ptr);
+            }
+            return next;
+        }
+
+        [[nodiscard]] uint64_t
+        CurrentBytes() const {
+            return current_bytes_.load(std::memory_order_acquire);
+        }
+
+    private:
+        std::atomic<uint64_t> current_bytes_{0};
+    };
+
+    auto tracking = std::make_shared<TrackingAllocator>();
+    {
+        auto common = MakeCommonParam(16);
+        common.allocator_ = tracking;
+        auto* allocator = tracking.get();
+        auto pool = vsag::SafeThreadPool::FactoryDefaultThreadPool();
+        pool->SetPoolSize(4);
+
+        constexpr uint64_t count = 200;
+        constexpr uint64_t total_vectors = 240;
+        constexpr uint64_t max_degree = 8;
+        auto vectors = MakeVectors(total_vectors, 16);
+        std::mt19937 rng(99);
+        std::normal_distribution<float> dist;
+        for (auto& val : vectors) {
+            val = dist(rng);
+        }
+
+        vsag::Vector<vsag::InnerIdType> ids(allocator);
+        std::vector<std::string> sources;
+        for (uint32_t i = 0; i < count; ++i) {
+            ids.push_back(i);
+            sources.push_back("src-" + std::to_string(i));
+        }
+        auto rows = MakeRows(vectors, ids, 16, allocator);
+
+        vsag::PiPNNGraphBuilderParameter param;
+        param.max_leaf_size = 64;
+        param.min_leaf_size = 8;
+        param.leaf_neighbor_count = 12;
+        param.reservoir_size = 32;
+        vsag::PiPNNGraphBuilder builder(param, 16, common.metric_, allocator, pool.get(), 4);
+
+        auto cold = MakeGraph(common, total_vectors, max_degree);
+        std::shared_ptr<vsag::PiPNNBuildCache> snap1;
+        builder.Build(cold, ids, rows, &sources, nullptr, &snap1);
+        REQUIRE(snap1 != nullptr);
+
+        auto clean_warm = MakeGraph(common, total_vectors, max_degree);
+        auto clean_ref = MakeGraph(common, total_vectors, max_degree);
+        std::shared_ptr<vsag::PiPNNBuildCache> snap2;
+        builder.Build(clean_warm, ids, rows, &sources, snap1.get(), &snap2);
+        REQUIRE(snap2 != nullptr);
+        REQUIRE(snap2->reused_rows == count);
+        REQUIRE(snap2->reused_graph_rows == count);
+        snap1->reuse_final_graph = false;
+        builder.Build(clean_ref, ids, rows, &sources, snap1.get());
+        for (const auto id : ids) {
+            vsag::Vector<vsag::InnerIdType> a(allocator), b(allocator);
+            clean_warm->GetNeighbors(id, a);
+            clean_ref->GetNeighbors(id, b);
+            REQUIRE(a == b);
+        }
+
+        vsag::Vector<vsag::InnerIdType> partial_ids(allocator);
+        std::vector<std::string> partial_sources;
+        for (uint32_t i = 0; i < 180; ++i) {
+            partial_ids.push_back(i);
+            partial_sources.push_back("src-" + std::to_string(i));
+        }
+        for (uint32_t i = 200; i < 220; ++i) {
+            partial_ids.push_back(i);
+            partial_sources.push_back("src-" + std::to_string(i));
+        }
+        auto partial_rows = MakeRows(vectors, partial_ids, 16, allocator);
+        auto partial_warm = MakeGraph(common, total_vectors, max_degree);
+        auto partial_ref = MakeGraph(common, total_vectors, max_degree);
+        std::shared_ptr<vsag::PiPNNBuildCache> snap3;
+        builder.Build(
+            partial_warm, partial_ids, partial_rows, &partial_sources, snap2.get(), &snap3);
+        REQUIRE(snap3 != nullptr);
+        REQUIRE(snap3->reused_rows >= 160);
+        REQUIRE(snap3->reused_rows <= 180);
+        snap2->reuse_final_graph = false;
+        builder.Build(partial_ref, partial_ids, partial_rows, &partial_sources, snap2.get());
+        for (const auto id : partial_ids) {
+            vsag::Vector<vsag::InnerIdType> a(allocator), b(allocator);
+            partial_warm->GetNeighbors(id, a);
+            partial_ref->GetNeighbors(id, b);
+            REQUIRE(a == b);
+        }
+    }
+    REQUIRE(tracking->CurrentBytes() == 0);
+}

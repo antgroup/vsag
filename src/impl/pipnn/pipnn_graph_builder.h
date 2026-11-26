@@ -84,6 +84,15 @@ public:
           const PiPNNBuildCache* imported_cache = nullptr,
           std::shared_ptr<PiPNNBuildCache>* exported_cache = nullptr) const;
 
+    void
+    Build(const GraphInterfacePtr& graph,
+          const Vector<InnerIdType>& ids_sequence,
+          const Vector<const float*>& rows,
+          const std::string* source_ids,
+          uint64_t source_id_count,
+          const PiPNNBuildCache* imported_cache = nullptr,
+          std::shared_ptr<PiPNNBuildCache>* exported_cache = nullptr) const;
+
     /** Native half rows are borrowed, subset-aligned with ids_sequence, and never indexed by ID. */
     void
     Build(const GraphInterfacePtr& graph,
@@ -98,7 +107,8 @@ private:
                 const Vector<InnerIdType>& ids_sequence,
                 const Vector<const ElementType*>& rows,
                 DataTypes data_type,
-                const std::vector<std::string>* source_ids,
+                const std::string* source_ids,
+                uint64_t source_id_count,
                 const PiPNNBuildCache* imported_cache,
                 std::shared_ptr<PiPNNBuildCache>* exported_cache) const;
 
