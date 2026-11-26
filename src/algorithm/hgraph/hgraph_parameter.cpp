@@ -181,9 +181,9 @@ HGraphParameter::FromJson(const JsonType& json) {
                        "pipnn_adaptive_pruning requires graph_type=pipnn");
     }
 
-    if (graph_json.Contains(ALPHA_CNG_TAU)) {
+    if (graph_json.Contains(ALPHA_CNG_TAU) and graph_type != GRAPH_TYPE_VALUE_PIPNN) {
         CHECK_ARGUMENT(graph_type == GRAPH_TYPE_VALUE_ALPHA_CNG,
-                       "alpha_cng_tau requires graph_type=alpha_cng");
+                       "alpha_cng_tau requires graph_type=alpha_cng or pipnn");
         alpha_cng_tau = graph_json[ALPHA_CNG_TAU].GetFloat();
         CHECK_ARGUMENT(std::isfinite(alpha_cng_tau) and alpha_cng_tau >= 0,
                        "alpha_cng_tau must be finite and nonnegative");
@@ -376,6 +376,7 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
     CHECK_FIELD_EQ(*this, *p, rabitq_fused_datacell);
     CHECK_FIELD_EQ(*this, *p, pipnn_param.adaptive_pruning);
     if (this->pipnn_param.adaptive_pruning) {
+        CHECK_FIELD_EQ(*this, *p, pipnn_param.alpha_cng_tau);
         CHECK_FIELD_EQ(*this, *p, graph_type);
         CHECK_FIELD_EQ(*this, *p, alpha);
         CHECK_FIELD_EQ(*this, *p, pipnn_param.adaptive_pruning_adjust_step);

@@ -89,7 +89,7 @@ records cross-index defaults and the top-level common fields.
 | `ef_construction` | int | `400` | Candidate list size during build (higher = better recall, slower build) |
 | `alpha` | float | `1.0` | Final robust-pruning factor; PiPNN requires a finite value at least `1.0`. |
 | `graph_type` | string | `"nsw"` | Graph algorithm: `nsw`, `odescent`, `pipnn`, or `alpha_cng` |
-| `alpha_cng_tau` | float | `0.0` | Nonnegative pruning margin in Euclidean distance units for `alpha_cng`. |
+| `alpha_cng_tau` | float | `0.0` for `alpha_cng`; omitted for `pipnn` | Nonnegative Euclidean pruning margin. On PiPNN, supplying this field selects Alpha-CNG final pruning. |
 | `pipnn_max_leaf_size` | int | `1024` | Maximum partition leaf size. Larger leaves increase candidate coverage and leaf distance work. |
 | `pipnn_min_leaf_size` | int | `64` | Target used when merging undersized leaves. |
 | `pipnn_leader_sample_rate` | float | `0.005` | Fraction sampled as partition leaders; each partition uses at least `2` and at most `1000` leaders, bounded by its point count. |
@@ -243,6 +243,12 @@ For target degree K, scan the existing ordered reservoir at the configured `alph
 The strict rejection rule remains `alpha * d(selected, candidate) < d(source, candidate)`. PiPNN retains its BF16 source-distance cache, FP32 pairwise squared-L2 calculations, and `(distance, source-ID gap, ID)` order. Unlike the NSW selector's disabled fast path, PiPNN already prunes short reservoirs, so zero adjustment step reproduces its original single-pass adjacency. Greedy selection and the degree cap mean recall need not improve monotonically with alpha.
 
 The policy and step are serialized. Loading an enabled index requires matching policy, base alpha, and step. Missing fields mean disabled. The disabled path preserves legacy behavior. This is experimental: compare build cost and query throughput at matched recall.
+
+#### Alpha-CNG pruning of PiPNN candidates
+
+With `graph_type: "pipnn"`, set `alpha_cng_tau` to apply Alpha-CNG when selecting the bottom-layer neighbors from each PiPNN reservoir. For L2 input, the builder recomputes Euclidean distances on the input rows. A selected neighbor `v` excludes candidate `u` from source `p` when `d(p,u) - tau > alpha * (d(v,u) + tau)`. The initial `alpha` and `pipnn_adaptive_pruning_adjust_step` control the same per-node schedule used by the Alpha-CNG builder.
+
+For example, use `{"graph_type":"pipnn","alpha_cng_tau":0.02,"alpha":1.0,"pipnn_adaptive_pruning_adjust_step":0.06}` under `index_param`. An explicit zero margin selects the Euclidean criterion too. Supplying the margin enables PiPNN adaptive pruning by default. A zero adjustment step selects a single pass. Reload the index with the same margin.
 
 ### Deduplicating vector storage
 

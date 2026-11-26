@@ -114,34 +114,17 @@ adaptive_prune(const Vector<Node>& sorted,
                float tau,
                Vector<Node>& result,
                Allocator* allocator) {
-    Vector<PruningCandidate> candidates(allocator);
-    candidates.reserve(sorted.size());
-    for (uint32_t i = 0; i < sorted.size(); ++i) {
-        // d(p,u) - tau > alpha * (d(u,v) + tau). A nonpositive left side never prunes.
-        candidates.emplace_back(std::max(sorted[i].distance - tau, 0.0F), i);
-    }
-    Vector<Vector<float>> cache(sorted.size(), Vector<float>(allocator), allocator);
-    auto pair_score = [&](InnerIdType pivot, InnerIdType candidate) {
-        auto& distances = cache[pivot];
-        if (distances.empty()) {
-            distances.resize(sorted.size(), -1.0F);
-        }
-        auto& score = distances[candidate];
-        if (score < 0) {
-            score = std::sqrt(
-                        FP32ComputeL2Sqr(rows[sorted[pivot].id], rows[sorted[candidate].id], dim)) +
-                    tau;
-        }
-        return score;
-    };
-    // Both callers have already removed the center from this local candidate list.
-    auto selected = select_edges_adaptive(candidates,
-                                          std::numeric_limits<InnerIdType>::max(),
-                                          degree,
-                                          alpha,
-                                          pruning,
-                                          pair_score,
-                                          allocator);
+    auto selected = select_alpha_cng_edges(
+        sorted.size(),
+        degree,
+        alpha,
+        pruning,
+        tau,
+        [&](uint32_t i) { return sorted[i].distance; },
+        [&](uint32_t i, uint32_t j) {
+            return FP32ComputeL2Sqr(rows[sorted[i].id], rows[sorted[j].id], dim);
+        },
+        allocator);
     result.clear();
     for (const auto& candidate : selected) {
         result.push_back(sorted[candidate.second]);

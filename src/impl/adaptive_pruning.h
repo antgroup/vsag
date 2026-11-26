@@ -65,4 +65,16 @@ select_edges_adaptive(Vector<PruningCandidate>& candidates,
                       Allocator* allocator,
                       AdaptivePruningStats* stats = nullptr);
 
+// Both callbacks address the sorted candidate list by position. The source distance is
+// Euclidean; the pair kernel returns squared L2. Result IDs are positions in the original list.
+Vector<PruningCandidate>
+select_alpha_cng_edges(uint32_t count,
+                       uint64_t target_degree,
+                       float alpha,
+                       const AdaptivePruningParameter& pruning,
+                       float tau,
+                       const std::function<float(uint32_t)>& source_distance,
+                       const std::function<float(uint32_t, uint32_t)>& pair_l2sqr,
+                       Allocator* allocator);
+
 }  // namespace vsag

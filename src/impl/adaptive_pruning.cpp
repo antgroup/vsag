@@ -193,4 +193,40 @@ select_edges_adaptive(Vector<PruningCandidate>& candidates,
     return accepted;
 }
 
+Vector<PruningCandidate>
+select_alpha_cng_edges(uint32_t count,
+                       uint64_t target_degree,
+                       float alpha,
+                       const AdaptivePruningParameter& pruning,
+                       float tau,
+                       const std::function<float(uint32_t)>& source_distance,
+                       const std::function<float(uint32_t, uint32_t)>& pair_l2sqr,
+                       Allocator* allocator) {
+    Vector<PruningCandidate> candidates(allocator);
+    candidates.reserve(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        // Positions preserve the original order when subtracting tau produces equal scores.
+        candidates.emplace_back(std::max(source_distance(i) - tau, 0.0F), i);
+    }
+    Vector<Vector<float>> cache(count, Vector<float>(allocator), allocator);
+    auto pair_score = [&](uint32_t pivot, uint32_t candidate) {
+        auto& distances = cache[pivot];
+        if (distances.empty()) {
+            distances.resize(count, -1.0F);
+        }
+        auto& score = distances[candidate];
+        if (score < 0) {
+            score = std::sqrt(pair_l2sqr(pivot, candidate)) + tau;
+        }
+        return score;
+    };
+    return select_edges_adaptive(candidates,
+                                 std::numeric_limits<InnerIdType>::max(),
+                                 target_degree,
+                                 alpha,
+                                 pruning,
+                                 pair_score,
+                                 allocator);
+}
+
 }  // namespace vsag

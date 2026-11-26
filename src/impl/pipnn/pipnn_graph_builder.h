@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -46,6 +47,7 @@ struct PiPNNGraphBuilderParameter {
     float duplicate_distance_threshold{0.0F};
     bool adaptive_pruning{false};
     float adaptive_pruning_adjust_step{0.06F};
+    std::optional<float> alpha_cng_tau;
 
     void
     FromJson(const JsonType& json);

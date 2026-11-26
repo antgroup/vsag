@@ -76,7 +76,7 @@ auto result = index->KnnSearch(
 | `ef_construction` | int | `400` | 构建阶段的候选集大小（越大召回越高，构建越慢） |
 | `alpha` | float | `1.0` | 最终 robust pruning 的系数；PiPNN 要求有限且不小于 `1.0` |
 | `graph_type` | string | `"nsw"` | 构图算法：`nsw`、`odescent`、`pipnn` 或 `alpha_cng` |
-| `alpha_cng_tau` | float | `0.0` | α-CNG 的非负剪枝余量，单位为欧氏距离。 |
+| `alpha_cng_tau` | float | `alpha_cng` 为 `0.0`；`pipnn` 默认省略 | 非负欧氏距离余量。在 PiPNN 上显式设置此参数即可启用 Alpha-CNG 最终剪枝。 |
 | `pipnn_max_leaf_size` | int | `1024` | 分区叶子的最大点数；越大候选覆盖可能越高，叶内距离计算也越多 |
 | `pipnn_min_leaf_size` | int | `64` | 合并过小叶子时使用的目标规模 |
 | `pipnn_leader_sample_rate` | float | `0.005` | 分区 leader 的采样比率；每个分区最少使用 `2` 个、最多 `1000` 个 leader，且不超过分区点数 |
@@ -217,6 +217,12 @@ PiPNN，并通过查询验证每一份生成的图。
 拒绝条件仍为 `alpha * d(已选邻居, 候选) < d(源点, 候选)`。保留 PiPNN 的 BF16 源点距离缓存、FP32 两点平方 L2 计算和 `(距离, 源点 ID 差, ID)` 排序。PiPNN 原算法已对较短 reservoir 剪枝，因此零步长会复现其原单轮邻接结果。贪心选择和度数上限意味着 Recall 不一定随 alpha 单调增加。
 
 策略和步长会序列化；加载已启用的索引要求策略、基础 alpha、步长一致，旧参数缺失字段按关闭处理。关闭时保留原有行为。该功能属于实验性质，需对比构建开销和匹配召回率时的查询吞吐。
+
+#### 用 Alpha-CNG 筛选 PiPNN 候选邻居
+
+在 `graph_type: "pipnn"` 下设置 `alpha_cng_tau`，即可从每个点的 PiPNN 候选池中按 Alpha-CNG 规则选择底层邻居。对 L2 输入，构建器用输入向量重新计算欧氏距离。设源点为 `p`、已选邻居为 `v`、候选为 `u`，当 `d(p,u) - tau > alpha * (d(v,u) + tau)` 时排除 `u`。初始 `alpha` 与 `pipnn_adaptive_pruning_adjust_step` 控制逐点调节，和 Alpha-CNG 构建器使用同一套动态 α 规则。
+
+例如，在 `index_param` 下设置 `{"graph_type":"pipnn","alpha_cng_tau":0.02,"alpha":1.0,"pipnn_adaptive_pruning_adjust_step":0.06}`。显式设置零余量也会启用欧氏距离判据。提供余量时默认启用 PiPNN 动态剪枝；步长设为零时只执行一轮。重载索引时使用相同的余量。
 
 ### 向量存储去重
 
