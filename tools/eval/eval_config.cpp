@@ -14,6 +14,7 @@
 
 #include "eval_config.h"
 
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 
@@ -154,6 +155,21 @@ EvalConfig::FromJson(const nlohmann::json& json) {
     read_bool(json, "enable_percent_latency", config.enable_percent_latency);
     read_bool(json, "use_id_based_recall", config.use_id_based_recall);
     return config;
+}
+
+void
+EvalConfig::Validate() const {
+    if (not recall_target.has_value()) {
+        return;
+    }
+    if (not std::isfinite(recall_target.value()) || recall_target.value() < 0.0 ||
+        recall_target.value() > 1.0) {
+        throw std::invalid_argument("recall_target must be finite and in [0, 1]");
+    }
+    if (search_mode != "knn" and search_mode != "knn_filter") {
+        throw std::invalid_argument(
+            "recall_target is supported only for knn and knn_filter search modes");
+    }
 }
 
 }  // namespace vsag::eval

@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 
 namespace argparse {
@@ -35,6 +36,9 @@ class EvalConfig {
 public:
     // The loaders below are implemented in eval_config_loader.cpp, which needs argparse and
     // yaml-cpp and is therefore not part of the dependency-free evaluation core.
+    static void
+    AddCliArguments(argparse::ArgumentParser& parser);
+
     static EvalConfig
     Load(argparse::ArgumentParser& parser);
 
@@ -49,6 +53,9 @@ public:
     // given either as JSON strings or as JSON objects.
     static EvalConfig
     FromJson(const nlohmann::json& json);
+
+    void
+    Validate() const;
 
 public:
     std::string dataset_path;
@@ -75,6 +82,7 @@ public:
     bool enable_latency{true};
     bool enable_percent_latency{true};
     bool use_id_based_recall{false};
+    std::optional<double> recall_target;
 
     EvalConfig() = default;
 };
