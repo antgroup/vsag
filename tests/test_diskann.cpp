@@ -172,6 +172,9 @@ TEST_CASE_METHOD(fixtures::DiskANNTestIndex,
             REQUIRE(std::isnan(batch.value()->GetDistances()[i]));
             REQUIRE_FALSE(valids[i]);
         }
+        auto negative_count = index->CalDistanceById(query, ids, -1, true);
+        REQUIRE_FALSE(negative_count.has_value());
+        REQUIRE(negative_count.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
 
     SECTION("built index follows the missing-id contract") {
