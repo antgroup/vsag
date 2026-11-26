@@ -217,6 +217,39 @@ TEST_CASE_METHOD(fixtures::DiskANNTestIndex,
         REQUIRE(empty.value()->GetNumElements() == 0);
         REQUIRE(empty.value()->GetValids() == nullptr);
     }
+
+    SECTION("result stays valid after the index is destroyed") {
+        auto index = TestFactory(name, param, true);
+        TestBuildIndex(index, dataset, true);
+        REQUIRE(index->CheckFeature(vsag::SUPPORT_CAL_DISTANCE_BY_ID));
+        auto* query = dataset->query_->GetFloat32Vectors();
+        const auto* gt_ids = dataset->ground_truth_->GetIds();
+        int64_t valid_id = gt_ids[0];
+        int64_t missing = fixtures::get_missing_id(dataset->base_);
+        std::vector<int64_t> ids = {valid_id, missing};
+        auto single_valid = index->CalcDistanceById(query, valid_id, true);
+        REQUIRE(single_valid.has_value());
+        auto batch =
+            index->CalDistanceById(query, ids.data(), static_cast<int64_t>(ids.size()), true);
+        REQUIRE(batch.has_value());
+        REQUIRE(batch.value()->GetNumElements() == 2);
+        REQUIRE(batch.value()->GetDim() == 1);
+
+        // destroy the index (and the allocator it owns) before touching the returned result
+        index.reset();
+
+        const auto* dists = batch.value()->GetDistances();
+        const auto* valids = batch.value()->GetValids();
+        REQUIRE(dists != nullptr);
+        REQUIRE(valids != nullptr);
+        REQUIRE(valids[0]);
+        REQUIRE(dists[0] == single_valid.value());
+        REQUIRE_FALSE(valids[1]);
+        REQUIRE(std::isnan(dists[1]));
+
+        // the result must also be destroyable after the index is gone
+        batch.value().reset();
+    }
 }
 
 TEST_CASE_METHOD(fixtures::DiskANNTestIndex,

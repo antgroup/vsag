@@ -1402,6 +1402,22 @@ DiskANN::init_feature_list() {
     }
 }
 
+namespace {
+
+// Allocates the validity buffer with `new[]` and hands its ownership to the dataset. The dataset
+// must not depend on the index allocator, otherwise destroying the index before the returned
+// dataset would leave the dataset with a dangling allocator.
+void
+attach_valids_with_ownership(const DatasetPtr& dataset, const std::vector<bool>& validity) {
+    auto* valids = new bool[validity.size()];
+    for (uint64_t i = 0; i < validity.size(); ++i) {
+        valids[i] = validity[i];
+    }
+    dataset->Valids(valids);
+}
+
+}  // namespace
+
 DatasetPtr
 DiskANN::cal_distance_by_id(const float* query,
                             const int64_t* ids,
@@ -1418,19 +1434,15 @@ DiskANN::cal_distance_by_id(const float* query,
         CHECK_ARGUMENT(ids != nullptr, "ids cannot be null when count is greater than 0");
     }
     std::shared_lock lock(rw_mutex_);
-    auto allocator = this->common_param_.allocator_;
     auto result = Dataset::Make();
-    result->Owner(true, allocator.get());
+    // the result must outlive the index, so it owns plain `new[]` buffers and no allocator
+    result->Owner(true);
     result->NumElements(count)->Dim(1);
     if (count == 0) {
         return result;
     }
 
-    auto* distances = static_cast<float*>(allocator->Allocate(sizeof(float) * count));
-    if (distances == nullptr) {
-        throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
-                            "failed to allocate distances for CalDistanceById");
-    }
+    auto* distances = new float[count];
     result->Distances(distances);
     std::vector<bool> validity(count, false);
     if (not this->index_) {
@@ -1438,12 +1450,12 @@ DiskANN::cal_distance_by_id(const float* query,
         for (int64_t i = 0; i < count; ++i) {
             distances[i] = std::numeric_limits<float>::quiet_NaN();
         }
-        AttachValids(result, validity, allocator.get());
+        attach_valids_with_ownership(result, validity);
         return result;
     }
     this->index_->cal_distance_by_ids(
         query, ids, count, distances, calculate_precise_distance, &validity);
-    AttachValids(result, validity, allocator.get());
+    attach_valids_with_ownership(result, validity);
     return result;
 }
 
