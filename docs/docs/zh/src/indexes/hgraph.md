@@ -98,6 +98,7 @@ auto result = index->KnnSearch(
 | `saq_segment_count` | int | `0` | SAQ 分段数；`0` 表示动态选择边界 |
 | `saq_random_rotation` | bool | `true` | 在每个 SAQ 分段内使用独立正交旋转 |
 | `rabitq_fused_datacell` | bool | `false` | 将底层 HGraph 节点与 RaBitQ split 编码融合到一条内存记录中；要求 L2/IP、flat 内存图、x 在 `[1, 4]` 的 RaBitQ x+y split 编码，并满足 [RaBitQ x+y split](../quantization/rabitq_split.md) 中的其他约束 |
+| `rabitq_fused_layout` | string | `inline` | 启用 fused RaBitQ 后，选择 `external_supplement` 可将 64 槽底层图和 filter 留在内存，把 supplement 独立存储并用于 KNN 批量精排。 |
 | `train_sample_count` | int | `65536` | 量化器训练的最大采样向量数；显式配置时最小为 `512` |
 | `build_thread_count` | int | `100` | 构建阶段并发线程数 |
 | `support_duplicate` | bool | `false` | 合并重复向量的图节点，并保留各自的标签 |
@@ -126,7 +127,7 @@ auto result = index->KnnSearch(
 | `graph_file_path` | string | `"./default_file_path"` | `graph_io_type` 为磁盘后端时使用的文件路径 |
 | `raw_vector_io_type` | string | `"block_memory_io"` | 保留原始向量（`store_raw_vector: true`）的存储后端 |
 | `raw_vector_file_path` | string | `"./default_file_path"` | `raw_vector_io_type` 为磁盘后端时使用的文件路径 |
-| `base_supplement_io_type` | string | 未设置 | RaBitQ split 补充码的 IO 后端。仅在 split base 编码下有意义：split datacell 允许两半使用同一后端（`block_memory_io`、`memory_io`、`buffer_io`、`async_io`、`mmap_io`；`uring_io` 始终不支持），或使用「base `block_memory_io` + supplement `async_io`」的混合组合（无 libaio 时回退为 `buffer_io`）。启用 `rabitq_fused_datacell` 时两半都只能是 `block_memory_io` / `memory_io` |
+| `base_supplement_io_type` | string | 未设置 | RaBitQ split 补充码的 IO 后端。仅在 split base 编码下有意义：split datacell 允许两半使用同一后端（`block_memory_io`、`memory_io`、`buffer_io`、`async_io`、`mmap_io`；`uring_io` 始终不支持），或使用「base `block_memory_io` + supplement `async_io`」的混合组合（无 libaio 时回退为 `buffer_io`）。内联 fused 要求两段码均在内存。外置 fused supplement 也支持上述混合磁盘组合。 |
 | `base_supplement_file_path` | string | 派生 | split 补充后端的文件路径；默认在 base 路径后加 `_supplement` 后缀 |
 | `precise_user_defined_io` | string | 未设置 | 已注册的自定义 IO 类名。仅在 `precise_io_type: "user_defined_io"` 时需要，该组合还要求 `use_reorder: true`、精排 `fp32`、base 为 `sq8`，且 base 与图存储均为 `block_memory_io` |
 | `base_enable_read_cache` | bool | `false` | 为 base 编码开启块读缓存。仅对块式磁盘后端有意义 |
@@ -355,6 +356,7 @@ FP16/BF16 输入支持原来对 FP32 合法的同一组存储量化器配置，�
 | `skip_strategy` | string | `"deterministic_accumulative"` | 过滤跳过的策略。可选值：`"random"`（随机跳过）或 `"deterministic_accumulative"`（确定性累积跳过）。详见下文[过滤跳过策略](#过滤跳过策略skip_ratio-与-skip_strategy)。 |
 | `brute_force_threshold` | float | `0.0` | 选择率感知的暴搜回退开关。当取值 `> 0` 且当前 filter 的 `ValidRatio()` 小于等于 `brute_force_threshold` 时，搜索会**完全跳过图遍历**，直接在通过过滤的 id 上用最佳精度的 flatten 编码做一次暴力扫描（细节见下一节）。取值范围 `[0.0, 1.0]`；默认 `0.0` 表示关闭，保持原有行为。 |
 | `rabitq_one_bit_search` | bool | `false` | 启用 RaBitQ filter/lower-bound 路径；对 x+y split 索引会使用全部 x 个 filter bits，详见 [RaBitQ x+y Split](../quantization/rabitq_split.md)。 |
+| `rabitq_rerank_candidates` | integer | 自动 | 外置 supplement 的唯一精排候选数上限。至少为 k，默认 `max(ef_search, 2*k)`。 |
 | `rabitq_error_rate` | float | 索引默认值 | 本次搜索使用的正数 lower-bound 误差倍率；调整它不需要重建 split 索引。 |
 | `enable_reorder` | bool | `true` | 是否用精排编码对粗排候选做重打分。设为 `false` 跳过精排，直接返回近似结果。需在 `index_param` 中设置 `use_reorder: true` 以存储精排所需的精确编码。 |
 | `factor` | float | `0.0` | 精排候选倍率。候选池初值为 `max(ef_search, topk)`；当 `> 1.0` 时上限为 `min(max(ef_search, topk), floor(topk * factor))`，因此最终可能**低于** `ef_search`。默认 `0.0` 保持 `ef_search` 候选池。启用共轭图时最终候选池不低于其 look-at-`k` 下限。无法精排时不生效。 |

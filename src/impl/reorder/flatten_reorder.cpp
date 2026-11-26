@@ -48,7 +48,7 @@ FlattenReorder::QueryFusedLowerBound(float* distances,
         rate_context_ptr = &rate_context;
     }
     for (uint64_t i = 0; i < count; ++i) {
-        const auto code = fused_graph_->GetCodeView(ids[i]);
+        const auto code = fused_graph_->GetFullCodeView(ids[i]);
         if (not split_codes->ComputeFusedOneBitWithFilterIP(computer,
                                                             code.cluster_id,
                                                             code.one_bit_code,
@@ -87,7 +87,7 @@ FlattenReorder::QueryFusedFullWithHint(float* distances,
     const bool exact_filter_ip_hint =
         split_codes->FusedFilterBits() >= 2 and not split_codes->UsesLegacyHnswFusedCodec();
     for (uint64_t i = 0; i < count; ++i) {
-        const auto code = fused_graph_->GetCodeView(ids[i]);
+        const auto code = fused_graph_->GetFullCodeView(ids[i]);
         bool used_hint = false;
         if (exact_filter_ip_hint and IsFiniteRaBitQValue(filter_inner_products[i])) {
             used_hint = split_codes->ComputeFusedFullWithFilterIP(computer,
@@ -471,7 +471,7 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
         {
             ScopedDistancePhase scoped(ctx, DistanceEvaluationPhase::RERANK);
             for (uint64_t i = 0; i < heap_candidate_size; ++i) {
-                const auto code = fused_graph_->GetCodeView(ids[i]);
+                const auto code = fused_graph_->GetFullCodeView(ids[i]);
                 if (not split_codes->ComputeFusedFull(computer,
                                                       code.cluster_id,
                                                       code.one_bit_code,

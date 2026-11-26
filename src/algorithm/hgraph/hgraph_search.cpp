@@ -142,6 +142,9 @@ HGraph::KnnSearch(const DatasetPtr& query,
     this->validate_knn_args(query, k);
 
     auto params = HGraphSearchParameters::FromJson(parameters);
+    CHECK_ARGUMENT(
+        rabitq_fused_datacell_ == nullptr or not rabitq_fused_datacell_->HasExternalSupplement(),
+        "external_supplement does not support iterator search");
     const SearchLockScope search_lock_scope(params.search_no_lock);
     const auto threshold = ParseSearchThreshold(parameters);
     ctx.rabitq_error_rate = params.rabitq_error_rate;
@@ -361,7 +364,8 @@ HGraph::search_one_graph(const void* query,
     }
     if (rabitq_fused_datacell_ != nullptr and graph.get() == rabitq_fused_datacell_.get() and
         flatten.get() == basic_flatten_codes_.get() and
-        (inner_search_param.parallel_search_thread_count <= 1 or this->support_duplicate_) and
+        (inner_search_param.parallel_search_thread_count <= 1 or this->support_duplicate_ or
+         rabitq_fused_datacell_->HasExternalSupplement()) and
         not inner_search_param.find_duplicate) {
         result = rabitq_fused_searcher_->Search(
             rabitq_fused_datacell_,
@@ -374,6 +378,11 @@ HGraph::search_one_graph(const void* query,
             fused_search_finalized);
         if (result != nullptr and rabitq_candidates != nullptr) {
             rabitq_candidates->fused_search_used = true;
+        }
+        if (result != nullptr and rabitq_fused_datacell_->HasExternalSupplement() and
+            inner_search_param.parallel_search_thread_count > 1 and ctx != nullptr and
+            ctx->stats != nullptr) {
+            ctx->stats->parallel_search_fallback_count.fetch_add(1, std::memory_order_relaxed);
         }
     }
     const bool parallel_search_requested = inner_search_param.parallel_search_thread_count > 1;
@@ -781,6 +790,21 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     }
 
     auto params = HGraphSearchParameters::FromJson(request.params_str_);
+    const bool external =
+        rabitq_fused_datacell_ != nullptr and rabitq_fused_datacell_->HasExternalSupplement();
+    if (external) {
+        CHECK_ARGUMENT(not is_range and not use_custom_distance,
+                       "external_supplement requires vector KNN search");
+        CHECK_ARGUMENT(
+            not params.search_no_lock or this->immutable_.load(std::memory_order_acquire),
+            "mutable external_supplement searches require the index read lock");
+        CHECK_ARGUMENT(params.enable_reorder and
+                           (not params.has_rabitq_one_bit_search or params.rabitq_one_bit_search),
+                       "external_supplement requires filter scanning and reranking");
+        CHECK_ARGUMENT(params.rabitq_rerank_candidates == 0 or params.rabitq_rerank_candidates >= k,
+                       "rabitq_rerank_candidates must be at least k");
+        params.rabitq_one_bit_search = true;
+    }
     const SearchLockScope search_lock_scope(params.search_no_lock);
     ctx.rabitq_error_rate = params.rabitq_error_rate;
     ctx.enable_rabitq_reorder = params.enable_reorder;
@@ -936,6 +960,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     }
     base_search_param.topk = static_cast<int64_t>(base_search_param.ef);
     base_search_param.rerank_topk = k;
+    base_search_param.rabitq_rerank_candidates = params.rabitq_rerank_candidates;
     base_search_param.min_results = k;
     if (params.topk_factor > 1.0F) {
         base_search_param.topk =
@@ -1170,7 +1195,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             this->mci_parameters_.enabled and this->mci_cliques_ != nullptr and
             this->mci_cliques_->HasCliqueIndex(hybrid_total_count);
         if (not use_custom_distance) {
-            if (params.brute_force_threshold > 0.0F &&
+            if (not external and params.brute_force_threshold > 0.0F &&
                 mci_result.valid_ratio <= params.brute_force_threshold) {
                 search_result = this->brute_force_search<InnerSearchMode::KNN_SEARCH>(
                     raw_query, ft, k, 0.0F, &ctx, request.threshold_);

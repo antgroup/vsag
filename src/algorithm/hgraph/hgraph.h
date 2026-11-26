@@ -480,7 +480,7 @@ public:
     insert_persistent_codes_to_slot(const void* data, CodeSlotIdType code_slot_id);
 
     void
-    sync_fused_node_codes(InnerIdType inner_id, const void* data);
+    sync_fused_node_codes(InnerIdType inner_id, const void* data, bool replacing = false);
 
     void
     restore_fused_codec();

@@ -23,6 +23,7 @@
 
 #include "attr/executor/executor.h"
 #include "datacell/rabitq_split_datacell.h"
+#include "hash_types.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/reasoning/reasoning_context.h"
 #include "index_common_param.h"
@@ -608,6 +609,11 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
     if (search_param.ef == 0 or not graph->CheckIdExists(search_param.ep)) {
         return std::make_shared<StandardHeap<true, false>>(allocator, -1);
     }
+    const bool external = graph->HasExternalSupplement();
+    if (external) {
+        // The bounded queues below retain the hints for the cold phase.
+        lower_bound_candidates = nullptr;
+    }
     if (lower_bound_candidates != nullptr) {
         lower_bound_candidates->clear();
         const uint64_t reserve_hint =
@@ -626,8 +632,18 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
     const bool should_rerank =
         search_param.enable_rabitq_one_bit_search and search_param.enable_reorder;
     const bool deferred_rerank =
-        not range_search and HGraphRaBitQSearcher::ShouldDeferRerank(search_param);
-    const uint64_t deferred_rerank_count = std::max<uint64_t>(search_param.ef, 2 * rerank_topk);
+        external or (not range_search and HGraphRaBitQSearcher::ShouldDeferRerank(search_param));
+    const uint64_t default_budget = std::max<uint64_t>(search_param.ef, 2 * rerank_topk);
+    const uint64_t deferred_rerank_count =
+        external ? std::min<uint64_t>(graph->Capacity(),
+                                      search_param.rabitq_rerank_candidates == 0
+                                          ? default_budget
+                                          : search_param.rabitq_rerank_candidates)
+                 : default_budget;
+    std::optional<BoundedResults> best_bounds;
+    if (external) {
+        best_bounds.emplace(deferred_rerank_count, allocator);
+    }
     BoundedResults results(deferred_rerank ? deferred_rerank_count : result_limit, allocator);
     SearchBuffer candidate_set(search_param.ef, allocator);
 
@@ -657,6 +673,15 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
         if (search_param.enable_rabitq_one_bit_search) {
             ++rabitq_filter_count;
             if (scorer.Estimate(node, distance, lower_bound, filter_inner_product)) {
+                return true;
+            }
+            if (external) {
+                CHECK_ARGUMENT(node.cluster_id < K_FUSED_CLUSTER_COUNT, "invalid fused cluster id");
+                if (not scorer.HasValidFilterDistance(node, *distance)) {
+                    *distance = std::numeric_limits<float>::max();
+                }
+                *lower_bound = std::numeric_limits<float>::lowest();
+                *filter_inner_product = std::numeric_limits<float>::quiet_NaN();
                 return true;
             }
             if (not should_rerank) {
@@ -696,6 +721,9 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                                         float filter_inner_product,
                                         bool allowed,
                                         float full_distance) {
+        if (external and allowed) {
+            best_bounds->Insert(id, lower_bound, filter_inner_product);
+        }
         if (lower_bound_candidates == nullptr or not allowed) {
             return K_INVALID_CANDIDATE_INDEX;
         }
@@ -729,6 +757,17 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                 continue;
             }
             float duplicate_distance = 0.0F;
+            if (external) {
+                float bound = 0.0F;
+                float hint = 0.0F;
+                bool full = false;
+                if (score_node(
+                        graph->GetCodeView(duplicate), &duplicate_distance, &bound, &hint, &full)) {
+                    best_bounds->Insert(duplicate, bound, hint);
+                    results.Insert(duplicate, duplicate_distance, hint);
+                }
+                continue;
+            }
             ++rabitq_full_count;
             if (not scorer.FullDirect(graph->GetCodeView(duplicate), &duplicate_distance) or
                 not result_eligible(duplicate_distance)) {
@@ -760,7 +799,7 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
         return std::make_shared<StandardHeap<true, false>>(allocator, -1);
     }
     const bool entry_allowed = is_allowed(search_param.ep);
-    if (should_rerank and not entry_full_distance_available) {
+    if (not external and should_rerank and not entry_full_distance_available) {
         if (not refine_node(entry_node, entry_filter_ip, &entry_distance)) {
             return std::make_shared<StandardHeap<true, false>>(allocator, -1);
         }
@@ -939,6 +978,18 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                     batch_codes, distances, lower_bounds, filter_inner_products, valid);
                 for (uint32_t lane = 0; lane < 4; ++lane) {
                     if (not valid[lane]) {
+                        if (external) {
+                            CHECK_ARGUMENT(batch_codes[lane].cluster_id < K_FUSED_CLUSTER_COUNT,
+                                           "invalid fused cluster id");
+                            valid[lane] = true;
+                            if (not scorer.HasValidFilterDistance(batch_codes[lane],
+                                                                  distances[lane])) {
+                                distances[lane] = std::numeric_limits<float>::max();
+                            }
+                            lower_bounds[lane] = std::numeric_limits<float>::lowest();
+                            filter_inner_products[lane] = std::numeric_limits<float>::quiet_NaN();
+                            continue;
+                        }
                         if (not should_rerank) {
                             if (scorer.HasValidFilterDistance(batch_codes[lane], distances[lane])) {
                                 valid[lane] = true;
@@ -990,7 +1041,56 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
         }
     }
 
-    if (deferred_rerank) {
+    if (external) {
+        Vector<BoundedResultRecord> shortlist(allocator);
+        UnorderedSet<InnerIdType> seen(allocator);
+        const auto append = [&](const BoundedResultRecord& candidate) {
+            if (shortlist.size() < deferred_rerank_count and seen.insert(candidate.id).second) {
+                shortlist.push_back(candidate);
+            }
+        };
+        uint64_t estimate = 0;
+        for (; estimate < std::min(results.Size(), rerank_topk); ++estimate) {
+            append(results[estimate]);
+        }
+        uint64_t bound = 0;
+        while (shortlist.size() < deferred_rerank_count and
+               (estimate < results.Size() or bound < best_bounds->Size())) {
+            if (bound < best_bounds->Size()) {
+                append((*best_bounds)[bound++]);
+            }
+            if (estimate < results.Size()) {
+                append(results[estimate++]);
+            }
+        }
+        std::sort(shortlist.begin(), shortlist.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.id < rhs.id;
+        });
+        BoundedResults refined(rerank_topk, allocator);
+        const auto stride = graph->FusedSupplementCodeSize();
+        const auto batch =
+            std::min<uint64_t>(shortlist.size(), std::max<uint64_t>(1, (256 * 1024) / stride));
+        Vector<InnerIdType> ids(batch, allocator);
+        Vector<uint8_t> codes(batch * stride, allocator);
+        for (uint64_t begin = 0; begin < shortlist.size(); begin += batch) {
+            const auto count = std::min<uint64_t>(batch, shortlist.size() - begin);
+            for (uint64_t i = 0; i < count; ++i) {
+                ids[i] = shortlist[begin + i].id;
+            }
+            graph->ReadSupplements(ids.data(), count, codes.data());
+            for (uint64_t i = 0; i < count; ++i) {
+                auto node = graph->GetCodeView(ids[i]);
+                node.supplement_code = codes.data() + i * stride;
+                float distance = 0.0F;
+                ++deferred_finalize_full_count;
+                if (refine_node(node, shortlist[begin + i].filter_inner_product, &distance)) {
+                    refined.Insert(
+                        ids[i], distance, shortlist[begin + i].filter_inner_product, true);
+                }
+            }
+        }
+        results = std::move(refined);
+    } else if (deferred_rerank) {
         BoundedResults refined(rerank_topk, allocator);
         const auto has_valid_full_distance = [](float distance) {
             return IsFiniteRaBitQValue(distance) and distance < std::numeric_limits<float>::max();
@@ -1119,7 +1219,7 @@ route_direct_fused(const GraphInterfacePtr& route_graph,
             scorer.HasValidFilterDistance(node, *distance)) {
             return true;
         }
-        return scorer.FullDirect(node, distance);
+        return not fused_graph->HasExternalSupplement() and scorer.FullDirect(node, distance);
     };
     float current_distance = 0.0F;
     if (not score(entry_point, &current_distance)) {
@@ -1197,6 +1297,8 @@ HGraphRaBitQSearcher::Route(const GraphInterfacePtr& route_graph,
                 break;
         }
     }
+    CHECK_ARGUMENT(not fused_graph->HasExternalSupplement(),
+                   "external supplement routing requires a filter traversal codec");
     const auto score = [&](InnerIdType id, float* distance) {
         const auto node = fused_graph->GetNodeView(id);
         *distance = std::numeric_limits<float>::max();
@@ -1266,6 +1368,12 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
     if (graph == nullptr or split_codes == nullptr or search_param.find_duplicate) {
         return nullptr;
     }
+    if (graph->HasExternalSupplement() and
+        (not search_param.enable_rabitq_one_bit_search or not search_param.enable_reorder or
+         search_param.search_mode != KNN_SEARCH)) {
+        // Construction uses the generic full-distance computer.
+        return nullptr;
+    }
     if (search_param.ef == 0 or not graph->CheckIdExists(search_param.ep)) {
         return std::make_shared<StandardHeap<true, false>>(allocator, -1);
     }
@@ -1321,7 +1429,8 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
                                               neighbors_mutex_,
                                               scorer);
             if (search_finalized != nullptr) {
-                *search_finalized = not deferred_rerank or lower_bound_candidates != nullptr;
+                *search_finalized = graph->HasExternalSupplement() or not deferred_rerank or
+                                    lower_bound_candidates != nullptr;
             }
             return result;
         };
@@ -1350,6 +1459,8 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
                 break;
         }
     }
+    CHECK_ARGUMENT(not graph->HasExternalSupplement(),
+                   "external supplement requires fused traversal codec");
     auto result = std::make_shared<StandardHeap<true, false>>(allocator, -1);
     SearchBuffer candidate_set(search_param.ef, allocator);
     uint32_t rabitq_filter_count = 0;

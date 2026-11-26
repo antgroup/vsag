@@ -97,6 +97,7 @@ public:
     bool ignore_reorder{false};
     bool build_by_base{false};
     bool rabitq_fused_datacell{false};
+    bool external_fused_supplement{false};
 
     uint64_t ef_construction{400};
     uint64_t resize_increase_count_bit{DEFAULT_RESIZE_INCREASE_COUNT_BIT};
@@ -133,6 +134,8 @@ public:
     bool use_reorder{false};
     bool use_extra_info_filter{false};
     bool rabitq_one_bit_search{false};
+    bool has_rabitq_one_bit_search{false};
+    uint32_t rabitq_rerank_candidates{0};
     bool use_mci{true};
     // Dynamic neighbor traversal: expand the sparse Hgraph neighbors and the MCI
     // clique members inside one traversal, with the MCI part bounded by the

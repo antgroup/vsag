@@ -171,11 +171,12 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         CHECK_ARGUMENT(graph_param != nullptr, "rabitq_fused_datacell requires flat graph storage");
         rabitq_fused_searcher_ =
             std::make_shared<HGraphRaBitQSearcher>(common_param, neighbors_mutex_);
-        rabitq_fused_datacell_ =
-            std::make_shared<HGraphRaBitQFusedDataCell>(graph_param,
-                                                        split_codes->OneBitCodeSize(),
-                                                        split_codes->SupplementCodeSize(),
-                                                        common_param);
+        rabitq_fused_datacell_ = std::make_shared<HGraphRaBitQFusedDataCell>(
+            graph_param,
+            split_codes->OneBitCodeSize(),
+            split_codes->SupplementCodeSize(),
+            common_param,
+            hgraph_param->external_fused_supplement ? split_codes : nullptr);
         split_codes->AttachFusedCodeStorage(rabitq_fused_datacell_.get());
         this->bottom_graph_ = rabitq_fused_datacell_;
     } else {
@@ -481,6 +482,10 @@ HGraph::EstimateMemory(uint64_t num_elements) const {
     if (this->rabitq_fused_datacell_ != nullptr) {
         const auto fused_memory = this->rabitq_fused_datacell_->RecordSize() * element_count;
         estimate_memory += block_memory_ceil(fused_memory, block_size);
+        if (rabitq_fused_datacell_->HasMemorySupplement()) {
+            estimate_memory += block_memory_ceil(
+                element_count * rabitq_fused_datacell_->FusedSupplementCodeSize(), block_size);
+        }
     } else {
         if (this->basic_flatten_codes_->InMemory()) {
             auto base_memory = this->basic_flatten_codes_->code_size_ * element_count;
@@ -1184,7 +1189,7 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
     // codes lock here would invert a brute-force reader's codes -> node order.
     bool update_status = basic_flatten_codes_->UpdateVector(new_base_vec, inner_id);
     if (update_status and rabitq_fused_datacell_ != nullptr) {
-        this->sync_fused_node_codes(inner_id, new_base_vec);
+        this->sync_fused_node_codes(inner_id, new_base_vec, true);
     }
     if (has_precise_reorder()) {
         update_status = update_status && high_precise_codes_->UpdateVector(new_base_vec, inner_id);

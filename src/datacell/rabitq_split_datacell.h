@@ -122,7 +122,7 @@ struct RaBitQFusedTraversalQuery {
     bool filter_inner_product_is_exact{false};
 };
 
-class RaBitQSplitDataCellInterface {
+class RaBitQSplitDataCellInterface : public FusedSupplementStorage {
 public:
     virtual ~RaBitQSplitDataCellInterface() = default;
 
@@ -1995,6 +1995,10 @@ public:
     void
     InitIO(const IOParamPtr& io_param) override {
         if (this->fused_code_storage_ != nullptr) {
+            if (this->fused_code_storage_->HasExternalSupplement()) {
+                this->supplement_layout_->InitIO(RebuildSupplementIOParam(io_param));
+                return;
+            }
             CHECK_ARGUMENT(OneBitIOTmpl::InMemory and SupplementIOTmpl::InMemory,
                            "fused RaBitQ code storage requires memory IO");
             return;
@@ -2012,6 +2016,12 @@ public:
     void
     InitIO(const IOParamPtr& one_bit_io_param, const IOParamPtr& supplement_io_param) {
         if (this->fused_code_storage_ != nullptr) {
+            if (this->fused_code_storage_->HasExternalSupplement()) {
+                this->supplement_layout_->InitIO(supplement_io_param != nullptr
+                                                     ? supplement_io_param
+                                                     : RebuildSupplementIOParam(one_bit_io_param));
+                return;
+            }
             CHECK_ARGUMENT(OneBitIOTmpl::InMemory and SupplementIOTmpl::InMemory,
                            "fused RaBitQ code storage requires memory IO");
             return;
@@ -2059,6 +2069,45 @@ public:
         return supplement_code_size_;
     }
 
+    void
+    ResizeSupplement(InnerIdType capacity) override {
+        supplement_layout_->Resize(capacity);
+    }
+
+    void
+    WriteSupplement(InnerIdType id, const uint8_t* code) override {
+        supplement_layout_->Write(id, code);
+    }
+
+    void
+    ReadSupplements(const InnerIdType* ids, uint64_t count, uint8_t* codes) const override {
+        if (not supplement_layout_->MultiRead(ids, count, codes, allocator_)) {
+            throw VsagException(ErrorType::READ_ERROR, "failed to read fused supplement records");
+        }
+    }
+
+    void
+    SerializeSupplement(StreamWriter& writer) override {
+        supplement_layout_->Serialize(writer);
+    }
+
+    void
+    DeserializeSupplement(StreamReader& reader, uint64_t expected_size) override {
+        const auto cursor = reader.GetCursor();
+        uint64_t size = 0;
+        StreamReader::ReadObj(reader, size);
+        CHECK_ARGUMENT(size == expected_size and reader.GetCursor() <= reader.Length() and
+                           size <= reader.Length() - reader.GetCursor(),
+                       "invalid external fused supplement payload length");
+        reader.Seek(cursor);
+        supplement_layout_->Deserialize(reader);
+    }
+
+    bool
+    SupplementInMemory() const override {
+        return SupplementIOTmpl::InMemory;
+    }
+
     [[nodiscard]] uint32_t
     FusedFilterBits() const override {
         return bottom_quantizer().FilterBits();
@@ -2084,7 +2133,9 @@ public:
                        "fused RaBitQ code sizes do not match the split model");
         fused_code_storage_ = storage;
         x_bit_layout_->Shrink(0);
-        supplement_layout_->Shrink(0);
+        if (not storage->HasExternalSupplement()) {
+            supplement_layout_->Shrink(0);
+        }
     }
 
     [[nodiscard]] bool

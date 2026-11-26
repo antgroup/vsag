@@ -62,6 +62,14 @@ x + y <= 8
 If `rabitq_bits_per_dim_precise` is omitted, HGraph, IVF, and Pyramid use the standard RaBitQ
 path instead of split storage.
 
+### HGraph fused layout with external supplements
+
+Set `rabitq_fused_datacell=true`, `rabitq_fused_layout="external_supplement"`, `use_reorder=true` and `max_degree=64`. Each 64-byte-aligned bottom record holds the neighbor count, 64 internal IDs, cluster ID, label, and filter code with its metadata. The separate fixed-size supplement record uses the same internal ID. To place it on disk, select `base_io_type="block_memory_io"`, `base_supplement_io_type="async_io"` and a dedicated `base_supplement_file_path`. Without libaio the split factory uses buffered file IO.
+
+Vector KNN scans the graph using filter codes, then reads a bounded set of supplements in batches. The one-bit scorer recomputes the exact high-bit contribution. The multi-bit scorer reuses a valid high-bit inner product. Set `hgraph.rabitq_rerank_candidates` to bound the number of unique full evaluations per query. It defaults to `max(ef_search, 2*k)` and must be at least k. This layout requires reranking, implicitly enables filter scanning and uses the direct fused traversal loop. Range, iterator and custom-distance queries are unsupported.
+
+Each query expands the graph on one thread, including when `parallelism` exceeds one. The disk backend can issue multiple candidate reads per batch. The external layout always uses the graph scan, including for selective label filters.
+
 ### HGraph fused in-memory layout
 
 For HGraph only, set `rabitq_fused_datacell` to `true` to store each
@@ -116,7 +124,7 @@ storage:
 
 - `1 <= x <= 4`, `y >= 1`, and `x + y <= 8`.
 - The metric must be L2 or inner product.
-- The graph, filter codes, and supplement codes must all use memory IO.
+- The inline layout keeps the graph, filter codes, and supplement codes in memory.
 - MCI, `deduplicate_storage`, removal metadata, reverse edges, and force remove
   must be disabled.
 - PCA is not supported; omit `rabitq_pca_dim` or set it to `0`.

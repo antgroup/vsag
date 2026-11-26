@@ -28,6 +28,7 @@
 #include <tuple>
 #include <vector>
 
+#include "core/temp_dir.h"
 #include "datacell/flatten_datacell.h"
 #include "datacell/hgraph_rabitq_fused_datacell.h"
 #include "datacell/rabitq_split_datacell.h"
@@ -110,6 +111,11 @@ public:
         REQUIRE(graph.rabitq_fused_datacell_->GetFusedCodeView(
             graph.label_table_->GetIdByLabel(label), view));
         return view;
+    }
+
+    static uint64_t
+    FusedStride(const HGraph& graph) {
+        return graph.rabitq_fused_datacell_->RecordSize();
     }
 };
 
@@ -339,6 +345,140 @@ const std::string kBruteForceSearchParams =
     R"({"hgraph": {"ef_search": 32, "brute_force_threshold": 1.0}})";
 
 }  // namespace
+
+TEST_CASE("HGraph scans hot fused records and batch reranks separate supplements",
+          "[ut][hgraph][external_supplement]") {
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 96;
+    const auto bits = GENERATE(1U, 3U);
+    const auto metric =
+        GENERATE(vsag::MetricType::METRIC_TYPE_L2SQR, vsag::MetricType::METRIC_TYPE_IP);
+    const auto graph_type = GENERATE("nsw", "pipnn");
+    fixtures::TempDir dir("hgraph_external_fused");
+    auto common = MakeCommonParam(dim, 1);
+    common.metric_ = metric;
+    auto json = MakeFusedPiPNNJson(bits, 1, false);
+    json["graph_type"].SetString(graph_type);
+    json["max_degree"].SetInt(64);
+    json["ef_construction"].SetInt(80);
+    json["base_io_type"].SetString("block_memory_io");
+    json["rabitq_fused_layout"].SetString("external_supplement");
+    auto memory = MakeHGraphIndex(json, common);
+    std::vector<float> vectors(count * dim);
+    std::vector<int64_t> labels(count);
+    std::iota(labels.begin(), labels.end(), 1000);
+    for (int64_t i = 0; i < count * dim; ++i) {
+        vectors[i] = std::sin(0.017F * i) + std::cos(0.013F * (i + i / dim));
+    }
+    REQUIRE(memory->Build(MakeFloatDataset(vectors, labels, dim, count)).has_value());
+    const auto graph = std::dynamic_pointer_cast<vsag::HGraph>(memory->GetInnerIndex());
+    REQUIRE(vsag::HGraphCodeWriteTestAccess::FusedStride(*graph) == 320);
+    const auto snapshot = memory->Serialize();
+    REQUIRE(snapshot.has_value());
+    json["base_supplement_io_type"].SetString("async_io");
+    const auto path = dir.GenerateRandomFile(false);
+    json["base_supplement_file_path"].SetString(path);
+    auto disk = MakeHGraphIndex(json, common);
+    REQUIRE(disk->Deserialize(snapshot.value()).has_value());
+    REQUIRE(std::filesystem::file_size(path) >= count * ((8 - bits) * 8 + 20));
+    const auto query = MakeFloatQuery(vectors, dim);
+    for (int ef : {16, 80}) {
+        const auto search =
+            fmt::format(R"({{"hgraph":{{"ef_search":{},"rabitq_rerank_candidates":12}}}})", ef);
+        auto expected = memory->KnnSearch(query, 5, search);
+        auto actual = disk->KnnSearch(query, 5, search);
+        REQUIRE(expected.has_value());
+        REQUIRE(actual.has_value());
+        REQUIRE(actual.value()->GetDim() == 5);
+        const auto stats = vsag::JsonType::Parse(actual.value()->GetStatistics());
+        const auto full = stats["rabitq_full_count"].GetUint64();
+        CAPTURE(bits, metric, ef, full);
+        REQUIRE(full >= 5);
+        REQUIRE(full <= 12);
+        REQUIRE(stats["rabitq_filter_count"].GetUint64() >= full);
+        REQUIRE(stats["reorder_distance_count"].GetUint64() == full);
+        REQUIRE(stats["rabitq_reorder_hint_full_count"].GetUint64() == (bits == 1 ? 0 : full));
+        for (int row = 0; row < 5; ++row) {
+            REQUIRE(actual.value()->GetIds()[row] == expected.value()->GetIds()[row]);
+            REQUIRE(actual.value()->GetDistances()[row] == expected.value()->GetDistances()[row]);
+            auto by_id = disk->CalcDistanceById(vectors.data(), actual.value()->GetIds()[row]);
+            REQUIRE(by_id.has_value());
+            REQUIRE(std::abs(by_id.value() - actual.value()->GetDistances()[row]) < 0.001F);
+        }
+    }
+    REQUIRE_FALSE(
+        disk->KnnSearch(query, 5, R"({"hgraph":{"ef_search":16,"rabitq_rerank_candidates":4}})")
+            .has_value());
+    REQUIRE_FALSE(
+        disk->KnnSearch(query, 5, R"({"hgraph":{"ef_search":16,"rabitq_one_bit_search":false}})")
+            .has_value());
+
+    class EvenLabels : public vsag::Filter {
+    public:
+        bool
+        CheckValid(int64_t label) const override {
+            return label % 2 == 0;
+        }
+    };
+    const auto filter = std::make_shared<EvenLabels>();
+    const auto filter_params = fmt::format(
+        R"({{"hgraph":{{"ef_search":{},"rabitq_rerank_candidates":{},"parallelism":2}}}})",
+        count,
+        count);
+    const auto candidates = memory->KnnSearch(query, count, filter_params);
+    REQUIRE(candidates.has_value());
+    const auto filtered = disk->KnnSearch(query, 5, filter_params, filter);
+    REQUIRE(filtered.has_value());
+    const auto filtered_stats = vsag::JsonType::Parse(filtered.value()->GetStatistics());
+    REQUIRE(filtered_stats["parallel_search_fallback_count"].GetUint64() >= 1);
+    int64_t matched = 0;
+    for (int64_t row = 0; row < candidates.value()->GetDim() and matched < 5; ++row) {
+        const auto id = candidates.value()->GetIds()[row];
+        if (filter->CheckValid(id)) {
+            REQUIRE(matched < filtered.value()->GetDim());
+            REQUIRE(filtered.value()->GetIds()[matched] == id);
+            REQUIRE(filtered.value()->GetDistances()[matched] ==
+                    candidates.value()->GetDistances()[row]);
+            ++matched;
+        }
+    }
+    REQUIRE(matched > 0);
+    REQUIRE(filtered.value()->GetDim() == matched);
+
+    std::vector<int64_t> extra_id{1000 + count};
+    std::vector<float> extra(vectors.begin() + dim, vectors.begin() + 2 * dim);
+    auto extra_row = MakeFloatDataset(extra, extra_id, dim, 1);
+    auto added = disk->Add(extra_row);
+    REQUIRE(added.has_value());
+    REQUIRE(added.value().empty());
+    for (auto& value : extra) {
+        value += 0.4F;
+    }
+    auto updated = disk->UpdateVector(extra_id.front(), extra_row, true);
+    REQUIRE(updated.has_value());
+    REQUIRE(updated.value());
+    auto saved = disk->Serialize();
+    REQUIRE(saved.has_value());
+    auto restored_json = MakeFusedPiPNNJson(bits, 1, false);
+    restored_json["graph_type"].SetString(graph_type);
+    restored_json["max_degree"].SetInt(64);
+    restored_json["ef_construction"].SetInt(80);
+    restored_json["base_io_type"].SetString("block_memory_io");
+    restored_json["rabitq_fused_layout"].SetString("external_supplement");
+    auto restored = MakeHGraphIndex(restored_json, common);
+    REQUIRE(restored->Deserialize(saved.value()).has_value());
+    const auto before = disk->CalcDistanceById(vectors.data(), extra_id.front());
+    const auto after = restored->CalcDistanceById(vectors.data(), extra_id.front());
+    REQUIRE(before.has_value());
+    REQUIRE(after.has_value());
+    REQUIRE(before.value() == after.value());
+    std::filesystem::resize_file(path, 0);
+    const auto truncated = disk->KnnSearch(query, 5, R"({"hgraph":{"ef_search":16}})");
+    REQUIRE_FALSE(truncated.has_value());
+    // File backends throw INTERNAL_ERROR on a short read. A false MultiRead returns READ_ERROR.
+    const auto error = truncated.error().type;
+    REQUIRE((error == vsag::ErrorType::INTERNAL_ERROR or error == vsag::ErrorType::READ_ERROR));
+}
 
 TEST_CASE("HGraph PiPNN encodes each fused input once and preserves compacted rows",
           "[ut][hgraph][pipnn][fused][preencode]") {
