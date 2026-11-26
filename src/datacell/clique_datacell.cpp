@@ -36,12 +36,12 @@ capacity_bytes(const Vector<T>& values) noexcept {
 
 // Account for the actual allocation, including a resize that succeeds before a
 // stream read throws. The row must remain in place until this guard is destroyed.
-struct RowCapacityChange {
-    RowCapacityChange(uint64_t& bytes, const Vector<InnerIdType>& row)
+struct row_capacity_change {
+    row_capacity_change(uint64_t& bytes, const Vector<InnerIdType>& row)
         : bytes(bytes), row(row), before(capacity_bytes(row)) {
     }
 
-    ~RowCapacityChange() {
+    ~row_capacity_change() {
         bytes = bytes - before + capacity_bytes(row);
     }
 
@@ -52,7 +52,7 @@ struct RowCapacityChange {
 
 void
 append_membership(Vector<InnerIdType>& row, InnerIdType value, uint64_t& row_bytes) {
-    RowCapacityChange change(row_bytes, row);
+    row_capacity_change change(row_bytes, row);
     row.push_back(value);
 }
 
@@ -78,7 +78,7 @@ read_nested_vector(StreamReader& reader,
     values.reserve(size);
     for (uint64_t i = 0; i < size; ++i) {
         values.emplace_back(allocator);
-        RowCapacityChange change(row_bytes, values.back());
+        row_capacity_change change(row_bytes, values.back());
         StreamReader::ReadVector(reader, values.back());
     }
 }

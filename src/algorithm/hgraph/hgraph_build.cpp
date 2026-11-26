@@ -768,7 +768,8 @@ HGraph::AddImpl::Run(const DatasetPtr& data) {
             for (const auto& row : batch.rows) {
                 if (single_add) {
                     bool reuse = false;
-                    if (context.mci_candidate_scores and row.inner_id == mci_start_total) {
+                    if (context.mci_candidate_scores != nullptr and
+                        row.inner_id == mci_start_total) {
                         const auto k =
                             std::min<uint64_t>(mci_start_total, index_.mci_parameters_.mcs);
                         auto label_lock = std::shared_lock(index_.label_lookup_mutex_);
