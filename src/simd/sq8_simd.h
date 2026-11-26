@@ -155,6 +155,14 @@ SQ8ComputeCodesL2SqrBatch4(const uint8_t* source,
                            uint64_t dim,
                            float* distances);
 }
+// Four independent single-pair calls on platforms without the batched kernel.
+void
+SQ8CodeBatch4Fallback(const uint8_t* source,
+                      const uint8_t* const* targets,
+                      const float* lower_bound,
+                      const float* diff,
+                      uint64_t dim,
+                      float* distances);
 extern SQ8CodeBatch4Type SQ8ComputeCodesL2SqrBatch4;
 
 using SQ8ComputeCodesType = float (*)(const uint8_t* RESTRICT codes1,

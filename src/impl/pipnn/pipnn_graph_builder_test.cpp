@@ -47,8 +47,6 @@
 #include "pipnn_incremental.h"
 #include "simd/bf16_simd.h"
 #include "simd/fp32_simd.h"
-#include "simd/pipnn_filter.h"
-#include "simd/pipnn_ip_tile.h"
 #include "unittest.h"
 #include "utils/half_input.h"
 #include "vsag_exception.h"
@@ -1922,99 +1920,6 @@ TEST_CASE("PiPNN appends sketches in place and validates sparse IDs after reload
     }
 }
 
-TEST_CASE("PiPNN old row tiles match the dispatched FP32 kernels bit for bit", "[ut][pipnn][add]") {
-    const uint64_t dim = GENERATE(959U, 960U, 961U);
-    const uint64_t m = GENERATE(3U, 6U, 8U);
-    const uint64_t b = GENERATE(1U, 3U, 4U, 7U, 8U);
-    const auto n = m + b;
-    auto values = MakeVectors(n, dim);
-    std::vector<const float*> rows(n);
-    std::vector<uint32_t> members(n);
-    for (uint64_t i = 0; i < n; ++i) {
-        rows[i] = values.data() + i * dim;
-        members[i] = static_cast<uint32_t>(n - 1 - i);
-    }
-    constexpr float sentinel = -123456.0F;
-    std::vector<float> dots(n * b, sentinel), expected(n * b, sentinel);
-    const auto processed =
-        vsag::ComputePiPNNOldRowTiles(rows.data(), members.data(), m, b, dim, dots.data());
-    const bool use_tiles = dim == 960 && vsag::FP32ComputeIP == vsag::avx512::FP32ComputeIP &&
-                           vsag::FP32ComputeIPBatch4 == vsag::avx512::FP32ComputeIPBatch4;
-    REQUIRE(processed == (use_tiles ? m - m % 4 : 0));
-    for (uint64_t i = 0; i < processed; ++i) {
-        auto* old = rows[members[i]];
-        uint64_t j = 0;
-        for (; j + 4 <= b; j += 4) {
-            float scores[4]{};
-            vsag::FP32ComputeIPBatch4(old,
-                                      dim,
-                                      rows[members[m + j]],
-                                      rows[members[m + j + 1]],
-                                      rows[members[m + j + 2]],
-                                      rows[members[m + j + 3]],
-                                      scores[0],
-                                      scores[1],
-                                      scores[2],
-                                      scores[3]);
-            for (int t = 0; t < 4; ++t) expected[(j + t) * n + i] = scores[t];
-        }
-        for (; j < b; ++j)
-            expected[j * n + i] = vsag::FP32ComputeIP(old, rows[members[m + j]], dim);
-    }
-    REQUIRE(std::memcmp(dots.data(), expected.data(), dots.size() * sizeof(float)) == 0);
-}
-
-TEST_CASE("PiPNN dispatched relative hashes preserve both directions and coincidence",
-          "[ut][pipnn]") {
-    const auto hash = vsag::pipnn_filter::GetKernels().hashes;
-    const float inf = std::numeric_limits<float>::infinity();
-    const float nan = std::numeric_limits<float>::quiet_NaN();
-    for (uint64_t planes = 1; planes <= 15; ++planes) {
-        const uint16_t active = static_cast<uint16_t>((1U << planes) - 1);
-        std::vector<float> a(planes, -0.0F), b(planes, +0.0F);
-        a.front() = b.front() = inf;
-        const auto equal = hash(a.data(), b.data(), planes);
-        REQUIRE(equal.forward == (active | vsag::pipnn_filter::COINCIDENT_HASH_FLAG));
-        REQUIRE(equal.reverse == equal.forward);
-        for (uint64_t i = 0; i < planes; ++i) {
-            CAPTURE(planes, i);
-            const auto bit = static_cast<uint16_t>(1U << i);
-            a[i] = -inf;
-            b[i] = inf;
-            auto different = hash(a.data(), b.data(), planes);
-            REQUIRE(different.forward == active);
-            REQUIRE(different.reverse == (active ^ bit));
-            b[i] = nan;
-            auto unordered = hash(a.data(), b.data(), planes);
-            REQUIRE(unordered.forward == (active ^ bit));
-            REQUIRE(unordered.reverse == (active ^ bit));
-            b[i] = a[i];
-        }
-    }
-}
-
-TEST_CASE("PiPNN vector kth filter includes ties and masks the last partial group", "[ut][pipnn]") {
-    const auto select = vsag::pipnn_filter::GetKernels().kth;
-    if (!select) {
-        SUCCEED("The generic Add path uses row-wise comparisons");
-        return;
-    }
-    for (uint64_t n : {0U, 1U, 15U, 16U, 17U, 31U, 32U, 33U}) {
-        std::vector<float> d(n), limit(n);
-        std::vector<uint32_t> rows(n + 1, UINT32_MAX), expected;
-        for (uint32_t i = 0; i < n; ++i) {
-            limit[i] = i % 5 == 0 ? std::numeric_limits<float>::infinity() : -0.0F;
-            d[i] = i % 5 == 0 ? limit[i] : static_cast<float>(i % 3) - 1.0F;
-            if (d[i] <= limit[i])
-                expected.push_back(i);
-        }
-        const auto count = select(d.data(), limit.data(), n, rows.data());
-        REQUIRE(count == expected.size());
-        REQUIRE(std::equal(expected.begin(), expected.end(), rows.begin()));
-        REQUIRE(rows[count] == UINT32_MAX);
-    }
-}
-
 TEST_CASE("PiPNN old and new leaf rows retain exact ranks across vector filter batches",
           "[ut][pipnn][add]") {
     const auto metric = GENERATE(vsag::MetricType::METRIC_TYPE_L2SQR,
@@ -2299,6 +2204,19 @@ TEST_CASE("PiPNN Add groups both directions by local ID for singleton and bulk b
                     neighbors.end());
         }
     }
+}
+
+TEST_CASE("PiPNN empty leaf top-k has no addressable neighbors", "[ut][pipnn][add]") {
+    vsag::PiPNNLeafTopK empty(1, 0);
+    empty.AppendRows(3);
+    REQUIRE_THROWS(empty.Row(0));
+    const auto& readonly = empty;
+    REQUIRE_THROWS(readonly.Row(3));
+    const std::array<uint32_t, 4> points{0, 1, 2, 3};
+    std::ostringstream snapshot;
+    vsag::IOStreamWriter writer(snapshot);
+    empty.Write(writer, points);
+    REQUIRE(snapshot.str() == std::string(sizeof(uint64_t), '\0'));
 }
 
 TEST_CASE("PiPNN leaf top-k append keeps existing rows in place and writes packed snapshots",

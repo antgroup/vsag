@@ -16,7 +16,11 @@
 #include "fp32_simd.h"
 
 #include <catch2/benchmark/catch_benchmark.hpp>
+#include <cstring>
+#include <random>
 
+#include "pipnn_filter.h"
+#include "pipnn_ip_tile.h"
 #include "simd_status.h"
 #include "unittest.h"
 
@@ -361,5 +365,105 @@ TEST_CASE("FP32 Benchmark Batch4", "[ut][simd][!benchmark]") {
     }
     if (SimdStatus::SupportSVE()) {
         BENCHMARK_SIMD_COMPUTE_BATCH4(sve, FP32ComputeL2SqrBatch4);
+    }
+}
+
+TEST_CASE("PiPNN old row tiles match the dispatched FP32 kernels bit for bit",
+          "[ut][simd][pipnn][add]") {
+    const uint64_t dim = GENERATE(959U, 960U, 961U);
+    const uint64_t m = GENERATE(3U, 6U, 8U);
+    const uint64_t b = GENERATE(1U, 3U, 4U, 7U, 8U);
+    const auto n = m + b;
+    std::mt19937 generator(42);
+    std::vector<float> values(n * dim);
+    for (auto& value : values) {
+        value = std::generate_canonical<float, 24>(generator) - 0.5F;
+    }
+    std::vector<const float*> rows(n);
+    std::vector<uint32_t> members(n);
+    for (uint64_t i = 0; i < n; ++i) {
+        rows[i] = values.data() + i * dim;
+        members[i] = static_cast<uint32_t>(n - 1 - i);
+    }
+    constexpr float sentinel = -123456.0F;
+    std::vector<float> dots(n * b, sentinel), expected(n * b, sentinel);
+    const auto processed =
+        vsag::ComputePiPNNOldRowTiles(rows.data(), members.data(), m, b, dim, dots.data());
+    const bool use_tiles = dim == 960 && vsag::FP32ComputeIP == vsag::avx512::FP32ComputeIP &&
+                           vsag::FP32ComputeIPBatch4 == vsag::avx512::FP32ComputeIPBatch4;
+    REQUIRE(processed == (use_tiles ? m - m % 4 : 0));
+    for (uint64_t i = 0; i < processed; ++i) {
+        auto* old = rows[members[i]];
+        uint64_t j = 0;
+        for (; j + 4 <= b; j += 4) {
+            float scores[4]{};
+            vsag::FP32ComputeIPBatch4(old,
+                                      dim,
+                                      rows[members[m + j]],
+                                      rows[members[m + j + 1]],
+                                      rows[members[m + j + 2]],
+                                      rows[members[m + j + 3]],
+                                      scores[0],
+                                      scores[1],
+                                      scores[2],
+                                      scores[3]);
+            for (int t = 0; t < 4; ++t) expected[(j + t) * n + i] = scores[t];
+        }
+        for (; j < b; ++j)
+            expected[j * n + i] = vsag::FP32ComputeIP(old, rows[members[m + j]], dim);
+    }
+    REQUIRE(std::memcmp(dots.data(), expected.data(), dots.size() * sizeof(float)) == 0);
+}
+
+TEST_CASE("PiPNN dispatched relative hashes preserve both directions and coincidence",
+          "[ut][simd][pipnn]") {
+    const auto hash =
+        GENERATE(&vsag::pipnn_filter::ScalarHash, vsag::pipnn_filter::GetKernels().hashes);
+    const float inf = std::numeric_limits<float>::infinity();
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    for (uint64_t planes = 1; planes <= 15; ++planes) {
+        const uint16_t active = static_cast<uint16_t>((1U << planes) - 1);
+        std::vector<float> a(planes, -0.0F), b(planes, +0.0F);
+        a.front() = b.front() = inf;
+        const auto equal = hash(a.data(), b.data(), planes);
+        REQUIRE(equal.forward == (active | vsag::pipnn_filter::COINCIDENT_HASH_FLAG));
+        REQUIRE(equal.reverse == equal.forward);
+        for (uint64_t i = 0; i < planes; ++i) {
+            CAPTURE(planes, i);
+            const auto bit = static_cast<uint16_t>(1U << i);
+            a[i] = -inf;
+            b[i] = inf;
+            auto different = hash(a.data(), b.data(), planes);
+            REQUIRE(different.forward == active);
+            REQUIRE(different.reverse == (active ^ bit));
+            b[i] = nan;
+            auto unordered = hash(a.data(), b.data(), planes);
+            REQUIRE(unordered.forward == (active ^ bit));
+            REQUIRE(unordered.reverse == (active ^ bit));
+            b[i] = a[i];
+        }
+    }
+}
+
+TEST_CASE("PiPNN vector kth filter includes ties and masks the last partial group",
+          "[ut][simd][pipnn]") {
+    const auto select = vsag::pipnn_filter::GetKernels().kth;
+    if (!select) {
+        SUCCEED("The generic Add path uses row-wise comparisons");
+        return;
+    }
+    for (uint64_t n : {0U, 1U, 15U, 16U, 17U, 31U, 32U, 33U}) {
+        std::vector<float> d(n), limit(n);
+        std::vector<uint32_t> rows(n + 1, UINT32_MAX), expected;
+        for (uint32_t i = 0; i < n; ++i) {
+            limit[i] = i % 5 == 0 ? std::numeric_limits<float>::infinity() : -0.0F;
+            d[i] = i % 5 == 0 ? limit[i] : static_cast<float>(i % 3) - 1.0F;
+            if (d[i] <= limit[i])
+                expected.push_back(i);
+        }
+        const auto count = select(d.data(), limit.data(), n, rows.data());
+        REQUIRE(count == expected.size());
+        REQUIRE(std::equal(expected.begin(), expected.end(), rows.begin()));
+        REQUIRE(rows[count] == UINT32_MAX);
     }
 }

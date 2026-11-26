@@ -718,11 +718,11 @@ private:
     void
     restore_pipnn_projections_from_exact(StreamReader& reader);
     void
-    add_pipnn_to_hierarchy(Hierarchy&,
-                           const DatasetPtr&,
-                           const std::string&,
-                           const AddBatch&,
-                           std::span<const float* const> rows);
+    add_pipnn_to_hierarchy(Hierarchy& hierarchy,
+                           const DatasetPtr& dataset,
+                           const std::string& name,
+                           const AddBatch& batch,
+                           std::span<const float* const> exact);
     std::vector<GraphInterfacePtr>
     pipnn_graphs_in_path_order() const;
     PiPNNGraphBuilderParameter pipnn_param_{};   // PiPNN build parameters

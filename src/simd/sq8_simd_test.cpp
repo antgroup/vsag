@@ -247,3 +247,28 @@ TEST_CASE("SQ8 SIMD Compute Benchmark", "[ut][simd][!benchmark]") {
         BENCHMARK_SIMD_COMPUTE_QUERY(sve, SQ8ComputeIP);
     }
 }
+
+TEST_CASE("SQ8 four-code L2 matches the single-pair kernel including vector tails",
+          "[ut][simd][sq8_tile]") {
+    const uint64_t dim = GENERATE(1U, 15U, 16U, 17U, 33U, 960U);
+    const auto stride = dim + 1;
+    std::vector<uint8_t> bytes(5 * stride);
+    std::vector<float> lower(dim), scale(dim);
+    for (uint64_t i = 0; i < bytes.size(); ++i) {
+        bytes[i] = static_cast<uint8_t>((i * 37U + i / stride * 13U) % 256U);
+    }
+    for (uint64_t i = 0; i < dim; ++i) {
+        lower[i] = -static_cast<float>(i % 17) / 3.0F;
+        scale[i] = static_cast<float>(i % 13) / 7.0F;
+    }
+    const auto* source = bytes.data() + 1;
+    const uint8_t* targets[] = {source, source + stride, source + 2 * stride, source + 4 * stride};
+    float distances[4]{};
+    const auto compute = GENERATE(&vsag::SQ8CodeBatch4Fallback, vsag::SQ8ComputeCodesL2SqrBatch4);
+    compute(source, targets, lower.data(), scale.data(), dim, distances);
+    for (size_t i = 0; i < 4; ++i) {
+        const auto expected =
+            vsag::SQ8ComputeCodesL2Sqr(source, targets[i], lower.data(), scale.data(), dim);
+        REQUIRE(distances[i] == expected);
+    }
+}

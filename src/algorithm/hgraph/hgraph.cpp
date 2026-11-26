@@ -125,17 +125,21 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
                             "HGraph deduplicate_storage only supports dense vectors");
     }
     if (this->graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
-        if (pipnn_param_.add_use_codes)
+        if (pipnn_param_.add_use_codes) {
             CHECK_ARGUMENT(!support_duplicate_, "coded PiPNN requires unique graph IDs");
+        }
         if (pipnn_param_.incremental_add) {
-            CHECK_ARGUMENT(
-                !(support_duplicate_ && common_param.metric_ == MetricType::METRIC_TYPE_L2SQR &&
-                  duplicate_distance_threshold_ > 0.0F),
-                "incremental PiPNN with L2 duplicate detection requires "
-                "duplicate_distance_threshold = 0");
-            CHECK_ARGUMENT(common_param.data_type_ == DataTypes::DATA_TYPE_FLOAT &&
-                               !support_force_remove_ && !mci_parameters_.enabled &&
-                               !use_conjugate_graph_ && !hgraph_param->rabitq_fused_datacell,
+            const bool positive_duplicate_threshold =
+                support_duplicate_ && common_param.metric_ == MetricType::METRIC_TYPE_L2SQR &&
+                duplicate_distance_threshold_ > 0.0F;
+            CHECK_ARGUMENT(!positive_duplicate_threshold,
+                           "incremental PiPNN with L2 duplicate detection requires "
+                           "duplicate_distance_threshold = 0");
+            const bool supports_incremental_input =
+                common_param.data_type_ == DataTypes::DATA_TYPE_FLOAT && !support_force_remove_ &&
+                !mci_parameters_.enabled && !use_conjugate_graph_ &&
+                !hgraph_param->rabitq_fused_datacell;
+            CHECK_ARGUMENT(supports_incremental_input,
                            "incremental PiPNN requires FP32 input without force removal, fused "
                            "storage, conjugate graph or MCI");
         }
@@ -217,8 +221,9 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         optimizer_ = std::make_shared<Optimizer<BasicSearcher>>(common_param);
     }
     check_and_init_raw_vector(hgraph_param->raw_vector_param, common_param);
-    if (pipnn_param_.add_use_codes)
+    if (pipnn_param_.add_use_codes) {
         pipnn_param_.ValidateAddDistanceCodes(*graph_build_distance_codes());
+    }
     if (this->using_dedup_storage()) {
         this->basic_flatten_codes_ = MakeCodeSlotFlattenAdapter(
             this->basic_flatten_codes_, this->code_slot_map_, allocator_, &this->total_count_);
@@ -243,8 +248,9 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
 
 FlattenInterfacePtr
 HGraph::pipnn_exact_store(int64_t source) const {
-    if (support_duplicate_)
+    if (support_duplicate_) {
         return nullptr;
+    }
     // A cosine FP32 code without its mold contains normalized coordinates.
     const auto exact = [&](const FlattenInterfacePtr& store) {
         return store && (!ignore_reorder_ || store != high_precise_codes_) &&
@@ -253,12 +259,16 @@ HGraph::pipnn_exact_store(int64_t source) const {
                (metric_ != MetricType::METRIC_TYPE_COSINE ||
                 store->GetQuantizerCodeSize() == (dim_ + 1) * sizeof(float));
     };
-    if ((!source || source == BASE_CODE) && exact(basic_flatten_codes_))
+    if (((source == 0) || source == BASE_CODE) && exact(basic_flatten_codes_)) {
         return basic_flatten_codes_;
-    if ((!source || source == PRECISE_CODE) && has_precise_reorder() && exact(high_precise_codes_))
+    }
+    if (((source == 0) || source == PRECISE_CODE) && has_precise_reorder() &&
+        exact(high_precise_codes_)) {
         return high_precise_codes_;
-    if ((!source || source == RAW_CODE) && exact(raw_vector_))
+    }
+    if (((source == 0) || source == RAW_CODE) && exact(raw_vector_)) {
         return raw_vector_;
+    }
     return nullptr;
 }
 
@@ -342,8 +352,9 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
         const auto distance_codes =
             graph_build_distance_codes(new_basic_code, new_precise_code, raw_after_tune);
         pipnn_param_.ValidateAddDistanceCodes(*distance_codes);
-        if (distance_codes == raw_after_tune && !covers_active_ids(raw_after_tune))
+        if (distance_codes == raw_after_tune && !covers_active_ids(raw_after_tune)) {
             return false;
+        }
     }
 
     // Check which codes need to be rebuilt.
@@ -1315,10 +1326,12 @@ HGraph::cal_memory_usage() const {
     // unaccounted and simply forces one more recalculation on the next query.
     const auto version = this->memory_usage_version_.load(std::memory_order_acquire);
     auto memory = sizeof(HGraph);
-    if (pipnn_add_state_)
+    if (pipnn_add_state_) {
         memory += pipnn_add_state_->MemoryUsage();
-    if (pipnn_exact_rows_)
+    }
+    if (pipnn_exact_rows_) {
         memory += pipnn_exact_rows_->MemoryUsage();
+    }
     memory += this->neighbors_mutex_->GetMemoryUsage();
     memory += this->pool_->GetMemoryUsage();
     memory += this->label_table_->GetMemoryUsage();

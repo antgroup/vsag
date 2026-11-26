@@ -117,11 +117,11 @@ public:
     }
 
     float
-    QueryDistance(InnerIdType id, QueryContext* = nullptr) const override {
+    QueryDistance(InnerIdType id, QueryContext* /*ctx*/ = nullptr) const override {
         return PairwiseDistance(query_id_, id, nullptr);
     }
 
-    float
+    [[nodiscard]] float
     PairwiseDistance(InnerIdType source,
                      InnerIdType target,
                      const ComputerInterfacePtr& computer) const override {
@@ -130,13 +130,13 @@ public:
         return distance;
     }
 
-    ComputerInterfacePtr
+    [[nodiscard]] ComputerInterfacePtr
     FactoryComputerById(InnerIdType id) const override {
-        return codes_->FactoryComputer(exact_rows_ ? exact_rows_->Get(id)
-                                                   : state_.GetVector(state_.LocalId(id)));
+        return codes_->FactoryComputer(
+            (exact_rows_ != nullptr) ? exact_rows_->Get(id) : state_.GetVector(state_.LocalId(id)));
     }
 
-    bool
+    [[nodiscard]] bool
     SupportsComputerById() const override {
         return true;
     }
@@ -554,8 +554,9 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
             if (auto exact = pipnn_exact_store(); !pipnn_param_.add_use_codes && exact) {
                 // Build consumes original inputs, including when query-code writes are deferred.
                 Vector<const float*> by_id(current_count + new_ids_count, nullptr, allocator_);
-                for (size_t i = 0; i < inner_ids.size(); ++i)
+                for (size_t i = 0; i < inner_ids.size(); ++i) {
                     by_id[inner_ids[i]] = pipnn_f32_vectors[i];
+                }
                 pipnn_builder.UpdateFromSharedRows(bottom_graph_, inner_ids, by_id, *state);
                 pipnn_exact_rows_ = std::make_shared<HGraphPiPNNRows>(std::move(exact));
             } else {
@@ -694,15 +695,18 @@ FlattenInterfacePtr
 HGraph::graph_build_distance_codes(const FlattenInterfacePtr& base,
                                    const FlattenInterfacePtr& precise,
                                    const FlattenInterfacePtr& raw) const {
-    if (build_by_base_)
+    if (build_by_base_) {
         return base;
-    if (precise)
+    }
+    if (precise) {
         return precise;
+    }
     if (graph_type_ == GRAPH_TYPE_VALUE_PIPNN && pipnn_param_.add_use_codes && raw &&
         raw->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32 &&
         !base->SupportSplitCodeStorage() &&
-        GetBaseQuantizerName(base->GetQuantizerName()) == QUANTIZATION_TYPE_VALUE_RABITQ)
+        GetBaseQuantizerName(base->GetQuantizerName()) == QUANTIZATION_TYPE_VALUE_RABITQ) {
         return raw;
+    }
     return base;
 }
 
@@ -712,15 +716,17 @@ HGraph::try_write_pipnn_rabitq_codes(const Vector<InnerIdType>& ids,
     constexpr size_t block_size = 64;
     const size_t workers =
         std::min<size_t>(build_thread_count_, (ids.size() + block_size - 1) / block_size);
-    if (workers < 2 || thread_pool_ == nullptr || thread_pool_->IsCurrentThread())
+    if (workers < 2 || thread_pool_ == nullptr || thread_pool_->IsCurrentThread()) {
         return false;
+    }
 
     // Tune takes add_mutex_ exclusively. Pin the trained encoders and their layout until
     // every block has committed, without serializing the expensive Encode calls.
     std::shared_lock add_lock(add_mutex_);
     if (GetBaseQuantizerName(basic_flatten_codes_->GetQuantizerName()) !=
-        QUANTIZATION_TYPE_VALUE_RABITQ)
+        QUANTIZATION_TYPE_VALUE_RABITQ) {
         return false;
+    }
     struct Store {
         FlattenInterface* cell;
         FlattenCodeWriter* writer;
@@ -730,20 +736,23 @@ HGraph::try_write_pipnn_rabitq_codes(const Vector<InnerIdType>& ids,
     size_t count = 0;
     auto add_store = [&](const FlattenInterfacePtr& cell) {
         auto* writer = dynamic_cast<FlattenCodeWriter*>(cell.get());
-        if (writer == nullptr || !writer->CanInsertEncodedRange())
+        if (writer == nullptr || !writer->CanInsertEncodedRange()) {
             return false;
+        }
         stores[count++] = {cell.get(), writer, cell->GetQuantizerCodeSize()};
         return true;
     };
     if (!add_store(basic_flatten_codes_) ||
         (has_precise_reorder() && !add_store(high_precise_codes_)) ||
-        (create_new_raw_vector_ && !add_store(raw_vector_)))
+        (create_new_raw_vector_ && !add_store(raw_vector_))) {
         return false;
+    }
 
     auto run = [&](size_t worker) {
         std::array<std::unique_ptr<ByteBuffer>, 3> buffers;
-        for (size_t j = 0; j < count; ++j)
+        for (size_t j = 0; j < count; ++j) {
             buffers[j] = std::make_unique<ByteBuffer>(block_size * stores[j].width, allocator_);
+        }
         for (size_t begin = worker * block_size; begin < ids.size();
              begin += workers * block_size) {
             const size_t end = std::min(begin + block_size, ids.size());
@@ -758,21 +767,27 @@ HGraph::try_write_pipnn_rabitq_codes(const Vector<InnerIdType>& ids,
             std::unique_lock codes_lock(persistent_codes_mutex_);
             for (size_t first = begin; first < end;) {
                 size_t next = first + 1;
-                while (next < end && ids[next] == ids[next - 1] + 1) ++next;
-                for (size_t j = 0; j < count; ++j)
+                while (next < end && ids[next] == ids[next - 1] + 1) {
+                    ++next;
+                }
+                for (size_t j = 0; j < count; ++j) {
                     stores[j].writer->InsertEncodedRange(
                         ids[first],
                         next - first,
                         buffers[j]->data + (first - begin) * stores[j].width);
+                }
                 first = next;
             }
-            for (size_t i = begin; i < end; ++i)
+            for (size_t i = begin; i < end; ++i) {
                 finish_code_write(ids[i], BASE_CODE | PRECISE_CODE | RAW_CODE);
+            }
         }
     };
     std::vector<std::future<void>> futures;
     HGraphBuildTaskGuard guard(futures, workers);
-    for (size_t i = 0; i < workers; ++i) futures.emplace_back(thread_pool_->GeneralEnqueue(run, i));
+    for (size_t i = 0; i < workers; ++i) {
+        futures.emplace_back(thread_pool_->GeneralEnqueue(run, i));
+    }
     wait_all_futures(futures);
     return true;
 }
@@ -780,11 +795,14 @@ HGraph::try_write_pipnn_rabitq_codes(const Vector<InnerIdType>& ids,
 std::vector<int64_t>
 HGraph::add_by_pipnn(const DatasetPtr& data) {
     validate_add_data(data);
-    CHECK_ARGUMENT(!support_force_remove() && !rabitq_fused_datacell_ && !use_conjugate_graph_,
+    const bool supports_incremental_mutation =
+        !support_force_remove() && !rabitq_fused_datacell_ && !use_conjugate_graph_;
+    CHECK_ARGUMENT(supports_incremental_mutation,
                    "unsupported mutation mode for incremental PiPNN");
     auto batch = prepare_add_batch(data, true);
-    if (batch.rows.empty())
+    if (batch.rows.empty()) {
         return batch.failed_ids;
+    }
     Vector<InnerIdType> ids(allocator_);
     Vector<const float*> vectors(allocator_);
     prepare_build_codes(data, batch.rows);
@@ -792,14 +810,18 @@ HGraph::add_by_pipnn(const DatasetPtr& data) {
         const auto* v = static_cast<const float*>(get_data(data, row.input_idx));
         ids.push_back(row.inner_id);
         vectors.push_back(v);
-        if (extra_infos_)
+        if (extra_infos_) {
             extra_infos_->InsertExtraInfo(data->GetExtraInfos() + row.input_idx * extra_info_size_,
                                           row.inner_id);
-        if (use_attribute_filter_ && data->GetAttributeSets())
+        }
+        if (use_attribute_filter_ && (data->GetAttributeSets() != nullptr)) {
             attr_filter_index_->Insert(data->GetAttributeSets()[row.input_idx], row.inner_id);
+        }
     }
     if (!using_dedup_storage() && !try_write_pipnn_rabitq_codes(ids, vectors)) {
-        for (size_t i = 0; i < ids.size(); ++i) insert_persistent_codes(vectors[i], ids[i]);
+        for (size_t i = 0; i < ids.size(); ++i) {
+            insert_persistent_codes(vectors[i], ids[i]);
+        }
     }
     std::unique_lock global(global_mutex_);
     auto parameters = pipnn_param_;
@@ -813,16 +835,19 @@ HGraph::add_by_pipnn(const DatasetPtr& data) {
         pipnn_exact_rows_->Materialize(*pipnn_add_state_, dim_, allocator_);
         pipnn_exact_rows_.reset();
     }
-    if (parameters.add_use_codes)
+    if (parameters.add_use_codes) {
         builder.UpdateWithCodes(bottom_graph_, ids, vectors, *pipnn_add_state_, *distance_codes);
-    else if (pipnn_exact_rows_) {
+    } else if (pipnn_exact_rows_) {
         auto rows = pipnn_exact_rows_->Prepare(*pipnn_add_state_, ids, max_capacity_.load());
         builder.UpdateFromSharedRows(bottom_graph_, ids, rows, *pipnn_add_state_);
-    } else
+    } else {
         builder.Update(bottom_graph_, ids, vectors, *pipnn_add_state_);
+    }
     if (using_dedup_storage()) {
         Vector<int64_t> positions(allocator_);
-        for (const auto& row : batch.rows) positions.push_back(row.input_idx);
+        for (const auto& row : batch.rows) {
+            positions.push_back(row.input_idx);
+        }
         materialize_pipnn_storage(
             ids,
             positions,
@@ -847,21 +872,24 @@ HGraph::add_by_pipnn(const DatasetPtr& data) {
             ensure_route_graphs_for_level(row.level);
             InnerSearchParam param;
             param.ep = entry_point_id_;
-            param.ef = param.topk = ef_construct_;
+            param.ef = ef_construct_;
+            param.topk = static_cast<int64_t>(ef_construct_);
             publish_unique_to_route_graphs(get_data(data, row.input_idx),
                                            row.level,
                                            row.inner_id,
                                            param,
                                            context.graph_read_codes);
-            if (highest)
+            if (highest) {
                 entry_point_id_ = row.inner_id;
+            }
         }
         const auto* source_ids = data->GetSourceID();
         {
             std::scoped_lock label_lock(label_lookup_mutex_);
             label_table_->Insert(row.inner_id, data->GetIds()[row.input_idx]);
-            if (source_ids && !source_ids[row.input_idx].empty())
+            if ((source_ids != nullptr) && !source_ids[row.input_idx].empty()) {
                 label_table_->InsertSourceId(row.inner_id, source_ids[row.input_idx]);
+            }
         }
         PublishNode(row.inner_id);
     }

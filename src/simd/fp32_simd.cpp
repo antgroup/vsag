@@ -49,7 +49,6 @@ ComputePiPNNOldRowTiles(const float* const* rows,
 }
 
 namespace pipnn_filter {
-namespace {
 RelativeHashes
 ScalarHash(const float* source, const float* target, uint64_t planes) {
     RelativeHashes hash{};
@@ -68,7 +67,6 @@ ScalarHash(const float* source, const float* target, uint64_t planes) {
     }
     return hash;
 }
-}  // namespace
 
 const Kernels&
 GetKernels() {

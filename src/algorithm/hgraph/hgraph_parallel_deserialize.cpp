@@ -179,9 +179,10 @@ HGraph::ParallelDeserialize(DeserializeReader& reader) {
             return comp.name == "pipnn_incremental";
         });
         if (it != components.end()) {
-            CHECK_ARGUMENT(it->granularity == ComponentGranularity::Whole &&
-                               metadata->Get("pipnn_incremental_version").IsNumberInteger(),
-                           "invalid incremental PiPNN component");
+            const bool valid_component =
+                it->granularity == ComponentGranularity::Whole &&
+                metadata->Get("pipnn_incremental_version").IsNumberInteger();
+            CHECK_ARGUMENT(valid_component, "invalid incremental PiPNN component");
             incremental = std::move(*it);
             components.erase(it);
         }
@@ -200,9 +201,9 @@ HGraph::ParallelDeserialize(DeserializeReader& reader) {
                         ForwardStreamReader stream(is);
                         BoundedForwardReader frame(&stream, comp.logical_size);
                         deserialize_pipnn_state(frame, metadata, count, true);
-                        CHECK_ARGUMENT(frame.GetCursor() == comp.logical_size &&
-                                           is.peek() == std::istream::traits_type::eof(),
-                                       "bad PiPNN frame size");
+                        const bool valid_frame_size = frame.GetCursor() == comp.logical_size &&
+                                                      is.peek() == std::istream::traits_type::eof();
+                        CHECK_ARGUMENT(valid_frame_size, "bad PiPNN frame size");
                     });
             }
         }
@@ -215,9 +216,9 @@ HGraph::ParallelDeserialize(DeserializeReader& reader) {
     // The probe path parses graph tails before filling IO. Rebuild incoming edges only
     // after all fills have joined, before any FORCE_REMOVE may relocate tail IDs.
     this->bottom_graph_->FinishDeserialize();
-    CHECK_ARGUMENT(
-        !pipnn_add_state_ || pipnn_add_state_->RequiredCapacity() <= bottom_graph_->MaxCapacity(),
-        "PiPNN state ID exceeds loaded graph capacity");
+    const bool ids_fit_graph =
+        !pipnn_add_state_ || pipnn_add_state_->RequiredCapacity() <= bottom_graph_->MaxCapacity();
+    CHECK_ARGUMENT(ids_fit_graph, "PiPNN state ID exceeds loaded graph capacity");
     this->validate_and_publish_dedup_state(serialized_total_count);
     if (!this->using_dedup_storage()) {
         // Keep failed Add reservations unavailable to subsequent Adds after restore.

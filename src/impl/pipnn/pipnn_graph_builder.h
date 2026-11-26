@@ -103,7 +103,7 @@ public:
           DataTypes data_type) const;
 
     void
-    Update(const GraphInterfacePtr&,
+    Update(const GraphInterfacePtr& graph,
            const Vector<InnerIdType>& batch_ids,
            const Vector<const float*>& batch_vectors,
            PiPNNIncrementalState& state) const;

@@ -145,6 +145,8 @@ HGraphParameter::FromJson(const JsonType& json) {
     if (json.Contains(EF_CONSTRUCTION_KEY)) {
         this->ef_construction = json[EF_CONSTRUCTION_KEY].GetUint64();
         CHECK_ARGUMENT(this->ef_construction > 0, "ef_construction must be positive");
+        CHECK_ARGUMENT(this->ef_construction <= INT64_MAX,
+                       "ef_construction exceeds signed search range");
     }
 
     // FromJson replaces the whole sub-struct, so it must run before any field that lives on

@@ -12,6 +12,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "common.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 
@@ -122,10 +123,13 @@ private:
     }
     uint8_t*
     row_data(uint32_t row) const {
-        if (width_ == 0)
-            return nullptr;
-        if (row < base_rows_)
+        if (width_ == 0 || row >= rows_) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "PiPNN top-k row has no entries");
+        }
+        if (row < base_rows_) {
+            CHECK_ARGUMENT(base_ != nullptr, "missing PiPNN base top-k rows");
             return base_.get() + uint64_t{row} * width_ * stride_;
+        }
         const auto offset = row - base_rows_;
         return blocks_[offset / BLOCK_ROWS].get() +
                uint64_t{offset % BLOCK_ROWS} * width_ * stride_;

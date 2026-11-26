@@ -79,7 +79,7 @@ SQ8ComputeBatch4Type SQ8ComputeIPBatch4 = GetSQ8ComputeIPBatch4();
 VSAG_DEFINE_SIMD_DISPATCH(SQ8ComputeCodesIP, SQ8ComputeCodesType);
 VSAG_DEFINE_SIMD_DISPATCH(SQ8ComputeCodesL2Sqr, SQ8ComputeCodesType);
 VSAG_DEFINE_SIMD_DISPATCH(SQ8SparseAccumulate, SQ8SparseAccumulateType);
-static void
+void
 SQ8CodeBatch4Fallback(const uint8_t* source,
                       const uint8_t* const* targets,
                       const float* lower_bound,

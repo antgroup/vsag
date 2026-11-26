@@ -25,6 +25,9 @@ struct Kernels {
     KthFilter kth;  // Null selects the existing row-wise top-k loop.
 };
 
+RelativeHashes
+ScalarHash(const float* source, const float* target, uint64_t planes);
+
 const Kernels&
 GetKernels();
 

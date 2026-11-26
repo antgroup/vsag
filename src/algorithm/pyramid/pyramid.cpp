@@ -788,8 +788,9 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
                 .AppendProjections(pipnn_projections_, rows);
         } else if (pipnn_param_.incremental_add && !pipnn_exact_codes()) {
             pipnn_exact_rows_.Resize(rows.size(), dim_, allocator_);
-            for (size_t i = 0; i < rows.size(); ++i)
+            for (size_t i = 0; i < rows.size(); ++i) {
                 std::copy_n(rows[i], dim_, pipnn_exact_rows_.Row(i));
+            }
         }
         for (const auto& [hname, hierarchy] : hierarchies_) {
             auto pipnn_parameter = pipnn_param_;
@@ -1418,8 +1419,9 @@ Pyramid::GetMemoryUsage() const {
 std::unordered_map<std::string, uint64_t>
 Pyramid::GetMemoryUsageDetail() const {
     std::unique_lock add_lock(pipnn_add_mutex_, std::defer_lock);
-    if (pipnn_param_.incremental_add)
+    if (pipnn_param_.incremental_add) {
         add_lock.lock();
+    }
     std::shared_lock resize_lock(resize_mutex_);
     std::unordered_map<std::string, uint64_t> memory_usage;
     memory_usage["pipnn_build_cache"] = pipnn_cache_memory_.load(std::memory_order_acquire);
@@ -1449,10 +1451,11 @@ Pyramid::GetMemoryUsageDetail() const {
     }
     memory_usage["hierarchies"] = hierarchy_memory;
     memory_usage["root_route_graphs"] = route_memory;
-    if (pipnn_projections_.projections.Size())
+    if (pipnn_projections_.projections.Size() != 0U) {
         memory_usage["pipnn_global_sketches"] =
             pipnn_projections_.planes.capacity() * sizeof(float) +
             pipnn_projections_.projections.MemoryUsage() + pipnn_projections_.norms.MemoryUsage();
+    }
     if (!pipnn_row_view_.rows.empty()) {
         const auto& view = pipnn_row_view_;
         memory_usage["pipnn_exact_row_view"] = view.rows.capacity() * sizeof(const float*) +
@@ -1462,10 +1465,12 @@ Pyramid::GetMemoryUsageDetail() const {
                 view.owned.size() * pipnn_exact_codes()->GetQuantizerCodeSize();
         }
     }
-    if (pipnn_exact_rows_.Size())
+    if (pipnn_exact_rows_.Size() != 0U) {
         memory_usage["pipnn_shared_fp32"] = pipnn_exact_rows_.MemoryUsage();
-    for (const auto& [graph, state] : pipnn_graph_states_)
+    }
+    for (const auto& [graph, state] : pipnn_graph_states_) {
         memory_usage["pipnn_incremental"] += state->MemoryUsage();
+    }
     return memory_usage;
 }
 
@@ -1518,16 +1523,19 @@ Pyramid::Serialize(StreamWriter& writer) const {
     if (pipnn_param_.incremental_add) {
         basic_info["pipnn_incremental_version"].SetInt(pipnn_param_.add_use_codes ? 3 : 2);
         if (pipnn_param_.add_use_codes) {
-            if (cur_element_count_)
+            if (cur_element_count_ != 0) {
                 pipnn_projections_.WriteSketches(writer);
-        } else if (!pipnn_exact_codes())
+            }
+        } else if (!pipnn_exact_codes()) {
             pipnn_exact_rows_.Write(writer);
+        }
         for (auto& graph : pipnn_graphs_in_path_order()) {
             auto it = pipnn_graph_states_.find(graph.get());
             bool present = it != pipnn_graph_states_.end();
             StreamWriter::WriteObj(writer, present);
-            if (present)
+            if (present) {
                 it->second->Serialize(writer, false);
+            }
         }
     }
     basic_info["max_capacity"].SetInt(max_capacity_);
@@ -1976,7 +1984,7 @@ Pyramid::Deserialize(StreamReader& reader) {
         const bool migrate_exact = version == 2 && pipnn_param_.add_use_codes;
         std::optional<uint64_t> exact_offset;
         if (version == 3) {
-            if (cur_element_count_) {
+            if (cur_element_count_ != 0) {
                 pipnn_projections_.ReadSketches(buffer_reader,
                                                 cur_element_count_,
                                                 dim_,
@@ -1996,15 +2004,16 @@ Pyramid::Deserialize(StreamReader& reader) {
                 StreamReader::ReadObj(buffer_reader, elements);
                 const auto count = static_cast<uint64_t>(cur_element_count_);
                 exact_offset = buffer_reader.GetCursor();
-                CHECK_ARGUMENT(dim_ && count <= UINT64_MAX / dim_ && elements == count * dim_ &&
-                                   elements <= (UINT64_MAX - *exact_offset) / sizeof(float),
-                               "bad PiPNN shared FP32 snapshot");
+                const bool valid_vector_shape =
+                    dim_ != 0 && count <= UINT64_MAX / dim_ && elements == count * dim_ &&
+                    elements <= (UINT64_MAX - *exact_offset) / sizeof(float);
+                CHECK_ARGUMENT(valid_vector_shape, "bad PiPNN shared FP32 snapshot");
                 buffer_reader.Seek(*exact_offset + elements * sizeof(float));
             }
         } else if (!pipnn_exact_codes()) {
-            if (version == 2)
+            if (version == 2) {
                 pipnn_exact_rows_.Read(buffer_reader, cur_element_count_, dim_, false, allocator_);
-            else {
+            } else {
                 pipnn_exact_rows_.Resize(cur_element_count_, dim_, allocator_);
                 recovered.resize(cur_element_count_);
             }
@@ -2023,8 +2032,9 @@ Pyramid::Deserialize(StreamReader& reader) {
                     allocator_,
                     version == 1 ? PiPNNVectorPayload::Restore : PiPNNVectorPayload::Absent);
                 if (pipnn_param_.add_use_codes) {
-                    if (migrate_exact && pipnn_projections_.planes.empty())
+                    if (migrate_exact && pipnn_projections_.planes.empty()) {
                         pipnn_projections_.planes = state->planes;
+                    }
                     CHECK_ARGUMENT(state->planes == pipnn_projections_.planes,
                                    "inconsistent PiPNN projection planes across Pyramid graphs");
                 }
@@ -2040,11 +2050,13 @@ Pyramid::Deserialize(StreamReader& reader) {
             }
         }
         if (migrate_exact) {
-            if (exact_offset)
+            if (exact_offset) {
                 buffer_reader.PushSeek(*exact_offset);
+            }
             restore_pipnn_projections_from_exact(buffer_reader);
-            if (exact_offset)
+            if (exact_offset) {
                 buffer_reader.PopSeek();
+            }
         }
         // A v1 cosine flat-only member may have only a normalized query code.
         if (std::find(recovered.begin(), recovered.end(), 0) != recovered.end()) {
@@ -2106,8 +2118,9 @@ Pyramid::Add(const DatasetPtr& base) {
         return {};
     }
     std::unique_lock lock(pipnn_add_mutex_, std::defer_lock);
-    if (pipnn_param_.incremental_add)
+    if (pipnn_param_.incremental_add) {
         lock.lock();
+    }
     auto batch = prepare_add_batch(base);
     insert_add_batch(base, batch);
     return batch.failed_ids;
@@ -2260,8 +2273,9 @@ void
 Pyramid::restore_pipnn_projections_from_exact(StreamReader& reader) {
     const uint64_t count = cur_element_count_;
     auto codes = pipnn_exact_codes();
-    if (!count)
+    if (count == 0U) {
         return;
+    }
     PiPNNGraphBuilder builder(pipnn_param_,
                               dim_,
                               common_param_.metric_,
@@ -2282,12 +2296,15 @@ Pyramid::restore_pipnn_projections_from_exact(StreamReader& reader) {
                 auto lease = codes->AcquireCodesById(first + i);
                 CHECK_ARGUMENT(lease, "missing exact PiPNN code");
                 view.rows.push_back(reinterpret_cast<const float*>(lease.Data()));
-                if (lease.NeedsRelease())
+                if (lease.NeedsRelease()) {
                     view.owned.emplace_back(std::move(lease));
+                }
             }
         } else {
             reader.Read(reinterpret_cast<char*>(buffer.data()), n * dim_ * sizeof(float));
-            for (uint64_t i = 0; i < n; ++i) view.rows.push_back(buffer.data() + i * dim_);
+            for (uint64_t i = 0; i < n; ++i) {
+                view.rows.push_back(buffer.data() + i * dim_);
+            }
         }
         builder.AppendProjections(pipnn_projections_, view.rows);
     }
@@ -2297,13 +2314,16 @@ void
 Pyramid::insert_add_batch(const DatasetPtr& base, const AddBatch& batch) {
     std::shared_lock<std::shared_mutex> storage_lock(resize_mutex_);
     const auto* data_vectors = get_data(base);
-    if (batch.input_indices.empty())
+    if (batch.input_indices.empty()) {
         return;
+    }
     PiPNNRowView temporary;
     std::span<const float* const> exact;
     if (pipnn_param_.incremental_add && pipnn_param_.add_use_codes) {
         std::vector<const float*> fresh;
-        for (auto i : batch.input_indices) fresh.push_back(base->GetFloat32Vectors() + i * dim_);
+        for (auto i : batch.input_indices) {
+            fresh.push_back(base->GetFloat32Vectors() + i * dim_);
+        }
         CHECK_ARGUMENT(pipnn_projections_.projections.Size() == batch.first_inner_id,
                        "PiPNN projection IDs out of sequence");
         PiPNNGraphBuilder(pipnn_param_,
@@ -2328,8 +2348,9 @@ Pyramid::insert_add_batch(const DatasetPtr& base, const AddBatch& batch) {
         // batch, and use the caller's FP32 input for the newly encoded IDs.
         const bool persistent = !codes || codes->InMemory();
         auto& view = persistent ? pipnn_row_view_ : temporary;
-        if (view.rows.empty())
+        if (view.rows.empty()) {
             view.rows.reserve(persistent ? max_capacity_ : total);
+        }
         for (size_t id = view.rows.size(); id < total; ++id) {
             if (!codes) {
                 view.rows.push_back(pipnn_exact_rows_.Row(id));
@@ -2340,8 +2361,9 @@ Pyramid::insert_add_batch(const DatasetPtr& base, const AddBatch& batch) {
                 auto lease = codes->AcquireCodesById(id);
                 CHECK_ARGUMENT(lease, "missing exact PiPNN code");
                 const auto* row = reinterpret_cast<const float*>(lease.Data());
-                if (lease.NeedsRelease())
+                if (lease.NeedsRelease()) {
                     view.owned.emplace_back(std::move(lease));
+                }
                 view.rows.push_back(row);
             }
         }
@@ -2390,29 +2412,35 @@ Pyramid::insert_add_batch(const DatasetPtr& base, const AddBatch& batch) {
 }
 
 void
-Pyramid::add_pipnn_to_hierarchy(Hierarchy& h,
+Pyramid::add_pipnn_to_hierarchy(Hierarchy& hierarchy,
                                 const DatasetPtr& dataset,
                                 const std::string& name,
                                 const AddBatch& batch,
                                 std::span<const float* const> exact) {
     std::unordered_map<IndexNode*, Vector<InnerIdType>> groups;
+    std::vector<IndexNode*> ordered_nodes;
     std::vector<int> levels;
-    if (h.root->has_routing()) {
-        auto sampled = sample_route_levels(*h.root, batch.input_indices.size());
+    if (hierarchy.root->has_routing()) {
+        auto sampled = sample_route_levels(*hierarchy.root, batch.input_indices.size());
         levels.assign(sampled.begin(), sampled.end());
     }
     for (uint64_t i = 0; i < batch.input_indices.size(); ++i) {
         uint64_t count = 0;
-        auto paths = GetDatasetPaths(*dataset, name, batch.input_indices[i], count);
-        for (auto* node : collect_path_nodes(h, paths, count)) {
-            if (std::find(h.no_build_levels.begin(), h.no_build_levels.end(), node->level_) ==
-                h.no_build_levels.end())
-                groups.try_emplace(node, allocator_)
-                    .first->second.push_back(batch.first_inner_id + i);
+        const auto* paths = GetDatasetPaths(*dataset, name, batch.input_indices[i], count);
+        for (auto* node : collect_path_nodes(hierarchy, paths, count)) {
+            if (std::find(hierarchy.no_build_levels.begin(),
+                          hierarchy.no_build_levels.end(),
+                          node->level_) == hierarchy.no_build_levels.end()) {
+                auto [group, inserted] = groups.try_emplace(node, allocator_);
+                if (inserted) {
+                    ordered_nodes.push_back(node);
+                }
+                group->second.push_back(batch.first_inner_id + i);
+            }
         }
     }
     auto parameters = pipnn_param_;
-    parameters.alpha = h.alpha;
+    parameters.alpha = hierarchy.alpha;
     PiPNNGraphBuilder builder(parameters,
                               dim_,
                               common_param_.metric_,
@@ -2420,38 +2448,44 @@ Pyramid::add_pipnn_to_hierarchy(Hierarchy& h,
                               thread_pool_.get(),
                               build_thread_count_);
     auto update = [&](GraphInterfacePtr& graph, const Vector<InnerIdType>& ids) {
-        if (ids.empty())
+        if (ids.empty()) {
             return;
+        }
         graph->SetMaxCapacity(max_capacity_);
         auto& state = pipnn_graph_states_[graph.get()];
-        if (!state)
+        if (!state) {
             state = std::make_shared<PiPNNIncrementalState>();
-        if (parameters.add_use_codes)
+        }
+        if (parameters.add_use_codes) {
             builder.UpdateWithCodes(graph,
                                     ids,
                                     Vector<const float*>(allocator_),
                                     *state,
                                     *construction_codes(),
                                     &pipnn_projections_);
-        else
+        } else {
             builder.UpdateFromSharedRows(graph, ids, exact, *state);
+        }
     };
-    for (auto& [node, ids] : groups) {
+    for (auto* node : ordered_nodes) {
+        auto& ids = groups.at(node);
         std::unique_lock lock(node->mutex_);
         if (node->status_ != IndexNode::Status::GRAPH) {
             node->ids_.insert(node->ids_.end(), ids.begin(), ids.end());
             node->status_ = IndexNode::Status::NO_INDEX;
             node->Init();
-            if (node->status_ != IndexNode::Status::GRAPH)
+            if (node->status_ != IndexNode::Status::GRAPH) {
                 continue;
+            }
             node->entry_point_ = node->ids_.front();
             update(node->graph_, node->ids_);
             node->ids_.clear();
         } else {
             update(node->graph_, ids);
         }
-        if (!node->has_routing() || levels.empty())
+        if (!node->has_routing() || levels.empty()) {
             continue;
+        }
         const auto old_top = static_cast<int>(node->routing_->graphs.size()) - 1;
         int top = old_top;
         for (auto id : ids) {
@@ -2462,12 +2496,15 @@ Pyramid::add_pipnn_to_hierarchy(Hierarchy& h,
             }
         }
         for (int j = 0; j <= top; ++j) {
-            if (j > old_top)
+            if (j > old_top) {
                 node->routing_->graphs.push_back(node->make_route_graph());
+            }
             Vector<InnerIdType> route_ids(allocator_);
-            for (auto id : ids)
-                if (levels.at(id - batch.first_inner_id) >= j)
+            for (auto id : ids) {
+                if (levels.at(id - batch.first_inner_id) >= j) {
                     route_ids.push_back(id);
+                }
+            }
             update(node->routing_->graphs[j], route_ids);
         }
     }
@@ -2477,17 +2514,29 @@ std::vector<GraphInterfacePtr>
 Pyramid::pipnn_graphs_in_path_order() const {
     std::vector<GraphInterfacePtr> graphs;
     std::function<void(const IndexNode&)> visit = [&](const IndexNode& node) {
-        if (node.graph_)
+        if (node.graph_) {
             graphs.push_back(node.graph_);
-        if (node.has_routing())
-            for (auto& graph : node.routing_->graphs) graphs.push_back(graph);
+        }
+        if (node.has_routing()) {
+            for (auto& graph : node.routing_->graphs) {
+                graphs.push_back(graph);
+            }
+        }
         std::map<std::string, const IndexNode*> children;
-        for (auto& [name, child] : node.children_) children.emplace(name, child.get());
-        for (auto& [name, child] : children) visit(*child);
+        for (const auto& [name, child] : node.children_) {
+            children.emplace(name, child.get());
+        }
+        for (auto& [name, child] : children) {
+            visit(*child);
+        }
     };
     std::map<std::string, const IndexNode*> roots;
-    for (auto& [name, h] : hierarchies_) roots.emplace(name, h->root.get());
-    for (auto& [name, root] : roots) visit(*root);
+    for (const auto& [name, h] : hierarchies_) {
+        roots.emplace(name, h->root.get());
+    }
+    for (auto& [name, root] : roots) {
+        visit(*root);
+    }
     return graphs;
 }
 
@@ -2864,11 +2913,13 @@ Pyramid::Build(const DatasetPtr& base) {
                 return build_with_cache(base);
             }
             logger::info(
-                "[pyramid_build_cache] source-id overlap below {}%; falling back to cold build",
+                "[pyramid_build_cache] source-id overlap below {}%; falling back to cold "
+                "build",
                 minimum_cache_hit_percent);
         } else {
             logger::warn(
-                "[pyramid_build_cache] duplicate source_id or label; falling back to cold build");
+                "[pyramid_build_cache] duplicate source_id or label; falling back to cold "
+                "build");
         }
     }
     if (graph_type_ != GRAPH_TYPE_VALUE_PIPNN) {
@@ -3179,7 +3230,8 @@ Pyramid::repair_duplicate_connectivity(IndexNode& node,
     }
     if (bridges != 0) {
         logger::info(
-            "[pyramid_duplicate_connectivity] repaired {} representative connectivity bridges",
+            "[pyramid_duplicate_connectivity] repaired {} representative connectivity "
+            "bridges",
             bridges);
     }
 }
@@ -3864,7 +3916,8 @@ Pyramid::search_node(const IndexNode* node,
             results->Push(dists[i], ids_ptr[i]);
             if (results->Size() > search_param.ef) {
                 if (ctx.reasoning_ctx != nullptr) {
-                    ctx.reasoning_ctx->RecordEviction(results->Top().second, 0);  // [reasoning]
+                    ctx.reasoning_ctx->RecordEviction(results->Top().second,
+                                                      0);  // [reasoning]
                 }
                 results->Pop();
             }
