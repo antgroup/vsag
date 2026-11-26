@@ -382,7 +382,7 @@ HGraphRaBitQFusedDataCell::Serialize(StreamWriter& writer) {
         ByteBuffer buffer(batch * supplement_code_size_, allocator_);
         for (uint64_t first = 0; first < max_capacity_; first += batch) {
             const auto count = std::min<uint64_t>(batch, max_capacity_ - first);
-            std::iota(ids.begin(), ids.begin() + count, static_cast<InnerIdType>(first));
+            std::iota(ids.data(), ids.data() + count, static_cast<InnerIdType>(first));
             ReadSupplements(ids.data(), count, buffer.data);
             writer.Write(reinterpret_cast<const char*>(buffer.data), count * supplement_code_size_);
         }
@@ -496,10 +496,10 @@ HGraphRaBitQFusedDataCell::Deserialize(StreamReader& reader) {
     replacement->Reserve(max_capacity_);
     replacement->ReadRecords(reader, max_capacity_);
     if (external_supplement_ != nullptr) {
-        CHECK_ARGUMENT(
+        const bool valid_extent =
             supplement_code_size_ != 0 and
-                max_capacity_ <= std::numeric_limits<uint64_t>::max() / supplement_code_size_,
-            "invalid external supplement extent");
+            max_capacity_ <= std::numeric_limits<uint64_t>::max() / supplement_code_size_;
+        CHECK_ARGUMENT(valid_extent, "invalid external supplement extent");
         external_supplement_->DeserializeSupplement(
             reader, static_cast<uint64_t>(max_capacity_) * supplement_code_size_);
         failed_updates_.clear();

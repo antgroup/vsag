@@ -99,8 +99,9 @@ HGraphParameter::FromJson(const JsonType& json) {
                        "unknown rabitq_fused_layout");
         this->external_fused_supplement = layout == "external_supplement";
     }
-    CHECK_ARGUMENT(not external_fused_supplement or rabitq_fused_datacell,
-                   "external_supplement requires rabitq_fused_datacell");
+    if (external_fused_supplement) {
+        CHECK_ARGUMENT(rabitq_fused_datacell, "external_supplement requires rabitq_fused_datacell");
+    }
 
     CHECK_ARGUMENT(json.Contains(BASE_CODES_KEY),
                    fmt::format("hgraph parameters must contains {}", BASE_CODES_KEY));

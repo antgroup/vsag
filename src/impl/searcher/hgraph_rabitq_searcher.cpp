@@ -1068,8 +1068,8 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
         });
         BoundedResults refined(rerank_topk, allocator);
         const auto stride = graph->FusedSupplementCodeSize();
-        const auto batch =
-            std::min<uint64_t>(shortlist.size(), std::max<uint64_t>(1, (256 * 1024) / stride));
+        const auto batch = std::min<uint64_t>(
+            shortlist.size(), std::max<uint64_t>(1, (uint64_t{256} * 1024) / stride));
         Vector<InnerIdType> ids(batch, allocator);
         Vector<uint8_t> codes(batch * stride, allocator);
         for (uint64_t begin = 0; begin < shortlist.size(); begin += batch) {
@@ -1219,7 +1219,7 @@ route_direct_fused(const GraphInterfacePtr& route_graph,
             scorer.HasValidFilterDistance(node, *distance)) {
             return true;
         }
-        return not fused_graph->HasExternalSupplement() and scorer.FullDirect(node, distance);
+        return node.supplement_code != nullptr and scorer.FullDirect(node, distance);
     };
     float current_distance = 0.0F;
     if (not score(entry_point, &current_distance)) {

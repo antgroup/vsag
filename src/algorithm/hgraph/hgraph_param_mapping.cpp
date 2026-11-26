@@ -404,9 +404,10 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
         const auto graph_param =
             std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_parameter->bottom_graph_param);
         CHECK_ARGUMENT(graph_param != nullptr, "rabitq_fused_datacell requires flat graph storage");
-        CHECK_ARGUMENT(
-            not hgraph_parameter->external_fused_supplement or graph_param->max_degree_ == 64,
-            "external_supplement requires max_degree=64");
+        if (hgraph_parameter->external_fused_supplement) {
+            CHECK_ARGUMENT(graph_param->max_degree_ == 64,
+                           "external_supplement requires max_degree=64");
+        }
         const auto graph_io_type = graph_param->io_parameter_->GetTypeName();
         CHECK_ARGUMENT(graph_io_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO or
                            graph_io_type == IO_TYPE_VALUE_MEMORY_IO,

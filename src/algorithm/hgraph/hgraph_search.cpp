@@ -142,9 +142,9 @@ HGraph::KnnSearch(const DatasetPtr& query,
     this->validate_knn_args(query, k);
 
     auto params = HGraphSearchParameters::FromJson(parameters);
-    CHECK_ARGUMENT(
-        rabitq_fused_datacell_ == nullptr or not rabitq_fused_datacell_->HasExternalSupplement(),
-        "external_supplement does not support iterator search");
+    const bool external =
+        rabitq_fused_datacell_ != nullptr and rabitq_fused_datacell_->HasExternalSupplement();
+    CHECK_ARGUMENT(not external, "external_supplement does not support iterator search");
     const SearchLockScope search_lock_scope(params.search_no_lock);
     const auto threshold = ParseSearchThreshold(parameters);
     ctx.rabitq_error_rate = params.rabitq_error_rate;
@@ -793,16 +793,18 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     const bool external =
         rabitq_fused_datacell_ != nullptr and rabitq_fused_datacell_->HasExternalSupplement();
     if (external) {
-        CHECK_ARGUMENT(not is_range and not use_custom_distance,
-                       "external_supplement requires vector KNN search");
-        CHECK_ARGUMENT(
-            not params.search_no_lock or this->immutable_.load(std::memory_order_acquire),
-            "mutable external_supplement searches require the index read lock");
-        CHECK_ARGUMENT(params.enable_reorder and
-                           (not params.has_rabitq_one_bit_search or params.rabitq_one_bit_search),
-                       "external_supplement requires filter scanning and reranking");
-        CHECK_ARGUMENT(params.rabitq_rerank_candidates == 0 or params.rabitq_rerank_candidates >= k,
-                       "rabitq_rerank_candidates must be at least k");
+        const bool vector_knn = not is_range and not use_custom_distance;
+        const bool protected_read =
+            not params.search_no_lock or this->immutable_.load(std::memory_order_acquire);
+        const bool two_stage = params.enable_reorder and (not params.has_rabitq_one_bit_search or
+                                                          params.rabitq_one_bit_search);
+        const bool valid_budget =
+            params.rabitq_rerank_candidates == 0 or params.rabitq_rerank_candidates >= k;
+        CHECK_ARGUMENT(vector_knn, "external_supplement requires vector KNN search");
+        CHECK_ARGUMENT(protected_read,
+                       "mutable external_supplement searches require the index read lock");
+        CHECK_ARGUMENT(two_stage, "external_supplement requires filter scanning and reranking");
+        CHECK_ARGUMENT(valid_budget, "rabitq_rerank_candidates must be at least k");
         params.rabitq_one_bit_search = true;
     }
     const SearchLockScope search_lock_scope(params.search_no_lock);
