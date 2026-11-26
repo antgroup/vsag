@@ -8,3 +8,4 @@
 - 中文网站：<https://vsag.io/docs/zh/resources/eval.html>
 - 配置模板：[eval_template.yaml](eval_template.yaml)
 - Python 用法（`pyvsag.eval`、`pyvsag-eval`）：见上述中文文档的“Python 使用”章节
+- 查询子集准备：[prepare_query_split.py](prepare_query_split.py)，用法见[校准与验证输入说明](../../docs/docs/zh/src/resources/eval.md#准备校准与验证输入)。
