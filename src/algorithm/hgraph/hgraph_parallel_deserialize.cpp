@@ -24,7 +24,7 @@
 #include "datacell/clique_datacell.h"
 #include "hgraph.h"
 #include "hgraph_component_names.h"  // IWYU pragma: keep
-#include "impl/pipnn/pipnn_incremental.h"
+#include "hgraph_pipnn_add.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "storage/chunked_manifest.h"
 #include "storage/parallel_deserialize_utils.h"
@@ -193,14 +193,14 @@ HGraph::ParallelDeserialize(DeserializeReader& reader) {
                 std::max<uint64_t>(serialized_total_count, basic_flatten_codes_->TotalCount());
             if (chunked_manifest.codec_ == "none") {
                 auto frame = footer_reader.Slice(comp.offset, comp.logical_size);
-                deserialize_pipnn_state(frame, metadata, count);
+                pipnn_add_ = PiPNNAdd::Read(*this, frame, metadata, count);
                 CHECK_ARGUMENT(frame.GetCursor() == comp.logical_size, "bad PiPNN frame size");
             } else {
                 read_decompressed_checked(
                     reader, comp.offset, comp.compressed_size, [&](std::istream& is) {
                         ForwardStreamReader stream(is);
                         BoundedForwardReader frame(&stream, comp.logical_size);
-                        deserialize_pipnn_state(frame, metadata, count, true);
+                        pipnn_add_ = PiPNNAdd::Read(*this, frame, metadata, count, true);
                         const bool valid_frame_size = frame.GetCursor() == comp.logical_size &&
                                                       is.peek() == std::istream::traits_type::eof();
                         CHECK_ARGUMENT(valid_frame_size, "bad PiPNN frame size");
@@ -217,7 +217,7 @@ HGraph::ParallelDeserialize(DeserializeReader& reader) {
     // after all fills have joined, before any FORCE_REMOVE may relocate tail IDs.
     this->bottom_graph_->FinishDeserialize();
     const bool ids_fit_graph =
-        !pipnn_add_state_ || pipnn_add_state_->RequiredCapacity() <= bottom_graph_->MaxCapacity();
+        !pipnn_add_ || pipnn_add_->state.RequiredCapacity() <= bottom_graph_->MaxCapacity();
     CHECK_ARGUMENT(ids_fit_graph, "PiPNN state ID exceeds loaded graph capacity");
     this->validate_and_publish_dedup_state(serialized_total_count);
     if (!this->using_dedup_storage()) {

@@ -35,12 +35,11 @@
 #include "datacell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
 #include "hgraph_fgim.h"
-#include "hgraph_pipnn_rows.h"
+#include "hgraph_pipnn_add.h"
 #include "impl/filter/filter_headers.h"
 #include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
-#include "impl/pipnn/pipnn_incremental.h"
 #include "impl/pruning_strategy.h"
 #include "impl/reasoning/reasoning_context.h"
 #include "impl/reorder/flatten_reorder.h"
@@ -86,6 +85,8 @@ HGraph::check_user_defined_precise_io_supported(std::string_view operation) cons
         }
     }
 }
+
+HGraph::~HGraph() = default;
 
 HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonParam& common_param)
     : InnerIndexInterface(hgraph_param, common_param),
@@ -222,7 +223,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     }
     check_and_init_raw_vector(hgraph_param->raw_vector_param, common_param);
     if (pipnn_param_.add_use_codes) {
-        pipnn_param_.ValidateAddDistanceCodes(*graph_build_distance_codes());
+        pipnn_param_.ValidateAddDistanceCodes(*PiPNNAdd::DistanceCodes(*this));
     }
     if (this->using_dedup_storage()) {
         this->basic_flatten_codes_ = MakeCodeSlotFlattenAdapter(
@@ -244,45 +245,6 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     // Reorder retains its flatten pointer, so initialize it after slot wrapping.
     init_resize_bit_and_reorder();
     resize(bottom_graph_->max_capacity_);
-}
-
-FlattenInterfacePtr
-HGraph::pipnn_exact_store(int64_t source) const {
-    if (support_duplicate_) {
-        return nullptr;
-    }
-    // A cosine FP32 code without its mold contains normalized coordinates.
-    const auto exact = [&](const FlattenInterfacePtr& store) {
-        return store && (!ignore_reorder_ || store != high_precise_codes_) &&
-               (source || store->CanBorrowRowsUntilResize()) &&
-               store->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32 &&
-               (metric_ != MetricType::METRIC_TYPE_COSINE ||
-                store->GetQuantizerCodeSize() == (dim_ + 1) * sizeof(float));
-    };
-    if (((source == 0) || source == BASE_CODE) && exact(basic_flatten_codes_)) {
-        return basic_flatten_codes_;
-    }
-    if (((source == 0) || source == PRECISE_CODE) && has_precise_reorder() &&
-        exact(high_precise_codes_)) {
-        return high_precise_codes_;
-    }
-    if (((source == 0) || source == RAW_CODE) && exact(raw_vector_)) {
-        return raw_vector_;
-    }
-    return nullptr;
-}
-
-int64_t
-HGraph::pipnn_snapshot_version() const {
-    return pipnn_exact_rows_ ? 3 : pipnn_param_.add_use_codes ? 2 : 1;
-}
-
-int64_t
-HGraph::pipnn_exact_source() const {
-    const auto& source = pipnn_exact_rows_->Store();
-    return source == basic_flatten_codes_  ? BASE_CODE
-           : source == high_precise_codes_ ? PRECISE_CODE
-                                           : RAW_CODE;
 }
 
 bool
@@ -350,7 +312,7 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
         const auto raw_after_tune =
             disable_future_tuning && !requires_raw_vector ? nullptr : raw_vector_;
         const auto distance_codes =
-            graph_build_distance_codes(new_basic_code, new_precise_code, raw_after_tune);
+            PiPNNAdd::DistanceCodes(*this, new_basic_code, new_precise_code, raw_after_tune);
         pipnn_param_.ValidateAddDistanceCodes(*distance_codes);
         if (distance_codes == raw_after_tune && !covers_active_ids(raw_after_tune)) {
             return false;
@@ -536,12 +498,12 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
             }
         }
         // Materialize historical inputs if the last index reference to their store was removed.
-        if (pipnn_exact_rows_) {
-            const auto& source = pipnn_exact_rows_->Store();
+        if (pipnn_add_ && pipnn_add_->exact_rows) {
+            const auto& source = pipnn_add_->exact_rows->Store();
             if (source != basic_flatten_codes_ && source != high_precise_codes_ &&
                 source != raw_vector_) {
-                pipnn_exact_rows_->Materialize(*pipnn_add_state_, dim_, allocator_);
-                pipnn_exact_rows_.reset();
+                pipnn_add_->exact_rows->Materialize(pipnn_add_->state, dim_, allocator_);
+                pipnn_add_->exact_rows.reset();
             }
         }
     }
@@ -1326,11 +1288,11 @@ HGraph::cal_memory_usage() const {
     // unaccounted and simply forces one more recalculation on the next query.
     const auto version = this->memory_usage_version_.load(std::memory_order_acquire);
     auto memory = sizeof(HGraph);
-    if (pipnn_add_state_) {
-        memory += pipnn_add_state_->MemoryUsage();
-    }
-    if (pipnn_exact_rows_) {
-        memory += pipnn_exact_rows_->MemoryUsage();
+    if (pipnn_add_) {
+        memory += pipnn_add_->state.MemoryUsage();
+        if (pipnn_add_->exact_rows) {
+            memory += pipnn_add_->exact_rows->MemoryUsage();
+        }
     }
     memory += this->neighbors_mutex_->GetMemoryUsage();
     memory += this->pool_->GetMemoryUsage();

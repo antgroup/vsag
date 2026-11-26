@@ -8,11 +8,12 @@
 #include <thread>
 
 #include "algorithm/hgraph/hgraph.h"
-#include "algorithm/hgraph/hgraph_pipnn_rows.h"
+#include "algorithm/hgraph/hgraph_pipnn_add.h"
 #include "algorithm/pyramid/pyramid.h"
 #include "framework/test_reader.h"
 #include "impl/pipnn/pipnn_incremental.h"
 #include "index/index_impl.h"
+#include "storage/serialization.h"
 #include "unittest.h"
 #include "vsag/vsag.h"
 
@@ -37,18 +38,13 @@ struct PiPNNQuantizedAddTestAccess {
         return std::dynamic_pointer_cast<HGraph>(impl->GetInnerIndex());
     }
 
-    static int64_t
-    fp32_version(const IndexPtr& index) {
-        return hgraph(index)->pipnn_snapshot_version();
-    }
-
     static void
     own_fp32(const IndexPtr& index) {
         auto graph = hgraph(index);
-        REQUIRE(graph->pipnn_exact_rows_);
-        graph->pipnn_exact_rows_->Materialize(
-            *graph->pipnn_add_state_, graph->dim_, graph->allocator_);
-        graph->pipnn_exact_rows_.reset();
+        REQUIRE(graph->pipnn_add_->exact_rows);
+        graph->pipnn_add_->exact_rows->Materialize(
+            graph->pipnn_add_->state, graph->dim_, graph->allocator_);
+        graph->pipnn_add_->exact_rows.reset();
     }
 
     static void
@@ -99,22 +95,22 @@ struct PiPNNQuantizedAddTestAccess {
         } else {
             auto impl = std::dynamic_pointer_cast<IndexImpl<HGraph>>(index);
             auto graph = std::dynamic_pointer_cast<HGraph>(impl->GetInnerIndex());
-            write_graph(buffer, *graph->pipnn_add_state_, graph->bottom_graph_, graph->allocator_);
+            write_graph(buffer, graph->pipnn_add_->state, graph->bottom_graph_, graph->allocator_);
         }
         return buffer.str();
     }
-    static std::vector<std::shared_ptr<PiPNNIncrementalState>>
+    static std::vector<PiPNNIncrementalState*>
     states(const IndexPtr& index, bool pyramid) {
         if (!pyramid)
-            return {hgraph(index)->pipnn_add_state_};
+            return {&hgraph(index)->pipnn_add_->state};
         auto impl = std::dynamic_pointer_cast<IndexImpl<Pyramid>>(index);
         auto p = std::dynamic_pointer_cast<Pyramid>(impl->GetInnerIndex());
         REQUIRE(p->pipnn_exact_rows_.Size() == 0);
         REQUIRE(p->pipnn_exact_rows_.MemoryUsage() == 0);
         REQUIRE(p->pipnn_projections_.projections.Size() ==
                 static_cast<uint64_t>(index->GetNumElements()));
-        std::vector<std::shared_ptr<PiPNNIncrementalState>> states;
-        for (const auto& [graph, state] : p->pipnn_graph_states_) states.push_back(state);
+        std::vector<PiPNNIncrementalState*> states;
+        for (const auto& [graph, state] : p->pipnn_graph_states_) states.push_back(state.get());
         return states;
     }
     static void
@@ -181,9 +177,17 @@ TEST_CASE("HGraph shares exact incremental rows across resize, Tune and legacy r
         REQUIRE(result.has_value());
         return result.value();
     };
+    auto snapshot_version = [](const vsag::IndexPtr& index) {
+        std::stringstream bytes;
+        REQUIRE(index->Serialize(bytes).has_value());
+        vsag::IOStreamReader reader(bytes);
+        auto footer = vsag::Footer::Parse(reader);
+        REQUIRE(footer != nullptr);
+        return footer->GetMetadata()->Get("pipnn_incremental_version").GetInt();
+    };
     auto owned = create();
     REQUIRE(owned->Build(data(0, initial)).has_value());
-    REQUIRE(Access::fp32_version(owned) == 3);
+    REQUIRE(snapshot_version(owned) == 3);
     REQUIRE(Access::states(owned, false).front()->Rows().empty());
     std::stringstream compact;
     REQUIRE(owned->Serialize(compact).has_value());
@@ -197,7 +201,7 @@ TEST_CASE("HGraph shares exact incremental rows across resize, Tune and legacy r
         file_params["index_param"]["base_io_type"].SetString("reader_io");
         auto disk = vsag::Factory::CreateIndex("hgraph", file_params.Dump()).value();
         REQUIRE(disk->Deserialize(readers).has_value());
-        REQUIRE(Access::fp32_version(disk) == 3);
+        REQUIRE(snapshot_version(disk) == 3);
         for (int i = 0; i < initial; ++i) {
             auto distance = disk->CalcDistanceById(data(i, 1), ids[i], true);
             REQUIRE(distance.has_value());
@@ -226,7 +230,7 @@ TEST_CASE("HGraph shares exact incremental rows across resize, Tune and legacy r
         if (begin == initial + 2)
             Access::grow_hgraph(shared);
         for (const auto& index : {shared, restored}) {
-            REQUIRE(Access::fp32_version(index) == 3);
+            REQUIRE(snapshot_version(index) == 3);
             REQUIRE(Access::states(index, false).front()->Rows().empty());
         }
         for (const auto& index : {owned, restored, shared})
@@ -240,7 +244,7 @@ TEST_CASE("HGraph shares exact incremental rows across resize, Tune and legacy r
         REQUIRE(tuned.has_value());
         REQUIRE(tuned.value());
         REQUIRE_FALSE(Access::raw(shared));
-        REQUIRE(Access::fp32_version(shared) == 1);
+        REQUIRE(snapshot_version(shared) == 1);
         REQUIRE(std::memcmp(Access::states(shared, false).front()->GetVector(0),
                             vectors.data(),
                             dim * sizeof(float)) == 0);
@@ -251,7 +255,7 @@ TEST_CASE("HGraph shares exact incremental rows across resize, Tune and legacy r
     REQUIRE(owned->Serialize(distinct).has_value());
     auto historical = create();
     REQUIRE(historical->Deserialize(distinct).has_value());
-    REQUIRE(Access::fp32_version(historical) == 1);
+    REQUIRE(snapshot_version(historical) == 1);
     REQUIRE(std::memcmp(Access::states(historical, false).front()->GetVector(initial - 1),
                         vectors.data(),
                         dim * sizeof(float)) == 0);

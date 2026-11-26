@@ -1,6 +1,7 @@
 set(HGRAPH_SRCS
     hgraph.cpp
     hgraph_build.cpp
+    hgraph_pipnn_add.cpp
     hgraph_fgim.cpp
     hgraph_fast_build.cpp
     hgraph_modify.cpp

@@ -65,7 +65,6 @@ namespace vsag {
 class ChunkedManifest;
 struct ComponentManifestEntry;
 class FlattenOptimizedBuildInterface;
-class HGraphPiPNNRows;
 class HGraphFGIM;
 class HGraphRaBitQFusedDataCell;
 class HGraphRaBitQSearcher;
@@ -115,7 +114,7 @@ public:
     HGraph(const ParamPtr& param, const IndexCommonParam& common_param)
         : HGraph(std::dynamic_pointer_cast<HGraphParameter>(param), common_param) {};
 
-    ~HGraph() override = default;
+    ~HGraph() override;
 
     std::vector<int64_t>
     Add(const DatasetPtr& data) override;
@@ -458,9 +457,6 @@ public:
     std::vector<int64_t>
     build_by_pipnn(const DatasetPtr& data);
 
-    std::vector<int64_t>
-    add_by_pipnn(const DatasetPtr& data);
-
     /// Shared batch-build orchestration for ODescent and PiPNN.
     std::vector<int64_t>
     build_by_batch_graph(const DatasetPtr& data, bool use_pipnn);
@@ -673,10 +669,6 @@ private:
     [[nodiscard]] bool
     need_temporary_sq8_build_data_for_add() const;
 
-    bool
-    try_write_pipnn_rabitq_codes(const Vector<InnerIdType>& ids,
-                                 const Vector<const float*>& vectors);
-
     void
     prepare_build_codes(const DatasetPtr& data, const Vector<AddRow>& rows);
 
@@ -823,12 +815,6 @@ private:
     /// Write label (external id) mappings to stream.
     void
     serialize_label_info(StreamWriter& writer) const;
-
-    void
-    deserialize_pipnn_state(StreamReader& reader,
-                            const MetadataPtr& metadata,
-                            uint64_t count,
-                            bool forward_only = false);
 
     /// shared post-deserialization steps (dedup validation, memory accounting)
     void
@@ -995,17 +981,6 @@ private:
     has_precise_reorder() const {
         return use_reorder_ and not reorder_by_base_;
     }
-
-    [[nodiscard]] FlattenInterfacePtr
-    graph_build_distance_codes() const {
-        return graph_build_distance_codes(basic_flatten_codes_,
-                                          has_precise_reorder() ? high_precise_codes_ : nullptr,
-                                          raw_vector_);
-    }
-    FlattenInterfacePtr
-    graph_build_distance_codes(const FlattenInterfacePtr& base,
-                               const FlattenInterfacePtr& precise,
-                               const FlattenInterfacePtr& raw) const;
 
     /// True when force-remove is enabled.
     [[nodiscard]] bool
@@ -1317,14 +1292,8 @@ private:
     InnerIdType entry_point_id_{INVALID_ENTRY_POINT};  // top-level entry point
 
     ODescentParameterPtr odescent_param_{nullptr};  // ODescent build parameters
-    std::shared_ptr<PiPNNIncrementalState> pipnn_add_state_;
-    std::shared_ptr<HGraphPiPNNRows> pipnn_exact_rows_;
-    FlattenInterfacePtr
-    pipnn_exact_store(int64_t source = 0) const;
-    int64_t
-    pipnn_snapshot_version() const;
-    int64_t
-    pipnn_exact_source() const;
+    struct PiPNNAdd;
+    std::unique_ptr<PiPNNAdd> pipnn_add_;
     PiPNNGraphBuilderParameter pipnn_param_{};      // PiPNN build parameters
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};  // graph algorithm type
 
