@@ -1423,6 +1423,7 @@ DiskANN::cal_distance_by_id(const float* query,
         CHECK_ARGUMENT(query != nullptr, "query cannot be null when count is greater than 0");
         CHECK_ARGUMENT(ids != nullptr, "ids cannot be null when count is greater than 0");
     }
+    std::shared_lock lock(rw_mutex_);
     auto allocator = this->common_param_.allocator_;
     auto result = Dataset::Make();
     result->Owner(true, allocator.get());
@@ -1462,6 +1463,7 @@ DiskANN::calc_distance_by_id(const float* vector,
                             "support_calc_distance_by_id=true in the build parameters");
     }
     CHECK_ARGUMENT(vector != nullptr, "vector cannot be null");
+    std::shared_lock lock(rw_mutex_);
     if (not this->index_) {
         ThrowLabelNotFound(id);
     }
