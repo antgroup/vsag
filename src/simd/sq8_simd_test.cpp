@@ -15,7 +15,9 @@
 
 #include "sq8_simd.h"
 
+#include <array>
 #include <catch2/benchmark/catch_benchmark.hpp>
+#include <cmath>
 
 #include "simd_status.h"
 #include "unittest.h"
@@ -270,5 +272,56 @@ TEST_CASE("SQ8 four-code L2 matches the single-pair kernel including vector tail
         const auto expected =
             vsag::SQ8ComputeCodesL2Sqr(source, targets[i], lower.data(), scale.data(), dim);
         REQUIRE(distances[i] == expected);
+    }
+}
+
+TEST_CASE("SQ8 four-way L2 agrees with affine decoding for FP32 and encoded queries",
+          "[ut][simd][sq8_tile]") {
+    constexpr uint64_t dim = 33;
+    std::array<float, dim> lower{}, scale{}, query{};
+    std::array<uint8_t, dim> source{};
+    std::array<std::array<uint8_t, dim>, 4> target{};
+    std::array<const uint8_t*, 4> target_rows{};
+    for (uint64_t i = 0; i < dim; ++i) {
+        lower[i] = static_cast<float>(i % 9) - 4.0F;
+        scale[i] = static_cast<float>(i % 7) * 0.5F;
+        query[i] = lower[i] + 0.25F;
+        source[i] = static_cast<uint8_t>((19 * i + 23) % 256);
+        for (uint64_t j = 0; j < target.size(); ++j) {
+            target[j][i] = static_cast<uint8_t>((37 * i + 71 * j) % 256);
+        }
+    }
+    for (uint64_t j = 0; j < target.size(); ++j) {
+        target_rows[j] = target[j].data();
+    }
+
+    float from_float[4]{}, from_codes[4]{};
+    vsag::SQ8ComputeL2SqrBatch4(query.data(),
+                                target_rows[0],
+                                target_rows[1],
+                                target_rows[2],
+                                target_rows[3],
+                                lower.data(),
+                                scale.data(),
+                                dim,
+                                from_float[0],
+                                from_float[1],
+                                from_float[2],
+                                from_float[3]);
+    vsag::SQ8ComputeCodesL2SqrBatch4(
+        source.data(), target_rows.data(), lower.data(), scale.data(), dim, from_codes);
+    for (uint64_t j = 0; j < target.size(); ++j) {
+        double float_ref = 0, code_ref = 0;
+        for (uint64_t i = 0; i < dim; ++i) {
+            const auto decode = [&](uint8_t byte) {
+                return lower[i] + static_cast<double>(byte) * scale[i] / 255.0;
+            };
+            const double a = query[i] - decode(target[j][i]);
+            const double b = decode(source[i]) - decode(target[j][i]);
+            float_ref += a * a;
+            code_ref += b * b;
+        }
+        REQUIRE(std::abs(from_float[j] - float_ref) <= 1e-5 * std::max(1.0, float_ref));
+        REQUIRE(std::abs(from_codes[j] - code_ref) <= 1e-5 * std::max(1.0, code_ref));
     }
 }
