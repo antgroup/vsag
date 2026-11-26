@@ -364,15 +364,32 @@ TEST_CASE("Typed task drain continues after future errors",
           "[ut][TypedKMeans][TypedKMeansUnwind]") {
     std::vector<std::future<void>> futures;
     uint64_t completed = 0;
-    // An invalid future makes wait/get fail; it must not skip later tasks.
+    // An invalid future must report no_state without invoking get() or skipping later tasks.
     futures.emplace_back();
     futures.emplace_back(std::async(std::launch::deferred, [&]() {
         ++completed;
         throw std::runtime_error("secondary callback failure");
     }));
     futures.emplace_back(std::async(std::launch::deferred, [&]() { ++completed; }));
-    REQUIRE_THROWS_AS(vsag::WaitTypedKMeansTasks(futures), std::future_error);
+    bool caught_no_state = false;
+    try {
+        vsag::WaitTypedKMeansTasks(futures);
+    } catch (const std::future_error& e) {
+        caught_no_state = (e.code() == std::make_error_code(std::future_errc::no_state));
+    }
+    REQUIRE(caught_no_state);
     REQUIRE(completed == 2);
+    REQUIRE(futures.empty());
+
+    // A later invalid future must not overwrite an earlier failure or skip remaining tasks.
+    futures.emplace_back(std::async(std::launch::deferred, [&]() {
+        ++completed;
+        throw std::runtime_error("primary callback failure");
+    }));
+    futures.emplace_back();
+    futures.emplace_back(std::async(std::launch::deferred, [&]() { ++completed; }));
+    REQUIRE_THROWS_WITH(vsag::WaitTypedKMeansTasks(futures), "primary callback failure");
+    REQUIRE(completed == 4);
     REQUIRE(futures.empty());
 
     // Also exercise the successful-submission / failing-task path of the wrapper.
@@ -386,7 +403,7 @@ TEST_CASE("Typed task drain continues after future errors",
                                       }));
                                   }),
         "callback failure");
-    REQUIRE(completed == 3);
+    REQUIRE(completed == 5);
     REQUIRE(futures.empty());
 }
 

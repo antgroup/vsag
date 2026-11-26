@@ -36,6 +36,12 @@ WaitTypedKMeansTasks(std::vector<std::future<void>>& futures) {
     std::exception_ptr error;
     for (auto& future : futures) {
         try {
+            if (!future.valid()) {
+                if (!error) {
+                    error = std::make_exception_ptr(std::future_error(std::future_errc::no_state));
+                }
+                continue;
+            }
             future.get();
         } catch (...) {
             if (!error) {
