@@ -129,7 +129,7 @@ private:
 };
 
 /// A batch of parsed sparse records. Ids are sorted ascending per row (values follow), as
-/// `parse_sparse_vectors` in tools/eval/eval_dataset.cpp does.
+/// `parse_sparse_vectors` in tools/eval/eval_dataset_hdf5.cpp does.
 struct SparseBatch {
     uint64_t first_row{0};
     /// Row r spans [offsets[r], offsets[r + 1]) in ids/values.
