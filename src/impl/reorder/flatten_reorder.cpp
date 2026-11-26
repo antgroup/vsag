@@ -47,22 +47,28 @@ FlattenReorder::QueryFusedLowerBound(float* distances,
         rate_context.rabitq_error_rate = ctx->rabitq_error_rate;
         rate_context_ptr = &rate_context;
     }
-    for (uint64_t i = 0; i < count; ++i) {
-        const auto code = fused_graph_->GetFullCodeView(ids[i]);
-        if (not split_codes->ComputeFusedOneBitWithFilterIP(computer,
-                                                            code.cluster_id,
-                                                            code.one_bit_code,
-                                                            code.supplement_code,
-                                                            distances + i,
-                                                            lower_bounds + i,
-                                                            filter_inner_products + i,
-                                                            rate_context_ptr)) {
-            distances[i] = std::numeric_limits<float>::max();
-            lower_bounds[i] = std::numeric_limits<float>::max();
-            filter_inner_products[i] = std::numeric_limits<float>::quiet_NaN();
-            ++fallback_count;
-        }
-    }
+    auto* query_allocator =
+        select_query_allocator(ctx == nullptr ? nullptr : ctx->alloc, allocator_);
+    fused_graph_->VisitCodeViews(
+        ids,
+        count,
+        split_codes->UsesLegacyHnswFusedCodec(),
+        query_allocator,
+        [&](uint64_t i, const auto& code) {
+            if (not split_codes->ComputeFusedOneBitWithFilterIP(computer,
+                                                                code.cluster_id,
+                                                                code.one_bit_code,
+                                                                code.supplement_code,
+                                                                distances + i,
+                                                                lower_bounds + i,
+                                                                filter_inner_products + i,
+                                                                rate_context_ptr)) {
+                distances[i] = std::numeric_limits<float>::max();
+                lower_bounds[i] = std::numeric_limits<float>::max();
+                filter_inner_products[i] = std::numeric_limits<float>::quiet_NaN();
+                ++fallback_count;
+            }
+        });
     if (ctx != nullptr and ctx->stats != nullptr) {
         if (ctx->track_distance_evaluations and count > 0) {
             ctx->stats->AddDistance(ctx->distance_phase, DistanceEvaluationBackend::RABITQ, count);
@@ -86,32 +92,34 @@ FlattenReorder::QueryFusedFullWithHint(float* distances,
     uint32_t fallback_full_count = 0;
     const bool exact_filter_ip_hint =
         split_codes->FusedFilterBits() >= 2 and not split_codes->UsesLegacyHnswFusedCodec();
-    for (uint64_t i = 0; i < count; ++i) {
-        const auto code = fused_graph_->GetFullCodeView(ids[i]);
-        bool used_hint = false;
-        if (exact_filter_ip_hint and IsFiniteRaBitQValue(filter_inner_products[i])) {
-            used_hint = split_codes->ComputeFusedFullWithFilterIP(computer,
-                                                                  code.cluster_id,
-                                                                  code.one_bit_code,
-                                                                  code.supplement_code,
-                                                                  filter_inner_products[i],
-                                                                  distances + i,
-                                                                  nullptr);
-        }
-        if (used_hint) {
-            ++hint_full_count;
-        } else {
-            ++fallback_full_count;
-            if (not split_codes->ComputeFusedFull(computer,
-                                                  code.cluster_id,
-                                                  code.one_bit_code,
-                                                  code.supplement_code,
-                                                  distances + i,
-                                                  nullptr)) {
-                distances[i] = std::numeric_limits<float>::max();
+    auto* query_allocator =
+        select_query_allocator(ctx == nullptr ? nullptr : ctx->alloc, allocator_);
+    fused_graph_->VisitCodeViews(
+        ids, count, true, query_allocator, [&](uint64_t i, const auto& code) {
+            bool used_hint = false;
+            if (exact_filter_ip_hint and IsFiniteRaBitQValue(filter_inner_products[i])) {
+                used_hint = split_codes->ComputeFusedFullWithFilterIP(computer,
+                                                                      code.cluster_id,
+                                                                      code.one_bit_code,
+                                                                      code.supplement_code,
+                                                                      filter_inner_products[i],
+                                                                      distances + i,
+                                                                      nullptr);
             }
-        }
-    }
+            if (used_hint) {
+                ++hint_full_count;
+            } else {
+                ++fallback_full_count;
+                if (not split_codes->ComputeFusedFull(computer,
+                                                      code.cluster_id,
+                                                      code.one_bit_code,
+                                                      code.supplement_code,
+                                                      distances + i,
+                                                      nullptr)) {
+                    distances[i] = std::numeric_limits<float>::max();
+                }
+            }
+        });
     if (ctx != nullptr and ctx->stats != nullptr) {
         if (ctx->track_distance_evaluations and count > 0) {
             ctx->stats->AddDistance(ctx->distance_phase, DistanceEvaluationBackend::RABITQ, count);
@@ -470,17 +478,21 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
         add_reorder_distance_count(ctx, heap_candidate_size);
         {
             ScopedDistancePhase scoped(ctx, DistanceEvaluationPhase::RERANK);
-            for (uint64_t i = 0; i < heap_candidate_size; ++i) {
-                const auto code = fused_graph_->GetFullCodeView(ids[i]);
-                if (not split_codes->ComputeFusedFull(computer,
-                                                      code.cluster_id,
-                                                      code.one_bit_code,
-                                                      code.supplement_code,
-                                                      dists.data() + i,
-                                                      &ctx)) {
-                    dists[i] = std::numeric_limits<float>::max();
-                }
-            }
+            fused_graph_->VisitCodeViews(
+                ids.data(),
+                heap_candidate_size,
+                true,
+                query_allocator,
+                [&](uint64_t i, const auto& code) {
+                    if (not split_codes->ComputeFusedFull(computer,
+                                                          code.cluster_id,
+                                                          code.one_bit_code,
+                                                          code.supplement_code,
+                                                          dists.data() + i,
+                                                          &ctx)) {
+                        dists[i] = std::numeric_limits<float>::max();
+                    }
+                });
         }
         for (uint64_t i = 0; i < heap_candidate_size; ++i) {
             if (not has_valid_distance(dists[i])) {

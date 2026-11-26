@@ -1994,49 +1994,19 @@ public:
 
     void
     InitIO(const IOParamPtr& io_param) override {
-        if (this->fused_code_storage_ != nullptr) {
-            if (this->fused_code_storage_->HasExternalSupplement()) {
-                this->supplement_layout_->InitIO(RebuildSupplementIOParam(io_param));
-                return;
-            }
-            CHECK_ARGUMENT(OneBitIOTmpl::InMemory and SupplementIOTmpl::InMemory,
-                           "fused RaBitQ code storage requires memory IO");
+        // ReaderSet supplies a snapshot reader after Deserialize has already populated the
+        // external supplement store. Its reader describes the snapshot, not the destination.
+        if (this->fused_code_storage_ != nullptr and
+            this->fused_code_storage_->HasExternalSupplement() and io_param != nullptr and
+            io_param->GetTypeName() == IO_TYPE_VALUE_READER_IO) {
             return;
         }
-        const bool shares_io_param = this->supplement_io_type_.empty();
-        this->x_bit_layout_->InitIO(SuffixIOParam(io_param, "_onebit", shares_io_param));
-        // In hybrid mode (one-bit and supplement use different IO backends)
-        // the caller-facing `io_param` is the one-bit IO parameter type and
-        // cannot be passed directly to `supplement_layout_`. Rebuild a fresh
-        // IOParameter of the recorded supplement type so the underlying IO
-        // implementation receives the correct parameter subclass.
-        this->supplement_layout_->InitIO(RebuildSupplementIOParam(io_param));
+        init_split_io(io_param, nullptr, this->supplement_io_type_.empty());
     }
 
     void
     InitIO(const IOParamPtr& one_bit_io_param, const IOParamPtr& supplement_io_param) {
-        if (this->fused_code_storage_ != nullptr) {
-            if (this->fused_code_storage_->HasExternalSupplement()) {
-                this->supplement_layout_->InitIO(supplement_io_param != nullptr
-                                                     ? supplement_io_param
-                                                     : RebuildSupplementIOParam(one_bit_io_param));
-                return;
-            }
-            CHECK_ARGUMENT(OneBitIOTmpl::InMemory and SupplementIOTmpl::InMemory,
-                           "fused RaBitQ code storage requires memory IO");
-            return;
-        }
-        const bool shares_io_param = supplement_io_param == nullptr;
-        this->x_bit_layout_->InitIO(SuffixIOParam(one_bit_io_param, "_onebit", shares_io_param));
-        if (supplement_io_param != nullptr) {
-            // Refresh the recorded supplement type so subsequent
-            // single-parameter InitIO calls (e.g. from Deserialize) can
-            // reconstruct the same IO subtype.
-            this->supplement_io_type_ = supplement_io_param->GetTypeName();
-            this->supplement_layout_->InitIO(supplement_io_param);
-        } else {
-            this->supplement_layout_->InitIO(RebuildSupplementIOParam(one_bit_io_param));
-        }
+        init_split_io(one_bit_io_param, supplement_io_param, supplement_io_param == nullptr);
     }
 
     IndexCommonParam
@@ -2902,6 +2872,27 @@ public:
     uint64_t optimized_build_prefetch_bytes_{0};
 
 private:
+    void
+    init_split_io(const IOParamPtr& one_bit_io_param,
+                  const IOParamPtr& supplement_io_param,
+                  bool shares_io_param) {
+        if (this->fused_code_storage_ == nullptr) {
+            this->x_bit_layout_->InitIO(
+                SuffixIOParam(one_bit_io_param, "_onebit", shares_io_param));
+        } else if (not this->fused_code_storage_->HasExternalSupplement()) {
+            CHECK_ARGUMENT(OneBitIOTmpl::InMemory and SupplementIOTmpl::InMemory,
+                           "fused RaBitQ code storage requires memory IO");
+            return;
+        }
+
+        if (supplement_io_param != nullptr) {
+            this->supplement_layout_->InitIO(supplement_io_param);
+            this->supplement_io_type_ = supplement_io_param->GetTypeName();
+        } else {
+            this->supplement_layout_->InitIO(RebuildSupplementIOParam(one_bit_io_param));
+        }
+    }
+
     // Insert/update callers hold mutex_; other callers already require exclusive access.
     void
     restore_deferred_split_layouts() {

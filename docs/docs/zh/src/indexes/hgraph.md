@@ -366,7 +366,7 @@ FP16/BF16 输入支持原来对 FP32 合法的同一组存储量化器配置，�
 | `use_conjugate_graph_search` | bool | `true` | 搜索增强阶段。当构建时 `use_conjugate_graph: true` 时，通过共轭图扩展结果以提升召回；设为 `false` 跳过。仅在已构建共轭图时生效。 |
 | `use_mci` | bool | `true` | 遍历时使用已构建的 MCI 路由阶段。索引需启用 MCI，否则该开关无副作用 |
 | `use_hybrid_traversal` | bool | `false` | 将 MCI 路由与图遍历混合执行，而不是二选一 |
-| `search_no_lock` | bool | `false` | 跳过检索侧加锁。要求 `parallelism` 为 `1`，并由调用方保证查询期间不会并发修改或销毁索引 |
+| `search_no_lock` | bool | `false` | 跳过检索侧加锁。要求 `parallelism` 为 `1`，并由调用方保证查询期间不会并发修改或销毁索引。使用 `external_supplement` 时还须先调用 `SetImmutable()`。 |
 | `mci_packed_filter` | bool | `true` | 以打包的候选块为单位评估 MCI 过滤 |
 | `mci_batch_distance` | bool | `true` | 对一个候选批次批量计算 MCI 距离 |
 | `mci_activation_cap` | uint32 | `0` | 单次查询激活的 MCI 团数量上限；`0` 表示不限 |

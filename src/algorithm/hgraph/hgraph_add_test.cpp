@@ -32,6 +32,7 @@
 #include "datacell/flatten_datacell.h"
 #include "datacell/hgraph_rabitq_fused_datacell.h"
 #include "datacell/rabitq_split_datacell.h"
+#include "framework/test_reader.h"
 #include "hgraph.h"
 #include "hgraph_fast_build.h"
 #include "impl/allocator/safe_allocator.h"
@@ -379,7 +380,16 @@ TEST_CASE("HGraph scans hot fused records and batch reranks separate supplements
     const auto path = dir.GenerateRandomFile(false);
     json["base_supplement_file_path"].SetString(path);
     auto disk = MakeHGraphIndex(json, common);
-    REQUIRE(disk->Deserialize(snapshot.value()).has_value());
+    SECTION("restore writable supplement from a ReaderSet") {
+        vsag::ReaderSet readers;
+        for (const auto& key : snapshot.value().GetKeys()) {
+            readers.Set(key, std::make_shared<fixtures::TestReader>(snapshot.value().Get(key)));
+        }
+        REQUIRE(disk->Deserialize(readers).has_value());
+    }
+    SECTION("restore writable supplement from a BinarySet") {
+        REQUIRE(disk->Deserialize(snapshot.value()).has_value());
+    }
     REQUIRE(std::filesystem::file_size(path) >= count * ((8 - bits) * 8 + 20));
     const auto query = MakeFloatQuery(vectors, dim);
     for (int ef : {16, 80}) {
@@ -472,6 +482,10 @@ TEST_CASE("HGraph scans hot fused records and batch reranks separate supplements
     REQUIRE(before.has_value());
     REQUIRE(after.has_value());
     REQUIRE(before.value() == after.value());
+    const auto unlocked = R"({"hgraph":{"ef_search":16,"parallelism":1,"search_no_lock":true}})";
+    REQUIRE_FALSE(restored->KnnSearch(query, 5, unlocked).has_value());
+    REQUIRE(restored->SetImmutable().has_value());
+    REQUIRE(restored->KnnSearch(query, 5, unlocked).has_value());
     std::filesystem::resize_file(path, 0);
     const auto truncated = disk->KnnSearch(query, 5, R"({"hgraph":{"ef_search":16}})");
     REQUIRE_FALSE(truncated.has_value());

@@ -68,7 +68,7 @@ Set `rabitq_fused_datacell=true`, `rabitq_fused_layout="external_supplement"`, `
 
 Vector KNN scans the graph using filter codes, then reads a bounded set of supplements in batches. The one-bit scorer recomputes the exact high-bit contribution. The multi-bit scorer reuses a valid high-bit inner product. Set `hgraph.rabitq_rerank_candidates` to bound the number of unique full evaluations per query. It defaults to `max(ef_search, 2*k)` and must be at least k. This layout requires reranking, implicitly enables filter scanning and uses the direct fused traversal loop. Range, iterator and custom-distance queries are unsupported.
 
-Each query expands the graph on one thread, including when `parallelism` exceeds one. The disk backend can issue multiple candidate reads per batch. The external layout always uses the graph scan, including for selective label filters.
+Each query expands the graph on one thread, including when `parallelism` exceeds one. The disk backend can issue multiple candidate reads per batch. The external layout always uses the graph scan, including for selective label filters. For this layout, call `SetImmutable()` before using `search_no_lock=true` and set `parallelism=1`. A mutable index rejects lock-free search so a query cannot observe a filter and supplement from different updates.
 
 ### HGraph fused in-memory layout
 

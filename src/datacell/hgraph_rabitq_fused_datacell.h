@@ -14,12 +14,14 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <shared_mutex>
 #include <string>
 #include <utility>
 
+#include "common.h"
 #include "dense_duplicate_tracker.h"
 #include "graph_datacell_parameter.h"
 #include "graph_interface.h"
@@ -217,6 +219,43 @@ public:
         uint32_t cluster_id = 0;
         std::memcpy(&cluster_id, record + cluster_id_offset_, sizeof(cluster_id));
         return {record + one_bit_offset_, GetSupplementCode(record), cluster_id};
+    }
+
+    [[nodiscard]] uint64_t
+    SupplementBatchSize(uint64_t count) const {
+        constexpr uint64_t max_batch_bytes = 256 * 1024;
+        return std::min(count, std::max<uint64_t>(1, max_batch_bytes / supplement_code_size_));
+    }
+
+    // A view borrows the hot record and (for external full codes) the current batch buffer.
+    template <typename Visitor>
+    void
+    VisitCodeViews(const InnerIdType* ids,
+                   uint64_t count,
+                   bool need_supplement,
+                   Allocator* allocator,
+                   Visitor&& visit) const {
+        for (uint64_t i = 0; i < count; ++i) {
+            CHECK_ARGUMENT(ids[i] < Capacity(), "invalid fused record id");
+        }
+        if (count == 0 or not need_supplement or not HasExternalSupplement()) {
+            for (uint64_t i = 0; i < count; ++i) {
+                visit(i, GetCodeView(ids[i]));
+            }
+            return;
+        }
+
+        const auto batch = SupplementBatchSize(count);
+        Vector<uint8_t> codes(batch * supplement_code_size_, allocator);
+        for (uint64_t begin = 0; begin < count; begin += batch) {
+            const auto size = std::min(batch, count - begin);
+            ReadSupplements(ids + begin, size, codes.data());
+            for (uint64_t i = 0; i < size; ++i) {
+                auto view = GetCodeView(ids[begin + i]);
+                view.supplement_code = codes.data() + i * supplement_code_size_;
+                visit(begin + i, view);
+            }
+        }
     }
 
     [[nodiscard]] uint64_t

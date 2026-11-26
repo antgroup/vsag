@@ -67,7 +67,7 @@ standard RaBitQ 路径，
 
 向量 KNN 先用 filter 扫描图，再按批次读取入选候选的 supplement。1 位精排会重算高位内积，多位精排可复用有效的高位内积。`hgraph.rabitq_rerank_candidates` 控制每次查询的唯一精排候选数上限，至少为 k，默认 `max(ef_search, 2*k)`。该布局要求启用精排，自动启用 filter 扫描，使用 fused 专用遍历循环。Range、iterator 和自定义距离搜索暂不支持。
 
-单次查询使用一个线程展开图，即使设置 `parallelism>1` 也是如此。磁盘后端可以在一个批次中发起多个候选读取。启用标签过滤时同样走图扫描。
+单次查询使用一个线程展开图，即使设置 `parallelism>1` 也是如此。磁盘后端可以在一个批次中发起多个候选读取。启用标签过滤时同样走图扫描。该布局使用 `search_no_lock=true` 前须调用 `SetImmutable()` 并设置 `parallelism=1`。可变索引会拒绝无锁搜索，以免一次查询读到来自两次更新的 filter 和 supplement。
 
 ### HGraph 融合内存布局
 

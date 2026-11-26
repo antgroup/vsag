@@ -110,6 +110,48 @@ TEST_CASE("External fused records keep published bytes across a partial suppleme
     REQUIRE(std::memcmp(updated.supplement_code, next.data(), next.size()) == 0);
 }
 
+TEST_CASE("External fused code visits read only the requested supplement batches",
+          "[ut][external_supplement][HGraphRaBitQFusedDataCell]") {
+    IndexCommonParam common;
+    common.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    common.dim_ = 960;
+    auto param = std::make_shared<GraphDataCellParameter>();
+    param->max_degree_ = 64;
+    param->init_max_capacity_ = 3;
+    auto cold = std::make_shared<FaultingSupplement>();
+    HGraphRaBitQFusedDataCell graph(param, 376, cold->STRIDE, common, cold);
+    for (InnerIdType id = 0; id < 3; ++id) {
+        std::vector<uint8_t> filter(376, id + 1), supplement(cold->STRIDE, id + 4);
+        graph.SetNodeCodes(id, id, id, filter.data(), supplement.data());
+    }
+    const auto batch = graph.SupplementBatchSize(1000);
+    REQUIRE(batch > 1);
+    std::vector<InnerIdType> ids(batch + 1);
+    for (size_t i = 0; i < ids.size(); ++i) {
+        ids[i] = 2 - i % 3;
+    }
+    for (bool full : {false, true}) {
+        uint64_t visited = 0;
+        graph.VisitCodeViews(ids.data(),
+                             ids.size(),
+                             full,
+                             common.allocator_.get(),
+                             [&](uint64_t i, const auto& code) {
+                                 REQUIRE(i == visited);
+                                 ++visited;
+                                 REQUIRE(code.cluster_id == ids[i]);
+                                 REQUIRE(code.one_bit_code[0] == ids[i] + 1);
+                                 if (full) {
+                                     REQUIRE(code.supplement_code[cold->STRIDE - 1] == ids[i] + 4);
+                                 } else {
+                                     REQUIRE(code.supplement_code == nullptr);
+                                 }
+                             });
+        REQUIRE(visited == ids.size());
+        REQUIRE(cold->reads == (full ? 2 : 0));
+    }
+}
+
 TEST_CASE("HGraph RaBitQ fused node layout and serialization", "[ut][HGraphRaBitQFusedDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;

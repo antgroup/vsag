@@ -466,7 +466,7 @@ Search-time parameters live under the `hgraph` sub-object:
 | `use_conjugate_graph_search` | bool | `true` | Search enhancement pass. When `use_conjugate_graph: true` was set at build time, the search expands results through the conjugate graph for potentially higher recall; set to `false` to skip it. Only takes effect when a conjugate graph was built. |
 | `use_mci` | bool | `true` | Use the built MCI routing phase during traversal. Requires an index built with MCI enabled; otherwise the flag is harmless. |
 | `use_hybrid_traversal` | bool | `false` | Blend MCI routing with graph traversal instead of choosing one path. |
-| `search_no_lock` | bool | `false` | Skip the search-side lock. Requires `parallelism` to be `1`; the caller must guarantee no concurrent modification or destruction of the index while the query runs. |
+| `search_no_lock` | bool | `false` | Skip the search-side lock. Requires `parallelism` to be `1`; the caller must guarantee no concurrent modification or destruction of the index while the query runs. With `external_supplement`, first call `SetImmutable()`. |
 | `mci_packed_filter` | bool | `true` | Evaluate MCI filters against packed candidate blocks. |
 | `mci_batch_distance` | bool | `true` | Batch MCI distance computations across a candidate batch. |
 | `mci_activation_cap` | uint32 | `0` | Maximum number of MCI cliques activated per query; `0` means unlimited. |
