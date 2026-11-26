@@ -465,6 +465,61 @@ TestDataset::CreateTestDataset(uint64_t dim,
     return dataset;
 }
 
+int64_t
+TestDataset::CountDenseKnnHits(uint64_t query_index,
+                               const DatasetPtr& result,
+                               const std::string& metric,
+                               const std::vector<int64_t>& first_row_aliases,
+                               bool filtered) const {
+    const auto distance = get_distance_func(metric);
+    const auto dim = base_->GetDim();
+    const auto* base_vectors = base_->GetFloat32Vectors();
+    const auto& queries = filtered ? filter_query_ : query_;
+    const auto& ground_truth = filtered ? filter_ground_truth_ : ground_truth_;
+    const auto* query = queries->GetFloat32Vectors() + query_index * dim;
+    const auto* base_top_k = ground_truth->GetDistances() + query_index * top_k;
+    const auto is_allowed = [&](int64_t id) { return !filtered || !filter_function_(id); };
+    std::vector<float> nearest(base_top_k, base_top_k + top_k);
+
+    // The base oracle already contains its exact top-k. At most k added labels
+    // can affect that cutoff, and all of them reference the first base vector.
+    const int64_t alias_count =
+        std::count_if(first_row_aliases.begin(), first_row_aliases.end(), is_allowed);
+    if (alias_count > 0) {
+        nearest.insert(
+            nearest.end(), std::min(top_k, alias_count), distance(query, base_vectors, dim));
+    }
+    const auto kth = nearest.begin() + top_k - 1;
+    std::nth_element(nearest.begin(), kth, nearest.end());
+    const auto cutoff = *kth;
+    const int64_t strictly_closer =
+        std::count_if(nearest.begin(), kth, [&](float dist) { return dist < cutoff; });
+
+    const auto* base_ids = base_->GetIds();
+    const auto* base_end = base_ids + base_->GetNumElements();
+    const auto* result_ids = result->GetIds();
+    int64_t closer_hits = 0;
+    int64_t tied_hits = 0;
+    for (int64_t i = 0; i < result->GetDim(); ++i) {
+        const auto id = result_ids[i];
+        REQUIRE(is_allowed(id));
+        REQUIRE(std::find(result_ids, result_ids + i, id) == result_ids + i);
+        const auto* base_id = std::find(base_ids, base_end, id);
+        if (base_id == base_end) {
+            REQUIRE(std::find(first_row_aliases.begin(), first_row_aliases.end(), id) !=
+                    first_row_aliases.end());
+            base_id = base_ids;
+        }
+        const auto dist = distance(query, base_vectors + (base_id - base_ids) * dim, dim);
+        closer_hits += dist < cutoff;
+        tied_hits += dist == cutoff;
+    }
+
+    // Distinct labels at the cutoff are interchangeable, but only for the
+    // slots left by strictly closer labels in the exact answer.
+    return closer_hits + std::min(tied_hits, top_k - strictly_closer);
+}
+
 TestDatasetPtr
 TestDataset::CreateNanDataset(const std::string& metric_str) {
     TestDatasetPtr dataset = std::shared_ptr<TestDataset>(new TestDataset);

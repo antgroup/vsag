@@ -4133,6 +4133,44 @@ TEST_CASE("HGraph Test NonstandardID", "[ft][build][hgraph][pr]") {
     TestHGraphNonstandardID(test_index, resource);
 }
 
+// See #3504 for the Nightly failure caused by omitting added labels from the oracle.
+TEST_CASE("HGraph Duplicate filtered recall preserves slots for nearer labels",
+          "[ft][hgraph][duplicate][pr][regression]") {
+    using namespace fixtures;
+    auto dataset = TestDataset::CreateTestDataset(4, 16, "l2");
+    const int64_t ids[] = {0, 1, 2};
+    const float vectors[] = {1, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0};
+    const float query[] = {0, 0, 0, 0};
+    const float top_k_distances[] = {0, 1};
+    dataset->base_ =
+        vsag::Dataset::Make()->Dim(4)->NumElements(3)->Ids(ids)->Float32Vectors(vectors)->Owner(
+            false);
+    dataset->filter_query_ =
+        vsag::Dataset::Make()->Dim(4)->NumElements(1)->Float32Vectors(query)->Owner(false);
+    dataset->filter_ground_truth_ =
+        vsag::Dataset::Make()->Dim(2)->NumElements(1)->Distances(top_k_distances)->Owner(false);
+    dataset->filter_function_ = [](int64_t) { return false; };
+    dataset->top_k = 2;
+
+    const std::vector<int64_t> aliases = {3, 4};
+    const int64_t base_and_alias[] = {1, 3};
+    const int64_t both_tied[] = {3, 4};
+    auto result = vsag::Dataset::Make()->Dim(2)->Ids(base_and_alias)->Owner(false);
+    REQUIRE(dataset->CountDenseKnnHits(0, result, "l2", aliases, true) == 2);
+    result->Ids(both_tied);
+    REQUIRE(dataset->CountDenseKnnHits(0, result, "l2", aliases, true) == 1);
+
+    // Adding multiple labels of the nearest row can tighten the exact top-k cutoff.
+    const float nearest_first[] = {0, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, 0};
+    dataset->base_->Float32Vectors(nearest_first);
+    result->Ids(base_and_alias);
+    REQUIRE(dataset->CountDenseKnnHits(0, result, "l2", aliases, true) == 1);
+
+    dataset->query_ = dataset->filter_query_;
+    dataset->ground_truth_ = dataset->filter_ground_truth_;
+    REQUIRE(dataset->CountDenseKnnHits(0, result, "l2", aliases, false) == 1);
+}
+
 static void
 RunHGraphDuplicateChecks(const fixtures::HGraphTestIndexPtr& test_index,
                          const fixtures::HGraphResourcePtr& resource,
@@ -4173,18 +4211,34 @@ RunHGraphDuplicateChecks(const fixtures::HGraphTestIndexPtr& test_index,
                     auto index = TestIndex::TestFactory(test_index->name, param, true);
                     auto dataset = HGraphTestIndex::pool.GetDuplicateDataset(
                         dim, resource->base_count, metric_type);
-                    TestIndex::TestBuildDuplicateIndex(index, dataset, duplicate_pos, true);
+                    const auto first_row_aliases =
+                        TestIndex::TestBuildDuplicateIndex(index, dataset, duplicate_pos, true);
                     if (run_full_search_checks) {
-                        TestIndex::TestKnnSearch(index, dataset, search_param, recall, true);
+                        const auto count_knn_hits = [&](uint64_t query,
+                                                        const vsag::DatasetPtr& result) {
+                            return dataset->CountDenseKnnHits(
+                                query, result, metric_type, first_row_aliases, false);
+                        };
+                        TestIndex::TestKnnSearch(
+                            index, dataset, search_param, recall, true, count_knn_hits);
                         // TODO(inabao): Fix knn search iter test
                         // TestIndex::TestKnnSearchIter(index, dataset, search_param, recall, true);
                         TestIndex::TestConcurrentKnnSearch(
-                            index, dataset, search_param, recall, true);
+                            index, dataset, search_param, recall, true, count_knn_hits);
                         TestIndex::TestRangeSearch(index, dataset, search_param, recall, 10, true);
                         TestIndex::TestRangeSearch(
                             index, dataset, search_param, recall / 2.0, 5, true);
                         TestIndex::TestFilterSearch(
-                            index, dataset, search_param, recall, true, true);
+                            index,
+                            dataset,
+                            search_param,
+                            recall,
+                            true,
+                            true,
+                            [&](uint64_t query, const vsag::DatasetPtr& result) {
+                                return dataset->CountDenseKnnHits(
+                                    query, result, metric_type, first_row_aliases, true);
+                            });
                         TestIndex::TestCheckIdExist(index, dataset);
                         // Duplicate indexes can retain lossy codes without FP32 originals.
                         // Check stored-distance consistency for every configuration, while
@@ -4196,7 +4250,8 @@ RunHGraphDuplicateChecks(const fixtures::HGraphTestIndexPtr& test_index,
                         }
                         TestIndex::TestGetRawVectorByIds(index, dataset);
                         TestIndex::TestMultiQueryBatchCalcDistanceById(index, dataset);
-                        TestIndex::TestSearchAllocator(index, dataset, search_param, recall, true);
+                        TestIndex::TestSearchAllocator(
+                            index, dataset, search_param, recall, true, count_knn_hits);
                     }
                     if (run_serialize_check) {
                         auto index2 = TestIndex::TestFactory(test_index->name, param, true);

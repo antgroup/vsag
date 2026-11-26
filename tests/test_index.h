@@ -21,6 +21,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <shared_mutex>
 #include <unordered_set>
@@ -85,6 +86,8 @@ public:
     }
 
 public:
+    using KnnHitCounter = std::function<int64_t(uint64_t, const DatasetPtr&)>;
+
     static IndexPtr
     TestFactory(const std::string& name,
                 const std::string& build_param,
@@ -94,7 +97,7 @@ public:
         return new_index.value();
     }
 
-    static void
+    static std::vector<int64_t>
     TestBuildDuplicateIndex(const IndexPtr& index,
                             const TestDatasetPtr& dataset,
                             const std::string& duplicate_pos,
@@ -163,7 +166,8 @@ public:
                   const TestDatasetPtr& dataset,
                   const std::string& search_param,
                   float expected_recall = 0.99,
-                  bool expected_success = true);
+                  bool expected_success = true,
+                  const KnnHitCounter& count_knn_hits = {});
 
     static void
     TestKnnSearchCompare(const IndexPtr& index_weak,
@@ -185,7 +189,8 @@ public:
                         const TestDatasetPtr& dataset,
                         const std::string& search_param,
                         float expected_recall = 0.99,
-                        bool expected_success = true);
+                        bool expected_success = true,
+                        const KnnHitCounter& count_knn_hits = {});
 
     static void
     TestSearchWithDirtyVector(const IndexPtr& index,
@@ -207,7 +212,8 @@ public:
                      const std::string& search_param,
                      float expected_recall = 0.99,
                      bool expected_success = true,
-                     bool support_filter_obj = false);
+                     bool support_filter_obj = false,
+                     const KnnHitCounter& count_knn_hits = {});
 
     static void
     TestStoredDistanceConsistency(const IndexPtr& index, const TestDatasetPtr& dataset);
@@ -276,7 +282,8 @@ public:
                             const TestDatasetPtr& dataset,
                             const std::string& search_param,
                             float expected_recall = 0.99,
-                            bool expected_success = true);
+                            bool expected_success = true,
+                            const KnnHitCounter& count_knn_hits = {});
     static IndexPtr
     TestMergeIndex(const std::string& name,
                    const std::string& build_param,

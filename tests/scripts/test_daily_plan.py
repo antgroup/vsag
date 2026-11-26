@@ -23,6 +23,24 @@ import daily_window as window_helper
 from tests.scripts.test_team_test_shards import MOCK
 
 
+def use_fixture_quarantines(test_case):
+    matrix = dp.load(dp.HERE / "daily_matrix.json")
+    matrix["quarantine"] = [
+        {"key": dp.digest(["fixture", metric]), "case": "(Daily) HGraph Duplicate",
+         "reason": "Known fixture failure",
+         "tracking": "https://github.com/antgroup/vsag/issues/3225"}
+        for metric in ("l2", "cosine")
+    ]
+    original = dp.load
+
+    def load(path):
+        return matrix if Path(path).name == "daily_matrix.json" else original(path)
+
+    patcher = patch.object(dp, "load", side_effect=load)
+    patcher.start()
+    test_case.addCleanup(patcher.stop)
+    return matrix["quarantine"]
+
 class DailyPlanTests(unittest.TestCase):
     def test_pipnn_cache_is_shared_functional_ownership(self):
         case = {"name": "PiPNN cache version and structural validation",
@@ -124,11 +142,13 @@ class DailyPlanTests(unittest.TestCase):
         self.assertIsNone(unknown["estimate_seconds"])
 
     def test_quarantine_is_exact_rotation_only_and_visible_not_passed(self):
-        rule = dp.load(dp.HERE / "daily_matrix.json")["quarantine"][0]
+        rules = use_fixture_quarantines(self)
+        rule = rules[0]
         bad = {**self.unit(rule["key"]), "mode": "rotation", "configuration": {"metric": "l2", "dim": 1536},
                "tests": [{"name": rule["case"]}]}
         other = {**bad, "key": "other"}
-        plan = dp.build_plan(self.context(), "env", [self.unit()], [bad, other, {**bad, "key": dp.load(dp.HERE / "daily_matrix.json")["quarantine"][1]["key"]}])
+        second_bad = {**bad, "key": rules[1]["key"]}
+        plan = dp.build_plan(self.context(), "env", [self.unit()], [bad, other, second_bad])
         self.assertEqual([u["key"] for day in plan["rotation"] for u in day], ["other"])
         self.assertEqual(plan["quarantines"][0]["status"], "not_validated")
         self.assertEqual(plan["quarantines"][0]["configuration"], bad["configuration"])
@@ -161,8 +181,8 @@ class DailyPlanTests(unittest.TestCase):
             dp.quarantine_extensions([bad], [rule, rule])
 
     def test_execution_parts_keep_the_parent_rotation_and_quarantine(self):
-        rules = dp.load(dp.HERE / "daily_matrix.json")["quarantine"]
-        rule = next(rule for rule in rules if rule["case"] == "(Daily) HGraph Duplicate")
+        rules = use_fixture_quarantines(self)
+        rule = rules[0]
         core = {**self.unit(), "tests": [{"name": "core", "source_file": "tests/core.cpp",
                                          "tags": "[build]"}]}
         date = dt.date.fromisoformat(self.context()["logical_date"])
@@ -204,10 +224,11 @@ class DailyPlanTests(unittest.TestCase):
                 self.assertCountEqual(shard_keys, [u["key"] for u in split["selected"]])
 
     def test_quarantine_is_not_duplicated_in_four_shard_summary(self):
-        rule = dp.load(dp.HERE / "daily_matrix.json")["quarantine"][0]
+        rules = use_fixture_quarantines(self)
+        rule = rules[0]
         bad = {**self.unit(rule["key"]), "mode": "rotation", "tests": [{"name": rule["case"]}]}
         parent = dp.build_plan(self.context(), "env", [self.unit(str(i)) for i in range(4)],
-                               [{**bad, "key": r["key"]} for r in dp.load(dp.HERE / "daily_matrix.json")["quarantine"]])
+                               [{**bad, "key": r["key"]} for r in rules])
         results = []
         for i in range(4):
             plan = dp.shard_plan(parent, i, 4)
@@ -1008,9 +1029,9 @@ class DailyNamedCountTests(unittest.TestCase):
         self.assertNotEqual(daily_counts.case_identity({"source_file": "src/a_test.cpp", "name": "a"}),
                             daily_counts.case_identity({"source_file": "tests/a_test.cpp", "name": "a"}))
 
-    def test_second_quarantine_keeps_other_duplicate_configurations(self):
-        rules = dp.load(dp.HERE / "daily_matrix.json")["quarantine"]
-        cosine = next(r for r in rules if r["key"] == "df2ccbce1f3092b1dc00a580b4e6e2176e55e694eca7ed7c222ae100d1618bb5")
+    def test_exact_quarantine_keeps_other_duplicate_configurations(self):
+        rules = use_fixture_quarantines(self)
+        cosine = rules[1]
         unit = {**self.unit(cosine["key"]), "mode": "rotation", "tests": [{"name": cosine["case"]}]}
         kept, excluded = dp.quarantine_extensions([unit, {**unit, "key": "different-configuration"}], [cosine])
         self.assertEqual([u["key"] for u in kept], ["different-configuration"])
@@ -1069,7 +1090,8 @@ class DailyNamedCountTests(unittest.TestCase):
         self.assertEqual(daily_counts.named_status(unit, skipped, tests[0], "failed"), "not_run")
 
     def test_stale_quarantine_fails_and_unrelated_profiles_stay_independent(self):
-        rule = dp.load(dp.HERE / "daily_matrix.json")["quarantine"][0]
+        rules = use_fixture_quarantines(self)
+        rule = rules[0]
         for extension in ([], [{**self.unit("changed-key"), "mode": "rotation", "tests": [{"name": "renamed case"}]}]):
             with self.assertRaisesRegex(dp.PlanError, "Stale or mistargeted"):
                 dp.quarantine_extensions(extension, [rule])
@@ -1110,7 +1132,8 @@ class DailyNamedCountTests(unittest.TestCase):
                     self.assertTrue(all(r["configuration"] is None for r in plan["quarantines"]))
 
     def test_inactive_quarantine_is_visible_once_per_sharded_lane_not_a_pass(self):
-        rule = dp.load(dp.HERE / "daily_matrix.json")["quarantine"][0]
+        rules = use_fixture_quarantines(self)
+        rule = rules[0]
         extension = {**self.unit("new-configuration"), "mode": "rotation",
                      "tests": [{"name": rule["case"]}]}
         core = [{**self.unit(str(i)), "tests": [{"name": f"core{i}", "binary": "functests",
@@ -1141,7 +1164,8 @@ class DailyNamedCountTests(unittest.TestCase):
         self.assertEqual(report.summarize(results)["status"], "failed")
 
     def test_core_quarantine_is_rejected_even_with_rotating_siblings(self):
-        rule = dp.load(dp.HERE / "daily_matrix.json")["quarantine"][0]
+        rules = use_fixture_quarantines(self)
+        rule = rules[0]
         core = {**self.unit(rule["key"]), "tests": [{"name": rule["case"]}]}
         sibling = {**core, "key": "sibling", "mode": "rotation"}
         with self.assertRaisesRegex(dp.PlanError, "core configuration"):
