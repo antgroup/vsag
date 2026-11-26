@@ -149,6 +149,15 @@ No Daily environment means existing local, PR, Branch and release test behavior.
 The Examples runner now requires the generated binary manifest and propagates
 each example's exit status.
 
+## Functional ownership check
+
+The Team and Community Linux ASan builds in PR CI list the compiled
+`functests` inventory, including Daily-only cases, and validate ownership
+with the Nightly resolver. Keep the tags or explicit owners in
+`scripts/testing/daily_matrix.json` current when adding functional tests.
+The check lists registrations without running test bodies or building a
+Nightly plan.
+
 ## Parameter-adapter preflight
 
 Before building, the Daily plan job runs:
