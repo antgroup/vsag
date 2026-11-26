@@ -1,7 +1,7 @@
 // Copyright 2024-present the vsag project
 // SPDX-License-Identifier: Apache-2.0
 
-#include "sindi_parallel_search.h"
+#include "impl/searcher/sindi_parallel_search.h"
 
 #include <algorithm>
 #include <array>
@@ -30,8 +30,8 @@ extern char** environ;
 
 #include "impl/allocator/safe_allocator.h"
 #include "impl/searcher/search_execution_context.h"
+#include "impl/searcher/sindi_cpu_timer.h"
 #include "sindi.h"
-#include "sindi_cpu_timer.h"
 #include "unittest.h"
 #include "vsag/engine.h"
 #include "vsag_exception.h"

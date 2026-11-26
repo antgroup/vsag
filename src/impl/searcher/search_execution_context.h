@@ -31,4 +31,25 @@ public:
     std::mutex mutex;
     SafeThreadPoolPtr pool;
 };
+
+// Counts the calling thread as well as its reserved background slots. Keep this
+// reservation alive until every submitted task has joined, including on errors.
+class SearchExecutionReservation {
+public:
+    explicit SearchExecutionReservation(SearchExecutionContext& resources) : owner(resources) {
+        std::lock_guard<std::mutex> guard(owner.mutex);
+        ++owner.callers;
+    }
+    ~SearchExecutionReservation() {
+        std::lock_guard<std::mutex> guard(owner.mutex);
+        owner.busy -= extra;
+        --owner.callers;
+    }
+    SearchExecutionReservation(const SearchExecutionReservation&) = delete;
+    SearchExecutionReservation&
+    operator=(const SearchExecutionReservation&) = delete;
+
+    SearchExecutionContext& owner;
+    uint32_t extra{0};
+};
 }  // namespace vsag

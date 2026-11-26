@@ -16,6 +16,7 @@
 
 set(SINDI_V2_SRCS
         sindi_v2.cpp
+        sindi_v2_parallel_search.cpp
         sindi_v2_parameter.cpp
 )
 

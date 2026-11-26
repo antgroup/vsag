@@ -21,9 +21,11 @@
 #include <cstring>
 #include <limits>
 
+#include "datacell/sparse_read_execution.h"
 #include "datacell/sparse_vector_datacell_parameter.h"
 #include "framework/test_thread_pool.h"
 #include "impl/allocator/safe_allocator.h"
+#include "impl/searcher/search_execution_context.h"
 #include "index_common_param.h"
 #include "io/reader_io/reader_io_parameter.h"
 #include "quantization/sparse_quantization/sparse_quantizer_parameter.h"
@@ -746,6 +748,70 @@ TEST_CASE("SparseDataCell rejects undersized legacy location tables", "[ut][Spar
     auto loaded = FlattenInterface::MakeInstance(param, common_param);
     IOStreamReader reader(legacy_ss);
     REQUIRE_THROWS_AS(loaded->Deserialize(reader), VsagException);
+}
+
+}  // namespace vsag
+
+namespace vsag {
+TEST_CASE("Sparse async rerank preserves global ranges and exact distances",
+          "[ut][SparseDataCell][SparseReadExecution]") {
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    vsag::IndexCommonParam common;
+    common.allocator_ = allocator;
+    common.metric_ = vsag::MetricType::METRIC_TYPE_IP;
+    common.dim_ = 1024;
+    fixtures::TempDir dir("sparse_rerank_parallel_ranges");
+    const auto path = dir.GenerateRandomFile(false);
+    auto param = std::make_shared<vsag::SparseVectorDataCellParameter>();
+    param->FromJson(vsag::JsonType::Parse(fmt::format(R"({{
+        "io_params": {{"type":"async_io", "file_path":"{}"}},
+        "quantization_params": {{"type":"sparse", "value_type":"fp16"}}
+    }})",
+                                                      path)));
+    auto cell = vsag::FlattenInterface::MakeInstance(param, common);
+    std::vector<uint32_t> ids(1024);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<float> values(1024, 0.125F);
+    vsag::SparseVector vector{1024, ids.data(), values.data()};
+    cell->Train(&vector, 1);
+    for (uint32_t doc = 0; doc < 640; ++doc) {
+        vector.len_ = 1024 - doc % 17;
+        values[0] = static_cast<float>(doc % 11) / 16.0F;
+        cell->InsertVector(&vector, doc);
+    }
+    auto computer = cell->FactoryComputer(&vector);
+    vsag::SearchExecutionContext resources(3);
+    const bool clustered = GENERATE(false, true);
+    std::vector<vsag::InnerIdType> candidates(300);
+    for (uint32_t i = 0; i < candidates.size(); ++i) {
+        candidates[i] = clustered ? i : 2 * i;
+    }
+    std::shuffle(candidates.begin(), candidates.end(), std::mt19937(424242));
+    std::vector<float> expected(300), actual(300);
+    vsag::SparseQueryProfile serial_profile, parallel_profile;
+    vsag::QueryContext serial_context{.alloc = allocator.get()};
+    serial_context.sparse_profile = &serial_profile;
+    cell->Query(expected.data(), computer, candidates.data(), candidates.size(), &serial_context);
+    vsag::SparseReadExecution execution;
+    execution.resources = &resources;
+    execution.requested = 4;
+    execution.profile_search = true;
+    vsag::QueryContext context{.alloc = allocator.get()};
+    context.sparse_profile = &parallel_profile;
+    context.sparse_read_execution = &execution;
+    cell->Query(actual.data(), computer, candidates.data(), candidates.size(), &context);
+    REQUIRE(std::memcmp(expected.data(), actual.data(), actual.size() * sizeof(float)) == 0);
+    if (clustered) {
+        REQUIRE(execution.tasks == 0);
+    }
+    REQUIRE(parallel_profile.read_ranges == serial_profile.read_ranges);
+    REQUIRE(parallel_profile.read_bytes == serial_profile.read_bytes);
+    REQUIRE(resources.busy == 0);
+    REQUIRE(resources.callers == 0);
+#if HAVE_LIBAIO
+    REQUIRE(execution.granted ==
+            (clustered ? 1U : std::min({3U, resources.limit + 1, resources.slots})));
+#endif
 }
 
 }  // namespace vsag

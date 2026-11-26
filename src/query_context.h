@@ -26,6 +26,7 @@
 
 #include "metric_type.h"
 #include "search_metrics_names.h"
+#include "sparse_query_profile.h"
 #include "typing.h"
 #include "vsag/allocator.h"
 #include "vsag/search_metrics.h"
@@ -35,6 +36,7 @@ namespace vsag {
 class SearchStatistics;
 class ReasoningContext;
 class QueryComputerPool;
+struct SparseReadExecution;
 template <typename QuantTmpl, MetricType metric>
 class TransformQuantizer;
 
@@ -47,6 +49,8 @@ struct QueryContext {
     bool track_distance_evaluations = true;
     bool enable_rabitq_reorder = true;
     QueryComputerPool* computer_pool = nullptr;
+    SparseQueryProfile* sparse_profile = nullptr;
+    SparseReadExecution* sparse_read_execution = nullptr;
 };
 
 class ScopedDistancePhase {

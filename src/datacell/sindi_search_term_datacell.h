@@ -131,6 +131,8 @@ struct SindiQueryContext {
     QueryTermBuffers query_term_buffers;
     MappedQueryTerms mapped_query_terms;
     bool has_untracked_approximate_evaluations{false};
+    bool profile_work{false};
+    uint64_t scanned_postings{0};
     mutable SparseEvaluationTracker candidate_tracker;
 };
 

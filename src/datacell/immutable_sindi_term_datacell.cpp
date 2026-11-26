@@ -366,6 +366,9 @@ ImmutableSindiTermDataCell::QueryWindow(float* dists,
         }
         const auto begin = window.offsets[local_term];
         const auto count = computer->GetTermScanCount(window.offsets[local_term + 1] - begin);
+        if (query_context.profile_work) {
+            query_context.scanned_postings += count;
+        }
         query_context.has_untracked_approximate_evaluations |= count > 0;
         const auto* ids = window.id_payloads.data() + begin;
         const auto* values =

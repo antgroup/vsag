@@ -139,6 +139,12 @@ Search parameters live under `{"sindi_v2": {...}}`.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `n_candidate` | int | `0` | Coarse candidate count; `0` uses the index default derived from `topk`. |
+| `window_parallelism` | integer | `1` | Requested execution slots including the caller, `[1,16]`; eligible immutable in-memory KNN partitions compute, filter and collect candidates independently. |
+| `parallel_n_candidate_ratio` | number | `2` | Total local capacity multiplier R (finite, >=1); merged rerank candidates remain bounded by N. |
+| `parallel_rerank_reads` | bool | `false` | Parallelize multiple AsyncIO/libaio rerank read batches within the existing slot limit. |
+| `profile_search` | bool | `false` | Collect partition phases, cumulative work and logical rerank reads. |
+| `diagnose_search` | bool | `false` | Collect bounded candidate and result digests for controlled quality comparisons. Hashes are diagnostic evidence, not proof of equality. |
+| `profile_cpu` | bool | `false` | Sample caller and background-worker CPU time; unavailable clocks are explicitly marked. |
 | `filter_callback_limit` | uint64 | `0` | Maximum user `Filter::CheckValid` callback invocations for one filtered search. `0` disables the limit. Reaching a positive limit stops candidate and window scanning after processing the final callback result and returns the candidates accepted so far, so the result may be partial. The limit applies to the regular KNN and range-search APIs. |
 | `query_prune_ratio` | float | `0.0` | Fraction of the lowest-weight query terms skipped (`[0.0, 1.0)`). |
 | `term_prune_ratio` | float | `0.0` | Fraction of the lowest stored values skipped in each term list (`[0.0, 1.0)`). |
@@ -151,6 +157,49 @@ SINDI V2 chooses the heap-insertion strategy automatically from the build-time
 `doc_prune_ratio` and search-time `query_prune_ratio`. With the current `0.1`
 threshold, it uses distance-array insertion when both ratios are `<= 0.1`; if
 either ratio is greater than `0.1`, it uses term-list heap insertion.
+
+### Partitioned parallel KNN
+
+Inject a shared `SearchResource` through `Engine` before index creation/loading. Request
+`{"sindi_v2":{"window_parallelism":4,"parallel_n_candidate_ratio":2}}`.
+P1, missing resources, mutable/file postings, range and reasoning retain serial execution.
+An eligible search with only one granted slot retains its partition plan and deadline.
+
+Each partition has a local candidate heap. Persistent slots compute distances, evaluate independent
+Filters and update those heaps; the caller merges at most N candidates before reranking.
+With `parallel_rerank_reads=true`, AsyncIO/libaio reranking can distribute multiple batches of
+globally merged read ranges using the
+same execution-slot limit and shared admission. A single libaio batch remains intact. Range planning,
+distance evaluation and final heap insertion order are preserved; range reads drain before computation
+or error propagation. Memory, mmap and other rerank backends retain their original execution path.
+Read admission is separate from partition admission, so the granted slot counts can differ.
+Parallel reads hold shared worker slots and can increase in-flight IO buffer memory.
+A non-null parallel Filter must implement `ConcurrentFilterProvider`; a serial fallback leases one
+evaluator. Ordinary filters are not made parallel by a global lock.
+
+Parallel rerank reads default off and only affect eligible partition searches. P1 and serial
+fallbacks retain their original execution. Enable `parallel_rerank_reads=true` to compare parallel
+reading with the existing P4 path; it does not alter P/R/N or partition quotas.
+
+Let C=ceil(R*N), W be routed windows, K_plan=K (N for a distance threshold).
+The plan has G=min(16,W,floor(C/K_plan)); quotas sum to C. The partition count is
+independent of the requested and granted execution slots. Slot admission does not change G
+or quotas. Local truncation and pruning may change results, including ties; serial approximate
+output is a comparator, not ground truth. P1 does not apply R or partitions.
+
+Parallel deadlines cover lock wait, preparation, partition work, merge, rerank and publication.
+Cancellation is cooperative. Submitted tasks drain before errors escape. Callback permits are
+shared across partitions for one invocation; reaching the limit can return partial candidates.
+
+`profile_search` reports partition wall time, cumulative compute/consume/clear/filter time,
+join wait, merge and rerank read/compute. Cumulative times overlap wall time and must not be added.
+`profile_cpu` reports caller and background-worker CPU. `diagnose_search` hashes bounded candidates
+and results, never full window scratch arrays. All diagnostics default off. `execution_complete`
+tracks scan termination; the original `complete` only describes distance-count coverage.
+
+Rerank read diagnostics distinguish caller wall time (`sindi_v2_rerank_read_us`) from overlapping
+read-task time (`sindi_v2_rerank_read_sum_us`), plus read slots, planned tasks, admission and join wait. Direct fallback reads schedule no executor tasks;
+the task sum and task count remain zero, while read wall time, ranges and bytes still describe the reads.
 
 ## Choosing between SINDI and SINDI_V2
 

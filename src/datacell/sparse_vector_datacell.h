@@ -25,9 +25,11 @@
 #include "io/mmap_io/mmap_io.h"
 #include "layout/variable_record_layout.h"
 #include "quantization/sparse_quantization/sparse_quantizer.h"
+#include "sparse_read_execution.h"
 #include "vsag/dataset.h"
 
 namespace vsag {
+class AsyncIO;
 
 template <typename QuantTmpl, typename IOTmpl>
 class SparseVectorDataCell : public FlattenInterface {
