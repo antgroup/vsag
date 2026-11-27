@@ -1241,3 +1241,54 @@ TEST_CASE("Lite query heap data preserves priority queue contents", "[lite-graph
     check(std::less<Record>{});
     check(std::greater<Record>{});
 }
+
+TEST_CASE("graph repair reselects full affected rows after removal", "[lite-graph]") {
+    using vsag::lite::detail::restore_fp16_graph_backend;
+    using vsag::lite::detail::restore_graph_backend;
+    const std::vector<int64_t> ids{0, 1, 2, 3, 4};
+    const std::vector<float> vectors{0, 0, 1, 0, 2, 0, 10, 10, 0, 2};
+    const std::vector<std::vector<uint64_t>> links{{1, 2}, {0, 2}, {0, 1}, {0, 4}, {1, 2}};
+    std::vector<uint16_t> encoded;
+    encoded.reserve(vectors.size());
+    for (const float value : vectors) {
+        encoded.push_back(vsag::lite::detail::encode_fp16(value));
+    }
+    for (const bool fp16 : {false, true}) {
+        auto restored = fp16 ? restore_fp16_graph_backend(2, 2, 128, ids, encoded, links)
+                             : restore_graph_backend(2, 2, 128, ids, vectors, links);
+        REQUIRE(static_cast<bool>(restored));
+        auto& graph = **restored;
+        REQUIRE(graph.Remove(3));
+        REQUIRE(graph.Size() == 4);
+        std::vector<int64_t> neighbors;
+        neighbors.reserve(graph.LinkCountAt(0));
+        for (uint64_t edge = 0; edge < graph.LinkCountAt(0); ++edge) {
+            neighbors.push_back(graph.IdAt(graph.LinkAt(0, edge)));
+        }
+        std::sort(neighbors.begin(), neighbors.end());
+        // A full row of collinear short edges must still consider the removed
+        // node's outgoing candidates. ID 4 survives last-slot compaction.
+        REQUIRE(neighbors == std::vector<int64_t>{1, 4});
+        for (uint64_t target = 0; target < graph.Size(); ++target) {
+            std::vector<uint64_t> expected;
+            for (uint64_t source = 0; source < graph.Size(); ++source) {
+                REQUIRE(graph.LinkCountAt(source) <= 2);
+                for (uint64_t edge = 0; edge < graph.LinkCountAt(source); ++edge) {
+                    const uint64_t neighbor = graph.LinkAt(source, edge);
+                    REQUIRE(neighbor < graph.Size());
+                    REQUIRE(neighbor != source);
+                    if (neighbor == target) {
+                        expected.push_back(source);
+                    }
+                }
+            }
+            std::vector<uint64_t> incoming;
+            incoming.reserve(graph.IncomingLinkCountAt(target));
+            for (uint64_t edge = 0; edge < graph.IncomingLinkCountAt(target); ++edge) {
+                incoming.push_back(graph.IncomingLinkAt(target, edge));
+            }
+            std::sort(incoming.begin(), incoming.end());
+            REQUIRE(expected == incoming);
+        }
+    }
+}

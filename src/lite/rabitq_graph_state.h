@@ -873,7 +873,7 @@ public:
     void
     ConfigureIncomingProtection(IncomingProtection mode,
                                 bool protect_add = false,
-                                bool protect_remove = false,
+                                bool protect_removed_sources = false,
                                 bool protect_add_displaced = false,
                                 bool protect_link = false) {
         codec_require(active_journal_ == nullptr and (mode == IncomingProtection::NONE or
@@ -884,7 +884,7 @@ public:
                       "safe link pruning requires cached incoming counts");
         incoming_protection_ = mode;
         protect_added_incoming_ = protect_add;
-        protect_removed_incoming_ = protect_remove;
+        protect_removed_sources_ = protect_removed_sources;
         protect_added_displaced_ = protect_add_displaced;
         protect_link_incoming_ = protect_link;
         incoming_counts_valid_ = false;
@@ -1215,10 +1215,10 @@ public:
             return false;
         }
         codec_require(active_journal_ == nullptr, "nested graph remove transaction");
-        // Only removal protection can initialize the cold cache during Remove.
-        // Without it, the local journal preserves rollback without a full-state copy.
+        // Only removed-source protection initializes the cold cache during Remove.
+        // Reselection uses reverse adjacency counts; the journal stays local.
         if (use_incoming_adjacency_ and incoming_protection_ == IncomingProtection::CACHED and
-            protect_removed_incoming_ and not incoming_counts_valid_) {
+            protect_removed_sources_ and not incoming_counts_valid_) {
             auto next = *this;
             const bool removed = next.Remove(id);
             *this = std::move(next);
@@ -1411,7 +1411,7 @@ public:
             for (const uint64_t old_candidate : removed_neighbors) {
                 repair_candidates.push_back(remap(old_candidate));
             }
-            if (incoming_protection_ != IncomingProtection::NONE and protect_removed_incoming_) {
+            if (incoming_protection_ != IncomingProtection::NONE and protect_removed_sources_) {
                 std::sort(affected_nodes.begin(), affected_nodes.end());
                 affected_nodes.erase(std::unique(affected_nodes.begin(), affected_nodes.end()),
                                      affected_nodes.end());
@@ -1889,22 +1889,28 @@ private:
     }
 
     // Experimental adaptation of floating GraphBackend::ensure_incoming.
-    // Recount reference or cached degrees; neither adds a reverse-edge index.
+    // Use existing reverse adjacency when requested; otherwise recount or cache degrees.
     void
-    protect_incoming(const std::vector<uint64_t>& targets) {
+    protect_incoming(const std::vector<uint64_t>& targets, bool use_reverse_counts = false) {
         if (Size() <= 1) {
             return;
         }
         std::vector<uint64_t> recounted;
-        if (incoming_protection_ == IncomingProtection::CACHED) {
-            prepare_incoming_counts();
-        } else {
-            count_incoming(recounted);
+        const bool reverse_counts = use_reverse_counts and use_incoming_adjacency_;
+        if (not reverse_counts) {
+            if (incoming_protection_ == IncomingProtection::CACHED) {
+                prepare_incoming_counts();
+            } else {
+                count_incoming(recounted);
+            }
         }
         auto& indegrees =
             incoming_protection_ == IncomingProtection::CACHED ? incoming_counts_ : recounted;
+        const auto incoming_count = [&](uint64_t target) -> uint64_t {
+            return reverse_counts ? incoming_[target].size() : indegrees[target];
+        };
         for (const uint64_t target : targets) {
-            if (target >= Size() or indegrees[target] != 0) {
+            if (target >= Size() or incoming_count(target) != 0) {
                 continue;
             }
             uint64_t selected_source = Size();
@@ -1916,7 +1922,7 @@ private:
                 const float sum = std::accumulate(query.begin(), query.end(), 0.0F);
                 for (uint64_t edge = 0; edge < adjacency_[source].size(); ++edge) {
                     const uint64_t displaced = adjacency_[source][edge];
-                    if (indegrees[displaced] <= 1) {
+                    if (incoming_count(displaced) <= 1) {
                         continue;
                     }
                     const auto code = codes_.At(displaced);
@@ -1937,7 +1943,7 @@ private:
             const auto old_neighbors = adjacency_[selected_source];
             const uint64_t displaced = adjacency_[selected_source][selected_edge];
             adjacency_[selected_source][selected_edge] = target;
-            if (incoming_protection_ != IncomingProtection::CACHED) {
+            if (not reverse_counts and incoming_protection_ != IncomingProtection::CACHED) {
                 --indegrees[displaced];
                 ++indegrees[target];
             }
@@ -1951,71 +1957,81 @@ private:
         std::sort(affected_nodes.begin(), affected_nodes.end());
         affected_nodes.erase(std::unique(affected_nodes.begin(), affected_nodes.end()),
                              affected_nodes.end());
+        std::vector<uint64_t> displaced_targets;
         for (const uint64_t source : affected_nodes) {
             if (source >= Size()) {
                 continue;
             }
-            // Preserve valid links to limit topology drift; rank only candidates that can
-            // refill the degree lost by the mutation.
-            auto& repaired = adjacency_[source];
-            if (repaired.size() >= max_degree_) {
-                continue;
-            }
-            remember_row(source);
-            const auto old_neighbors = repaired;
+            const auto old_neighbors = adjacency_[source];
+            auto candidates = old_neighbors;
+            candidates.insert(
+                candidates.end(), additional_candidates.begin(), additional_candidates.end());
+            std::sort(candidates.begin(), candidates.end());
+            candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
             const auto query = decode_query(source);
             const float query_norm = codes_.At(source).metadata.norm;
             const float query_sum = std::accumulate(query.begin(), query.end(), 0.0F);
             std::vector<Candidate> ranked;
-            ranked.reserve(additional_candidates.size());
-            for (const uint64_t candidate : additional_candidates) {
-                if (candidate < Size() and candidate != source and
-                    std::find(repaired.begin(), repaired.end(), candidate) == repaired.end()) {
+            ranked.reserve(candidates.size());
+            for (const uint64_t candidate : candidates) {
+                if (candidate < Size() and candidate != source) {
                     ranked.push_back({candidate, 0.0F});
                 }
             }
             score_mutation_candidates(query, query_norm, query_sum, codes_, ranked);
             std::sort(ranked.begin(), ranked.end(), better);
-            const uint64_t needed = max_degree_ - repaired.size();
-            const uint64_t retained = std::min(needed, ranked.size());
-            repaired.reserve(repaired.size() + retained);
-            if (ranked.size() > retained and retained > 0) {
-                uint64_t chosen = 0;
-                for (const auto& candidate : ranked) {
-                    if (chosen == retained) {
+            std::vector<uint64_t> selected;
+            selected.reserve(max_degree_);
+            // Reuse the current encoded geometry; this is not exact FP32 pruning.
+            for (const auto& candidate : ranked) {
+                bool diverse = true;
+                for (const uint64_t neighbor : selected) {
+                    if (one_bit_code_distance(codes_.At(neighbor),
+                                              codes_.At(candidate.id),
+                                              model_.dim) < candidate.distance) {
+                        diverse = false;
                         break;
                     }
-                    const auto code = codes_.At(candidate.id);
-                    bool diverse = true;
-                    for (const uint64_t selected : repaired) {
-                        if (one_bit_code_distance(codes_.At(selected), code, model_.dim) <
-                            candidate.distance) {
-                            diverse = false;
-                            break;
-                        }
-                    }
-                    if (diverse) {
-                        repaired.push_back(candidate.id);
-                        ++chosen;
-                    }
                 }
-                // Preserve the degree-fill contract if every remaining candidate is occluded.
-                for (const auto& candidate : ranked) {
-                    if (chosen == retained) {
+                if (diverse) {
+                    selected.push_back(candidate.id);
+                    if (selected.size() == max_degree_) {
                         break;
                     }
-                    if (std::find(repaired.begin(), repaired.end(), candidate.id) ==
-                        repaired.end()) {
-                        repaired.push_back(candidate.id);
-                        ++chosen;
-                    }
-                }
-            } else {
-                for (uint64_t i = 0; i < retained; ++i) {
-                    repaired.push_back(ranked[i].id);
                 }
             }
-            sync_incoming(source, old_neighbors);
+            for (const auto& candidate : ranked) {
+                if (selected.size() == max_degree_) {
+                    break;
+                }
+                if (std::find(selected.begin(), selected.end(), candidate.id) == selected.end()) {
+                    selected.push_back(candidate.id);
+                }
+            }
+            for (const uint64_t target : old_neighbors) {
+                if (std::find(selected.begin(), selected.end(), target) == selected.end()) {
+                    displaced_targets.push_back(target);
+                }
+            }
+            replace_neighbors(source, selected);
+        }
+        // Reselection protects the targets it displaces, independently of the
+        // legacy Add/removed-source guards. Reverse adjacency supplies exact
+        // counts without initializing a cold cache inside the local transaction.
+        if (incoming_protection_ != IncomingProtection::NONE) {
+            std::sort(displaced_targets.begin(), displaced_targets.end());
+            displaced_targets.erase(std::unique(displaced_targets.begin(), displaced_targets.end()),
+                                    displaced_targets.end());
+            if (use_incoming_adjacency_) {
+                displaced_targets.erase(
+                    std::remove_if(displaced_targets.begin(),
+                                   displaced_targets.end(),
+                                   [&](uint64_t target) { return not incoming_[target].empty(); }),
+                    displaced_targets.end());
+            }
+            if (not displaced_targets.empty()) {
+                protect_incoming(displaced_targets, true);
+            }
         }
     }
 
@@ -2065,7 +2081,7 @@ private:
 
     IncomingProtection incoming_protection_{IncomingProtection::NONE};
     bool protect_added_incoming_{};
-    bool protect_removed_incoming_{};
+    bool protect_removed_sources_{};
     bool protect_added_displaced_{};
     bool protect_link_incoming_{};
     std::vector<uint64_t> incoming_counts_;
