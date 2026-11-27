@@ -16,7 +16,8 @@ VSAG 在 `include/vsag/vsag_c_api.h` 中导出 C ABI。它封装了与 C++ API �
   边界，也不保存线程局部的错误状态。
 - **借用缓冲区：** 向量、id 和过滤器数据不会被库复制或释放。传给某次调用的缓冲区只需在该调用期间
   有效；挂到 dataset 或 bitmap 过滤器上的缓冲区需在该句柄使用期间保持有效。
-- **返回的指针：** 从句柄读取的指针在该句柄销毁前有效。
+- **返回的指针：** 从句柄读取的指针在该句柄销毁前有效；分析接口返回的持有型字符串则需通过
+  `vsag_string_destroy` 释放。
 - **类型：** 签名中只使用定宽整数；标志位为 `int32_t`（0 表示假）。
 - **参数：** 索引参数和搜索参数与 C++ API 一样是 JSON 字符串。
 - **线程：** 索引可被并发搜索。dataset、过滤器和搜索结果可并发读取，但在其他线程使用时不得修改
@@ -76,6 +77,16 @@ dataset 是对调用方内存的视图，既可描述底库数据，也可描述
 对于稠密 float32 查询，`vsag_index_knn_search_float32` 是低开销路径：一次调用、无需句柄，输出
 缓冲区 `out_ids`/`out_distances` 由调用方分配，大小为 `num_queries * k`。
 
+## 索引分析
+
+`vsag_analyze_index` 加载序列化索引，返回与[索引分析工具](../resources/analyze_index.md)相同的
+静态或查询驱动 JSON 报告。构建或搜索参数传 `"default"` 可复用内嵌参数；查询数据类型接受
+`"auto"`、`"dense"` 或 `"sparse"`；未使用的可选路径传空字符串。所有字符串参数都不能为 `NULL`。
+
+成功时，`out_json` 接收调用方持有的 NUL 结尾 JSON 字符串，使用方复制或包装后必须通过
+`vsag_string_destroy` 释放；销毁 `NULL` 不做任何事。失败时，`out_json` 为 `NULL`，返回的错误可区分
+非法参数与加载或分析失败。
+
 ## 过滤器
 
 过滤器是纯数据，因此每个候选点都不会跨越语言边界：
@@ -107,6 +118,7 @@ dataset 是对调用方内存的视图，既可描述底库数据，也可描述
 - **复制与复用：** `vsag_index_clone`、`vsag_index_export_model`。
 - **持久化：** `vsag_index_serialize_file`、`vsag_index_deserialize_file`；对于把索引字节放在自有
   存储中的宿主，还有 `vsag_index_serialize_writer` 和 `vsag_index_deserialize_reader`。
+- **分析：** `vsag_analyze_index` 和 `vsag_string_destroy`。
 
 是否支持仍取决于所选索引，不支持的操作返回 `VSAG_UNSUPPORTED_INDEX_OPERATION`。请检查返回的
 错误码是否为 `VSAG_READ_ERROR`、`VSAG_MISSING_FILE` 等非成功值，不要假定文件操作一定完成。

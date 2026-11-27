@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <functional>
@@ -39,6 +40,7 @@
 #include <utility>
 #include <vector>
 
+#include "analyzer/index_analyzer.h"
 #include "vsag_c_api_internal.h"
 
 using namespace vsag::c_api;
@@ -1148,6 +1150,52 @@ vsag_index_get_min_max_id(const vsag_index_t* index, int64_t* out_min_id, int64_
         *out_max_id = range.value().second;
         return nullptr;
     });
+}
+
+vsag_error_t*
+vsag_analyze_index(const char* index_path,
+                   const char* build_parameter,
+                   const char* query_path,
+                   const char* query_data_type,
+                   const char* base_path,
+                   const char* groundtruth_path,
+                   const char* save_groundtruth_path,
+                   const char* search_parameter,
+                   int64_t topk,
+                   char** out_json) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(out_json != nullptr, "out_json is NULL");
+        *out_json = nullptr;
+        VSAG_REQUIRE(index_path != nullptr and build_parameter != nullptr and
+                         query_path != nullptr and query_data_type != nullptr and
+                         base_path != nullptr and groundtruth_path != nullptr and
+                         save_groundtruth_path != nullptr and search_parameter != nullptr,
+                     "analysis string arguments must not be NULL");
+
+        vsag::IndexAnalysisOptions options;
+        options.index_path = index_path;
+        options.build_parameter = build_parameter;
+        options.query_path = query_path;
+        options.query_data_type = query_data_type;
+        options.base_path = base_path;
+        options.groundtruth_path = groundtruth_path;
+        options.save_groundtruth_path = save_groundtruth_path;
+        options.search_parameter = search_parameter;
+        options.topk = topk;
+        const auto report = vsag::AnalyzeIndex(options).Dump();
+        auto* json = static_cast<char*>(std::malloc(report.size() + 1));
+        if (json == nullptr) {
+            throw std::bad_alloc();
+        }
+        std::memcpy(json, report.c_str(), report.size() + 1);
+        *out_json = json;
+        return nullptr;
+    });
+}
+
+void
+vsag_string_destroy(char* string) {
+    std::free(string);
 }
 
 }  // extern "C"

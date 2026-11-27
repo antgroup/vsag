@@ -37,10 +37,6 @@
 extern "C" {
 #endif
 
-/** Releases a string returned by a vsag_eval_* function. Destroying NULL is a no-op. */
-void
-vsag_string_destroy(char* str);
-
 /**
  * Sets the process-wide number of threads used to build indexes (1..200) and optionally returns the
  * previous value. Indexes read it when they are created, so call it before creating the index to

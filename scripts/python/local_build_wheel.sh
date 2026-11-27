@@ -98,7 +98,7 @@ run_build() {
     rm -rf wheelhouse
     CIBW_ARCHS="${ARCH}" \
     CIBW_ENVIRONMENT_PASS_LINUX="CMAKE_BUILD_PARALLEL_LEVEL" \
-    CIBW_TEST_COMMAND="pip install numpy pytest && python /project/tests/python/run_test.py" \
+    CIBW_TEST_COMMAND="pip install numpy pytest && python /project/tests/python/run_test.py && python /project/scripts/python/smoke_test_wheel.py" \
     cibuildwheel --platform linux --output-dir wheelhouse python
     # Wheels built against system dependencies (e.g. PR CI) legitimately bundle libgfortran.
     SYSTEM_DEPS="$(echo "${VSAG_USE_SYSTEM_DEPS:-OFF}" | tr '[:lower:]' '[:upper:]')"

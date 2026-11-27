@@ -89,11 +89,6 @@ private:
 
 extern "C" {
 
-void
-vsag_string_destroy(char* str) {
-    std::free(str);
-}
-
 vsag_error_t*
 vsag_eval_set_num_threads_building(int32_t num_threads, int32_t* out_previous) {
     return guarded([&]() -> vsag_error_t* {
