@@ -1,15 +1,18 @@
 <!-- agent-hints
 canonical: README.md
-purpose: VSAG project landing page (intro, performance, Quickstart, links)
+purpose: VSAG project landing page (intro, capabilities, performance, Quickstart, roadmap, links)
 key-facts:
-  - VSAG is a C++ vector indexing library with pyvsag (Python) and vsag (Node.js/TS) bindings
-  - SINDI (sparse) and HGraph (dense) are the headline indexes
+  - VSAG is a C++ vector indexing library with C API, pyvsag (Python), vsag (Node.js/TS) bindings, and standalone VSAG Lite
+  - Supports dense (HGraph, LazyHGraph, IVF, Pyramid, BruteForce), sparse (SINDI, SINDI_V2), and multi-vector (SIMQ, WARP) indexes
   - Quickstart blocks exist for C++, Python, and TypeScript
+  - Official documentation is published at https://vsag.io/docs from docs/docs/{en,zh}/src/
 related:
   - AGENTS.md
   - DEVELOPMENT.md
+  - docs/README.md
+  - lite/README.md
   - docs/docs/en/src/guide/installation.md
-last-reviewed: 2026-05-12
+last-reviewed: 2026-11-23
 -->
 <div align="center">
   <h1><img alt="vsag-pages" src="docs/banner.svg" width=500/></h1>
@@ -37,9 +40,18 @@ last-reviewed: 2026-05-12
 
 ## What is VSAG
 
-VSAG is a vector indexing library used for similarity search. The indexing algorithm allows users to search through various sizes of vector sets, especially those that cannot fit in memory. The library also provides methods for generating parameters based on vector dimensions and data scale, allowing developers to use it without understanding the algorithm’s principles. VSAG is written in C++ and provides a Python wrapper package called [pyvsag](https://pypi.org/project/pyvsag/) and a Node.js/TypeScript binding package called `vsag`.
+VSAG is a high-performance vector indexing library for similarity search. Its indexing algorithms support vector collections across scales, including datasets that exceed available memory, and provide automated tuning and parameter selection so developers can achieve strong performance without deep algorithm expertise. VSAG is written in C++ and offers a versioned [C API](./docs/docs/en/src/guide/c_api.md), a Python package ([pyvsag](https://pypi.org/project/pyvsag/)), a Node.js/TypeScript package (`vsag`), and a standalone [VSAG Lite](./lite/README.md) library for lightweight deployments.
 
-HGraph and Pyramid support experimental, opt-in adaptive alpha for PiPNN L2 builds; see the [HGraph parameter guide](docs/docs/en/src/indexes/hgraph.md) and [Pyramid parameter guide](docs/docs/en/src/indexes/pyramid.md#adaptive-pipnn-pruning).
+Full user documentation is available at [vsag.io/docs](https://vsag.io/docs/) ([中文文档](https://vsag.io/docs/zh/)) and indexed locally in [docs/README.md](./docs/README.md).
+
+### Key Capabilities
+
+- **Index Families** ([overview](./docs/docs/en/src/indexes/README.md)):
+  - **Dense**: [HGraph](./docs/docs/en/src/indexes/hgraph.md), [LazyHGraph](./docs/docs/en/src/indexes/lazy_hgraph.md), [IVF](./docs/docs/en/src/indexes/ivf.md) (`kmeans`, `e_means`, `gno_imi`, and optional CUDA GPU construction), [Pyramid](./docs/docs/en/src/indexes/pyramid.md) (hierarchical/multi-tenant paths), and [BruteForce](./docs/docs/en/src/indexes/brute_force.md).
+  - **Sparse**: [SINDI](./docs/docs/en/src/indexes/sindi.md) and [SINDI_V2](./docs/docs/en/src/indexes/sindi_v2.md) (in-memory and disk-based inverted-list search).
+  - **Multi-Vector**: [SIMQ](./docs/docs/en/src/indexes/simq.md) and [WARP](./docs/docs/en/src/indexes/warp.md) for ColBERT-style MaxSim retrieval.
+- **Quantization & Compression** ([overview](./docs/docs/en/src/quantization/README.md)): `fp32`, native `fp16` / `bf16`, `sq8` / `sq4` (including SIMD-friendly `sq8_uniform` / `sq4_uniform`), `pq` / `pqfs`, `rabitq` (1-bit and multi-bit x+y split), [`saq`](./docs/docs/en/src/quantization/saq.md), and transform chains (`tq`).
+- **Platforms & Tools**: Supports Linux (`x86_64` / `aarch64`) and macOS Apple Silicon (`arm64`, C++ and local/TestPyPI Python builds). Includes benchmarking, auto-tuning, index analysis, and compatibility verification utilities under [tools/](./tools/README.md).
 
 ## Performance
 The VSAG algorithm SINDI for sparse vector search achieves a breakthrough in performance, substantially outperforming previous **state-of-the-art (SOTA)** solutions. In our internal tests on a 40-core Intel(R) Xeon(R) Silver 4210R CPU, VSAG's QPS exceeds that of the previous SOTA algorithm, Zilliz, by 166% on the sparse-full(8M) at 98% recall. While the official ann-benchmarks on sparse track runs on an Azure Standard D8lds v5 VM, we plan to submit our results under the official benchmark environment soon to formally validate this performance leap.
@@ -54,6 +66,12 @@ The VSAG algorithm achieves a significant boost of efficiency and outperforms th
 
 ## Getting Started
 
+### Installation
+
+- **Python**: `pip install pyvsag` (Linux `x86_64` / `aarch64`, Python 3.10+; see the [pyvsag guide](./docs/docs/en/src/guide/pyvsag.md) for macOS and source builds)
+- **Node.js / TypeScript**: `npm install vsag`
+- **C++ / Docker / Source**: see the [Installation guide](./docs/docs/en/src/guide/installation.md) or [DEVELOPMENT.md](./DEVELOPMENT.md)
+
 ### Quickstart
 
 Below is a minimal example of creating an HGraph index, building it with random vectors, and performing a k-NN search — shown in C++, Python, and TypeScript.
@@ -65,19 +83,24 @@ Below is a minimal example of creating an HGraph index, building it with random 
 #include <vsag/vsag.h>
 #include <iostream>
 #include <random>
+#include <vector>
 
 int main() {
     // Prepare data
     int64_t num_vectors = 1000, dim = 128;
-    auto ids = new int64_t[num_vectors];
-    auto vectors = new float[dim * num_vectors];
+    std::vector<int64_t> ids(num_vectors);
+    std::vector<float> vectors(dim * num_vectors);
     std::mt19937 rng(47);
     std::uniform_real_distribution<float> dist;
     for (int64_t i = 0; i < num_vectors; ++i) ids[i] = i;
     for (int64_t i = 0; i < dim * num_vectors; ++i) vectors[i] = dist(rng);
 
     auto base = vsag::Dataset::Make();
-    base->NumElements(num_vectors)->Dim(dim)->Ids(ids)->Float32Vectors(vectors);
+    base->NumElements(num_vectors)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
 
     // Create and build index
     auto index = vsag::Factory::CreateIndex("hgraph", R"(
@@ -87,10 +110,10 @@ int main() {
     index->Build(base);
 
     // Search
-    auto query_vector = new float[dim];
+    std::vector<float> query_vector(dim);
     for (int64_t i = 0; i < dim; ++i) query_vector[i] = dist(rng);
     auto query = vsag::Dataset::Make();
-    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector)->Owner(true);
+    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
 
     auto result = index->KnnSearch(query, 10, R"({"hgraph":{"ef_search":100}})").value();
     for (int64_t i = 0; i < result->GetDim(); ++i)
@@ -206,14 +229,12 @@ include (FetchContent)
 FetchContent_Declare (
   vsag
   GIT_REPOSITORY https://github.com/antgroup/vsag
-  GIT_TAG main
+  GIT_TAG main # or pin to a release tag, e.g. v1.1.0
 )
 FetchContent_MakeAvailable (vsag)
 
 add_executable (vsag-cmake-example src/main.cpp)
-target_include_directories (vsag-cmake-example SYSTEM PRIVATE ${vsag_SOURCE_DIR}/include)
 target_link_libraries (vsag-cmake-example PRIVATE vsag)
-add_dependencies (vsag-cmake-example vsag)
 ```
 
 ### Examples
@@ -261,20 +282,18 @@ Thrive together in VSAG community with users and developers from all around the 
 - **Unified Indexing and Hybrid Retrieval**
   - **HGraph v2**: Integrate capabilities from LazyHGraph, MCI, and Pyramid into a unified index with comprehensive filtering and search optimizations.
   - **Dense–Sparse Hybrid Search**: Support retrieval that combines dense and sparse similarity with configurable query-time weights.
-  - **SINDI_V2**: Complete the sparse-vector index introduced in v1.1 as a work in progress, with optimized in-memory and disk-based search.
+  - **SINDI_V2**: Term-first sparse-vector index with in-memory and disk-based I/O (`reader_io`, `mmap_io`, `buffer_io`, `async_io`); see the [SINDI_V2 guide](./docs/docs/en/src/indexes/sindi_v2.md).
   - **Hamming Distance**: Enable similarity search over binary vectors.
   - **Grouped Retrieval**: Support multiple vectors per entity with collapsed and expanded search results.
 
 - **Faster Index Construction and Balanced Partitioning**
-  - **GPU-Accelerated HGraph Construction**: Accelerate graph building with GPU computation.
-  - **Random Projection Tree Partitioning**: Provide balanced, reproducible partitions for clustering and parallel index construction.
-  - **Balanced K-Means**: Add capacity-constrained clustering to produce balanced IVF partitions.
-  - **Efficient Graph Merging and Reuse**: Reuse existing graph structures during index merging and parameter tuning to reduce construction costs.
+  - **GPU-Accelerated HGraph Construction**: Accelerate graph building with GPU computation (optional CUDA acceleration is currently available for IVF training/construction).
+  - **Random Projection Tree Partitioning** *(implemented)*: Balanced, reproducible `vsag::rpt_partition` utility for sharding and parallel index construction; see the [RPT partitioning guide](./docs/docs/en/src/advanced/rpt_partition.md).
+  - **Balanced K-Means**: Add capacity-constrained clustering to produce balanced IVF partitions (faster `e_means` mini-batch IVF training is already available).
+  - **Efficient Graph Merging and Reuse**: Reuse existing graph structures during index merging and parameter tuning to reduce construction costs. Opt-in FGIM HGraph merging (`merge_strategy: "fgim"`) is now available; see [FGIM merge](./docs/docs/en/src/indexes/hgraph.md#fgim-merge-opt-in).
 
 - **Advanced Quantization**
-  - **SAQ (Segmented Code Adjustment Quantization)**: Trained segmentation, dynamic bit
-    allocation, and code adjustment for low-bit dense-vector storage. See the
-    [SAQ guide](./docs/docs/en/src/quantization/saq.md).
+  - **SAQ (Segmented Code Adjustment Quantization)** *(implemented)*: Trained segmentation, dynamic bit allocation, and code adjustment for low-bit dense-vector storage; see the [SAQ guide](./docs/docs/en/src/quantization/saq.md).
   - **Multi-Centroid Residual RaBitQ**: Improve compression quality by quantizing residuals around multiple centroids.
   - **Efficient Scalar Quantization**: Optimize local SQ4/SQ8 computation and reduce redundant storage between search and reranking.
 
@@ -285,8 +304,8 @@ Thrive together in VSAG community with users and developers from all around the 
   - **Pip-Installable Analysis Tools**: Make index diagnostics available through `pyvsag` without requiring a source build.
 
 - **Lightweight Deployment and Storage Integration**
-  - **VSAG Lite**: Provide a lightweight variant with essential indexing, search, update, and persistence capabilities for resource-constrained deployments.
-  - **Pluggable Storage I/O**: Extend custom reader and writer support for external storage integration.
+  - **VSAG Lite** *(implemented)*: Standalone lightweight variant with exact FP32 BruteForce, FP32/FP16 graphs, opt-in RaBitQ8, and optional durable Add/recovery; see [`lite/README.md`](./lite/README.md) and the [VSAG Lite guide](./docs/docs/en/src/development/lite_first.md).
+  - **Pluggable Storage I/O** *(in progress)*: Custom Reader/Writer callbacks during construction (`user_defined_io`) and C API host extension points are available; see the [User-Defined IO guide](./docs/docs/en/src/advanced/user_defined_io.md) and [C API guide](./docs/docs/en/src/guide/c_api.md).
   - **Lower Memory Footprint**: Reduce redundant storage in immutable indexes and improve binary distribution packaging.
 
 - **Python and RAG Ecosystem**
@@ -316,10 +335,10 @@ Thrive together in VSAG community with users and developers from all around the 
    [PDF](https://www.vldb.org/pvldb/vol18/p5017-cheng.pdf) | [DOI](https://doi.org/10.14778/3750601.3750624)
 
 6. Effective and General Distance Computation for Approximate Nearest Neighbor Search [_ICDE_, 2025]  
-   **Mingyu Yang**, Wentao Li, **Jiabao Jin, Xiaoyao Zhong, Xiangyu Wang, Zhitao Shen**, **Wei Jia,** Wei Wang \
-   [PDF](https://arxiv.org/pdf/2404.16322) | [DOI](https://doi.org/10.1109/ICDE65448.2025.00087)  
+   **Mingyu Yang**, Wentao Li, **Jiabao Jin, Xiaoyao Zhong, Xiangyu Wang, Zhitao Shen, Wei Jia**, Wei Wang  
+   [PDF](https://arxiv.org/pdf/2404.16322) | [DOI](https://doi.org/10.1109/ICDE65448.2025.00087)
 
-7. EnhanceGraph: A Continuously Enhanced Graph-based Index for High-dimensional Approximate Nearest Neighbor Search [_TKDE_] \
+7. EnhanceGraph: A Continuously Enhanced Graph-based Index for High-dimensional Approximate Nearest Neighbor Search [_TKDE_]  
    **Xiaoyao Zhong, Jiabao Jin**, Peng Cheng, **Mingyu Yang**, Lei Chen, Haoyang Li, **Zhitao Shen**, Xuemin Lin, Heng Tao Shen, Jingkuan Song  
    [PDF](https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=11663430) | [DOI](https://doi.org/10.1109/TKDE.2026.3726767)
 
@@ -359,7 +378,7 @@ VSAG draws on the following works for graph construction, vector quantization, f
 
 7. SAQ: Pushing the Limits of Vector Quantization through Code Adjustment and Dimension Segmentation [_SIGMOD_, 2026] \
    Hui Li, Shiyuan Deng, Xiao Yan, Xiangyu Zhi, James Cheng \
-   Code adjustment for the optional fast encoding path in the RaBitQ quantizer. \
+   Standalone SAQ quantizer (PCA, variance-aware segmentation, dynamic bit allocation, and CAQ) and shared code adjustment for RaBitQ's optional fast encoding path. \
    [PDF](https://arxiv.org/pdf/2509.12086) | [DOI](https://doi.org/10.1145/3769824)
 
 8. MCI: A Maximal Clique Index for Efficient Arbitrary-Filtered Approximate Nearest Neighbor Search [_arXiv_, 2026] \
