@@ -134,6 +134,7 @@ require_target(std::optional<ChunkedTarget>& target, const std::string& name) {
 
 void
 HGraph::ParallelDeserialize(DeserializeReader& reader) {
+    this->degree_reduction_prepared_.store(false, std::memory_order_release);
     // Engine-created indexes carry the Resource-managed pool in thread_pool_.
     // Keep an owned fallback only for direct construction without a Resource;
     // it must outlive every task dispatched below.

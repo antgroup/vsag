@@ -70,6 +70,8 @@ struct Config {
     /// Keep every generated index artifact instead of only the selected artifact.
     bool keep_intermediate{false};
     bool include_raw_evaluation{false};
+    /// Allow HGraph base_quantization_type candidates to share a canonical fp32 build.
+    bool allow_quantization_tune{false};
 };
 
 /// Candidate space for one concrete index type.
