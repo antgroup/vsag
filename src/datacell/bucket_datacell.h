@@ -127,6 +127,23 @@ public:
         const auto width = static_cast<uint64_t>(rows.Dim());
         if (rows.Count() > static_cast<uint64_t>(PTRDIFF_MAX) / sizeof(float) / width)
             throw std::invalid_argument("residual TrainingRows assignment extent overflow");
+        if (strategy_->ClassifiesBuildJointly()) {
+            // A Build places these vectors jointly (balanced) and Add at their nearest
+            // bucket, so the rows are those Train computes from FP32 input: the residuals
+            // of ResidualsForTrain, written over the decoded rows (plus a row per further
+            // bucket of a vector), and the quantizer is trained as Train trains it.
+            Vector<float> residuals(rows.Count() * width, allocator_);
+            for (uint64_t i = 0; i < rows.Count(); ++i) {
+                float* row = residuals.data() + i * width;
+                rows.Read(i, row);
+                if (metric_ == MetricType::METRIC_TYPE_COSINE)
+                    Normalize(row, row, rows.Dim());
+            }
+            const auto count = strategy_->ResidualsForTrain(
+                residuals.data(), static_cast<int64_t>(rows.Count()), residuals);
+            this->quantizer_->Train(residuals.data(), count);
+            return;
+        }
         // Preserve native classifier assignment shape. This full decoded assignment
         // slab is algorithm workspace, NOT a bounded reader claim; it is freed
         // before scalar training. Residuals themselves are never materialized N*D.
@@ -687,7 +704,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
     Vector<float> train_data_buffer(allocator_);
     if (use_residual_) {
         auto data_ptr = static_cast<const float*>(data);
-        auto dim = this->quantizer_->GetDim();
+        auto dim = this->strategy_->dim_;
         train_data_buffer.resize(count * dim);
         if (metric_ == MetricType::METRIC_TYPE_COSINE) {
             for (int i = 0; i < count; ++i) {
@@ -695,14 +712,10 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
             }
             data_ptr = train_data_buffer.data();
         }
-        Vector<float> centroid(this->quantizer_->GetDim(), allocator_);
-        auto buckets = strategy_->ClassifyDatas(data_ptr, count, 1, nullptr);
-        for (int i = 0; i < count; ++i) {
-            strategy_->GetCentroid(buckets[i], centroid);
-            for (int j = 0; j < dim; ++j) {
-                train_data_buffer[i * dim + j] = data_ptr[i * dim + j] - centroid[j];
-            }
-        }
+        // Residuals to the buckets a Build and Add give this batch. For a sample that is
+        // the same procedure, not the same placement of each vector.
+        count =
+            strategy_->ResidualsForTrain(data_ptr, static_cast<int64_t>(count), train_data_buffer);
         data = train_data_buffer.data();
     }
     this->quantizer_->Train(reinterpret_cast<const float*>(data), count);

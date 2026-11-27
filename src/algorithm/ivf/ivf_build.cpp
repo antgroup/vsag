@@ -259,12 +259,30 @@ IVF::add(const DatasetPtr& base, bool try_optimized_build) {
     const auto* attr_sets = base->GetAttributeSets();
     const auto* extra_info = base->GetExtraInfos();
     const auto extra_info_size = base->GetExtraInfoSize();
+    bool fresh_build = false;
+    if (try_optimized_build) {
+        std::lock_guard lock(label_lookup_mutex_);
+        fresh_build = this->total_elements_ == 0;
+    }
+    // A Build into an empty index lets the partition place all vectors at once, which
+    // is when a balanced trainer can balance the buckets; Add routes every vector.
     Vector<BucketIdType> buckets(allocator_);
     constexpr uint64_t block_rows = 256;
     Vector<float> classify_buffer(allocator_);
     if (common_param_.data_type_ == DataTypes::DATA_TYPE_FLOAT) {
-        buckets = partition_strategy_->ClassifyDatas(
-            input.Data(), num_element, buckets_per_data_, nullptr);
+        buckets = fresh_build ? partition_strategy_->ClassifyDatasForBuild(
+                                    input.Data(), num_element, buckets_per_data_)
+                              : partition_strategy_->ClassifyDatas(
+                                    input.Data(), num_element, buckets_per_data_, nullptr);
+    } else if (fresh_build and partition_strategy_->ClassifiesBuildJointly()) {
+        // A joint (balanced) placement needs the whole Build in one call, so FP16/BF16
+        // rows are decoded together: 4 * count * dim bytes, twice the half-precision
+        // input, released as soon as the buckets are known.
+        Vector<float> decoded(allocator_);
+        buckets = partition_strategy_->ClassifyDatasForBuild(
+            input.Rows(0, static_cast<uint64_t>(num_element), decoded),
+            num_element,
+            buckets_per_data_);
     } else {
         buckets.resize(num_element * buckets_per_data_);
         for (uint64_t first = 0; first < static_cast<uint64_t>(num_element); first += block_rows) {

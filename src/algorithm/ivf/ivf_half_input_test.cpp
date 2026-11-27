@@ -14,7 +14,9 @@
 
 #include <catch2/catch_approx.hpp>
 #include <cmath>
+#include <nlohmann/json.hpp>
 #include <numeric>
+#include <set>
 #include <sstream>
 
 #include "impl/allocator/safe_allocator.h"
@@ -359,4 +361,120 @@ TEST_CASE("IVF flat reorder consumes FP32 rows for half indexes", "[ut][IVFHalfF
     REQUIRE(restored.has_value());
     REQUIRE(restored.value()->Deserialize(artifact.value()).has_value());
     verify(restored.value());
+}
+
+TEST_CASE("IVF balanced_kmeans half inputs build floor and ceil buckets",
+          "[ut][IVFHalfInput][balanced]") {
+    const bool bf16 = GENERATE(false, true);
+    const std::string metric = GENERATE("l2", "ip", "cosine");
+    // With residual codes the decoded rows also train them (TrainRows), for every metric.
+    const auto [quantizer, residual] = GENERATE(std::make_pair(std::string("fp32"), false),
+                                                std::make_pair(std::string("sq8"), true));
+    CAPTURE(bf16, metric, quantizer, residual);
+    constexpr int64_t dim = 16;
+    constexpr int64_t buckets_count = 37;
+    constexpr int64_t base_count = 1000;  // 37 * 27 + 1
+    constexpr int64_t added_count = 100;
+    std::vector<uint16_t> half((base_count + added_count) * dim);
+    for (uint64_t i = 0; i < half.size(); ++i) {
+        const auto value = std::sin(static_cast<float>(i * 13 + 5)) * 0.75F;
+        half[i] = bf16 ? vsag::generic::FloatToBF16(value) : vsag::generic::FloatToFP16(value);
+    }
+    std::vector<int64_t> ids(base_count + added_count);
+    std::iota(ids.begin(), ids.end(), 0);
+    const auto config = fmt::format(R"({{
+        "dtype":"{}", "metric_type":"{}", "dim":{},
+        "index_param":{{"base_quantization_type":"{}", "buckets_count":{},
+            "ivf_train_type":"balanced_kmeans", "use_residual":{}, "use_route_graph":false}}
+    }})",
+                                    bf16 ? "bfloat16" : "float16",
+                                    metric,
+                                    dim,
+                                    quantizer,
+                                    buckets_count,
+                                    residual);
+    auto index = vsag::Factory::CreateIndex("ivf", config);
+    REQUIRE(index.has_value());
+    const auto rows = [&](int64_t first, int64_t count) {
+        return vsag::Dataset::Make()
+            ->Dim(dim)
+            ->NumElements(count)
+            ->Ids(ids.data() + first)
+            ->Float16Vectors(half.data() + first * dim)
+            ->Owner(false);
+    };
+    // The trainer reads the decoded sample, and the Build is placed in one assignment.
+    auto built = index.value()->Build(rows(0, base_count));
+    REQUIRE(built.has_value());
+    REQUIRE(built.value().empty());
+    auto stats = nlohmann::json::parse(index.value()->GetStats());
+    REQUIRE(stats["bucket_count"].get<int64_t>() == buckets_count);
+    REQUIRE(stats["bucket_num"]["min"].get<float>() == base_count / buckets_count);
+    REQUIRE(stats["bucket_num"]["max"].get<float>() == base_count / buckets_count + 1);
+    // Add routes every vector to its nearest bucket, in blocks, as for any trainer.
+    auto added = index.value()->Add(rows(base_count, added_count));
+    REQUIRE(added.has_value());
+    REQUIRE(added.value().empty());
+    REQUIRE(index.value()->GetNumElements() == base_count + added_count);
+    // Every vector is reachable through its bucket.
+    const auto search = fmt::format(R"({{"ivf":{{"scan_buckets_count":{}}}}})", buckets_count);
+    auto all = index.value()->KnnSearch(rows(7, 1), base_count + added_count, search);
+    REQUIRE(all.has_value());
+    REQUIRE(all.value()->GetDim() == base_count + added_count);
+    const std::set<int64_t> seen(all.value()->GetIds(),
+                                 all.value()->GetIds() + all.value()->GetDim());
+    REQUIRE(seen.size() == static_cast<uint64_t>(base_count + added_count));
+}
+
+TEST_CASE("IVF balanced_kmeans half inputs train residual codes on the Build buckets",
+          "[ut][IVFHalfInput][balanced]") {
+    // As the FP32 test: 300 zeros and 100 vectors at 100, in two buckets of 200, so 100
+    // zeros share a bucket with the far vectors, 50 below its centroid in every dimension.
+    // Residual codes trained on nearest-bucket residuals cover only [0, 50] and turned
+    // those zeros into 50s. Both values are exact in FP16 and BF16.
+    const bool bf16 = GENERATE(false, true);
+    CAPTURE(bf16);
+    constexpr int64_t dim = 8;
+    constexpr int64_t zeros = 300;
+    constexpr int64_t far = 100;
+    const auto encode = [&](float value) {
+        return bf16 ? vsag::generic::FloatToBF16(value) : vsag::generic::FloatToFP16(value);
+    };
+    std::vector<uint16_t> half((zeros + far) * dim, encode(0.0F));
+    std::fill(half.begin() + zeros * dim, half.end(), encode(100.0F));
+    std::vector<int64_t> ids(zeros + far);
+    std::iota(ids.begin(), ids.end(), 0);
+    const auto config = fmt::format(R"({{
+        "dtype":"{}", "metric_type":"l2", "dim":{},
+        "index_param":{{"base_quantization_type":"sq8", "buckets_count":2,
+            "ivf_train_type":"balanced_kmeans", "use_residual":true, "use_route_graph":false}}
+    }})",
+                                    bf16 ? "bfloat16" : "float16",
+                                    dim);
+    auto index = vsag::Factory::CreateIndex("ivf", config);
+    REQUIRE(index.has_value());
+    auto base = vsag::Dataset::Make()
+                    ->Dim(dim)
+                    ->NumElements(zeros + far)
+                    ->Ids(ids.data())
+                    ->Float16Vectors(half.data())
+                    ->Owner(false);
+    REQUIRE(index.value()->Build(base).has_value());
+    auto stats = nlohmann::json::parse(index.value()->GetStats());
+    REQUIRE(stats["bucket_num"]["min"].get<float>() == 200);
+    REQUIRE(stats["bucket_num"]["max"].get<float>() == 200);
+
+    std::vector<uint16_t> origin(dim, encode(0.0F));
+    auto query = vsag::Dataset::Make()
+                     ->Dim(dim)
+                     ->NumElements(1)
+                     ->Float16Vectors(origin.data())
+                     ->Owner(false);
+    auto result = index.value()->KnnSearch(query, zeros, R"({"ivf":{"scan_buckets_count":2}})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == zeros);
+    for (int64_t i = 0; i < zeros; ++i) {
+        REQUIRE(result.value()->GetIds()[i] < zeros);
+        REQUIRE(result.value()->GetDistances()[i] < 1.0F);
+    }
 }
