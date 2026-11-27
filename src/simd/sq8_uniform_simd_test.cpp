@@ -130,10 +130,11 @@ TEST_CASE("SQ8 Uniform SIMD Compute Codes Batch", "[ut][simd]") {
     // Cover dims that are AMX-friendly (multiples of 64), AVX-512-aligned
     // (multiples of 32), and odd ones to exercise the tail handling on
     // the AMX path.
-    const std::vector<int64_t> dims = {32, 48, 64, 96, 128, 192, 200, 256, 384, 512};
+    const std::vector<int64_t> dims = {
+        1, 15, 16, 17, 31, 32, 33, 48, 64, 96, 128, 192, 200, 256, 384, 512};
     // n_codes mix: smaller than the AMX 16-block, exactly one block,
     // multiple blocks plus a small remainder.
-    const std::vector<int64_t> ns = {1, 7, 15, 16, 17, 33, 100};
+    const std::vector<int64_t> ns = {1, 3, 4, 5, 7, 15, 16, 17, 32, 33, 48, 100};
     // Exercise tightly-packed (stride=dim) and strided (stride=dim+pad).
     const std::vector<int64_t> pads = {0, 8};
 

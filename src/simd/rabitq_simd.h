@@ -194,6 +194,9 @@ RotateOp(float* data, int idx, int dim_, int step);
 }  // namespace avx512
 
 namespace avx2 {
+uint32_t
+RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
+
 uint64_t
 RaBitQSQ4UBinaryIPWithBaseSum(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
 
@@ -370,9 +373,27 @@ VecRescale(float* data, uint64_t dim, float val);
 
 void
 KacsWalk(float* data, uint64_t len);
+
+void
+FlipSign(const uint8_t* flip, float* data, uint64_t dim);
 }  // namespace avx2
 
 namespace avx {
+uint32_t
+RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
+
+uint64_t
+RaBitQSQ4UBinaryIPWithBaseSum(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
+
+void
+RaBitQSQ4UBinaryIPWithBaseSumBatch4(const uint8_t* codes,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint64_t* results);
+
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
 
@@ -426,6 +447,63 @@ KacsWalk(float* data, uint64_t len);
 }  // namespace avx
 
 namespace sse {
+uint32_t
+RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
+
+uint64_t
+RaBitQSQ4UBinaryIPWithBaseSum(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
+
+void
+RaBitQSQ4UBinaryIPWithBaseSumBatch4(const uint8_t* codes,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint64_t* results);
+
+float
+RaBitQFloatPackedSupplementCodeIP(const float* vector,
+                                  const uint8_t* packed_supplement_code,
+                                  uint64_t dim,
+                                  uint32_t supplement_bits);
+
+float
+RaBitQFloatExCode7IP(const float* vector, const uint8_t* compact_code, uint64_t dim);
+
+bool
+RaBitQExCode7ToBytes(const uint8_t* one_bit_code,
+                     const uint8_t* supplement_code,
+                     uint64_t dim,
+                     uint8_t* out,
+                     uint64_t* code_sum,
+                     uint64_t* code_sq_sum);
+
+bool
+RaBitQExCode7ToVector(const uint8_t* one_bit_code,
+                      const uint8_t* supplement_code,
+                      const float* centroid,
+                      float residual_scale,
+                      float full_center,
+                      uint64_t dim,
+                      float* out);
+
+void
+RaBitQPackScalarToSplitCode(const uint8_t* scalar_codes,
+                            uint8_t* filter_planes,
+                            uint8_t* packed_supplement_code,
+                            uint64_t dim,
+                            uint32_t total_bits,
+                            uint32_t filter_bits);
+
+void
+RaBitQPackScalarToSplitPlanes(const uint8_t* scalar_codes,
+                              uint8_t* filter_planes,
+                              uint8_t* supplement_planes,
+                              uint64_t dim,
+                              uint32_t total_bits,
+                              uint32_t filter_bits);
+
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
 
@@ -473,6 +551,85 @@ VecRescale(float* data, uint64_t dim, float val);
 
 void
 KacsWalk(float* data, uint64_t len);
+
+void
+FlipSign(const uint8_t* flip, float* data, uint64_t dim);
+
+float
+RaBitQFloatTwoBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim);
+
+void
+RaBitQFloatTwoBitCenteredIPBatch4(const float* vector,
+                                  const uint8_t* bits1,
+                                  const uint8_t* bits2,
+                                  const uint8_t* bits3,
+                                  const uint8_t* bits4,
+                                  uint64_t dim,
+                                  float* results);
+
+float
+RaBitQFloatThreeBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim);
+
+void
+RaBitQFloatThreeBitCenteredIPBatch4(const float* vector,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    float* results);
+
+float
+RaBitQFloatFourBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim);
+
+void
+RaBitQFloatFourBitCenteredIPBatch4(const float* vector,
+                                   const uint8_t* bits1,
+                                   const uint8_t* bits2,
+                                   const uint8_t* bits3,
+                                   const uint8_t* bits4,
+                                   uint64_t dim,
+                                   float* results);
+
+float
+RaBitQFloatThreeBitIPByLookup(const float* lookup,
+                              const uint8_t* bits,
+                              uint64_t dim,
+                              uint32_t reorder_bits);
+
+void
+RaBitQFloatThreeBitIPBatch4ByLookup(const float* lookup,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint32_t reorder_bits,
+                                    float* results);
+
+float
+RaBitQFloatMultiBitIPByLookup(const float* lookup,
+                              const uint8_t* bits,
+                              uint64_t dim,
+                              uint32_t reorder_bits,
+                              uint32_t filter_bits);
+
+void
+RaBitQFloatMultiBitIPBatch4ByLookup(const float* lookup,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint32_t reorder_bits,
+                                    uint32_t filter_bits,
+                                    float* results);
+float
+RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim);
+
+uint64_t
+RaBitQCodeCodeIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim);
+
 }  // namespace sse
 
 namespace generic {
@@ -676,6 +833,52 @@ RotateOp(float* data, int idx, int dim_, int step);
 }  // namespace generic
 
 namespace neon {
+uint64_t
+RaBitQSQ4UBinaryIPWithBaseSum(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
+
+void
+RaBitQSQ4UBinaryIPWithBaseSumBatch4(const uint8_t* codes,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint64_t* results);
+
+float
+RaBitQFloatPackedSupplementCodeIP(const float* vector,
+                                  const uint8_t* packed_supplement_code,
+                                  uint64_t dim,
+                                  uint32_t supplement_bits);
+
+float
+RaBitQFloatExCode7IP(const float* vector, const uint8_t* compact_code, uint64_t dim);
+
+bool
+RaBitQExCode7ToBytes(const uint8_t* one_bit_code,
+                     const uint8_t* supplement_code,
+                     uint64_t dim,
+                     uint8_t* out,
+                     uint64_t* code_sum,
+                     uint64_t* code_sq_sum);
+
+bool
+RaBitQExCode7ToVector(const uint8_t* one_bit_code,
+                      const uint8_t* supplement_code,
+                      const float* centroid,
+                      float residual_scale,
+                      float full_center,
+                      uint64_t dim,
+                      float* out);
+
+void
+RaBitQPackScalarToSplitCode(const uint8_t* scalar_codes,
+                            uint8_t* filter_planes,
+                            uint8_t* packed_supplement_code,
+                            uint64_t dim,
+                            uint32_t total_bits,
+                            uint32_t filter_bits);
+
 float
 RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim);
 
@@ -742,6 +945,76 @@ FlipSign(const uint8_t* flip, float* data, uint64_t dim);
 
 void
 RotateOp(float* data, int idx, int dim_, int step);
+
+float
+RaBitQFloatTwoBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim);
+
+void
+RaBitQFloatTwoBitCenteredIPBatch4(const float* vector,
+                                  const uint8_t* bits1,
+                                  const uint8_t* bits2,
+                                  const uint8_t* bits3,
+                                  const uint8_t* bits4,
+                                  uint64_t dim,
+                                  float* results);
+
+float
+RaBitQFloatThreeBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim);
+
+void
+RaBitQFloatThreeBitCenteredIPBatch4(const float* vector,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    float* results);
+
+float
+RaBitQFloatFourBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim);
+
+void
+RaBitQFloatFourBitCenteredIPBatch4(const float* vector,
+                                   const uint8_t* bits1,
+                                   const uint8_t* bits2,
+                                   const uint8_t* bits3,
+                                   const uint8_t* bits4,
+                                   uint64_t dim,
+                                   float* results);
+
+float
+RaBitQFloatThreeBitIPByLookup(const float* lookup,
+                              const uint8_t* bits,
+                              uint64_t dim,
+                              uint32_t reorder_bits);
+
+void
+RaBitQFloatThreeBitIPBatch4ByLookup(const float* lookup,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint32_t reorder_bits,
+                                    float* results);
+
+float
+RaBitQFloatMultiBitIPByLookup(const float* lookup,
+                              const uint8_t* bits,
+                              uint64_t dim,
+                              uint32_t reorder_bits,
+                              uint32_t filter_bits);
+
+void
+RaBitQFloatMultiBitIPBatch4ByLookup(const float* lookup,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint32_t reorder_bits,
+                                    uint32_t filter_bits,
+                                    float* results);
 }  // namespace neon
 
 namespace sve {
@@ -811,6 +1084,119 @@ FlipSign(const uint8_t* flip, float* data, uint64_t dim);
 
 void
 RotateOp(float* data, int idx, int dim_, int step);
+float
+RaBitQFloatTwoBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim);
+
+void
+RaBitQFloatTwoBitCenteredIPBatch4(const float* vector,
+                                  const uint8_t* bits1,
+                                  const uint8_t* bits2,
+                                  const uint8_t* bits3,
+                                  const uint8_t* bits4,
+                                  uint64_t dim,
+                                  float* results);
+
+float
+RaBitQFloatThreeBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim);
+
+void
+RaBitQFloatThreeBitCenteredIPBatch4(const float* vector,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    float* results);
+
+float
+RaBitQFloatFourBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim);
+
+void
+RaBitQFloatFourBitCenteredIPBatch4(const float* vector,
+                                   const uint8_t* bits1,
+                                   const uint8_t* bits2,
+                                   const uint8_t* bits3,
+                                   const uint8_t* bits4,
+                                   uint64_t dim,
+                                   float* results);
+
+float
+RaBitQFloatMultiBitIPByLookup(const float* lookup,
+                              const uint8_t* bits,
+                              uint64_t dim,
+                              uint32_t reorder_bits,
+                              uint32_t filter_bits);
+
+void
+RaBitQFloatMultiBitIPBatch4ByLookup(const float* lookup,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint32_t reorder_bits,
+                                    uint32_t filter_bits,
+                                    float* results);
+
+float
+RaBitQFloatThreeBitIPByLookup(const float* lookup,
+                              const uint8_t* bits,
+                              uint64_t dim,
+                              uint32_t reorder_bits);
+
+void
+RaBitQFloatThreeBitIPBatch4ByLookup(const float* lookup,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint32_t reorder_bits,
+                                    float* results);
+
+float
+RaBitQFloatPackedSupplementCodeIP(const float* vector,
+                                  const uint8_t* packed,
+                                  uint64_t dim,
+                                  uint32_t bits);
+float
+RaBitQFloatExCode7IP(const float* vector, const uint8_t* packed, uint64_t dim);
+
+bool
+RaBitQExCode7ToBytes(const uint8_t* filter,
+                     const uint8_t* packed,
+                     uint64_t dim,
+                     uint8_t* out,
+                     uint64_t* code_sum,
+                     uint64_t* code_sq_sum);
+bool
+RaBitQExCode7ToVector(const uint8_t* filter,
+                      const uint8_t* packed,
+                      const float* centroid,
+                      float residual_scale,
+                      float full_center,
+                      uint64_t dim,
+                      float* out);
+
+uint64_t
+RaBitQSQ4UBinaryIPWithBaseSum(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
+void
+RaBitQSQ4UBinaryIPWithBaseSumBatch4(const uint8_t* codes,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint64_t* results);
+
+void
+RaBitQPackScalarToSplitCode(const uint8_t* codes,
+                            uint8_t* filter,
+                            uint8_t* supplement,
+                            uint64_t dim,
+                            uint32_t total_bits,
+                            uint32_t filter_bits);
+
 }  // namespace sve
 
 using RaBitQFloatBinaryType = float (*)(const float* vector,

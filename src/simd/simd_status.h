@@ -60,6 +60,32 @@ public:
         return initialized;
     }
 
+    // Shared by dispatch and runtime reporting; does not depend on build flags.
+    static inline bool
+    RuntimeSupportsSSE() {
+        return Init() && cpuinfo_has_x86_sse4_1();
+    }
+
+    // Higher tiers reuse lower-tier kernels (including vector tails). The
+    // runtime feature checks must hold even if a VM masks individual CPUID bits.
+    static inline bool
+    RuntimeSupportsAVX() {
+        return RuntimeSupportsSSE() && cpuinfo_has_x86_avx();
+    }
+
+    static inline bool
+    RuntimeSupportsAVX2() {
+        return RuntimeSupportsAVX() && cpuinfo_has_x86_avx2() && cpuinfo_has_x86_fma3() &&
+               cpuinfo_has_x86_popcnt();
+    }
+
+    static inline bool
+    RuntimeSupportsAVX512() {
+        return RuntimeSupportsAVX2() && cpuinfo_has_x86_avx512f() && cpuinfo_has_x86_avx512dq() &&
+               cpuinfo_has_x86_avx512bw() && cpuinfo_has_x86_avx512vl() &&
+               cpuinfo_has_x86_avx512cd();
+    }
+
     static inline bool
     SupportAVX512() {
         if (!Init()) {
@@ -69,8 +95,7 @@ public:
 #if defined(ENABLE_AVX512)
         ret = true;
 #endif
-        ret &= cpuinfo_has_x86_avx512f() & cpuinfo_has_x86_avx512dq() & cpuinfo_has_x86_avx512bw() &
-               cpuinfo_has_x86_avx512vl();
+        ret &= RuntimeSupportsAVX512();
         return ret;
     }
 
@@ -80,7 +105,7 @@ public:
             return false;
         }
 #if defined(ENABLE_AVX512VPOPCNTDQ)
-        return cpuinfo_has_x86_avx512vpopcntdq();
+        return SupportAVX512() && cpuinfo_has_x86_avx512vpopcntdq();
 #else
         return false;
 #endif
@@ -115,7 +140,8 @@ public:
 #if defined(ENABLE_AVX2)
         ret = true;
 #endif
-        ret &= cpuinfo_has_x86_avx2();
+        // AVX2 kernels are compiled with -mfma.
+        ret &= RuntimeSupportsAVX2();
         return ret;
     }
 
@@ -130,6 +156,16 @@ public:
     }
 
     static inline bool
+    SupportAVXF16C() {
+        return SupportAVX() && cpuinfo_has_x86_f16c();
+    }
+
+    static inline bool
+    SupportAVX512F16C() {
+        return SupportAVX512() && cpuinfo_has_x86_f16c();
+    }
+
+    static inline bool
     SupportAVX() {
         if (!Init()) {
             return false;
@@ -138,7 +174,7 @@ public:
 #if defined(ENABLE_AVX)
         ret = true;
 #endif
-        ret &= cpuinfo_has_x86_avx();
+        ret &= RuntimeSupportsAVX();
         return ret;
     }
 
@@ -151,7 +187,8 @@ public:
 #if defined(ENABLE_SSE)
         ret = true;
 #endif
-        ret &= cpuinfo_has_x86_sse();
+        // This translation unit uses SSE4.1 intrinsics, not just SSE.
+        ret &= RuntimeSupportsSSE();
         return ret;
     }
 

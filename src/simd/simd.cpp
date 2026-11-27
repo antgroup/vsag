@@ -23,7 +23,7 @@ SimdStatus
 setup_simd() {
     SimdStatus ret;
 
-    if (cpuinfo_has_x86_sse()) {
+    if (SimdStatus::RuntimeSupportsSSE()) {
         ret.runtime_has_sse = true;
 #ifndef ENABLE_SSE
     }
@@ -32,7 +32,7 @@ setup_simd() {
     ret.dist_support_sse = true;
 #endif
 
-    if (cpuinfo_has_x86_avx()) {
+    if (SimdStatus::RuntimeSupportsAVX()) {
         ret.runtime_has_avx = true;
 #ifndef ENABLE_AVX
     }
@@ -41,7 +41,7 @@ setup_simd() {
     ret.dist_support_avx = true;
 #endif
 
-    if (cpuinfo_has_x86_avx2()) {
+    if (SimdStatus::RuntimeSupportsAVX2()) {
         ret.runtime_has_avx2 = true;
 #ifndef ENABLE_AVX2
     }
@@ -50,8 +50,7 @@ setup_simd() {
     ret.dist_support_avx2 = true;
 #endif
 
-    if (cpuinfo_has_x86_avx512f() && cpuinfo_has_x86_avx512dq() && cpuinfo_has_x86_avx512bw() &&
-        cpuinfo_has_x86_avx512vl()) {
+    if (SimdStatus::RuntimeSupportsAVX512()) {
         ret.runtime_has_avx512f = true;
         ret.runtime_has_avx512dq = true;
         ret.runtime_has_avx512bw = true;
@@ -66,7 +65,8 @@ setup_simd() {
     ret.dist_support_avx512vl = true;
 #endif
 
-    ret.runtime_has_avx512vpopcntdq = cpuinfo_has_x86_avx512vpopcntdq();
+    ret.runtime_has_avx512vpopcntdq =
+        SimdStatus::RuntimeSupportsAVX512() && cpuinfo_has_x86_avx512vpopcntdq();
 #ifdef ENABLE_AVX512VPOPCNTDQ
     ret.dist_support_avx512vpopcntdq = true;
 #endif

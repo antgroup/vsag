@@ -24,9 +24,12 @@
 #include <memory>
 
 #include "kernels/local_sq_compute.h"
+#include "kernels/rabitq_pack.h"
+#include "kernels/rabitq_packed_supplement.h"
 #include "simd.h"
 #include "sq4_local_simd.h"
 #include "sq8_local_simd.h"
+#include "utils/float_utils.h"
 constexpr auto
 generate_bit_lookup_table() {
     std::array<std::array<uint8_t, 8>, 256> table{};
@@ -41,6 +44,13 @@ generate_bit_lookup_table() {
 static constexpr auto g_bit_lookup_table = generate_bit_lookup_table();
 
 namespace vsag::sve {
+#if defined(ENABLE_SVE)
+#if defined(ENABLE_NEON)
+namespace sq4_tail = neon;
+#else
+namespace sq4_tail = generic;
+#endif
+#endif
 
 float
 L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
@@ -209,7 +219,26 @@ FP32SparseAccumulate(float* RESTRICT dists,
                      const float* RESTRICT vals,
                      float query_val,
                      uint32_t num) {
-    return neon::FP32SparseAccumulate(dists, ids, vals, query_val, num);
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    // SVE permits up to 2048 bits, i.e. at most 64 float lanes.
+    float deltas[64];
+    const auto width = static_cast<uint32_t>(svcntw());
+    uint32_t i = 0;
+    while (i < num) {
+        const uint32_t remaining = num - i;
+        const uint32_t count = remaining < width ? remaining : width;
+        const svbool_t active = svwhilelt_b32(uint32_t{0}, count);
+        const svfloat32_t values = svld1_f32(active, vals + i);
+        svst1_f32(active, deltas, svmul_n_f32_x(active, values, query_val));
+        // Scatter in posting order, including repeated IDs.
+        for (uint32_t lane = 0; lane < count; ++lane) {
+            dists[ids[i + lane]] += deltas[lane];
+        }
+        i += count;
+    }
+#else
+    neon::FP32SparseAccumulate(dists, ids, vals, query_val, num);
+#endif
 }
 
 void
@@ -253,10 +282,10 @@ FP32ComputeIPBatch4(const float* RESTRICT query,
         predicate = svwhilelt_b32(i, dim);
     } while (svptest_first(svptrue_b32(), predicate));
 
-    result1 = svaddv_f32(svptrue_b32(), sum1);
-    result2 = svaddv_f32(svptrue_b32(), sum2);
-    result3 = svaddv_f32(svptrue_b32(), sum3);
-    result4 = svaddv_f32(svptrue_b32(), sum4);
+    result1 += svaddv_f32(svptrue_b32(), sum1);
+    result2 += svaddv_f32(svptrue_b32(), sum2);
+    result3 += svaddv_f32(svptrue_b32(), sum3);
+    result4 += svaddv_f32(svptrue_b32(), sum4);
 #else
     neon::FP32ComputeIPBatch4(
         query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
@@ -307,10 +336,10 @@ FP32ComputeL2SqrBatch4(const float* RESTRICT query,
         predicate = svwhilelt_b32(i, dim);
     } while (svptest_first(svptrue_b32(), predicate));
 
-    result1 = svaddv_f32(svptrue_b32(), sum1);
-    result2 = svaddv_f32(svptrue_b32(), sum2);
-    result3 = svaddv_f32(svptrue_b32(), sum3);
-    result4 = svaddv_f32(svptrue_b32(), sum4);
+    result1 += svaddv_f32(svptrue_b32(), sum1);
+    result2 += svaddv_f32(svptrue_b32(), sum2);
+    result3 += svaddv_f32(svptrue_b32(), sum3);
+    result4 += svaddv_f32(svptrue_b32(), sum4);
 #else
     neon::FP32ComputeL2SqrBatch4(
         query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
@@ -496,16 +525,18 @@ FP16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint
         svfloat16_t query_f16 = svld1_f16(predicate, &query_fp16[i]);
         svfloat16_t codes_f16 = svld1_f16(predicate, &codes_fp16[i]);
 
-        svbool_t half_predicate = svptrue_pat_b16(SV_POW2);
-        svfloat32_t query_f32_low = svcvt_f32_f16_x(half_predicate, query_f16);
-        svfloat32_t codes_f32_low = svcvt_f32_f16_x(half_predicate, codes_f16);
+        // Conversion is predicated on the widened FP32 lanes. The half loads
+        // already zero inactive lanes; use all lanes even at non-power-of-two VL.
+        const svbool_t convert_all = svptrue_b32();
+        svfloat32_t query_f32_low = svcvt_f32_f16_x(convert_all, query_f16);
+        svfloat32_t codes_f32_low = svcvt_f32_f16_x(convert_all, codes_f16);
 
         svfloat16_t query_f16_high = svreinterpret_f16_u32(
             svlsr_n_u32_x(svptrue_b32(), svreinterpret_u32_f16(query_f16), 16));
         svfloat16_t codes_f16_high = svreinterpret_f16_u32(
             svlsr_n_u32_x(svptrue_b32(), svreinterpret_u32_f16(codes_f16), 16));
-        svfloat32_t query_f32_high = svcvt_f32_f16_x(half_predicate, query_f16_high);
-        svfloat32_t codes_f32_high = svcvt_f32_f16_x(half_predicate, codes_f16_high);
+        svfloat32_t query_f32_high = svcvt_f32_f16_x(convert_all, query_f16_high);
+        svfloat32_t codes_f32_high = svcvt_f32_f16_x(convert_all, codes_f16_high);
 
         sum = svmla_f32_x(svptrue_b32(), sum, query_f32_low, codes_f32_low);
         sum = svmla_f32_x(svptrue_b32(), sum, query_f32_high, codes_f32_high);
@@ -534,16 +565,18 @@ FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, u
         svfloat16_t query_f16 = svld1_f16(predicate, &query_fp16[i]);
         svfloat16_t codes_f16 = svld1_f16(predicate, &codes_fp16[i]);
 
-        svbool_t half_predicate = svptrue_pat_b16(SV_POW2);
-        svfloat32_t query_f32_low = svcvt_f32_f16_x(half_predicate, query_f16);
-        svfloat32_t codes_f32_low = svcvt_f32_f16_x(half_predicate, codes_f16);
+        // Conversion is predicated on the widened FP32 lanes. The half loads
+        // already zero inactive lanes; use all lanes even at non-power-of-two VL.
+        const svbool_t convert_all = svptrue_b32();
+        svfloat32_t query_f32_low = svcvt_f32_f16_x(convert_all, query_f16);
+        svfloat32_t codes_f32_low = svcvt_f32_f16_x(convert_all, codes_f16);
 
         svfloat16_t query_f16_high = svreinterpret_f16_u32(
             svlsr_n_u32_x(svptrue_b32(), svreinterpret_u32_f16(query_f16), 16));
         svfloat16_t codes_f16_high = svreinterpret_f16_u32(
             svlsr_n_u32_x(svptrue_b32(), svreinterpret_u32_f16(codes_f16), 16));
-        svfloat32_t query_f32_high = svcvt_f32_f16_x(half_predicate, query_f16_high);
-        svfloat32_t codes_f32_high = svcvt_f32_f16_x(half_predicate, codes_f16_high);
+        svfloat32_t query_f32_high = svcvt_f32_f16_x(convert_all, query_f16_high);
+        svfloat32_t codes_f32_high = svcvt_f32_f16_x(convert_all, codes_f16_high);
 
         svfloat32_t diff_low = svsub_f32_x(svptrue_b32(), query_f32_low, codes_f32_low);
         svfloat32_t diff_high = svsub_f32_x(svptrue_b32(), query_f32_high, codes_f32_high);
@@ -566,7 +599,31 @@ FP16SparseAccumulate(float* RESTRICT dists,
                      const uint16_t* RESTRICT vals,
                      float query_val,
                      uint32_t num) {
-    return neon::FP16SparseAccumulate(dists, ids, vals, query_val, num);
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    // SVE permits up to 2048 bits, i.e. at most 64 float lanes.
+    float deltas[64];
+    const auto width = static_cast<uint32_t>(svcntw());
+    uint32_t i = 0;
+    while (i < num) {
+        const uint32_t remaining = num - i;
+        const uint32_t count = remaining < width ? remaining : width;
+        const svbool_t active = svwhilelt_b32(uint32_t{0}, count);
+        const svuint32_t half = svld1uh_u32(active, vals + i);
+        // Match the sparse codec's historical bit expansion.
+        const svuint32_t sign = svlsl_n_u32_x(active, svand_n_u32_x(active, half, 0x8000), 16);
+        const svuint32_t magnitude = svadd_n_u32_x(
+            active, svlsl_n_u32_x(active, svand_n_u32_x(active, half, 0x7fff), 13), 112U << 23);
+        const svfloat32_t values = svreinterpret_f32_u32(svorr_u32_x(active, sign, magnitude));
+        svst1_f32(active, deltas, svmul_n_f32_x(active, values, query_val));
+        // Scatter in posting order, including repeated IDs.
+        for (uint32_t lane = 0; lane < count; ++lane) {
+            dists[ids[i + lane]] += deltas[lane];
+        }
+        i += count;
+    }
+#else
+    neon::FP16SparseAccumulate(dists, ids, vals, query_val, num);
+#endif
 }
 
 float
@@ -638,6 +695,111 @@ SQ8ComputeL2Sqr(const float* RESTRICT query,
     return svaddv_f32(svptrue_b32(), sum);
 #else
     return neon::SQ8ComputeL2Sqr(query, codes, lower_bound, diff, dim);
+#endif
+}
+
+#if defined(ENABLE_SVE)
+namespace {
+template <bool KIsL2>
+svfloat32_t
+SQ8AccumulateBatch4(svbool_t active,
+                    const uint8_t* code,
+                    svfloat32_t query,
+                    svfloat32_t lower_bound,
+                    svfloat32_t diff,
+                    svfloat32_t inv255,
+                    svfloat32_t sum) {
+    const auto values = svcvt_f32_u32_z(active, svld1ub_u32(active, code));
+    const auto adjusted =
+        svmla_f32_m(active, lower_bound, svmul_f32_m(active, values, inv255), diff);
+    if constexpr (KIsL2) {
+        const auto delta = svsub_f32_z(active, query, adjusted);
+        return svmla_f32_m(active, sum, delta, delta);
+    } else {
+        return svmla_f32_m(active, sum, query, adjusted);
+    }
+}
+
+template <bool KIsL2>
+void
+SQ8ComputeBatch4(const float* query,
+                 const uint8_t* codes1,
+                 const uint8_t* codes2,
+                 const uint8_t* codes3,
+                 const uint8_t* codes4,
+                 const float* lower_bound,
+                 const float* diff,
+                 uint64_t dim,
+                 float& dist1,
+                 float& dist2,
+                 float& dist3,
+                 float& dist4) {
+    auto sum1 = svdup_f32(0.0F);
+    auto sum2 = svdup_f32(0.0F);
+    auto sum3 = svdup_f32(0.0F);
+    auto sum4 = svdup_f32(0.0F);
+    const auto inv255 = svdup_f32(1.0F / 255.0F);
+    const auto width = svcntw();
+    for (uint64_t i = 0; i < dim; i += width) {
+        const auto active = svwhilelt_b32(i, dim);
+        const auto q = svld1_f32(active, query + i);
+        const auto lb = svld1_f32(active, lower_bound + i);
+        const auto scale = svld1_f32(active, diff + i);
+        sum1 = SQ8AccumulateBatch4<KIsL2>(active, codes1 + i, q, lb, scale, inv255, sum1);
+        sum2 = SQ8AccumulateBatch4<KIsL2>(active, codes2 + i, q, lb, scale, inv255, sum2);
+        sum3 = SQ8AccumulateBatch4<KIsL2>(active, codes3 + i, q, lb, scale, inv255, sum3);
+        sum4 = SQ8AccumulateBatch4<KIsL2>(active, codes4 + i, q, lb, scale, inv255, sum4);
+    }
+    const auto all = svptrue_b32();
+    dist1 = svaddv_f32(all, sum1);
+    dist2 = svaddv_f32(all, sum2);
+    dist3 = svaddv_f32(all, sum3);
+    dist4 = svaddv_f32(all, sum4);
+}
+}  // namespace
+#endif
+
+void
+SQ8ComputeL2SqrBatch4(const float* query,
+                      const uint8_t* codes1,
+                      const uint8_t* codes2,
+                      const uint8_t* codes3,
+                      const uint8_t* codes4,
+                      const float* lower_bound,
+                      const float* diff,
+                      uint64_t dim,
+                      float& dist1,
+                      float& dist2,
+                      float& dist3,
+                      float& dist4) {
+#if defined(ENABLE_SVE)
+    SQ8ComputeBatch4<true>(
+        query, codes1, codes2, codes3, codes4, lower_bound, diff, dim, dist1, dist2, dist3, dist4);
+#else
+    vsag::SQ8ComputeL2SqrBatch4Fallback(
+        query, codes1, codes2, codes3, codes4, lower_bound, diff, dim, dist1, dist2, dist3, dist4);
+#endif
+}
+
+void
+SQ8ComputeIPBatch4(const float* query,
+                   const uint8_t* codes1,
+                   const uint8_t* codes2,
+                   const uint8_t* codes3,
+                   const uint8_t* codes4,
+                   const float* lower_bound,
+                   const float* diff,
+                   uint64_t dim,
+                   float& dist1,
+                   float& dist2,
+                   float& dist3,
+                   float& dist4) {
+#if defined(ENABLE_SVE)
+    SQ8ComputeBatch4<false>(
+        query, codes1, codes2, codes3, codes4, lower_bound, diff, dim, dist1, dist2, dist3, dist4);
+#else
+    vsag::SQ8ComputeIPBatch4Fallback(
+        query, codes1, codes2, codes3, codes4, lower_bound, diff, dim, dist1, dist2, dist3, dist4);
 #endif
 }
 
@@ -726,7 +888,26 @@ SQ8SparseAccumulate(float* RESTRICT dists,
                     const uint8_t* RESTRICT vals,
                     float query_val,
                     uint32_t num) {
-    return neon::SQ8SparseAccumulate(dists, ids, vals, query_val, num);
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    // SVE permits up to 2048 bits, i.e. at most 64 float lanes.
+    float deltas[64];
+    const auto width = static_cast<uint32_t>(svcntw());
+    uint32_t i = 0;
+    while (i < num) {
+        const uint32_t remaining = num - i;
+        const uint32_t count = remaining < width ? remaining : width;
+        const svbool_t active = svwhilelt_b32(uint32_t{0}, count);
+        const svfloat32_t values = svcvt_f32_u32_z(active, svld1ub_u32(active, vals + i));
+        svst1_f32(active, deltas, svmul_n_f32_x(active, values, query_val));
+        // Scatter in posting order, including repeated IDs.
+        for (uint32_t lane = 0; lane < count; ++lane) {
+            dists[ids[i + lane]] += deltas[lane];
+        }
+        i += count;
+    }
+#else
+    neon::SQ8SparseAccumulate(dists, ids, vals, query_val, num);
+#endif
 }
 
 float
@@ -777,7 +958,7 @@ SQ4ComputeIP(const float* RESTRICT query,
 
     if (i < dim) {
         return svaddv_f32(predicate, sum) +
-               neon::SQ4ComputeIP(&query[i], &codes[i / 2], &lower_bound[i], &diff[i], dim - i);
+               sq4_tail::SQ4ComputeIP(&query[i], &codes[i / 2], &lower_bound[i], &diff[i], dim - i);
     }
 
     return svaddv_f32(predicate, sum);
@@ -837,7 +1018,8 @@ SQ4ComputeL2Sqr(const float* RESTRICT query,
 
     if (i < dim) {
         return svaddv_f32(predicate, sum) +
-               neon::SQ4ComputeL2Sqr(&query[i], &codes[i / 2], &lower_bound[i], &diff[i], dim - i);
+               sq4_tail::SQ4ComputeL2Sqr(
+                   &query[i], &codes[i / 2], &lower_bound[i], &diff[i], dim - i);
     }
 
     return svaddv_f32(predicate, sum);
@@ -908,7 +1090,7 @@ SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
 
     if (i < dim) {
         return svaddv_f32(predicate, sum) +
-               neon::SQ4ComputeCodesIP(
+               sq4_tail::SQ4ComputeCodesIP(
                    &codes1[i / 2], &codes2[i / 2], &lower_bound[i], &diff[i], dim - i);
     }
 
@@ -983,7 +1165,7 @@ SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
 
     if (i < dim) {
         return svaddv_f32(predicate, sum) +
-               neon::SQ4ComputeCodesL2Sqr(
+               sq4_tail::SQ4ComputeCodesL2Sqr(
                    &codes1[i / 2], &codes2[i / 2], &lower_bound[i], &diff[i], dim - i);
     }
 
@@ -1056,9 +1238,38 @@ SQ8UniformComputeCodesIPBatch(const uint8_t* RESTRICT query,
                               uint64_t n_codes,
                               uint64_t code_stride,
                               float* RESTRICT out) {
-    for (uint64_t i = 0; i < n_codes; ++i) {
-        out[i] = sve::SQ8UniformComputeCodesIP(query, codes + i * code_stride, dim);
+#if defined(ENABLE_SVE)
+    const uint64_t width = svcntb();
+    uint64_t row = 0;
+    for (; n_codes - row >= 4; row += 4) {
+        const auto* c1 = codes + row * code_stride;
+        const auto* c2 = c1 + code_stride;
+        const auto* c3 = c2 + code_stride;
+        const auto* c4 = c3 + code_stride;
+        auto a1 = svdup_u32(0);
+        auto a2 = svdup_u32(0);
+        auto a3 = svdup_u32(0);
+        auto a4 = svdup_u32(0);
+        for (uint64_t d = 0; d < dim; d += width) {
+            const auto active = svwhilelt_b8(d, dim);
+            const auto q = svld1_u8(active, query + d);
+            a1 = svdot_u32(a1, q, svld1_u8(active, c1 + d));
+            a2 = svdot_u32(a2, q, svld1_u8(active, c2 + d));
+            a3 = svdot_u32(a3, q, svld1_u8(active, c3 + d));
+            a4 = svdot_u32(a4, q, svld1_u8(active, c4 + d));
+        }
+        const auto all = svptrue_b32();
+        out[row] = static_cast<float>(svaddv_u32(all, a1));
+        out[row + 1] = static_cast<float>(svaddv_u32(all, a2));
+        out[row + 2] = static_cast<float>(svaddv_u32(all, a3));
+        out[row + 3] = static_cast<float>(svaddv_u32(all, a4));
     }
+    for (; row < n_codes; ++row) {
+        out[row] = sve::SQ8UniformComputeCodesIP(query, codes + row * code_stride, dim);
+    }
+#else
+    neon::SQ8UniformComputeCodesIPBatch(query, codes, dim, n_codes, code_stride, out);
+#endif
 }
 
 float
@@ -1086,8 +1297,10 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
     const uint64_t step = svcntw();
     svfloat32_t sum = svdup_f32(0.0f);
 
-    const svfloat32_t positive_val = inv_sqrt_d < 1e-3 ? svdup_f32(1.0f) : svdup_f32(inv_sqrt_d);
-    const svfloat32_t negative_val = inv_sqrt_d < 1e-3 ? svdup_f32(0.0f) : svdup_f32(-inv_sqrt_d);
+    // Match generic and Batch4: keep the legacy double-precision threshold.
+    const bool signed_bits = inv_sqrt_d > 1e-3;
+    const svfloat32_t positive_val = svdup_f32(signed_bits ? inv_sqrt_d : 1.0F);
+    const svfloat32_t negative_val = svdup_f32(signed_bits ? -inv_sqrt_d : 0.0F);
     svbool_t predicate = svwhilelt_b32(i, dim);
     do {
         svuint32_t predicate_values = svld1ub_u32(predicate, &predicate_array[i]);
@@ -1173,6 +1386,181 @@ RaBitQFloatBinaryIPBatch4(const float* vector,
 #endif
 }
 
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+namespace {
+template <uint32_t Bits, uint32_t Count, bool Centered>
+void
+RaBitQBitPlanesIP(const float* vector,
+                  const uint8_t* const (&codes)[Count],
+                  uint64_t dim,
+                  uint32_t reorder_bits,
+                  float* results) {
+    const auto plane_bytes = (dim + 7) / 8;
+    const auto step = svcntw();
+    const auto lanes = svindex_u32(0, 1);
+    // SVE float-lane counts are multiples of four, not necessarily eight.
+    const auto all = svptrue_b32();
+    const auto bit_index = svand_n_u32_x(all, lanes, 7);
+    auto s0 = svdup_f32(0.0F);
+    auto s1 = svdup_f32(0.0F);
+    auto s2 = svdup_f32(0.0F);
+    auto s3 = svdup_f32(0.0F);
+    for (uint64_t i = 0; i < dim; i += step) {
+        const auto pg = svwhilelt_b32(i, dim);
+        const auto shifted = svadd_n_u32_x(pg, bit_index, static_cast<uint32_t>(i & 7));
+        const auto offsets = svlsr_n_u32_x(pg, svadd_n_u32_x(pg, lanes, i & 7), 3);
+        const auto shift = svand_n_u32_x(pg, shifted, 7);
+        const auto q = svld1_f32(pg, vector + i);
+        const auto accumulate = [&](const uint8_t* bits, svfloat32_t sum) {
+            auto weight = svdup_f32(Centered ? -0.5F * ((1U << Bits) - 1U) : 0.0F);
+            for (uint32_t plane = 0; plane < Bits; ++plane) {
+                const auto raw = svld1ub_gather_u32offset_u32(
+                    pg, bits + plane * plane_bytes + (i >> 3), offsets);
+                const auto bit = svand_n_u32_x(pg, svlsr_u32_x(pg, raw, shift), 1);
+                const auto present = svcmpne_n_u32(pg, bit, 0);
+                const auto value = static_cast<float>(1U << (reorder_bits + Bits - plane - 1));
+                weight = svadd_n_f32_m(present, weight, value);
+            }
+            return svmla_f32_m(pg, sum, q, weight);
+        };
+        s0 = accumulate(codes[0], s0);
+        if constexpr (Count == 4) {
+            s1 = accumulate(codes[1], s1);
+            s2 = accumulate(codes[2], s2);
+            s3 = accumulate(codes[3], s3);
+        }
+    }
+    results[0] = svaddv_f32(all, s0);
+    if constexpr (Count == 4) {
+        results[1] = svaddv_f32(all, s1);
+        results[2] = svaddv_f32(all, s2);
+        results[3] = svaddv_f32(all, s3);
+    }
+}
+float
+RaBitQPlanarIP(const float* vector,
+               const uint8_t* sign,
+               const uint8_t* supplement,
+               uint64_t dim,
+               uint32_t bits) {
+    const auto plane_bytes = (dim + 7) / 8;
+    const auto step = svcntw();
+    const auto lanes = svindex_u32(0, 1);
+    auto sum = svdup_f32(0.0F);
+    for (uint64_t i = 0; i < dim; i += step) {
+        const auto pg = svwhilelt_b32(i, dim);
+        const auto shifted = svadd_n_u32_x(pg, lanes, i & 7);
+        const auto offsets = svlsr_n_u32_x(pg, shifted, 3);
+        const auto shift = svand_n_u32_x(pg, shifted, 7);
+        auto code = svdup_u32(0);
+        const auto accumulate = [&](const uint8_t* plane, uint32_t bit) {
+            const auto raw = svld1ub_gather_u32offset_u32(pg, plane + (i >> 3), offsets);
+            const auto lane = svand_n_u32_x(pg, svlsr_u32_x(pg, raw, shift), 1);
+            code = svorr_u32_x(pg, code, svlsl_n_u32_x(pg, lane, bit));
+        };
+        if (sign != nullptr) {
+            accumulate(sign, bits);
+        }
+        for (uint32_t bit = 0; bit < bits; ++bit) {
+            accumulate(supplement + bit * plane_bytes, bit);
+        }
+        sum = svmla_f32_m(pg, sum, svld1_f32(pg, vector + i), svcvt_f32_u32_x(pg, code));
+    }
+    return svaddv_f32(svptrue_b32(), sum);
+}
+}  // namespace
+#endif
+
+float
+RaBitQFloatTwoBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim) {
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    const uint8_t* codes[] = {bits};
+    float results[1];
+    RaBitQBitPlanesIP<2, 1, true>(vector, codes, dim, 0, results);
+    return results[0];
+#else
+    return neon::RaBitQFloatTwoBitCenteredIP(vector, bits, dim);
+#endif
+}
+
+void
+RaBitQFloatTwoBitCenteredIPBatch4(const float* vector,
+                                  const uint8_t* bits1,
+                                  const uint8_t* bits2,
+                                  const uint8_t* bits3,
+                                  const uint8_t* bits4,
+                                  uint64_t dim,
+                                  float* results) {
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    const uint8_t* codes[] = {bits1, bits2, bits3, bits4};
+
+    RaBitQBitPlanesIP<2, 4, true>(vector, codes, dim, 0, results);
+
+#else
+    neon::RaBitQFloatTwoBitCenteredIPBatch4(vector, bits1, bits2, bits3, bits4, dim, results);
+#endif
+}
+
+float
+RaBitQFloatThreeBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim) {
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    const uint8_t* codes[] = {bits};
+    float results[1];
+    RaBitQBitPlanesIP<3, 1, true>(vector, codes, dim, 0, results);
+    return results[0];
+#else
+    return neon::RaBitQFloatThreeBitCenteredIP(vector, bits, dim);
+#endif
+}
+
+void
+RaBitQFloatThreeBitCenteredIPBatch4(const float* vector,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    float* results) {
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    const uint8_t* codes[] = {bits1, bits2, bits3, bits4};
+
+    RaBitQBitPlanesIP<3, 4, true>(vector, codes, dim, 0, results);
+
+#else
+    neon::RaBitQFloatThreeBitCenteredIPBatch4(vector, bits1, bits2, bits3, bits4, dim, results);
+#endif
+}
+
+float
+RaBitQFloatFourBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim) {
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    const uint8_t* codes[] = {bits};
+    float results[1];
+    RaBitQBitPlanesIP<4, 1, true>(vector, codes, dim, 0, results);
+    return results[0];
+#else
+    return neon::RaBitQFloatFourBitCenteredIP(vector, bits, dim);
+#endif
+}
+
+void
+RaBitQFloatFourBitCenteredIPBatch4(const float* vector,
+                                   const uint8_t* bits1,
+                                   const uint8_t* bits2,
+                                   const uint8_t* bits3,
+                                   const uint8_t* bits4,
+                                   uint64_t dim,
+                                   float* results) {
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    const uint8_t* codes[] = {bits1, bits2, bits3, bits4};
+
+    RaBitQBitPlanesIP<4, 4, true>(vector, codes, dim, 0, results);
+
+#else
+    neon::RaBitQFloatFourBitCenteredIPBatch4(vector, bits1, bits2, bits3, bits4, dim, results);
+#endif
+}
+
 void
 RaBitQFloatThreeBitIPBatch4(const float* vector,
                             const uint8_t* bits1,
@@ -1182,8 +1570,13 @@ RaBitQFloatThreeBitIPBatch4(const float* vector,
                             uint64_t dim,
                             uint32_t reorder_bits,
                             float* results) {
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    const uint8_t* codes[] = {bits1, bits2, bits3, bits4};
+    RaBitQBitPlanesIP<3, 4, false>(vector, codes, dim, reorder_bits, results);
+#else
     neon::RaBitQFloatThreeBitIPBatch4(
         vector, bits1, bits2, bits3, bits4, dim, reorder_bits, results);
+#endif
 }
 
 float
@@ -1192,8 +1585,12 @@ RaBitQFloatSplitCodeIP(const float* vector,
                        const uint8_t* supplement_code,
                        uint64_t dim,
                        uint32_t supplement_bits) {
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    return RaBitQPlanarIP(vector, one_bit_code, supplement_code, dim, supplement_bits);
+#else
     return neon::RaBitQFloatSplitCodeIP(
         vector, one_bit_code, supplement_code, dim, supplement_bits);
+#endif
 }
 
 float
@@ -1201,17 +1598,395 @@ RaBitQFloatSupplementCodeIP(const float* vector,
                             const uint8_t* supplement_code,
                             uint64_t dim,
                             uint32_t supplement_bits) {
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    return RaBitQPlanarIP(vector, nullptr, supplement_code, dim, supplement_bits);
+#else
     return neon::RaBitQFloatSupplementCodeIP(vector, supplement_code, dim, supplement_bits);
+#endif
+}
+
+float
+RaBitQFloatMultiBitIPByLookup(const float* lookup,
+                              const uint8_t* bits,
+                              uint64_t dim,
+                              uint32_t reorder_bits,
+                              uint32_t filter_bits) {
+#if defined(ENABLE_SVE)
+    const auto step = svcntw();
+    const auto plane_bytes = (dim + 7) / 8;
+    auto sum = svdup_f32(0.0F);
+    const auto base_offsets = svindex_u32(0, 256);
+    for (uint64_t block = 0; block < plane_bytes; block += step) {
+        const auto pg = svwhilelt_b32(block, plane_bytes);
+        const auto* table = lookup + block * 256;
+        for (uint32_t bit = 0; bit < filter_bits; ++bit) {
+            const auto offset = bit * plane_bytes + block;
+            const auto indices = svadd_u32_x(pg, base_offsets, svld1ub_u32(pg, bits + offset));
+            const auto values = svld1_gather_u32index_f32(pg, table, indices);
+            const float weight = static_cast<float>(1U << (reorder_bits + filter_bits - bit - 1));
+            sum = svadd_f32_m(pg, sum, svmul_n_f32_x(pg, values, weight));
+        }
+    }
+    return svaddv_f32(svptrue_b32(), sum);
+#else
+    return generic::RaBitQFloatMultiBitIPByLookup(lookup, bits, dim, reorder_bits, filter_bits);
+#endif
+}
+
+void
+RaBitQFloatMultiBitIPBatch4ByLookup(const float* lookup,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint32_t reorder_bits,
+                                    uint32_t filter_bits,
+                                    float* results) {
+#if defined(ENABLE_SVE)
+    const auto pg = svwhilelt_b32(uint64_t{0}, uint64_t{4});
+    const auto plane_bytes = (dim + 7) / 8;
+    auto sum = svdup_f32(0.0F);
+    const uint8_t* codes[] = {bits1, bits2, bits3, bits4};
+    for (uint64_t block = 0; block < plane_bytes; ++block) {
+        const float* table = lookup + block * 256;
+        for (uint32_t bit = 0; bit < filter_bits; ++bit) {
+            const auto offset = bit * plane_bytes + block;
+            const uint32_t indices[] = {
+                codes[0][offset], codes[1][offset], codes[2][offset], codes[3][offset]};
+            const auto values = svld1_gather_u32index_f32(pg, table, svld1_u32(pg, indices));
+            const float weight = static_cast<float>(1U << (reorder_bits + filter_bits - bit - 1));
+            sum = svadd_f32_m(pg, sum, svmul_n_f32_x(pg, values, weight));
+        }
+    }
+    svst1_f32(pg, results, sum);
+#else
+    generic::RaBitQFloatMultiBitIPBatch4ByLookup(
+        lookup, bits1, bits2, bits3, bits4, dim, reorder_bits, filter_bits, results);
+#endif
+}
+
+float
+RaBitQFloatThreeBitIPByLookup(const float* lookup,
+                              const uint8_t* bits,
+                              uint64_t dim,
+                              uint32_t reorder_bits) {
+    return sve::RaBitQFloatMultiBitIPByLookup(lookup, bits, dim, reorder_bits, 3);
+}
+
+void
+RaBitQFloatThreeBitIPBatch4ByLookup(const float* lookup,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint32_t reorder_bits,
+                                    float* results) {
+    sve::RaBitQFloatMultiBitIPBatch4ByLookup(
+        lookup, bits1, bits2, bits3, bits4, dim, reorder_bits, 3, results);
+}
+
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+namespace {
+// A wire block is four groups of 16 dimensions, independent of SVE VL.
+svuint32_t
+DecodeCompactGroup(
+    svbool_t pg, const uint8_t* data, uint32_t bits, uint32_t group, uint32_t offset, bool legacy) {
+    const auto lanes = svindex_u32(offset, 1);
+    svuint32_t code;
+    if (bits == 5) {
+        code = svand_n_u32_x(
+            pg,
+            svlsr_n_u32_x(pg, svld1ub_u32(pg, data + (group / 2) * 16 + offset), (group % 2) * 4),
+            15);
+    } else if (group < 3) {
+        code = svand_n_u32_x(pg, svld1ub_u32(pg, data + group * 16 + offset), 63);
+    } else {
+        const auto a = svlsr_n_u32_x(pg, svld1ub_u32(pg, data + offset), 6);
+        const auto b =
+            svand_n_u32_x(pg, svlsr_n_u32_x(pg, svld1ub_u32(pg, data + 16 + offset), 4), 12);
+        const auto c =
+            svand_n_u32_x(pg, svlsr_n_u32_x(pg, svld1ub_u32(pg, data + 32 + offset), 2), 48);
+        code = svorr_u32_x(pg, a, svorr_u32_x(pg, b, c));
+    }
+    if (bits != 6) {
+        const auto lo = svand_n_u32_x(pg, lanes, 7);
+        const auto half = svlsr_n_u32_x(pg, lanes, 3);
+        const auto indices = legacy ? lo : svadd_n_u32_x(pg, half, group * 2);
+        const auto shifts = legacy ? svadd_n_u32_x(pg, half, group * 2) : lo;
+        const auto plane = svld1ub_gather_u32offset_u32(pg, data + (bits == 5 ? 32 : 48), indices);
+        const auto bit = svand_n_u32_x(pg, svlsr_u32_x(pg, plane, shifts), 1);
+        code = svorr_u32_x(pg, code, svlsl_n_u32_x(pg, bit, bits - 1));
+    }
+    return code;
+}
+
+float
+CompactDot(const float* q, const uint8_t* packed, uint64_t blocks, uint32_t bits, bool legacy) {
+    const auto step = svcntw();
+    auto sum = svdup_f32(0.0F);
+    for (uint64_t chunk = 0; chunk < blocks; ++chunk, packed += bits * 8) {
+        for (uint32_t group = 0; group < 4; ++group) {
+            for (uint32_t i = 0; i < 16; i += step) {
+                const auto pg = svwhilelt_b32(i, 16U);
+                const auto code = DecodeCompactGroup(pg, packed, bits, group, i, legacy);
+                sum = svmla_f32_m(pg,
+                                  sum,
+                                  svld1_f32(pg, q + 64 * chunk + group * 16 + i),
+                                  svcvt_f32_u32_x(pg, code));
+            }
+        }
+    }
+    return svaddv_f32(svptrue_b32(), sum);
+}
+}  // namespace
+#endif
+
+float
+RaBitQFloatPackedSupplementCodeIP(const float* vector,
+                                  const uint8_t* packed,
+                                  uint64_t dim,
+                                  uint32_t bits) {
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    const simd::RaBitQPackedSupplementLayout layout{dim, bits};
+    if (layout.PackedSize() == 0) {
+        return 0.0F;
+    }
+    const auto value = CompactDot(vector, packed, layout.FullChunkCount(), bits, false);
+    return value + RaBitQPlanarIP(vector + layout.FullDimension(),
+                                  nullptr,
+                                  packed + layout.FullChunksSize(),
+                                  layout.TailDimension(),
+                                  bits);
+#elif defined(ENABLE_NEON)
+    return neon::RaBitQFloatPackedSupplementCodeIP(vector, packed, dim, bits);
+#else
+    return generic::RaBitQFloatPackedSupplementCodeIP(vector, packed, dim, bits);
+#endif
+}
+
+float
+RaBitQFloatExCode7IP(const float* vector, const uint8_t* packed, uint64_t dim) {
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    return (dim & 63U) != 0U ? 0.0F : CompactDot(vector, packed, dim / 64, 7, true);
+#elif defined(ENABLE_NEON)
+    return neon::RaBitQFloatExCode7IP(vector, packed, dim);
+#else
+    return generic::RaBitQFloatExCode7IP(vector, packed, dim);
+#endif
+}
+
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+namespace {
+svuint32_t
+DecodeLegacyWithFilter(
+    svbool_t pg, const uint8_t* packed, const uint8_t* filter, uint32_t group, uint32_t offset) {
+    const auto lanes = svindex_u32(offset, 1);
+    const auto bytes =
+        svld1ub_gather_u32offset_u32(pg, filter + group * 2, svlsr_n_u32_x(pg, lanes, 3));
+    const auto sign = svand_n_u32_x(pg, svlsr_u32_x(pg, bytes, svand_n_u32_x(pg, lanes, 7)), 1);
+    return svorr_u32_x(
+        pg, DecodeCompactGroup(pg, packed, 7, group, offset, true), svlsl_n_u32_x(pg, sign, 7));
+}
+}  // namespace
+#endif
+
+bool
+RaBitQExCode7ToBytes(const uint8_t* filter,
+                     const uint8_t* packed,
+                     uint64_t dim,
+                     uint8_t* out,
+                     uint64_t* code_sum,
+                     uint64_t* code_sq_sum) {
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    if (!filter || !packed || !out || !code_sum || !RaBitQExCode7SupportedDim(dim)) {
+        return false;
+    }
+    uint64_t sum = 0, sq = 0;
+    const auto step = svcntw();
+    for (uint64_t block = 0; block < dim; block += 64, filter += 8, packed += 56) {
+        for (uint32_t group = 0; group < 4; ++group) {
+            for (uint32_t i = 0; i < 16; i += step) {
+                const auto pg = svwhilelt_b32(i, 16U);
+                const auto code = DecodeLegacyWithFilter(pg, packed, filter, group, i);
+                svst1b_u32(pg, out + block + 16 * group + i, code);
+                sum += svaddv_u32(pg, code);
+                if (code_sq_sum) {
+                    sq += svaddv_u32(pg, svmul_u32_x(pg, code, code));
+                }
+            }
+        }
+    }
+    *code_sum = sum;
+    if (code_sq_sum) {
+        *code_sq_sum = sq;
+    }
+    return true;
+#elif defined(ENABLE_NEON)
+    return neon::RaBitQExCode7ToBytes(filter, packed, dim, out, code_sum, code_sq_sum);
+#else
+    return generic::RaBitQExCode7ToBytes(filter, packed, dim, out, code_sum, code_sq_sum);
+#endif
+}
+
+bool
+RaBitQExCode7ToVector(const uint8_t* filter,
+                      const uint8_t* packed,
+                      const float* centroid,
+                      float residual_scale,
+                      float full_center,
+                      uint64_t dim,
+                      float* out) {
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    if (!filter || !packed || !centroid || !out || !RaBitQExCode7SupportedDim(dim)) {
+        return false;
+    }
+    const auto step = svcntw();
+    bool finite = true;
+    for (uint64_t block = 0; block < dim; block += 64, filter += 8, packed += 56) {
+        for (uint32_t group = 0; group < 4; ++group) {
+            for (uint32_t i = 0; i < 16; i += step) {
+                const auto pg = svwhilelt_b32(i, 16U);
+                const auto code = DecodeLegacyWithFilter(pg, packed, filter, group, i);
+                const auto j = block + group * 16 + i;
+                const auto centered = svsub_n_f32_x(pg, svcvt_f32_u32_x(pg, code), full_center);
+                const auto v =
+                    svmla_n_f32_x(pg, svld1_f32(pg, centroid + j), centered, residual_scale);
+                svst1_f32(pg, out + j, v);
+                const auto exponent = svand_n_u32_x(pg, svreinterpret_u32_f32(v), 0x7f800000U);
+                finite &= !svptest_any(pg, svcmpeq_n_u32(pg, exponent, 0x7f800000U));
+            }
+        }
+    }
+    return finite;
+#elif defined(ENABLE_NEON)
+    return neon::RaBitQExCode7ToVector(
+        filter, packed, centroid, residual_scale, full_center, dim, out);
+#else
+    return generic::RaBitQExCode7ToVector(
+        filter, packed, centroid, residual_scale, full_center, dim, out);
+#endif
 }
 
 float
 RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    const auto step = svcntw();
+    auto sum = svdup_f32(0.0F);
+    for (uint64_t i = 0; i < dim; i += step) {
+        const auto pg = svwhilelt_b32(i, dim);
+        const auto code = svcvt_f32_u32_x(pg, svld1ub_u32(pg, codes + i));
+        sum = svmla_f32_m(pg, sum, svld1_f32(pg, vector + i), code);
+    }
+    return svaddv_f32(svptrue_b32(), sum);
+#else
     return neon::RaBitQFloatSQIP(vector, codes, dim);
+#endif
 }
 
 uint64_t
 RaBitQCodeCodeIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim) {
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    const auto step = svcntw();
+    uint64_t sum = 0;
+    for (uint64_t i = 0; i < dim; i += step) {
+        const auto pg = svwhilelt_b32(i, dim);
+        const auto a = svld1ub_u32(pg, codes1 + i);
+        const auto b = svld1ub_u32(pg, codes2 + i);
+        sum += svaddv_u32(pg, svmul_u32_x(pg, a, b));
+    }
+    return sum;
+#else
     return neon::RaBitQCodeCodeIP(codes1, codes2, dim);
+#endif
+}
+
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+namespace {
+void
+PackBitPlaneSVE(const uint8_t* codes, uint8_t* out, uint64_t dim, uint32_t bit) {
+    const auto step = svcntb();
+    const auto all = svptrue_b8();
+    const auto weights = svand_n_u8_x(all, svindex_u8(0, 1), 7);
+    uint8_t lanes[256];
+    for (uint64_t i = 0; i < dim; i += step) {
+        const auto code = svld1_u8(svwhilelt_b8(i, dim), codes + i);
+        const auto set = svand_n_u8_x(all, svlsr_n_u8_x(all, code, bit), 1);
+        svst1_u8(all, lanes, svlsl_u8_x(all, set, weights));
+        const auto bytes = std::min((dim - i + 7) / 8, step / 8);
+        for (uint64_t j = 0; j < bytes; ++j) {
+            const auto* x = lanes + j * 8;
+            out[i / 8 + j] = x[0] | x[1] | x[2] | x[3] | x[4] | x[5] | x[6] | x[7];
+        }
+    }
+}
+
+void
+PackCompactSupplementSVE(const uint8_t* values, uint8_t* out, uint32_t bits) {
+    const auto mask = svwhilelt_b8(uint64_t{0}, uint64_t{16});
+    const auto a = svld1_u8(mask, values);
+    const auto b = svld1_u8(mask, values + 16);
+    const auto c = svld1_u8(mask, values + 32);
+    const auto d = svld1_u8(mask, values + 48);
+    if (bits == 5) {
+        const auto pair = [&](svuint8_t low, svuint8_t high) {
+            return svorr_u8_x(mask, svand_n_u8_x(mask, low, 15), svlsl_n_u8_x(mask, high, 4));
+        };
+        svst1_u8(mask, out, pair(a, b));
+        svst1_u8(mask, out + 16, pair(c, d));
+        PackBitPlaneSVE(values, out + 32, 64, 4);
+    } else {
+        const auto pair = [&](svuint8_t x, unsigned shift) {
+            const auto extra = svlsr_n_u8_x(mask, d, shift);
+            return svorr_u8_x(mask, svand_n_u8_x(mask, x, 63), svlsl_n_u8_x(mask, extra, 6));
+        };
+        svst1_u8(mask, out, pair(a, 0));
+        svst1_u8(mask, out + 16, pair(b, 2));
+        svst1_u8(mask, out + 32, pair(c, 4));
+        if (bits == 7) {
+            PackBitPlaneSVE(values, out + 48, 64, 6);
+        }
+    }
+}
+}  // namespace
+#endif
+
+void
+RaBitQPackScalarToSplitCode(const uint8_t* codes,
+                            uint8_t* filter,
+                            uint8_t* supplement,
+                            uint64_t dim,
+                            uint32_t total_bits,
+                            uint32_t filter_bits) {
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    if (dim == 0) {
+        return;
+    }
+    const simd::RaBitQPackedSupplementLayout layout{dim, total_bits - filter_bits};
+    for (uint32_t i = 0; i < filter_bits; ++i) {
+        PackBitPlaneSVE(codes, filter + i * layout.PlaneBytes(), dim, total_bits - 1 - i);
+    }
+    if (layout.PackedSize() == 0) {
+        return;
+    }
+    for (uint64_t i = 0; i < layout.FullChunkCount(); ++i) {
+        PackCompactSupplementSVE(
+            codes + i * layout.CHUNK_DIM, supplement + i * layout.ChunkBytes(), layout.bits);
+    }
+    if (layout.TailDimension() != 0) {
+        for (uint32_t bit = 0; bit < layout.bits; ++bit) {
+            PackBitPlaneSVE(codes + layout.FullDimension(),
+                            supplement + layout.FullChunksSize() + bit * layout.TailPlaneBytes(),
+                            layout.TailDimension(),
+                            bit);
+        }
+    }
+#elif defined(ENABLE_NEON)
+    neon::RaBitQPackScalarToSplitCode(codes, filter, supplement, dim, total_bits, filter_bits);
+#else
+    generic::RaBitQPackScalarToSplitCode(codes, filter, supplement, dim, total_bits, filter_bits);
+#endif
 }
 
 void
@@ -1221,8 +1996,20 @@ RaBitQPackScalarToSplitPlanes(const uint8_t* scalar_codes,
                               uint64_t dim,
                               uint32_t total_bits,
                               uint32_t filter_bits) {
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    if (dim == 0) {
+        return;
+    }
+    const auto plane_bytes = (dim + 7) / 8;
+    for (uint32_t bit = 0; bit < total_bits; ++bit) {
+        auto* out = simd::RaBitQGetSplitPlane(
+            filter_planes, supplement_planes, plane_bytes, total_bits, filter_bits, bit);
+        PackBitPlaneSVE(scalar_codes, out, dim, bit);
+    }
+#else
     neon::RaBitQPackScalarToSplitPlanes(
         scalar_codes, filter_planes, supplement_planes, dim, total_bits, filter_bits);
+#endif
 }
 
 uint32_t
@@ -1262,6 +2049,68 @@ RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
     return result;
 #else
     return neon::RaBitQSQ4UBinaryIP(codes, bits, dim);
+#endif
+}
+
+#if defined(ENABLE_SVE)
+namespace {
+template <size_t Count>
+void
+RaBitQCountWithBaseSum(const uint8_t* codes,
+                       const uint8_t* const (&bases)[Count],
+                       uint64_t dim,
+                       uint64_t* results) {
+    const auto bytes = (dim + 7) / 8;
+    const auto step = svcntb();
+    uint32_t sums[Count]{};
+    uint32_t ips[Count]{};
+    for (uint64_t i = 0; i < bytes; i += step) {
+        const auto pg = svwhilelt_b8(i, bytes);
+        const auto p0 = svld1_u8(pg, codes + i);
+        const auto p1 = svld1_u8(pg, codes + bytes + i);
+        const auto p2 = svld1_u8(pg, codes + 2 * bytes + i);
+        const auto p3 = svld1_u8(pg, codes + 3 * bytes + i);
+        const auto count = [&](svuint8_t v) { return svaddv_u8(pg, svcnt_u8_x(pg, v)); };
+        for (size_t j = 0; j < Count; ++j) {
+            const auto base = svld1_u8(pg, bases[j] + i);
+            sums[j] += count(base);
+            ips[j] += count(svand_u8_x(pg, p0, base)) + (count(svand_u8_x(pg, p1, base)) << 1) +
+                      (count(svand_u8_x(pg, p2, base)) << 2) +
+                      (count(svand_u8_x(pg, p3, base)) << 3);
+        }
+    }
+    for (size_t j = 0; j < Count; ++j) {
+        results[j] = ips[j] | (static_cast<uint64_t>(sums[j]) << 32);
+    }
+}
+}  // namespace
+#endif
+
+uint64_t
+RaBitQSQ4UBinaryIPWithBaseSum(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
+#if defined(ENABLE_SVE)
+    const uint8_t* bases[] = {bits};
+    uint64_t result;
+    RaBitQCountWithBaseSum(codes, bases, dim, &result);
+    return result;
+#else
+    return neon::RaBitQSQ4UBinaryIPWithBaseSum(codes, bits, dim);
+#endif
+}
+
+void
+RaBitQSQ4UBinaryIPWithBaseSumBatch4(const uint8_t* codes,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint64_t* results) {
+#if defined(ENABLE_SVE)
+    const uint8_t* bases[] = {bits1, bits2, bits3, bits4};
+    RaBitQCountWithBaseSum(codes, bases, dim, results);
+#else
+    neon::RaBitQSQ4UBinaryIPWithBaseSumBatch4(codes, bits1, bits2, bits3, bits4, dim, results);
 #endif
 }
 
@@ -1346,6 +2195,9 @@ BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
 
 void
 Prefetch(const void* data) {
+#if defined(ENABLE_SVE)
+    __builtin_prefetch(data, 0, 3);
+#endif
 }
 
 void
@@ -1376,10 +2228,7 @@ DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
 float
 Normalize(const float* from, float* to, uint64_t dim) {
 #if defined(ENABLE_SVE)
-    float norm = std::sqrt(sve::FP32ComputeIP(from, from, dim));
-    if (norm == 0) {
-        norm = 1.0f;
-    }
+    const float norm = std::sqrt(sve::FP32ComputeIP(from, from, dim));
     sve::DivScalar(from, to, dim, norm);
     return norm;
 #else
@@ -1393,9 +2242,18 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
                    uint64_t pq_dim,
                    int32_t* RESTRICT result) {
 #if defined(ENABLE_SVE)
+    const auto step = svcntb();
+    // Each 128-bit segment accumulates one byte per iteration. Drain before
+    // its uint16 lanes wrap, keeping the existing loop for ordinary PQ sizes.
+    const uint64_t max_groups = (UINT16_MAX / UINT8_MAX) * (step / 16);
+    while (pq_dim > max_groups) {
+        sve::PQFastScanLookUp32(lookup_table, codes, max_groups, result);
+        lookup_table += max_groups * 16;
+        codes += max_groups * 16;
+        pq_dim -= max_groups;
+    }
     uint64_t i = 0;
     const uint64_t total_bytes = pq_dim * 16;
-    auto step = svcntb();
 
     const svuint8_t mask_low = svdup_u8(0x0F);
     const svuint16_t mask_low16 = svdup_u16(0x00FF);
@@ -1478,7 +2336,29 @@ PQFastScanLookUp32HighAcc(const uint8_t* RESTRICT low_lookup_table,
                           const uint8_t* RESTRICT codes,
                           uint64_t pq_dim,
                           int32_t* RESTRICT result) {
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    // Reuse the byte lookup kernel for both halves of each 16-bit LUT entry.
+    // Limit each call to 128 groups so its uint16 lane accumulators cannot wrap.
+    constexpr uint64_t kChunk = 128;
+    for (uint64_t group = 0; group < pq_dim;) {
+        const auto count = std::min(kChunk, pq_dim - group);
+        int32_t low[32]{};
+        int32_t high[32]{};
+        const auto offset = group * 16;
+        sve::PQFastScanLookUp32(low_lookup_table + offset, codes + offset, count, low);
+        sve::PQFastScanLookUp32(high_lookup_table + offset, codes + offset, count, high);
+        const auto step = svcntw();
+        for (uint64_t lane = 0; lane < 32; lane += step) {
+            const auto pg = svwhilelt_b32(lane, uint64_t{32});
+            const auto hi = svlsl_n_s32_x(pg, svld1_s32(pg, high + lane), 8);
+            const auto sum = svadd_s32_x(pg, svld1_s32(pg, low + lane), hi);
+            svst1_s32(pg, result + lane, svadd_s32_x(pg, svld1_s32(pg, result + lane), sum));
+        }
+        group += count;
+    }
+#else
     neon::PQFastScanLookUp32HighAcc(low_lookup_table, high_lookup_table, codes, pq_dim, result);
+#endif
 }
 
 void
@@ -1487,13 +2367,34 @@ PQFastScanLookUp32HighAccOverwrite(const uint8_t* RESTRICT low_lookup_table,
                                    const uint8_t* RESTRICT codes,
                                    uint64_t pq_dim,
                                    int32_t* RESTRICT result) {
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    std::fill_n(result, 32, 0);
+    sve::PQFastScanLookUp32HighAcc(low_lookup_table, high_lookup_table, codes, pq_dim, result);
+#else
     neon::PQFastScanLookUp32HighAccOverwrite(
         low_lookup_table, high_lookup_table, codes, pq_dim, result);
+#endif
 }
 
 uint32_t
 FP32LessThan32Mask(const float* values, float limit) {
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    uint32_t mask = 0;
+    // The result has only 32 lanes, even on a wider SVE implementation.
+    uint32_t matches[32];
+    const auto step = svcntw();
+    for (uint64_t i = 0; i < 32; i += step) {
+        const auto pg = svwhilelt_b32(i, uint64_t{32});
+        const auto less = svcmplt_n_f32(pg, svld1_f32(pg, values + i), limit);
+        svst1_u32(pg, matches + i, svsel_u32(less, svdup_u32(1), svdup_u32(0)));
+    }
+    for (uint32_t lane = 0; lane < 32; ++lane) {
+        mask |= matches[lane] << lane;
+    }
+    return mask;
+#else
     return neon::FP32LessThan32Mask(values, limit);
+#endif
 }
 
 uint32_t
@@ -1511,6 +2412,56 @@ RaBitQFastScan32ResidualPostprocess(const int32_t* accumulators,
                                     uint32_t valid_size,
                                     float* dists,
                                     float* filter_inner_products) {
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    uint32_t computed_mask = 0;
+    const float center = 0.5F * static_cast<float>((1U << filter_bits) - 1U) * query_sum;
+    const auto step = svcntw();
+    for (uint64_t i = 0; i < valid_size; i += step) {
+        const auto pg = svwhilelt_b32(i, static_cast<uint64_t>(valid_size));
+        const auto load_lookup = [&](uint32_t plane) {
+            const auto acc = svld1_s32(pg, accumulators + plane * 32 + i);
+            return svadd_n_f32_x(pg, svmul_n_f32_x(pg, svcvt_f32_s32_x(pg, acc), delta), sum_vl);
+        };
+        auto ip = svdup_f32(0.0F);
+        if (filter_bits == 1) {
+            ip =
+                svmul_n_f32_x(pg,
+                              svsub_n_f32_x(pg, svmul_n_f32_x(pg, load_lookup(0), 2.0F), query_sum),
+                              inv_sqrt_d);
+        } else {
+            for (uint32_t plane = 0; plane < filter_bits; ++plane) {
+                const auto weight = static_cast<float>(1U << (filter_bits - plane - 1));
+                ip = svadd_f32_x(pg, ip, svmul_n_f32_x(pg, load_lookup(plane), weight));
+            }
+            ip = svdiv_f32_x(
+                pg, svsub_n_f32_x(pg, ip, center), svld1_f32(pg, filter_norm_codes + i));
+        }
+        const auto scale = svld1_f32(pg, f_scale + i);
+        const auto add = svld1_f32(pg, f_add + i);
+        const auto result = svadd_f32_x(pg,
+                                        svadd_n_f32_x(pg, add, query_bucket_norm_sqr),
+                                        svmul_f32_x(pg, svmul_n_f32_x(pg, scale, query_norm), ip));
+        svst1_f32(pg, dists + i, result);
+        if (filter_inner_products) {
+            svst1_f32(pg, filter_inner_products + i, ip);
+        }
+        for (uint64_t lane = i; lane < std::min<uint64_t>(i + step, valid_size); ++lane) {
+            const bool valid = IsFiniteFloatBits(f_add[lane]) && IsFiniteFloatBits(f_scale[lane]) &&
+                               std::abs(f_scale[lane]) > std::numeric_limits<float>::epsilon() &&
+                               (filter_bits == 1 || filter_norm_codes[lane] > 0.0F) &&
+                               IsFiniteFloatBits(dists[lane]);
+            if (valid) {
+                computed_mask |= 1U << lane;
+            } else {
+                dists[lane] = std::numeric_limits<float>::max();
+                if (filter_inner_products) {
+                    filter_inner_products[lane] = std::numeric_limits<float>::quiet_NaN();
+                }
+            }
+        }
+    }
+    return computed_mask;
+#else
     return neon::RaBitQFastScan32ResidualPostprocess(accumulators,
                                                      filter_bits,
                                                      delta,
@@ -1525,6 +2476,7 @@ RaBitQFastScan32ResidualPostprocess(const int32_t* accumulators,
                                                      valid_size,
                                                      dists,
                                                      filter_inner_products);
+#endif
 }
 
 void
@@ -1719,39 +2671,145 @@ InverseNormalizeWithCentroid(
 }  // namespace vsag::sve
 
 namespace vsag::sve {
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+namespace {
+template <int Bits>
+svfloat32_t
+DecodeLocal(const uint8_t* codes, uint64_t i, svbool_t pg, svfloat32_t minimum, svfloat32_t step) {
+    svuint32_t values;
+    if constexpr (Bits == 8) {
+        values = svld1ub_u32(pg, codes + i);
+    } else {
+        const auto indices = svindex_u32(0, 1);
+        values = svld1ub_gather_u32offset_u32(pg, codes + i / 2, svlsr_n_u32_x(pg, indices, 1));
+        const auto shifts = svlsl_n_u32_x(pg, svand_n_u32_x(pg, indices, 1), 2);
+        values = svand_n_u32_x(pg, svlsr_u32_x(pg, values, shifts), 15);
+    }
+    return svmla_f32_x(pg, minimum, svcvt_f32_u32_x(pg, values), step);
+}
+
+template <int Bits, bool Adc, bool Ip>
+float
+LocalDistance(const float* query, const uint8_t* a, const uint8_t* b, uint64_t dim) {
+    const auto fallback = [&]() {
+        if constexpr (Bits == 4) {
+            if constexpr (Adc) {
+                return Ip ? generic::SQ4LocalComputeIP(query, b, dim)
+                          : generic::SQ4LocalComputeL2Sqr(query, b, dim);
+            } else {
+                return Ip ? generic::SQ4LocalComputeCodesIP(a, b, dim)
+                          : generic::SQ4LocalComputeCodesL2Sqr(a, b, dim);
+            }
+        } else if constexpr (Adc) {
+            return Ip ? generic::SQ8LocalComputeIP(query, b, dim)
+                      : generic::SQ8LocalComputeL2Sqr(query, b, dim);
+        } else {
+            return Ip ? generic::SQ8LocalComputeCodesIP(a, b, dim)
+                      : generic::SQ8LocalComputeCodesL2Sqr(a, b, dim);
+        }
+    };
+    float min_a = 0.0F, step_a = 0.0F, min_b, step_b;
+    std::memcpy(&min_b, b, sizeof(float));
+    std::memcpy(&step_b, b + sizeof(float), sizeof(float));
+    if constexpr (!Adc) {
+        std::memcpy(&min_a, a, sizeof(float));
+        std::memcpy(&step_a, a + sizeof(float), sizeof(float));
+    }
+    if (std::abs(min_a) > 1e30F || std::abs(min_b) > 1e30F || step_a > 1e30F || step_b > 1e30F) {
+        return fallback();
+    }
+    auto sum = svdup_f32(0.0F);
+    const auto vb_min = svdup_f32(min_b), vb_step = svdup_f32(step_b);
+    const auto va_min = svdup_f32(min_a), va_step = svdup_f32(step_a);
+    for (uint64_t i = 0; i < dim; i += svcntw()) {
+        const auto pg = svwhilelt_b32(i, dim);
+        const auto vb = DecodeLocal<Bits>(b + 2 * sizeof(float), i, pg, vb_min, vb_step);
+        svfloat32_t va;
+        if constexpr (Adc) {
+            va = svld1_f32(pg, query + i);
+        } else {
+            va = DecodeLocal<Bits>(a + 2 * sizeof(float), i, pg, va_min, va_step);
+        }
+        if constexpr (Ip) {
+            sum = svmla_f32_m(pg, sum, va, vb);
+        } else {
+            const auto delta = svsub_f32_x(pg, va, vb);
+            sum = svmla_f32_m(pg, sum, delta, delta);
+        }
+    }
+    const float result = svaddv_f32(svptrue_b32(), sum);
+    uint32_t bits;
+    std::memcpy(&bits, &result, sizeof(bits));
+    return (bits & 0x7f800000U) == 0x7f800000U ? fallback() : result;
+}
+}  // namespace
+#endif
+
 float
 SQ8LocalComputeL2Sqr(const float* query, const uint8_t* codes, uint64_t dim) {
-    return generic::SQ8LocalComputeL2Sqr(query, codes, dim);
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    return LocalDistance<8, true, false>(query, nullptr, codes, dim);
+#else
+    return neon::SQ8LocalComputeL2Sqr(query, codes, dim);
+#endif
 }
 float
 SQ8LocalComputeCodesL2Sqr(const uint8_t* a, const uint8_t* b, uint64_t dim) {
-    return generic::SQ8LocalComputeCodesL2Sqr(a, b, dim);
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    return LocalDistance<8, false, false>(nullptr, a, b, dim);
+#else
+    return neon::SQ8LocalComputeCodesL2Sqr(a, b, dim);
+#endif
 }
 
 float
 SQ8LocalComputeIP(const float* query, const uint8_t* codes, uint64_t dim) {
-    return generic::SQ8LocalComputeIP(query, codes, dim);
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    return LocalDistance<8, true, true>(query, nullptr, codes, dim);
+#else
+    return neon::SQ8LocalComputeIP(query, codes, dim);
+#endif
 }
 float
 SQ8LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
-    return generic::SQ8LocalComputeCodesIP(a, b, dim);
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    return LocalDistance<8, false, true>(nullptr, a, b, dim);
+#else
+    return neon::SQ8LocalComputeCodesIP(a, b, dim);
+#endif
 }
 
 float
 SQ4LocalComputeL2Sqr(const float* query, const uint8_t* codes, uint64_t dim) {
-    return generic::SQ4LocalComputeL2Sqr(query, codes, dim);
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    return LocalDistance<4, true, false>(query, nullptr, codes, dim);
+#else
+    return neon::SQ4LocalComputeL2Sqr(query, codes, dim);
+#endif
 }
 float
 SQ4LocalComputeCodesL2Sqr(const uint8_t* a, const uint8_t* b, uint64_t dim) {
-    return generic::SQ4LocalComputeCodesL2Sqr(a, b, dim);
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    return LocalDistance<4, false, false>(nullptr, a, b, dim);
+#else
+    return neon::SQ4LocalComputeCodesL2Sqr(a, b, dim);
+#endif
 }
 
 float
 SQ4LocalComputeIP(const float* query, const uint8_t* codes, uint64_t dim) {
-    return generic::SQ4LocalComputeIP(query, codes, dim);
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    return LocalDistance<4, true, true>(query, nullptr, codes, dim);
+#else
+    return neon::SQ4LocalComputeIP(query, codes, dim);
+#endif
 }
 float
 SQ4LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
-    return generic::SQ4LocalComputeCodesIP(a, b, dim);
+#if defined(ENABLE_SVE) && !defined(ENABLE_NEON)
+    return LocalDistance<4, false, true>(nullptr, a, b, dim);
+#else
+    return neon::SQ4LocalComputeCodesIP(a, b, dim);
+#endif
 }
 }  // namespace vsag::sve

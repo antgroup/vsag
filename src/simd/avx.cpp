@@ -398,6 +398,87 @@ SQ8ComputeL2Sqr(const float* RESTRICT query,
 #endif
 }
 
+void
+SQ8ComputeL2SqrBatch4(const float* query,
+                      const uint8_t* codes1,
+                      const uint8_t* codes2,
+                      const uint8_t* codes3,
+                      const uint8_t* codes4,
+                      const float* lower_bound,
+                      const float* diff,
+                      uint64_t dim,
+                      float& dist1,
+                      float& dist2,
+                      float& dist3,
+                      float& dist4) {
+#if defined(ENABLE_AVX)
+    simd::SQ8ComputeL2SqrBatch4Impl<simd::SQ8Traits<simd::AvxSQ8Tag>>(query,
+                                                                      codes1,
+                                                                      codes2,
+                                                                      codes3,
+                                                                      codes4,
+                                                                      lower_bound,
+                                                                      diff,
+                                                                      dim,
+                                                                      dist1,
+                                                                      dist2,
+                                                                      dist3,
+                                                                      dist4,
+                                                                      &sse::SQ8ComputeL2Sqr);
+#else
+    vsag::SQ8ComputeL2SqrBatch4Fallback(
+        query, codes1, codes2, codes3, codes4, lower_bound, diff, dim, dist1, dist2, dist3, dist4);
+#endif
+}
+
+void
+SQ8ComputeIPBatch4(const float* query,
+                   const uint8_t* codes1,
+                   const uint8_t* codes2,
+                   const uint8_t* codes3,
+                   const uint8_t* codes4,
+                   const float* lower_bound,
+                   const float* diff,
+                   uint64_t dim,
+                   float& dist1,
+                   float& dist2,
+                   float& dist3,
+                   float& dist4) {
+#if defined(ENABLE_AVX)
+    using T = simd::SQ8Traits<simd::AvxSQ8Tag>;
+    const auto inv255 = T::set1(1.0F / 255.0F);
+    auto s1 = T::zero(), s2 = T::zero(), s3 = T::zero(), s4 = T::zero();
+    uint64_t i = 0;
+    for (; dim - i >= T::Width; i += T::Width) {
+        const auto q = T::load(query + i);
+        const auto lb = T::load(lower_bound + i);
+        const auto scale = T::load(diff + i);
+        const auto accumulate = [&](const uint8_t* codes, T::FloatVec sum) {
+            const auto adjusted =
+                T::fmadd(T::mul(T::load_u8_as_float(codes + i), inv255), scale, lb);
+            return T::fmadd(q, adjusted, sum);
+        };
+        s1 = accumulate(codes1, s1);
+        s2 = accumulate(codes2, s2);
+        s3 = accumulate(codes3, s3);
+        s4 = accumulate(codes4, s4);
+    }
+    dist1 = T::reduce_add(s1);
+    dist2 = T::reduce_add(s2);
+    dist3 = T::reduce_add(s3);
+    dist4 = T::reduce_add(s4);
+    if (i != dim) {
+        dist1 += sse::SQ8ComputeIP(query + i, codes1 + i, lower_bound + i, diff + i, dim - i);
+        dist2 += sse::SQ8ComputeIP(query + i, codes2 + i, lower_bound + i, diff + i, dim - i);
+        dist3 += sse::SQ8ComputeIP(query + i, codes3 + i, lower_bound + i, diff + i, dim - i);
+        dist4 += sse::SQ8ComputeIP(query + i, codes4 + i, lower_bound + i, diff + i, dim - i);
+    }
+#else
+    vsag::SQ8ComputeIPBatch4Fallback(
+        query, codes1, codes2, codes3, codes4, lower_bound, diff, dim, dist1, dist2, dist3, dist4);
+#endif
+}
+
 float
 SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
                   const uint8_t* RESTRICT codes2,
@@ -603,9 +684,29 @@ SQ8UniformComputeCodesIPBatch(const uint8_t* RESTRICT query,
                               uint64_t n_codes,
                               uint64_t code_stride,
                               float* RESTRICT out) {
-    for (uint64_t i = 0; i < n_codes; ++i) {
-        out[i] = avx::SQ8UniformComputeCodesIP(query, codes + i * code_stride, dim);
-    }
+    sse::SQ8UniformComputeCodesIPBatch(query, codes, dim, n_codes, code_stride, out);
+}
+
+// AVX does not have 256-bit integer operations; reuse the SSE2 integer kernels.
+uint32_t
+RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
+    return sse::RaBitQSQ4UBinaryIP(codes, bits, dim);
+}
+
+uint64_t
+RaBitQSQ4UBinaryIPWithBaseSum(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
+    return sse::RaBitQSQ4UBinaryIPWithBaseSum(codes, bits, dim);
+}
+
+void
+RaBitQSQ4UBinaryIPWithBaseSumBatch4(const uint8_t* codes,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint64_t* results) {
+    sse::RaBitQSQ4UBinaryIPWithBaseSumBatch4(codes, bits1, bits2, bits3, bits4, dim, results);
 }
 
 float
@@ -652,7 +753,7 @@ RaBitQFloatThreeBitIPBatch4(const float* vector,
                             uint64_t dim,
                             uint32_t reorder_bits,
                             float* results) {
-    generic::RaBitQFloatThreeBitIPBatch4(
+    sse::RaBitQFloatThreeBitIPBatch4(
         vector, bits1, bits2, bits3, bits4, dim, reorder_bits, results);
 }
 
@@ -675,7 +776,7 @@ RaBitQFloatSupplementCodeIP(const float* vector,
                             const uint8_t* supplement_code,
                             uint64_t dim,
                             uint32_t supplement_bits) {
-    return generic::RaBitQFloatSupplementCodeIP(vector, supplement_code, dim, supplement_bits);
+    return sse::RaBitQFloatSupplementCodeIP(vector, supplement_code, dim, supplement_bits);
 }
 
 void
@@ -803,6 +904,11 @@ VecRescale(float* data, uint64_t dim, float val) {
 #else
     sse::VecRescale(data, dim, val);
 #endif
+}
+
+void
+FlipSign(const uint8_t* flip, float* data, uint64_t dim) {
+    sse::FlipSign(flip, data, dim);
 }
 
 void

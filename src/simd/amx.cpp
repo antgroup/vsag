@@ -262,7 +262,7 @@ SQ8UniformComputeCodesIPBatch(const uint8_t* RESTRICT query,
     // 16-broadcast B-tile setup) does not amortize for tiny batches.
     // Profiling sift1m / HGraph+IVF SQ8U showed ~99% of calls land at
     // n_codes <= 32 (IVF scan block) and never above 32. Below this
-    // threshold AVX-512 wins; switch to it instead of paying AMX
+    // threshold the AVX-512 batch kernel avoids paying AMX
     // setup cost.
     constexpr uint64_t kAmxMinCount = 48;
     // dim split into (dim_aligned = floor(dim/64)*64) handled by AMX,
@@ -275,12 +275,10 @@ SQ8UniformComputeCodesIPBatch(const uint8_t* RESTRICT query,
     uint64_t tail = dim - dim_aligned;
     // _tile_loadd takes a signed 32-bit stride. In practice code_stride is
     // O(dim) bytes and never anywhere near 2 GiB, but fall back to the
-    // AVX-512 scalar loop in release builds rather than truncating the cast.
+    // AVX-512 batch kernel in release builds rather than truncating the cast.
     if (n_codes < kAmxMinCount || dim_aligned == 0 ||
         code_stride > static_cast<uint64_t>(INT32_MAX)) {
-        for (uint64_t j = 0; j < n_codes; ++j) {
-            out[j] = avx512::SQ8UniformComputeCodesIP(query, codes + j * code_stride, dim);
-        }
+        avx512::SQ8UniformComputeCodesIPBatch(query, codes, dim, n_codes, code_stride, out);
         return;
     }
 

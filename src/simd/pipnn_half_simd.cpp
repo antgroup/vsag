@@ -42,6 +42,11 @@ ResolveDispatch(ImplementationSelection selection) {
 const Dispatch&
 GetDispatch() {
     static const Dispatch dispatch = [] {
+#if defined(ENABLE_NEON)
+        if (SimdStatus::SupportNEON()) {
+            return detail::ResolveNEONDispatch();
+        }
+#endif
         Capabilities caps{};
 #if defined(ENABLE_AVX2)
         caps.compiled_avx2 = true;

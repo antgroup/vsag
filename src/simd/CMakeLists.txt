@@ -48,7 +48,7 @@ if (DIST_CONTAINS_SSE)
     set_source_files_properties (
             sse.cpp
             PROPERTIES COMPILE_FLAGS
-            "-msse -msse2 -msse3 -mssse3 -msse4 -msse4a -msse4.1 -msse4.2")
+            "-msse4.1")
 endif ()
 if (DIST_CONTAINS_AVX)
     set_source_files_properties (avx.cpp PROPERTIES COMPILE_FLAGS "-mavx -mf16c")
@@ -68,7 +68,7 @@ if (DIST_CONTAINS_AVX2)
             "-mavx2 -mf16c -mno-fma -fno-fast-math -ffp-contract=off")
 endif ()
 
-set(AVX512_FLAGS "-mavx512f -mavx512cd -mavx512vl -mavx512bw -mavx512dq -mavx512ifma -mavx512vbmi")
+set(AVX512_FLAGS "-mavx512f -mavx512cd -mavx512vl -mavx512bw -mavx512dq")
 # AVX512PF/ER are unused and unsupported by Clang 20. Keep GCC compilation
 # commands compatible with clang-tidy as well as the actual SIMD kernels.
 
@@ -94,7 +94,7 @@ if (DIST_CONTAINS_AMX)
             amx.cpp
             PROPERTIES
             COMPILE_FLAGS
-            "-mavx512f -mavx512vl -mavx512bw -mavx512dq -mavx512vnni -mavx512bf16 -mamx-tile -mamx-int8 -mamx-bf16"
+            "-mavx512f -mavx512vl -mavx512bw -mavx512dq -mavx512bf16 -mamx-tile -mamx-int8 -mamx-bf16"
     )
 endif ()
 if (DIST_CONTAINS_NEON)
@@ -146,6 +146,12 @@ if (ENABLE_TESTS)
     file (GLOB_RECURSE SIMD_TESTS "*_test.cpp")
     add_library (simd_test STATIC ${SIMD_TESTS})
 
+    # This header-only kernel is exercised directly by the scoped SIMD tests.
+    if (ENABLE_COVERAGE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT WIN32 AND NOT APPLE)
+        set_source_files_properties (mci_hash_simd_test.cpp PROPERTIES
+            COMPILE_OPTIONS "$<TARGET_PROPERTY:coverage_config,INTERFACE_COMPILE_OPTIONS>")
+    endif ()
+
     if (DIST_CONTAINS_SSE)
         target_compile_definitions (simd_test PRIVATE ENABLE_SSE=1)
     endif ()
@@ -169,6 +175,9 @@ if (ENABLE_TESTS)
     endif ()
     if (DIST_CONTAINS_NEON)
         target_compile_definitions (simd_test PRIVATE ENABLE_NEON=1)
+    endif ()
+    if (DIST_CONTAINS_SVE)
+        target_compile_definitions (simd_test PRIVATE ENABLE_SVE=1)
     endif ()
     target_link_libraries (simd_test PRIVATE Catch2::Catch2 unittest_deps)
     add_dependencies (simd_test Catch2)

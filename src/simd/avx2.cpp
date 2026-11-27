@@ -165,9 +165,10 @@ PackCompactSupplementChunk(const uint8_t* scalar_codes, uint8_t* packed, uint32_
 
 }  // namespace
 
-uint64_t
-RaBitQSQ4UBinaryIPWithBaseSum(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
 #if defined(ENABLE_AVX2)
+template <bool WithBaseSum>
+static uint64_t
+SQ4UBinaryIPImpl(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
     const uint64_t num_bytes = (dim + 7) / 8;
     const __m256i lookup = _mm256_setr_epi8(0,
                                             1,
@@ -218,7 +219,9 @@ RaBitQSQ4UBinaryIPWithBaseSum(const uint8_t* codes, const uint8_t* bits, uint64_
     uint64_t offset = 0;
     for (; offset + 32 <= num_bytes; offset += 32) {
         const auto base = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(bits + offset));
-        base_acc = _mm256_add_epi64(base_acc, popcount(base));
+        if constexpr (WithBaseSum) {
+            base_acc = _mm256_add_epi64(base_acc, popcount(base));
+        }
         for (uint32_t bit = 0; bit < 4; ++bit) {
             const auto query = _mm256_loadu_si256(
                 reinterpret_cast<const __m256i*>(codes + bit * num_bytes + offset));
@@ -234,7 +237,9 @@ RaBitQSQ4UBinaryIPWithBaseSum(const uint8_t* codes, const uint8_t* bits, uint64_
             _mm256_cmpgt_epi32(_mm256_set1_epi32(static_cast<int>(remaining_words)), lane_ids);
         const auto base =
             _mm256_maskload_epi32(reinterpret_cast<const int32_t*>(bits + offset), mask);
-        base_acc = _mm256_add_epi64(base_acc, popcount(base));
+        if constexpr (WithBaseSum) {
+            base_acc = _mm256_add_epi64(base_acc, popcount(base));
+        }
         for (uint32_t bit = 0; bit < 4; ++bit) {
             const auto query = _mm256_maskload_epi32(
                 reinterpret_cast<const int32_t*>(codes + bit * num_bytes + offset), mask);
@@ -245,8 +250,11 @@ RaBitQSQ4UBinaryIPWithBaseSum(const uint8_t* codes, const uint8_t* bits, uint64_
     }
 
     alignas(32) uint64_t lanes[4];
-    _mm256_store_si256(reinterpret_cast<__m256i*>(lanes), base_acc);
-    uint32_t base_sum = static_cast<uint32_t>(lanes[0] + lanes[1] + lanes[2] + lanes[3]);
+    uint32_t base_sum = 0;
+    if constexpr (WithBaseSum) {
+        _mm256_store_si256(reinterpret_cast<__m256i*>(lanes), base_acc);
+        base_sum = static_cast<uint32_t>(lanes[0] + lanes[1] + lanes[2] + lanes[3]);
+    }
     uint32_t inner_product = 0;
     for (uint32_t bit = 0; bit < 4; ++bit) {
         _mm256_store_si256(reinterpret_cast<__m256i*>(lanes), inner_acc[bit]);
@@ -254,7 +262,9 @@ RaBitQSQ4UBinaryIPWithBaseSum(const uint8_t* codes, const uint8_t* bits, uint64_
     }
     for (; offset < num_bytes; ++offset) {
         const auto base = bits[offset];
-        base_sum += static_cast<uint32_t>(__builtin_popcount(base));
+        if constexpr (WithBaseSum) {
+            base_sum += static_cast<uint32_t>(__builtin_popcount(base));
+        }
         for (uint32_t bit = 0; bit < 4; ++bit) {
             inner_product +=
                 static_cast<uint32_t>(__builtin_popcount(codes[bit * num_bytes + offset] & base))
@@ -262,6 +272,22 @@ RaBitQSQ4UBinaryIPWithBaseSum(const uint8_t* codes, const uint8_t* bits, uint64_
         }
     }
     return static_cast<uint64_t>(inner_product) | (static_cast<uint64_t>(base_sum) << 32U);
+}
+#endif
+
+uint32_t
+RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    return static_cast<uint32_t>(SQ4UBinaryIPImpl<false>(codes, bits, dim));
+#else
+    return generic::RaBitQSQ4UBinaryIP(codes, bits, dim);
+#endif
+}
+
+uint64_t
+RaBitQSQ4UBinaryIPWithBaseSum(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    return SQ4UBinaryIPImpl<true>(codes, bits, dim);
 #else
     return generic::RaBitQSQ4UBinaryIPWithBaseSum(codes, bits, dim);
 #endif
@@ -496,20 +522,13 @@ FP32SparseAccumulate(float* RESTRICT dists,
     __m256 q_vec = _mm256_set1_ps(query_val);
     uint32_t i = 0;
     for (; i + 8 <= num; i += 8) {
-        __m128i id_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(ids + i));
-        __m256i idx_vec = _mm256_cvtepu16_epi32(id_vec);
         __m256 val_vec = _mm256_loadu_ps(vals + i);
 
-        __m256 dist_vec = _mm256_i32gather_ps(dists, idx_vec, 4);
-        dist_vec = _mm256_fmadd_ps(val_vec, q_vec, dist_vec);
-
-        alignas(32) float res[8];
-        alignas(32) int32_t indices[8];
-        _mm256_store_ps(res, dist_vec);
-        _mm256_store_si256(reinterpret_cast<__m256i*>(indices), idx_vec);
-
-        for (int k = 0; k < 8; ++k) {
-            dists[indices[k]] = res[k];
+        alignas(32) float deltas[8];
+        _mm256_store_ps(deltas, _mm256_mul_ps(val_vec, q_vec));
+        // Each read/modify/write must see earlier postings with the same ID.
+        for (uint32_t k = 0; k < 8; ++k) {
+            dists[ids[i + k]] += deltas[k];
         }
     }
     for (; i < num; ++i) {
@@ -687,21 +706,14 @@ FP16SparseAccumulate(float* RESTRICT dists,
     __m256 q_vec = _mm256_set1_ps(query_val);
     uint32_t i = 0;
     for (; i + 8 <= num; i += 8) {
-        __m128i id_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(ids + i));
-        __m256i idx_vec = _mm256_cvtepu16_epi32(id_vec);
         __m128i val_half = _mm_loadu_si128(reinterpret_cast<const __m128i*>(vals + i));
         __m256 val_vec = _mm256_cvtph_ps(val_half);
 
-        __m256 dist_vec = _mm256_i32gather_ps(dists, idx_vec, 4);
-        dist_vec = _mm256_fmadd_ps(val_vec, q_vec, dist_vec);
-
-        alignas(32) float res[8];
-        alignas(32) int32_t indices[8];
-        _mm256_store_ps(res, dist_vec);
-        _mm256_store_si256(reinterpret_cast<__m256i*>(indices), idx_vec);
-
-        for (int k = 0; k < 8; ++k) {
-            dists[indices[k]] = res[k];
+        alignas(32) float deltas[8];
+        _mm256_store_ps(deltas, _mm256_mul_ps(val_vec, q_vec));
+        // Each read/modify/write must see earlier postings with the same ID.
+        for (uint32_t k = 0; k < 8; ++k) {
+            dists[ids[i + k]] += deltas[k];
         }
     }
     for (; i < num; ++i) {
@@ -760,6 +772,72 @@ SQ8ComputeL2Sqr(const float* RESTRICT query,
 #endif
 }
 
+void
+SQ8ComputeL2SqrBatch4(const float* query,
+                      const uint8_t* codes1,
+                      const uint8_t* codes2,
+                      const uint8_t* codes3,
+                      const uint8_t* codes4,
+                      const float* lower_bound,
+                      const float* diff,
+                      uint64_t dim,
+                      float& dist1,
+                      float& dist2,
+                      float& dist3,
+                      float& dist4) {
+#if defined(ENABLE_AVX2)
+    simd::SQ8ComputeL2SqrBatch4Impl<simd::SQ8Traits<simd::Avx2SQ8Tag>>(query,
+                                                                       codes1,
+                                                                       codes2,
+                                                                       codes3,
+                                                                       codes4,
+                                                                       lower_bound,
+                                                                       diff,
+                                                                       dim,
+                                                                       dist1,
+                                                                       dist2,
+                                                                       dist3,
+                                                                       dist4,
+                                                                       &avx::SQ8ComputeL2Sqr);
+#else
+    vsag::SQ8ComputeL2SqrBatch4Fallback(
+        query, codes1, codes2, codes3, codes4, lower_bound, diff, dim, dist1, dist2, dist3, dist4);
+#endif
+}
+
+void
+SQ8ComputeIPBatch4(const float* query,
+                   const uint8_t* codes1,
+                   const uint8_t* codes2,
+                   const uint8_t* codes3,
+                   const uint8_t* codes4,
+                   const float* lower_bound,
+                   const float* diff,
+                   uint64_t dim,
+                   float& dist1,
+                   float& dist2,
+                   float& dist3,
+                   float& dist4) {
+#if defined(ENABLE_AVX2)
+    simd::SQ8ComputeIPBatch4Impl<simd::SQ8Traits<simd::Avx2SQ8Tag>>(query,
+                                                                    codes1,
+                                                                    codes2,
+                                                                    codes3,
+                                                                    codes4,
+                                                                    lower_bound,
+                                                                    diff,
+                                                                    dim,
+                                                                    dist1,
+                                                                    dist2,
+                                                                    dist3,
+                                                                    dist4,
+                                                                    &avx::SQ8ComputeIP);
+#else
+    vsag::SQ8ComputeIPBatch4Fallback(
+        query, codes1, codes2, codes3, codes4, lower_bound, diff, dim, dist1, dist2, dist3, dist4);
+#endif
+}
+
 float
 SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
                   const uint8_t* RESTRICT codes2,
@@ -798,21 +876,14 @@ SQ8SparseAccumulate(float* RESTRICT dists,
     __m256 q_vec = _mm256_set1_ps(query_val);
     uint32_t i = 0;
     for (; i + 8 <= num; i += 8) {
-        __m128i id_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(ids + i));
-        __m256i idx_vec = _mm256_cvtepu16_epi32(id_vec);
         __m256i val_i32 = _mm256_cvtepu8_epi32(load_8_char(vals + i));
         __m256 val_vec = _mm256_cvtepi32_ps(val_i32);
 
-        __m256 dist_vec = _mm256_i32gather_ps(dists, idx_vec, 4);
-        dist_vec = _mm256_fmadd_ps(val_vec, q_vec, dist_vec);
-
-        alignas(32) float res[8];
-        alignas(32) int32_t indices[8];
-        _mm256_store_ps(res, dist_vec);
-        _mm256_store_si256(reinterpret_cast<__m256i*>(indices), idx_vec);
-
-        for (int k = 0; k < 8; ++k) {
-            dists[indices[k]] = res[k];
+        alignas(32) float deltas[8];
+        _mm256_store_ps(deltas, _mm256_mul_ps(val_vec, q_vec));
+        // Each read/modify/write must see earlier postings with the same ID.
+        for (uint32_t k = 0; k < 8; ++k) {
+            dists[ids[i + k]] += deltas[k];
         }
     }
     for (; i < num; ++i) {
@@ -971,9 +1042,14 @@ SQ8UniformComputeCodesIPBatch(const uint8_t* RESTRICT query,
                               uint64_t n_codes,
                               uint64_t code_stride,
                               float* RESTRICT out) {
+#if defined(ENABLE_AVX2)
+    simd::SQ8UniformComputeCodesIPBatchImpl<simd::UniformCodeTraits<simd::Avx2UniformTag>>(
+        query, codes, dim, n_codes, code_stride, out, &avx2::SQ8UniformComputeCodesIP);
+#else
     for (uint64_t i = 0; i < n_codes; ++i) {
         out[i] = avx2::SQ8UniformComputeCodesIP(query, codes + i * code_stride, dim);
     }
+#endif
 }
 
 float
@@ -2265,6 +2341,11 @@ VecRescale(float* data, uint64_t dim, float val) {
 #else
     sse::VecRescale(data, dim, val);
 #endif
+}
+
+void
+FlipSign(const uint8_t* flip, float* data, uint64_t dim) {
+    sse::FlipSign(flip, data, dim);
 }
 
 void

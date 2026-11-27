@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <catch2/benchmark/catch_benchmark.hpp>
 #include <cstring>
+#include <limits>
 
 #include "fp32_simd.h"
 #include "kernels/rabitq_compute.h"
@@ -139,7 +140,9 @@ TEST_CASE("RaBitQ SQ4U-BQ Compute Codes", "[ut][simd]") {
             expected_base_sum += static_cast<uint32_t>(__builtin_popcount(bits[i]));
         }
         REQUIRE(static_cast<uint32_t>(packed >> 32U) == expected_base_sum);
-        REQUIRE(avx2::RaBitQSQ4UBinaryIPWithBaseSum(codes.data(), bits.data(), dim) == packed);
+        if (SimdStatus::SupportAVX2()) {
+            REQUIRE(avx2::RaBitQSQ4UBinaryIPWithBaseSum(codes.data(), bits.data(), dim) == packed);
+        }
         TEST_ACCURACY_SQ4(RaBitQSQ4UBinaryIP);
         if (dim == 0) {
             REQUIRE(result == 0);
@@ -292,6 +295,12 @@ TEST_CASE("RaBitQ scalar-code inner products", "[ut][simd]") {
                              expected_query_ip) < 1e-4F);
             REQUIRE(std::abs(RaBitQFloatSQIP(query.data(), codes1.data(), dim) -
                              expected_query_ip) < 1e-3F);
+            if (SimdStatus::SupportSSE()) {
+                REQUIRE(sse::RaBitQCodeCodeIP(codes1.data(), codes2.data(), dim) ==
+                        expected_code_ip);
+                REQUIRE(std::abs(sse::RaBitQFloatSQIP(query.data(), codes1.data(), dim) -
+                                 expected_query_ip) < 1e-3F);
+            }
             if (SimdStatus::SupportAVX2()) {
                 REQUIRE(avx2::RaBitQCodeCodeIP(codes1.data(), codes2.data(), dim) ==
                         expected_code_ip);
@@ -307,10 +316,14 @@ TEST_CASE("RaBitQ scalar-code inner products", "[ut][simd]") {
             if (SimdStatus::SupportNEON()) {
                 REQUIRE(neon::RaBitQCodeCodeIP(codes1.data(), codes2.data(), dim) ==
                         expected_code_ip);
+                REQUIRE(std::abs(neon::RaBitQFloatSQIP(query.data(), codes1.data(), dim) -
+                                 expected_query_ip) < 1e-3F);
             }
             if (SimdStatus::SupportSVE()) {
                 REQUIRE(sve::RaBitQCodeCodeIP(codes1.data(), codes2.data(), dim) ==
                         expected_code_ip);
+                REQUIRE(std::abs(sve::RaBitQFloatSQIP(query.data(), codes1.data(), dim) -
+                                 expected_query_ip) < 1e-3F);
             }
         }
     }
@@ -475,7 +488,10 @@ TEST_CASE("RaBitQ FP32-BQ Batch4 preserves legacy high-dimensional coding", "[ut
         float results[4];
         batch(query.data(), bits[0], bits[1], bits[2], bits[3], dim, inv_sqrt_d, results);
         for (uint32_t i = 0; i < 4; ++i) {
-            REQUIRE(results[i] == single(query.data(), bits[i], dim, inv_sqrt_d));
+            const float expected =
+                generic::RaBitQFloatBinaryIP(query.data(), bits[i], dim, inv_sqrt_d);
+            REQUIRE(std::abs(results[i] - expected) < 1e-6F);
+            REQUIRE(std::abs(single(query.data(), bits[i], dim, inv_sqrt_d) - expected) < 1e-6F);
             if (dim > 1000000) {
                 REQUIRE(results[i] == (i % 2 == 0 ? 1.0F + static_cast<float>(tail) : 0.0F));
             }
@@ -517,7 +533,7 @@ TEST_CASE("RaBitQ NEON single and Batch4 preserve binary tail", "[ut][simd]") {
     }
 }
 
-TEST_CASE("RaBitQ SVE Batch4 packed-bit tails and scale boundary", "[ut][simd]") {
+TEST_CASE("RaBitQ SVE single and Batch4 packed-bit tails and scale boundary", "[ut][simd]") {
     if (not SimdStatus::SupportSVE()) {
         return;
     }
@@ -538,7 +554,8 @@ TEST_CASE("RaBitQ SVE Batch4 packed-bit tails and scale boundary", "[ut][simd]")
                                   97ULL,
                                   127ULL,
                                   129ULL);
-    const float scale = GENERATE(0.0F, 0.0005F, 1e-3F, 0.25F);
+    const float scale =
+        GENERATE(0.0F, 0.0005F, 1e-3F, 0.25F, std::numeric_limits<float>::quiet_NaN());
     const uint64_t code_size = std::max<uint64_t>(1, (dim + 7) / 8);
     std::vector<float> query(dim);
     std::vector<uint8_t> codes(code_size * 4);
@@ -547,6 +564,12 @@ TEST_CASE("RaBitQ SVE Batch4 packed-bit tails and scale boundary", "[ut][simd]")
     }
     for (uint64_t i = 0; i < codes.size(); ++i) {
         codes[i] = static_cast<uint8_t>(31U * i + 17U);
+    }
+    for (uint64_t row = 0; row < 4; ++row) {
+        const auto* code = codes.data() + row * code_size;
+        const float expected = generic::RaBitQFloatBinaryIP(query.data(), code, dim, scale);
+        const float actual = sve::RaBitQFloatBinaryIP(query.data(), code, dim, scale);
+        REQUIRE(std::abs(actual - expected) < 1e-5F);
     }
     float results[4];
     sve::RaBitQFloatBinaryIPBatch4(query.data(),
@@ -628,6 +651,15 @@ TEST_CASE("RaBitQ FP32 three-bit SIMD Batch4 Compute Codes", "[ut][simd]") {
                 sse::RaBitQFloatThreeBitIPBatch4(
                     query.data(), bits1, bits2, bits3, bits4, dim, reorder_bits, result);
                 check_result(result);
+                sse::RaBitQFloatThreeBitIPBatch4ByLookup(
+                    lookup.data(), bits1, bits2, bits3, bits4, dim, reorder_bits, result);
+                check_result(result);
+                const uint8_t* rows[] = {bits1, bits2, bits3, bits4};
+                for (size_t i = 0; i < 4; ++i) {
+                    REQUIRE(std::abs(expected[i] - sse::RaBitQFloatThreeBitIPByLookup(
+                                                       lookup.data(), rows[i], dim, reorder_bits)) <
+                            1e-4F);
+                }
             }
             if (SimdStatus::SupportAVX()) {
                 avx::RaBitQFloatThreeBitIPBatch4(
@@ -678,11 +710,29 @@ TEST_CASE("RaBitQ FP32 three-bit SIMD Batch4 Compute Codes", "[ut][simd]") {
                 neon::RaBitQFloatThreeBitIPBatch4(
                     query.data(), bits1, bits2, bits3, bits4, dim, reorder_bits, result);
                 check_result(result);
+                neon::RaBitQFloatThreeBitIPBatch4ByLookup(
+                    lookup.data(), bits1, bits2, bits3, bits4, dim, reorder_bits, result);
+                check_result(result);
+                const uint8_t* rows[] = {bits1, bits2, bits3, bits4};
+                for (size_t i = 0; i < 4; ++i) {
+                    REQUIRE(std::abs(expected[i] - neon::RaBitQFloatThreeBitIPByLookup(
+                                                       lookup.data(), rows[i], dim, reorder_bits)) <
+                            1e-4F);
+                }
             }
             if (SimdStatus::SupportSVE()) {
                 sve::RaBitQFloatThreeBitIPBatch4(
                     query.data(), bits1, bits2, bits3, bits4, dim, reorder_bits, result);
                 check_result(result);
+                sve::RaBitQFloatThreeBitIPBatch4ByLookup(
+                    lookup.data(), bits1, bits2, bits3, bits4, dim, reorder_bits, result);
+                check_result(result);
+                const uint8_t* rows[] = {bits1, bits2, bits3, bits4};
+                for (size_t i = 0; i < 4; ++i) {
+                    REQUIRE(std::abs(expected[i] - sve::RaBitQFloatThreeBitIPByLookup(
+                                                       lookup.data(), rows[i], dim, reorder_bits)) <
+                            1e-4F);
+                }
             }
         }
     }
@@ -747,6 +797,33 @@ TEST_CASE("RaBitQ FP32 two-bit centered SIMD Batch4 Compute Codes", "[ut][simd]"
         check_one(RaBitQFloatTwoBitCenteredIP, bits3, expected[2]);
         check_one(RaBitQFloatTwoBitCenteredIP, bits4, expected[3]);
 
+        if (SimdStatus::SupportSSE()) {
+            sse::RaBitQFloatTwoBitCenteredIPBatch4(
+                query.data(), bits1, bits2, bits3, bits4, dim, result);
+            check_result(result);
+            check_one(sse::RaBitQFloatTwoBitCenteredIP, bits1, expected[0]);
+            check_one(sse::RaBitQFloatTwoBitCenteredIP, bits2, expected[1]);
+            check_one(sse::RaBitQFloatTwoBitCenteredIP, bits3, expected[2]);
+            check_one(sse::RaBitQFloatTwoBitCenteredIP, bits4, expected[3]);
+        }
+        if (SimdStatus::SupportNEON()) {
+            neon::RaBitQFloatTwoBitCenteredIPBatch4(
+                query.data(), bits1, bits2, bits3, bits4, dim, result);
+            check_result(result);
+            check_one(neon::RaBitQFloatTwoBitCenteredIP, bits1, expected[0]);
+            check_one(neon::RaBitQFloatTwoBitCenteredIP, bits2, expected[1]);
+            check_one(neon::RaBitQFloatTwoBitCenteredIP, bits3, expected[2]);
+            check_one(neon::RaBitQFloatTwoBitCenteredIP, bits4, expected[3]);
+        }
+        if (SimdStatus::SupportSVE()) {
+            sve::RaBitQFloatTwoBitCenteredIPBatch4(
+                query.data(), bits1, bits2, bits3, bits4, dim, result);
+            check_result(result);
+            check_one(sve::RaBitQFloatTwoBitCenteredIP, bits1, expected[0]);
+            check_one(sve::RaBitQFloatTwoBitCenteredIP, bits2, expected[1]);
+            check_one(sve::RaBitQFloatTwoBitCenteredIP, bits3, expected[2]);
+            check_one(sve::RaBitQFloatTwoBitCenteredIP, bits4, expected[3]);
+        }
         if (SimdStatus::SupportAVX2()) {
             avx2::RaBitQFloatTwoBitCenteredIPBatch4(
                 query.data(), bits1, bits2, bits3, bits4, dim, result);
@@ -823,6 +900,33 @@ TEST_CASE("RaBitQ FP32 three-bit centered SIMD Batch4 Compute Codes", "[ut][simd
         check_one(RaBitQFloatThreeBitCenteredIP, bits3, expected[2]);
         check_one(RaBitQFloatThreeBitCenteredIP, bits4, expected[3]);
 
+        if (SimdStatus::SupportSSE()) {
+            sse::RaBitQFloatThreeBitCenteredIPBatch4(
+                query.data(), bits1, bits2, bits3, bits4, dim, result);
+            check_result(result);
+            check_one(sse::RaBitQFloatThreeBitCenteredIP, bits1, expected[0]);
+            check_one(sse::RaBitQFloatThreeBitCenteredIP, bits2, expected[1]);
+            check_one(sse::RaBitQFloatThreeBitCenteredIP, bits3, expected[2]);
+            check_one(sse::RaBitQFloatThreeBitCenteredIP, bits4, expected[3]);
+        }
+        if (SimdStatus::SupportNEON()) {
+            neon::RaBitQFloatThreeBitCenteredIPBatch4(
+                query.data(), bits1, bits2, bits3, bits4, dim, result);
+            check_result(result);
+            check_one(neon::RaBitQFloatThreeBitCenteredIP, bits1, expected[0]);
+            check_one(neon::RaBitQFloatThreeBitCenteredIP, bits2, expected[1]);
+            check_one(neon::RaBitQFloatThreeBitCenteredIP, bits3, expected[2]);
+            check_one(neon::RaBitQFloatThreeBitCenteredIP, bits4, expected[3]);
+        }
+        if (SimdStatus::SupportSVE()) {
+            sve::RaBitQFloatThreeBitCenteredIPBatch4(
+                query.data(), bits1, bits2, bits3, bits4, dim, result);
+            check_result(result);
+            check_one(sve::RaBitQFloatThreeBitCenteredIP, bits1, expected[0]);
+            check_one(sve::RaBitQFloatThreeBitCenteredIP, bits2, expected[1]);
+            check_one(sve::RaBitQFloatThreeBitCenteredIP, bits3, expected[2]);
+            check_one(sve::RaBitQFloatThreeBitCenteredIP, bits4, expected[3]);
+        }
         if (SimdStatus::SupportAVX2()) {
             avx2::RaBitQFloatThreeBitCenteredIPBatch4(
                 query.data(), bits1, bits2, bits3, bits4, dim, result);
@@ -952,6 +1056,33 @@ TEST_CASE("RaBitQ FP32 four-bit centered SIMD Batch4 Compute Codes", "[ut][simd]
         check_one(RaBitQFloatFourBitCenteredIP, bits3, expected[2]);
         check_one(RaBitQFloatFourBitCenteredIP, bits4, expected[3]);
 
+        if (SimdStatus::SupportSSE()) {
+            sse::RaBitQFloatFourBitCenteredIPBatch4(
+                query.data(), bits1, bits2, bits3, bits4, dim, result);
+            check_result(result);
+            check_one(sse::RaBitQFloatFourBitCenteredIP, bits1, expected[0]);
+            check_one(sse::RaBitQFloatFourBitCenteredIP, bits2, expected[1]);
+            check_one(sse::RaBitQFloatFourBitCenteredIP, bits3, expected[2]);
+            check_one(sse::RaBitQFloatFourBitCenteredIP, bits4, expected[3]);
+        }
+        if (SimdStatus::SupportNEON()) {
+            neon::RaBitQFloatFourBitCenteredIPBatch4(
+                query.data(), bits1, bits2, bits3, bits4, dim, result);
+            check_result(result);
+            check_one(neon::RaBitQFloatFourBitCenteredIP, bits1, expected[0]);
+            check_one(neon::RaBitQFloatFourBitCenteredIP, bits2, expected[1]);
+            check_one(neon::RaBitQFloatFourBitCenteredIP, bits3, expected[2]);
+            check_one(neon::RaBitQFloatFourBitCenteredIP, bits4, expected[3]);
+        }
+        if (SimdStatus::SupportSVE()) {
+            sve::RaBitQFloatFourBitCenteredIPBatch4(
+                query.data(), bits1, bits2, bits3, bits4, dim, result);
+            check_result(result);
+            check_one(sve::RaBitQFloatFourBitCenteredIP, bits1, expected[0]);
+            check_one(sve::RaBitQFloatFourBitCenteredIP, bits2, expected[1]);
+            check_one(sve::RaBitQFloatFourBitCenteredIP, bits3, expected[2]);
+            check_one(sve::RaBitQFloatFourBitCenteredIP, bits4, expected[3]);
+        }
         if (SimdStatus::SupportAVX2()) {
             avx2::RaBitQFloatFourBitCenteredIPBatch4(
                 query.data(), bits1, bits2, bits3, bits4, dim, result);
@@ -1033,68 +1164,45 @@ TEST_CASE("RaBitQ FP32 multi-bit lookup SIMD Batch4 Compute Codes", "[ut][simd]"
                             kLookupTolerance);
                 };
 
-                float result[4] = {0.0F, 0.0F, 0.0F, 0.0F};
-                generic::RaBitQFloatMultiBitIPBatch4ByLookup(lookup.data(),
-                                                             bits1,
-                                                             bits2,
-                                                             bits3,
-                                                             bits4,
-                                                             dim,
-                                                             reorder_bits,
-                                                             filter_bits,
-                                                             result);
-                check_result(result);
-                check_one(generic::RaBitQFloatMultiBitIPByLookup, bits1, expected[0]);
-                check_one(generic::RaBitQFloatMultiBitIPByLookup, bits2, expected[1]);
-                check_one(generic::RaBitQFloatMultiBitIPByLookup, bits3, expected[2]);
-                check_one(generic::RaBitQFloatMultiBitIPByLookup, bits4, expected[3]);
-
-                RaBitQFloatMultiBitIPBatch4ByLookup(lookup.data(),
-                                                    bits1,
-                                                    bits2,
-                                                    bits3,
-                                                    bits4,
-                                                    dim,
-                                                    reorder_bits,
-                                                    filter_bits,
-                                                    result);
-                check_result(result);
-                check_one(RaBitQFloatMultiBitIPByLookup, bits1, expected[0]);
-                check_one(RaBitQFloatMultiBitIPByLookup, bits2, expected[1]);
-                check_one(RaBitQFloatMultiBitIPByLookup, bits3, expected[2]);
-                check_one(RaBitQFloatMultiBitIPByLookup, bits4, expected[3]);
-
-                if (SimdStatus::SupportAVX2()) {
-                    avx2::RaBitQFloatMultiBitIPBatch4ByLookup(lookup.data(),
-                                                              bits1,
-                                                              bits2,
-                                                              bits3,
-                                                              bits4,
-                                                              dim,
-                                                              reorder_bits,
-                                                              filter_bits,
-                                                              result);
+                auto check_backend = [&](auto single, auto batch) {
+                    float result[4] = {1.0F, 2.0F, 3.0F, 4.0F};
+                    batch(lookup.data(),
+                          bits1,
+                          bits2,
+                          bits3,
+                          bits4,
+                          dim,
+                          reorder_bits,
+                          filter_bits,
+                          result);
                     check_result(result);
-                    check_one(avx2::RaBitQFloatMultiBitIPByLookup, bits1, expected[0]);
-                    check_one(avx2::RaBitQFloatMultiBitIPByLookup, bits2, expected[1]);
-                    check_one(avx2::RaBitQFloatMultiBitIPByLookup, bits3, expected[2]);
-                    check_one(avx2::RaBitQFloatMultiBitIPByLookup, bits4, expected[3]);
+                    check_one(single, bits1, expected[0]);
+                    check_one(single, bits2, expected[1]);
+                    check_one(single, bits3, expected[2]);
+                    check_one(single, bits4, expected[3]);
+                };
+                check_backend(generic::RaBitQFloatMultiBitIPByLookup,
+                              generic::RaBitQFloatMultiBitIPBatch4ByLookup);
+                check_backend(RaBitQFloatMultiBitIPByLookup, RaBitQFloatMultiBitIPBatch4ByLookup);
+                if (SimdStatus::SupportSSE()) {
+                    check_backend(sse::RaBitQFloatMultiBitIPByLookup,
+                                  sse::RaBitQFloatMultiBitIPBatch4ByLookup);
+                }
+                if (SimdStatus::SupportNEON()) {
+                    check_backend(neon::RaBitQFloatMultiBitIPByLookup,
+                                  neon::RaBitQFloatMultiBitIPBatch4ByLookup);
+                }
+                if (SimdStatus::SupportSVE()) {
+                    check_backend(sve::RaBitQFloatMultiBitIPByLookup,
+                                  sve::RaBitQFloatMultiBitIPBatch4ByLookup);
+                }
+                if (SimdStatus::SupportAVX2()) {
+                    check_backend(avx2::RaBitQFloatMultiBitIPByLookup,
+                                  avx2::RaBitQFloatMultiBitIPBatch4ByLookup);
                 }
                 if (SimdStatus::SupportAVX512()) {
-                    avx512::RaBitQFloatMultiBitIPBatch4ByLookup(lookup.data(),
-                                                                bits1,
-                                                                bits2,
-                                                                bits3,
-                                                                bits4,
-                                                                dim,
-                                                                reorder_bits,
-                                                                filter_bits,
-                                                                result);
-                    check_result(result);
-                    check_one(avx512::RaBitQFloatMultiBitIPByLookup, bits1, expected[0]);
-                    check_one(avx512::RaBitQFloatMultiBitIPByLookup, bits2, expected[1]);
-                    check_one(avx512::RaBitQFloatMultiBitIPByLookup, bits3, expected[2]);
-                    check_one(avx512::RaBitQFloatMultiBitIPByLookup, bits4, expected[3]);
+                    check_backend(avx512::RaBitQFloatMultiBitIPByLookup,
+                                  avx512::RaBitQFloatMultiBitIPBatch4ByLookup);
                 }
             }
         }
@@ -1251,7 +1359,7 @@ TEST_CASE("RaBitQ FP32 supplement-code SIMD Compute Codes", "[ut][simd]") {
 }
 
 TEST_CASE("RaBitQ packed supplement layout and SIMD parity", "[ut][simd][rabitq]") {
-    const std::vector<uint64_t> dims = {0, 1, 7, 8, 63, 64, 65, 960};
+    const std::vector<uint64_t> dims = {0, 1, 7, 8, 15, 16, 17, 63, 64, 65, 79, 80, 81, 960};
     for (const uint64_t dim : dims) {
         const uint64_t plane_bytes = (dim + 7U) / 8U;
         std::vector<uint8_t> scalar_codes(dim);
@@ -1348,6 +1456,21 @@ TEST_CASE("RaBitQ packed supplement layout and SIMD parity", "[ut][simd][rabitq]
             };
             check_pack(generic::RaBitQPackScalarToSplitCode);
             check_pack(RaBitQPackScalarToSplitCode);
+#if defined(ENABLE_SSE)
+            if (SimdStatus::SupportSSE()) {
+                check_pack(sse::RaBitQPackScalarToSplitCode);
+            }
+#endif
+#if defined(ENABLE_NEON)
+            if (SimdStatus::SupportNEON()) {
+                check_pack(neon::RaBitQPackScalarToSplitCode);
+            }
+#endif
+#if defined(ENABLE_SVE)
+            if (SimdStatus::SupportSVE()) {
+                check_pack(sve::RaBitQPackScalarToSplitCode);
+            }
+#endif
             if (SimdStatus::SupportAVX2()) {
                 check_pack(avx2::RaBitQPackScalarToSplitCode);
             }
@@ -1362,6 +1485,21 @@ TEST_CASE("RaBitQ packed supplement layout and SIMD parity", "[ut][simd][rabitq]
             };
             check_ip(generic::RaBitQFloatPackedSupplementCodeIP);
             check_ip(RaBitQFloatPackedSupplementCodeIP);
+#if defined(ENABLE_SSE)
+            if (SimdStatus::SupportSSE()) {
+                check_ip(sse::RaBitQFloatPackedSupplementCodeIP);
+            }
+#endif
+#if defined(ENABLE_NEON)
+            if (SimdStatus::SupportNEON()) {
+                check_ip(neon::RaBitQFloatPackedSupplementCodeIP);
+            }
+#endif
+#if defined(ENABLE_SVE)
+            if (SimdStatus::SupportSVE()) {
+                check_ip(sve::RaBitQFloatPackedSupplementCodeIP);
+            }
+#endif
             if (SimdStatus::SupportAVX2()) {
                 check_ip(avx2::RaBitQFloatPackedSupplementCodeIP);
             }
@@ -1408,6 +1546,24 @@ TEST_CASE("RaBitQ HNSW 7-bit ExData SIMD", "[ut][simd]") {
     REQUIRE(std::abs(expected - generic::RaBitQFloatExCode7IP(query.data(), packed.data(), dim)) <
             1e-3F);
     REQUIRE(std::abs(expected - RaBitQFloatExCode7IP(query.data(), packed.data(), dim)) < 1e-3F);
+#if defined(ENABLE_SSE)
+    if (SimdStatus::SupportSSE()) {
+        REQUIRE(std::abs(expected - sse::RaBitQFloatExCode7IP(query.data(), packed.data(), dim)) <
+                1e-3F);
+    }
+#endif
+#if defined(ENABLE_NEON)
+    if (SimdStatus::SupportNEON()) {
+        REQUIRE(std::abs(expected - neon::RaBitQFloatExCode7IP(query.data(), packed.data(), dim)) <
+                1e-3F);
+    }
+#endif
+#if defined(ENABLE_SVE)
+    if (SimdStatus::SupportSVE()) {
+        REQUIRE(std::abs(expected - sve::RaBitQFloatExCode7IP(query.data(), packed.data(), dim)) <
+                1e-3F);
+    }
+#endif
     if (SimdStatus::SupportAVX2()) {
         REQUIRE(std::abs(expected - avx2::RaBitQFloatExCode7IP(query.data(), packed.data(), dim)) <
                 1e-3F);
@@ -1502,6 +1658,59 @@ TEST_CASE("RaBitQ HNSW ExData reconstruction SIMD", "[ut][simd]") {
     for (uint64_t d = 0; d < dim; ++d) {
         REQUIRE(std::abs(expected[d] - result[d]) < 1e-4F);
     }
+
+    auto check_backend = [&](auto compute_bytes, auto compute_vector) {
+        std::vector<uint8_t> bytes(dim, 0xa5);
+        uint64_t sum = 0;
+        uint64_t squares = 0;
+        REQUIRE(compute_bytes(filter.data(), packed.data(), dim, bytes.data(), &sum, &squares));
+        REQUIRE(bytes == codes);
+        uint64_t expected_sum = 0;
+        uint64_t expected_squares = 0;
+        for (const uint8_t code : codes) {
+            expected_sum += code;
+            expected_squares += static_cast<uint64_t>(code) * code;
+        }
+        REQUIRE(sum == expected_sum);
+        REQUIRE(squares == expected_squares);
+        REQUIRE(compute_bytes(filter.data(), packed.data(), dim, bytes.data(), &sum, nullptr));
+        REQUIRE(sum == expected_sum);
+        REQUIRE_FALSE(
+            compute_bytes(filter.data(), packed.data(), dim - 1, bytes.data(), &sum, nullptr));
+        REQUIRE(compute_vector(filter.data(),
+                               packed.data(),
+                               centroid.data(),
+                               residual_scale,
+                               full_center,
+                               dim,
+                               result.data()));
+        for (uint64_t d = 0; d < dim; ++d) {
+            REQUIRE(std::abs(result[d] - expected[d]) < 1e-4F);
+        }
+        REQUIRE_FALSE(compute_vector(filter.data(),
+                                     packed.data(),
+                                     centroid.data(),
+                                     residual_scale,
+                                     full_center,
+                                     dim - 1,
+                                     result.data()));
+    };
+#if defined(ENABLE_SSE)
+    if (SimdStatus::SupportSSE()) {
+        check_backend(sse::RaBitQExCode7ToBytes, sse::RaBitQExCode7ToVector);
+    }
+#endif
+#if defined(ENABLE_NEON)
+    if (SimdStatus::SupportNEON()) {
+        check_backend(neon::RaBitQExCode7ToBytes, neon::RaBitQExCode7ToVector);
+    }
+#endif
+#if defined(ENABLE_SVE)
+    if (SimdStatus::SupportSVE()) {
+        check_backend(sve::RaBitQExCode7ToBytes, sve::RaBitQExCode7ToVector);
+    }
+#endif
+    check_backend(RaBitQExCode7ToBytes, RaBitQExCode7ToVector);
 
     // The byte-output twin used by the code-domain pairwise inner product is bit exact.
     for (int which = 0; which < 2; ++which) {
@@ -1927,6 +2136,16 @@ TEST_CASE("SIMD FlipSign Correctness with Patterns", "[ut][simd]") {
 
             generic::FlipSign(test.flip_pattern.data(), gt_data.data(), dim);
 
+            auto check_x86 = [&](bool supported, FlipSignType fn, std::vector<float>& data) {
+                if (supported) {
+                    fn(test.flip_pattern.data(), data.data(), dim);
+                    REQUIRE(data == gt_data);
+                }
+            };
+            check_x86(SimdStatus::SupportSSE(), sse::FlipSign, sse_data);
+            check_x86(SimdStatus::SupportAVX(), avx::FlipSign, avx_data);
+            check_x86(SimdStatus::SupportAVX2(), avx2::FlipSign, avx2_data);
+
             if (SimdStatus::SupportAVX512()) {
                 avx512::FlipSign(test.flip_pattern.data(), avx512_data.data(), dim);
                 for (int i = 0; i < dim; i++) {
@@ -2006,6 +2225,11 @@ TEST_CASE("RaBitQ scalar code to split planes SIMD", "[ut][simd][rabitq]") {
 
                 check(generic::RaBitQPackScalarToSplitPlanes);
                 check(RaBitQPackScalarToSplitPlanes);
+#if defined(ENABLE_SSE)
+                if (SimdStatus::SupportSSE()) {
+                    check(sse::RaBitQPackScalarToSplitPlanes);
+                }
+#endif
                 if (SimdStatus::SupportAVX2()) {
                     check(avx2::RaBitQPackScalarToSplitPlanes);
                 }

@@ -40,15 +40,6 @@ SQ8ComputeL2SqrBatch4Fallback(const float* query,
     dist4 = SQ8ComputeL2Sqr(query, codes4, lower_bound, diff, dim);
 }
 
-static SQ8ComputeBatch4Type
-GetSQ8ComputeL2SqrBatch4() {
-    if (SimdStatus::SupportAVX512()) {
-        VSAG_SIMD_DISPATCH_BODY_AVX512(SQ8ComputeL2SqrBatch4)
-    }
-    return SQ8ComputeL2SqrBatch4Fallback;
-}
-SQ8ComputeBatch4Type SQ8ComputeL2SqrBatch4 = GetSQ8ComputeL2SqrBatch4();
-
 void
 SQ8ComputeIPBatch4Fallback(const float* query,
                            const uint8_t* codes1,
@@ -68,14 +59,48 @@ SQ8ComputeIPBatch4Fallback(const float* query,
     dist4 = SQ8ComputeIP(query, codes4, lower_bound, diff, dim);
 }
 
-static SQ8ComputeBatch4Type
-GetSQ8ComputeIPBatch4() {
-    if (SimdStatus::SupportAVX512()) {
-        VSAG_SIMD_DISPATCH_BODY_AVX512(SQ8ComputeIPBatch4)
-    }
-    return SQ8ComputeIPBatch4Fallback;
+namespace generic {
+void
+SQ8ComputeL2SqrBatch4(const float* query,
+                      const uint8_t* codes1,
+                      const uint8_t* codes2,
+                      const uint8_t* codes3,
+                      const uint8_t* codes4,
+                      const float* lower_bound,
+                      const float* diff,
+                      uint64_t dim,
+                      float& dist1,
+                      float& dist2,
+                      float& dist3,
+                      float& dist4) {
+    dist1 = generic::SQ8ComputeL2Sqr(query, codes1, lower_bound, diff, dim);
+    dist2 = generic::SQ8ComputeL2Sqr(query, codes2, lower_bound, diff, dim);
+    dist3 = generic::SQ8ComputeL2Sqr(query, codes3, lower_bound, diff, dim);
+    dist4 = generic::SQ8ComputeL2Sqr(query, codes4, lower_bound, diff, dim);
 }
-SQ8ComputeBatch4Type SQ8ComputeIPBatch4 = GetSQ8ComputeIPBatch4();
+
+void
+SQ8ComputeIPBatch4(const float* query,
+                   const uint8_t* codes1,
+                   const uint8_t* codes2,
+                   const uint8_t* codes3,
+                   const uint8_t* codes4,
+                   const float* lower_bound,
+                   const float* diff,
+                   uint64_t dim,
+                   float& dist1,
+                   float& dist2,
+                   float& dist3,
+                   float& dist4) {
+    dist1 = generic::SQ8ComputeIP(query, codes1, lower_bound, diff, dim);
+    dist2 = generic::SQ8ComputeIP(query, codes2, lower_bound, diff, dim);
+    dist3 = generic::SQ8ComputeIP(query, codes3, lower_bound, diff, dim);
+    dist4 = generic::SQ8ComputeIP(query, codes4, lower_bound, diff, dim);
+}
+}  // namespace generic
+
+VSAG_DEFINE_SIMD_DISPATCH(SQ8ComputeL2SqrBatch4, SQ8ComputeBatch4Type);
+VSAG_DEFINE_SIMD_DISPATCH(SQ8ComputeIPBatch4, SQ8ComputeBatch4Type);
 VSAG_DEFINE_SIMD_DISPATCH(SQ8ComputeCodesIP, SQ8ComputeCodesType);
 VSAG_DEFINE_SIMD_DISPATCH(SQ8ComputeCodesL2Sqr, SQ8ComputeCodesType);
 VSAG_DEFINE_SIMD_DISPATCH(SQ8SparseAccumulate, SQ8SparseAccumulateType);

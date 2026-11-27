@@ -18,6 +18,8 @@
 #include <arm_neon.h>
 
 #include "simd/kernels/kernels.h"
+#include "simd/kernels/rabitq_binary.h"
+#include "simd/pipnn_half_scalar.h"
 #include "simd/traits/simd_traits_neon.h"
 #endif
 
@@ -25,9 +27,15 @@
 #include <cstdint>
 
 #include "kernels/local_sq_compute.h"
+#include "kernels/rabitq_residual4.h"
+#include "kernels/rabitq_small_bitplanes.h"
 #include "simd.h"
 #include "sq4_local_simd.h"
 #include "sq8_local_simd.h"
+
+#if defined(ENABLE_NEON)
+#include "simd/kernels/rabitq_pack_128.h"
+#endif
 
 namespace vsag::neon {
 
@@ -152,7 +160,25 @@ FP32SparseAccumulate(float* RESTRICT dists,
                      const float* RESTRICT vals,
                      float query_val,
                      uint32_t num) {
-    return generic::FP32SparseAccumulate(dists, ids, vals, query_val, num);
+#if defined(ENABLE_NEON)
+    constexpr uint32_t kWidth = 4;
+    const float32x4_t query = vdupq_n_f32(query_val);
+    uint32_t i = 0;
+    for (; num - i >= kWidth; i += kWidth) {
+        const float32x4_t values = vld1q_f32(vals + i);
+        float deltas[4];
+        vst1q_f32(deltas, vmulq_f32(values, query));
+        // Ordered updates preserve repeated IDs within and across blocks.
+        for (uint32_t lane = 0; lane < kWidth; ++lane) {
+            dists[ids[i + lane]] += deltas[lane];
+        }
+    }
+    if (i < num) {
+        generic::FP32SparseAccumulate(dists, ids + i, vals + i, query_val, num - i);
+    }
+#else
+    generic::FP32SparseAccumulate(dists, ids, vals, query_val, num);
+#endif
 }
 
 void
@@ -318,7 +344,31 @@ FP16SparseAccumulate(float* RESTRICT dists,
                      const uint16_t* RESTRICT vals,
                      float query_val,
                      uint32_t num) {
-    return generic::FP16SparseAccumulate(dists, ids, vals, query_val, num);
+#if defined(ENABLE_NEON)
+    constexpr uint32_t kWidth = 4;
+    const float32x4_t query = vdupq_n_f32(query_val);
+    uint32_t i = 0;
+    for (; num - i >= kWidth; i += kWidth) {
+        const uint32x4_t half = vmovl_u16(vld1_u16(vals + i));
+        // Match the sparse codec's historical bit expansion, including
+        // exponent 0 and 31, rather than IEEE half conversion.
+        const uint32x4_t sign = vshlq_n_u32(vandq_u32(half, vdupq_n_u32(0x8000)), 16);
+        const uint32x4_t magnitude = vaddq_u32(
+            vshlq_n_u32(vandq_u32(half, vdupq_n_u32(0x7fff)), 13), vdupq_n_u32(112U << 23));
+        const float32x4_t values = vreinterpretq_f32_u32(vorrq_u32(sign, magnitude));
+        float deltas[4];
+        vst1q_f32(deltas, vmulq_f32(values, query));
+        // Ordered updates preserve repeated IDs within and across blocks.
+        for (uint32_t lane = 0; lane < kWidth; ++lane) {
+            dists[ids[i + lane]] += deltas[lane];
+        }
+    }
+    if (i < num) {
+        generic::FP16SparseAccumulate(dists, ids + i, vals + i, query_val, num - i);
+    }
+#else
+    generic::FP16SparseAccumulate(dists, ids, vals, query_val, num);
+#endif
 }
 
 #if defined(ENABLE_NEON)
@@ -420,6 +470,72 @@ SQ8ComputeL2Sqr(const float* RESTRICT query,
 #endif
 }
 
+void
+SQ8ComputeL2SqrBatch4(const float* query,
+                      const uint8_t* codes1,
+                      const uint8_t* codes2,
+                      const uint8_t* codes3,
+                      const uint8_t* codes4,
+                      const float* lower_bound,
+                      const float* diff,
+                      uint64_t dim,
+                      float& dist1,
+                      float& dist2,
+                      float& dist3,
+                      float& dist4) {
+#if defined(ENABLE_NEON)
+    simd::SQ8ComputeL2SqrBatch4Impl<simd::SQ8Traits<simd::NeonSQ8Tag>>(query,
+                                                                       codes1,
+                                                                       codes2,
+                                                                       codes3,
+                                                                       codes4,
+                                                                       lower_bound,
+                                                                       diff,
+                                                                       dim,
+                                                                       dist1,
+                                                                       dist2,
+                                                                       dist3,
+                                                                       dist4,
+                                                                       &generic::SQ8ComputeL2Sqr);
+#else
+    vsag::SQ8ComputeL2SqrBatch4Fallback(
+        query, codes1, codes2, codes3, codes4, lower_bound, diff, dim, dist1, dist2, dist3, dist4);
+#endif
+}
+
+void
+SQ8ComputeIPBatch4(const float* query,
+                   const uint8_t* codes1,
+                   const uint8_t* codes2,
+                   const uint8_t* codes3,
+                   const uint8_t* codes4,
+                   const float* lower_bound,
+                   const float* diff,
+                   uint64_t dim,
+                   float& dist1,
+                   float& dist2,
+                   float& dist3,
+                   float& dist4) {
+#if defined(ENABLE_NEON)
+    simd::SQ8ComputeIPBatch4Impl<simd::SQ8Traits<simd::NeonSQ8Tag>>(query,
+                                                                    codes1,
+                                                                    codes2,
+                                                                    codes3,
+                                                                    codes4,
+                                                                    lower_bound,
+                                                                    diff,
+                                                                    dim,
+                                                                    dist1,
+                                                                    dist2,
+                                                                    dist3,
+                                                                    dist4,
+                                                                    &generic::SQ8ComputeIP);
+#else
+    vsag::SQ8ComputeIPBatch4Fallback(
+        query, codes1, codes2, codes3, codes4, lower_bound, diff, dim, dist1, dist2, dist3, dist4);
+#endif
+}
+
 float
 SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
                   const uint8_t* RESTRICT codes2,
@@ -454,7 +570,29 @@ SQ8SparseAccumulate(float* RESTRICT dists,
                     const uint8_t* RESTRICT vals,
                     float query_val,
                     uint32_t num) {
-    return generic::SQ8SparseAccumulate(dists, ids, vals, query_val, num);
+#if defined(ENABLE_NEON)
+    constexpr uint32_t kWidth = 8;
+    const float32x4_t query = vdupq_n_f32(query_val);
+    uint32_t i = 0;
+    for (; num - i >= kWidth; i += kWidth) {
+        const uint8x8_t bytes = vld1_u8(vals + i);
+        const uint16x8_t halfwords = vmovl_u8(bytes);
+        const float32x4_t values = vcvtq_f32_u32(vmovl_u16(vget_low_u16(halfwords)));
+        float deltas[8];
+        vst1q_f32(deltas, vmulq_f32(values, query));
+        const float32x4_t upper = vcvtq_f32_u32(vmovl_u16(vget_high_u16(halfwords)));
+        vst1q_f32(deltas + 4, vmulq_f32(upper, query));
+        // Ordered updates preserve repeated IDs within and across blocks.
+        for (uint32_t lane = 0; lane < kWidth; ++lane) {
+            dists[ids[i + lane]] += deltas[lane];
+        }
+    }
+    if (i < num) {
+        generic::SQ8SparseAccumulate(dists, ids + i, vals + i, query_val, num - i);
+    }
+#else
+    generic::SQ8SparseAccumulate(dists, ids, vals, query_val, num);
+#endif
 }
 
 float
@@ -638,9 +776,39 @@ SQ8UniformComputeCodesIPBatch(const uint8_t* RESTRICT query,
                               uint64_t n_codes,
                               uint64_t code_stride,
                               float* RESTRICT out) {
-    for (uint64_t i = 0; i < n_codes; ++i) {
-        out[i] = neon::SQ8UniformComputeCodesIP(query, codes + i * code_stride, dim);
+#if defined(ENABLE_NEON)
+    uint64_t row = 0;
+    if (dim >= 16) {
+        for (; n_codes - row >= 4; row += 4) {
+            const uint8_t* rows[] = {codes + row * code_stride,
+                                     codes + (row + 1) * code_stride,
+                                     codes + (row + 2) * code_stride,
+                                     codes + (row + 3) * code_stride};
+            uint32x4_t sums[] = {vdupq_n_u32(0), vdupq_n_u32(0), vdupq_n_u32(0), vdupq_n_u32(0)};
+            uint64_t d = 0;
+            for (; dim - d >= 16; d += 16) {
+                const auto q = vld1q_u8(query + d);
+                for (uint64_t j = 0; j < 4; ++j) {
+                    const auto c = vld1q_u8(rows[j] + d);
+                    sums[j] = vpadalq_u16(sums[j], vmull_u8(vget_low_u8(q), vget_low_u8(c)));
+                    sums[j] = vpadalq_u16(sums[j], vmull_high_u8(q, c));
+                }
+            }
+            for (uint64_t j = 0; j < 4; ++j) {
+                uint32_t value = vaddvq_u32(sums[j]);
+                for (uint64_t k = d; k < dim; ++k) {
+                    value += static_cast<uint32_t>(query[k]) * rows[j][k];
+                }
+                out[row + j] = static_cast<float>(value);
+            }
+        }
     }
+    for (; row < n_codes; ++row) {
+        out[row] = neon::SQ8UniformComputeCodesIP(query, codes + row * code_stride, dim);
+    }
+#else
+    generic::SQ8UniformComputeCodesIPBatch(query, codes, dim, n_codes, code_stride, out);
+#endif
 }
 
 #if defined(ENABLE_NEON)
@@ -835,6 +1003,70 @@ RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
     return generic::RaBitQSQ4UBinaryIP(codes, bits, dim);
 #endif
 }
+#if defined(ENABLE_NEON)
+namespace {
+struct NeonBinaryTraits : simd::SimdTraits<simd::NeonTag> {
+    static FloatVec
+    select_nibble(uint8_t byte, FloatVec pos, FloatVec neg) {
+        const uint32x4_t bits = {1, 2, 4, 8};
+        return vbslq_f32(vtstq_u32(vdupq_n_u32(byte), bits), pos, neg);
+    }
+
+    using ByteVec = uint8x16_t;
+    using CountVec = uint32x4_t;
+    static constexpr uint64_t ByteWidth = 16;
+
+    static CountVec
+    zero_counts() {
+        return vdupq_n_u32(0);
+    }
+    static ByteVec
+    load_bytes(const uint8_t* p) {
+        return vld1q_u8(p);
+    }
+    static ByteVec
+    bit_and(ByteVec a, ByteVec b) {
+        return vandq_u8(a, b);
+    }
+    static CountVec
+    accumulate(CountVec sum, ByteVec value) {
+        return vpadalq_u16(sum, vpaddlq_u8(vcntq_u8(value)));
+    }
+    static uint32_t
+    reduce_counts(CountVec sum) {
+        return vaddvq_u32(sum);
+    }
+};
+}  // namespace
+#endif
+
+uint64_t
+RaBitQSQ4UBinaryIPWithBaseSum(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    uint64_t result;
+    simd::RaBitQSQ4UBinary<NeonBinaryTraits, 1, true>(codes, {bits}, dim, &result);
+    return result;
+#else
+    return generic::RaBitQSQ4UBinaryIPWithBaseSum(codes, bits, dim);
+#endif
+}
+
+void
+RaBitQSQ4UBinaryIPWithBaseSumBatch4(const uint8_t* codes,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint64_t* results) {
+#if defined(ENABLE_NEON)
+    simd::RaBitQSQ4UBinary<NeonBinaryTraits, 4, true>(
+        codes, {bits1, bits2, bits3, bits4}, dim, results);
+#else
+    generic::RaBitQSQ4UBinaryIPWithBaseSumBatch4(codes, bits1, bits2, bits3, bits4, dim, results);
+#endif
+}
+
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d) {
 #if defined(ENABLE_NEON)
@@ -953,15 +1185,116 @@ RaBitQFloatBinaryIPBatch4(const float* vector,
                           uint64_t dim,
                           float inv_sqrt_d,
                           float* results) {
-    if (inv_sqrt_d == 0.0F) {
-        generic::RaBitQFloatBinaryIPBatch4(
-            vector, bits1, bits2, bits3, bits4, dim, inv_sqrt_d, results);
-        return;
+#if defined(ENABLE_NEON)
+    simd::RaBitQBinaryIP4Lane<NeonBinaryTraits>(
+        vector, {bits1, bits2, bits3, bits4}, dim, inv_sqrt_d, results);
+#else
+    generic::RaBitQFloatBinaryIPBatch4(
+        vector, bits1, bits2, bits3, bits4, dim, inv_sqrt_d, results);
+#endif
+}
+
+#if defined(ENABLE_NEON)
+namespace {
+struct SmallBitplaneTraits : simd::SimdTraits<simd::NeonTag> {
+    static FloatVec
+    SelectBits(uint8_t bits, FloatVec value) {
+        const uint32x4_t masks = {1, 2, 4, 8};
+        return vreinterpretq_f32_u32(
+            vandq_u32(vtstq_u32(vdupq_n_u32(bits), masks), vreinterpretq_u32_f32(value)));
     }
-    results[0] = neon::RaBitQFloatBinaryIP(vector, bits1, dim, inv_sqrt_d);
-    results[1] = neon::RaBitQFloatBinaryIP(vector, bits2, dim, inv_sqrt_d);
-    results[2] = neon::RaBitQFloatBinaryIP(vector, bits3, dim, inv_sqrt_d);
-    results[3] = neon::RaBitQFloatBinaryIP(vector, bits4, dim, inv_sqrt_d);
+};
+}  // namespace
+#endif
+
+float
+RaBitQFloatTwoBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    float results[1];
+    const uint8_t* codes[] = {bits};
+    simd::ComputeSmallBitplaneIP<SmallBitplaneTraits, 2, true>(vector, codes, dim, 0, results);
+    return results[0];
+#else
+    return generic::RaBitQFloatTwoBitCenteredIP(vector, bits, dim);
+#endif
+}
+
+void
+RaBitQFloatTwoBitCenteredIPBatch4(const float* vector,
+                                  const uint8_t* bits1,
+                                  const uint8_t* bits2,
+                                  const uint8_t* bits3,
+                                  const uint8_t* bits4,
+                                  uint64_t dim,
+                                  float* results) {
+#if defined(ENABLE_NEON)
+
+    const uint8_t* codes[] = {bits1, bits2, bits3, bits4};
+    simd::ComputeSmallBitplaneIP<SmallBitplaneTraits, 2, true>(vector, codes, dim, 0, results);
+
+#else
+    generic::RaBitQFloatTwoBitCenteredIPBatch4(vector, bits1, bits2, bits3, bits4, dim, results);
+#endif
+}
+
+float
+RaBitQFloatThreeBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    float results[1];
+    const uint8_t* codes[] = {bits};
+    simd::ComputeSmallBitplaneIP<SmallBitplaneTraits, 3, true>(vector, codes, dim, 0, results);
+    return results[0];
+#else
+    return generic::RaBitQFloatThreeBitCenteredIP(vector, bits, dim);
+#endif
+}
+
+void
+RaBitQFloatThreeBitCenteredIPBatch4(const float* vector,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    float* results) {
+#if defined(ENABLE_NEON)
+
+    const uint8_t* codes[] = {bits1, bits2, bits3, bits4};
+    simd::ComputeSmallBitplaneIP<SmallBitplaneTraits, 3, true>(vector, codes, dim, 0, results);
+
+#else
+    generic::RaBitQFloatThreeBitCenteredIPBatch4(vector, bits1, bits2, bits3, bits4, dim, results);
+#endif
+}
+
+float
+RaBitQFloatFourBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    float results[1];
+    const uint8_t* codes[] = {bits};
+    simd::ComputeSmallBitplaneIP<SmallBitplaneTraits, 4, true>(vector, codes, dim, 0, results);
+    return results[0];
+#else
+    return generic::RaBitQFloatFourBitCenteredIP(vector, bits, dim);
+#endif
+}
+
+void
+RaBitQFloatFourBitCenteredIPBatch4(const float* vector,
+                                   const uint8_t* bits1,
+                                   const uint8_t* bits2,
+                                   const uint8_t* bits3,
+                                   const uint8_t* bits4,
+                                   uint64_t dim,
+                                   float* results) {
+#if defined(ENABLE_NEON)
+
+    const uint8_t* codes[] = {bits1, bits2, bits3, bits4};
+    simd::ComputeSmallBitplaneIP<SmallBitplaneTraits, 4, true>(vector, codes, dim, 0, results);
+
+#else
+    generic::RaBitQFloatFourBitCenteredIPBatch4(vector, bits1, bits2, bits3, bits4, dim, results);
+#endif
 }
 
 void
@@ -973,8 +1306,76 @@ RaBitQFloatThreeBitIPBatch4(const float* vector,
                             uint64_t dim,
                             uint32_t reorder_bits,
                             float* results) {
+#if defined(ENABLE_NEON)
+
+    const uint8_t* codes[] = {bits1, bits2, bits3, bits4};
+    simd::ComputeSmallBitplaneIP<SmallBitplaneTraits, 3, false>(
+        vector, codes, dim, reorder_bits, results);
+
+#else
     generic::RaBitQFloatThreeBitIPBatch4(
         vector, bits1, bits2, bits3, bits4, dim, reorder_bits, results);
+#endif
+}
+
+float
+RaBitQFloatThreeBitIPByLookup(const float* lookup,
+                              const uint8_t* bits,
+                              uint64_t dim,
+                              uint32_t reorder_bits) {
+    return RaBitQFloatMultiBitIPByLookup(lookup, bits, dim, reorder_bits, 3);
+}
+
+void
+RaBitQFloatThreeBitIPBatch4ByLookup(const float* lookup,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint32_t reorder_bits,
+                                    float* results) {
+    RaBitQFloatMultiBitIPBatch4ByLookup(
+        lookup, bits1, bits2, bits3, bits4, dim, reorder_bits, 3, results);
+}
+
+float
+RaBitQFloatMultiBitIPByLookup(const float* lookup,
+                              const uint8_t* bits,
+                              uint64_t dim,
+                              uint32_t reorder_bits,
+                              uint32_t filter_bits) {
+#if defined(ENABLE_NEON)
+    const uint8_t* codes[] = {bits};
+    float results[1];
+    simd::ComputeSmallLookupIP<simd::SimdTraits<simd::NeonTag>>(
+        lookup, codes, dim, reorder_bits, filter_bits, results);
+    return results[0];
+#else
+    return generic::RaBitQFloatMultiBitIPByLookup(lookup, bits, dim, reorder_bits, filter_bits);
+#endif
+}
+
+void
+RaBitQFloatMultiBitIPBatch4ByLookup(const float* lookup,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint32_t reorder_bits,
+                                    uint32_t filter_bits,
+                                    float* results) {
+#if defined(ENABLE_NEON)
+    const uint8_t* codes[] = {bits1, bits2, bits3, bits4};
+
+    simd::ComputeSmallLookupIP<simd::SimdTraits<simd::NeonTag>>(
+        lookup, codes, dim, reorder_bits, filter_bits, results);
+
+#else
+    generic::RaBitQFloatMultiBitIPBatch4ByLookup(
+        lookup, bits1, bits2, bits3, bits4, dim, reorder_bits, filter_bits, results);
+#endif
 }
 
 float
@@ -983,8 +1384,13 @@ RaBitQFloatSplitCodeIP(const float* vector,
                        const uint8_t* supplement_code,
                        uint64_t dim,
                        uint32_t supplement_bits) {
+#if defined(ENABLE_NEON)
+    return simd::ComputeSmallPlanarIP<SmallBitplaneTraits>(
+        vector, one_bit_code, supplement_code, dim, supplement_bits);
+#else
     return generic::RaBitQFloatSplitCodeIP(
         vector, one_bit_code, supplement_code, dim, supplement_bits);
+#endif
 }
 
 float
@@ -992,7 +1398,15 @@ RaBitQFloatSupplementCodeIP(const float* vector,
                             const uint8_t* supplement_code,
                             uint64_t dim,
                             uint32_t supplement_bits) {
+#if defined(ENABLE_NEON)
+    if (supplement_bits == 0) {
+        return 0.0F;
+    }
+    return simd::ComputeSmallPlanarIP<SmallBitplaneTraits>(
+        vector, nullptr, supplement_code, dim, supplement_bits);
+#else
     return generic::RaBitQFloatSupplementCodeIP(vector, supplement_code, dim, supplement_bits);
+#endif
 }
 
 void
@@ -1089,7 +1503,37 @@ PQFastScanLookUp32HighAcc(const uint8_t* RESTRICT low_lookup_table,
                           const uint8_t* RESTRICT codes,
                           uint64_t pq_dim,
                           int32_t* RESTRICT result) {
+#if defined(ENABLE_NEON) && defined(__aarch64__)
+    const auto nibble = vdupq_n_u8(15);
+    uint32x4_t sums[8];
+    for (int i = 0; i < 8; ++i) {
+        sums[i] = vreinterpretq_u32_s32(vld1q_s32(result + 4 * i));
+    }
+    for (uint64_t j = 0; j < pq_dim; ++j) {
+        const auto lo = vld1q_u8(low_lookup_table + 16 * j);
+        const auto hi = vld1q_u8(high_lookup_table + 16 * j);
+        const auto code = vld1q_u8(codes + 16 * j);
+        const uint8x16_t indices[] = {vandq_u8(code, nibble), vshrq_n_u8(code, 4)};
+        for (int half = 0; half < 2; ++half) {
+            const auto lows = vqtbl1q_u8(lo, indices[half]);
+            const auto highs = vqtbl1q_u8(hi, indices[half]);
+            const uint8x16_t low_bytes[] = {vuzp1q_u8(lows, lows), vuzp2q_u8(lows, lows)};
+            const uint8x16_t high_bytes[] = {vuzp1q_u8(highs, highs), vuzp2q_u8(highs, highs)};
+            for (int p = 0; p < 2; ++p) {
+                const auto values = vorrq_u16(vmovl_u8(vget_low_u8(low_bytes[p])),
+                                              vshll_n_u8(vget_low_u8(high_bytes[p]), 8));
+                const int slot = 4 * half + 2 * p;
+                sums[slot] = vaddw_u16(sums[slot], vget_low_u16(values));
+                sums[slot + 1] = vaddw_high_u16(sums[slot + 1], values);
+            }
+        }
+    }
+    for (int i = 0; i < 8; ++i) {
+        vst1q_s32(result + 4 * i, vreinterpretq_s32_u32(sums[i]));
+    }
+#else
     generic::PQFastScanLookUp32HighAcc(low_lookup_table, high_lookup_table, codes, pq_dim, result);
+#endif
 }
 
 void
@@ -1106,7 +1550,18 @@ PQFastScanLookUp32HighAccOverwrite(const uint8_t* RESTRICT low_lookup_table,
 
 uint32_t
 FP32LessThan32Mask(const float* values, float limit) {
+#if defined(ENABLE_NEON) && defined(__aarch64__)
+    const uint32x4_t weights = {1, 2, 4, 8};
+    const auto cutoff = vdupq_n_f32(limit);
+    uint32_t result = 0;
+    for (unsigned i = 0; i < 32; i += 4) {
+        const auto lanes = vcltq_f32(vld1q_f32(values + i), cutoff);
+        result |= vaddvq_u32(vandq_u32(lanes, weights)) << i;
+    }
+    return result;
+#else
     return generic::FP32LessThan32Mask(values, limit);
+#endif
 }
 
 uint32_t
@@ -1124,6 +1579,24 @@ RaBitQFastScan32ResidualPostprocess(const int32_t* accumulators,
                                     uint32_t valid_size,
                                     float* dists,
                                     float* filter_inner_products) {
+#if defined(ENABLE_NEON)
+    return simd::RaBitQResidual4<simd::SimdTraits<simd::NeonTag>>(
+        accumulators,
+        filter_bits,
+        delta,
+        sum_vl,
+        query_sum,
+        query_norm,
+        query_bucket_norm_sqr,
+        inv_sqrt_d,
+        f_add,
+        f_scale,
+        filter_norm_codes,
+        valid_size,
+        dists,
+        filter_inner_products,
+        [](const int32_t* p) { return vcvtq_f32_s32(vld1q_s32(p)); });
+#else
     return generic::RaBitQFastScan32ResidualPostprocess(accumulators,
                                                         filter_bits,
                                                         delta,
@@ -1138,6 +1611,7 @@ RaBitQFastScan32ResidualPostprocess(const int32_t* accumulators,
                                                         valid_size,
                                                         dists,
                                                         filter_inner_products);
+#endif
 }
 
 void
@@ -1356,3 +1830,86 @@ SQ4LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
 #endif
 }
 }  // namespace vsag::neon
+
+#if defined(ENABLE_NEON)
+// PiPNN half preparation uses separate multiply and add with a fixed reduction order.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC push_options
+#pragma GCC optimize("no-fast-math", "fp-contract=off")
+#endif
+namespace vsag::pipnn_half::detail {
+namespace {
+template <Format format>
+float32x4_t
+DecodeFour(const uint16_t* in) {
+    const auto wide = vmovl_u16(vld1_u16(in));
+    if constexpr (format == Format::BF16) {
+        return vreinterpretq_f32_u32(vshlq_n_u32(wide, 16));
+    } else {
+        const auto sign = vshlq_n_u32(vandq_u32(wide, vdupq_n_u32(0x8000)), 16);
+        const auto exponent = vandq_u32(vshrq_n_u32(wide, 10), vdupq_n_u32(31));
+        const auto fraction = vandq_u32(wide, vdupq_n_u32(1023));
+        const auto norm = vorrq_u32(vshlq_n_u32(vaddq_u32(exponent, vdupq_n_u32(112)), 23),
+                                    vshlq_n_u32(fraction, 13));
+        const auto special = vorrq_u32(vdupq_n_u32(0x7f800000), vshlq_n_u32(fraction, 13));
+        const auto scaled = vmulq_n_f32(vcvtq_f32_u32(fraction), 0x1p-24F);
+        const auto bits = vbslq_u32(vceqq_u32(exponent, vdupq_n_u32(0)),
+                                    vreinterpretq_u32_f32(scaled),
+                                    vbslq_u32(vceqq_u32(exponent, vdupq_n_u32(31)), special, norm));
+        return vreinterpretq_f32_u32(vorrq_u32(sign, bits));
+    }
+}
+
+template <Format format>
+void
+DecodeRowNEON(const uint16_t* src, float* dst, uint64_t dim) {
+    uint64_t i = 0;
+    for (; dim - i >= 4; i += 4) {
+        vst1q_f32(dst + i, DecodeFour<format>(src + i));
+    }
+    if (i != dim) {
+        DecodeRowScalar<format>(src + i, dst + i, dim - i);
+    }
+}
+
+template <Format format, bool square>
+float
+PreparationNEON(const uint16_t* a, const float* b, uint64_t dim) {
+#if defined(__clang__)
+#pragma clang fp reassociate(off) contract(off)
+#endif
+    auto sum = vdupq_n_f32(0);
+    uint64_t i = 0;
+    for (; dim - i >= 4; i += 4) {
+        const auto left = DecodeFour<format>(a + i);
+        const auto right = square ? left : vld1q_f32(b + i);
+        sum = vaddq_f32(sum, vmulq_f32(left, right));
+    }
+    const auto pairs = vadd_f32(vget_low_f32(sum), vget_high_f32(sum));
+    float result = vget_lane_f32(pairs, 0) + vget_lane_f32(pairs, 1);
+    for (; i < dim; ++i) {
+        const auto left = Decode(a[i], format);
+        result += left * (square ? left : b[i]);
+    }
+    return result;
+}
+}  // namespace
+
+Dispatch
+ResolveNEONDispatch() {
+    return {DecodeRowNEON<Format::FP16>,
+            DecodeRowNEON<Format::BF16>,
+            [](const uint16_t* a, const float* b, uint64_t dim, Format format) {
+                if (format == Format::FP16) {
+                    return b ? PreparationNEON<Format::FP16, false>(a, b, dim)
+                             : PreparationNEON<Format::FP16, true>(a, b, dim);
+                }
+                return b ? PreparationNEON<Format::BF16, false>(a, b, dim)
+                         : PreparationNEON<Format::BF16, true>(a, b, dim);
+            }};
+}
+}  // namespace vsag::pipnn_half::detail
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC pop_options
+#endif
+#endif
