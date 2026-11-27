@@ -76,6 +76,7 @@ typedef struct vsag_engine vsag_engine_t;
 typedef struct vsag_engine_options vsag_engine_options_t;
 typedef struct vsag_filter vsag_filter_t;
 typedef struct vsag_index vsag_index_t;
+typedef struct vsag_index_analysis vsag_index_analysis_t;
 typedef struct vsag_search_result vsag_search_result_t;
 
 /** The value of VSAG_C_API_VERSION the library was built with. */
@@ -445,6 +446,33 @@ vsag_index_check_id_exist(const vsag_index_t* index, int64_t id, int32_t* out_ex
 
 vsag_error_t*
 vsag_index_get_min_max_id(const vsag_index_t* index, int64_t* out_min_id, int64_t* out_max_id);
+
+/* ---------------------------------------------------------------------------------------------
+ * Index file analysis
+ * ------------------------------------------------------------------------------------------ */
+
+/** The `schema_version` of the reports returned by vsag_index_analysis_report(). */
+#define VSAG_ANALYZE_INDEX_SCHEMA_VERSION 1
+
+/**
+ * Analyzes a serialized index file without building or modifying it: the analysis of
+ * vsag::analyze_index() and of the analyze_index tool.
+ *
+ * `options_json` is a JSON object with the members of vsag::AnalyzeIndexOptions: "index_path"
+ * (required), "build_parameter", "query_path", "query_data_type", "base_path",
+ * "groundtruth_path", "save_groundtruth_path" and "search_parameter" as strings, the two parameter
+ * members also as JSON objects, and "topk" as an integer. Unknown members are rejected with
+ * VSAG_INVALID_ARGUMENT.
+ */
+vsag_error_t*
+vsag_analyze_index(const char* options_json, vsag_index_analysis_t** out_analysis);
+
+/** The analysis report: a NUL-terminated JSON object. */
+const char*
+vsag_index_analysis_report(const vsag_index_analysis_t* analysis);
+
+void
+vsag_index_analysis_destroy(vsag_index_analysis_t* analysis);
 
 #ifdef __cplusplus
 }

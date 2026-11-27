@@ -43,6 +43,7 @@ across languages. Use the numbered examples for new code.
 | [`110_index_sindi_sq8_dmq_reorder.py`](110_index_sindi_sq8_dmq_reorder.py) | SINDI SQ8 + DMQ8 | Sparse vectors with SQ8 quantization + DMQ reranking. |
 | [`333_feature_eval_api.py`](333_feature_eval_api.py) | HGraph / BruteForce | `pyvsag.eval` Python API: `EvalDataset.from_arrays`, `evaluate_build` / `evaluate_search`, `num_threads_building`, table / JSON export. |
 | [`334_feature_eval_job.py`](334_feature_eval_job.py) | HGraph | `pyvsag.eval` HDF5 dataset + YAML job (`run_job`) and the `pyvsag-eval` CLI. Needs `pip install "pyvsag[eval]"`. |
+| [`335_feature_analyze_index.py`](335_feature_analyze_index.py) | HGraph | Analyze a saved index file with `pyvsag.analyze_index()`, the API behind `pyvsag-analyze-index`. |
 
 ## Where to go next
 

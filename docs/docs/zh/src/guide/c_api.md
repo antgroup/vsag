@@ -107,6 +107,9 @@ dataset 是对调用方内存的视图，既可描述底库数据，也可描述
 - **复制与复用：** `vsag_index_clone`、`vsag_index_export_model`。
 - **持久化：** `vsag_index_serialize_file`、`vsag_index_deserialize_file`；对于把索引字节放在自有
   存储中的宿主，还有 `vsag_index_serialize_writer` 和 `vsag_index_deserialize_reader`。
+- **索引文件分析：** `vsag_analyze_index` 返回 `vsag_index_analysis_t`，用
+  `vsag_index_analysis_report` 读取 [analyze_index](../resources/analyze_index.md#分析索引文件) 的
+  JSON 报告，用 `vsag_index_analysis_destroy` 释放。
 
 是否支持仍取决于所选索引，不支持的操作返回 `VSAG_UNSUPPORTED_INDEX_OPERATION`。请检查返回的
 错误码是否为 `VSAG_READ_ERROR`、`VSAG_MISSING_FILE` 等非成功值，不要假定文件操作一定完成。

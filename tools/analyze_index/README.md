@@ -2,6 +2,9 @@
 
 The canonical documentation for `analyze_index` lives in the website source tree.
 
+Without a source build, `pip install pyvsag` provides the same analysis as the
+`pyvsag-analyze-index` command and the `pyvsag.analyze_index()` Python API.
+
 - Local English docs: [docs/docs/en/src/resources/analyze_index.md](../../docs/docs/en/src/resources/analyze_index.md)
 - Local Chinese docs: [docs/docs/zh/src/resources/analyze_index.md](../../docs/docs/zh/src/resources/analyze_index.md)
 - Website: <https://vsag.io/docs/resources/analyze_index.html>

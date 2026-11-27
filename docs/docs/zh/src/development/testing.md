@@ -124,6 +124,10 @@ cd tests/python && pytest -q
 请像上面那样先把它装进干净的虚拟环境，再运行 pytest。如果想针对源码树中的构建结果运行，见 [pyvsag](../guide/pyvsag.md#从源码构建)。`test_openmp_coexistence.py`
 需要 `torch` 和 `scikit-learn`，缺少时会自动跳过。
 
+`scripts/python/wheel_smoke_test.sh WHEELHOUSE [PYTHON]` 会基于构建好的 wheel，在只安装了该 wheel
+及其依赖的全新虚拟环境中检查 `pyvsag.analyze_index()` 与 `pyvsag-analyze-index`；Docker 可用时，还会在
+`python:<version>-slim` 容器（没有 CMake 与编译器）中再检查一次。`make pyvsag` 与 wheel 相关的 CI 任务都会运行它。
+
 ## 统计 testcase 预算与耗时
 
 `scripts/testing/test_budget_report.py` 只读取已保存的测试列表、结果和成本记录，不运行测试；

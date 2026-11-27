@@ -196,6 +196,23 @@ new_index.load("index.bin")
 
 底层序列化或反序列化失败（包括文件无法打开）时，`save` 与 `load` 会抛出 `RuntimeError`。
 
+## 分析索引文件
+
+`pyvsag.analyze_index()` 通常无需原始构建参数即可检查已保存的索引；wheel 还会安装提供相同分析能力的
+`pyvsag-analyze-index` 命令：
+
+```python
+report = pyvsag.analyze_index("index.bin")
+print(report["metadata"]["index_type"], report["static_analysis"]["_analysis"]["status"])
+```
+
+```bash
+pyvsag-analyze-index --index_path index.bin --query_path queries.bin --topk 10
+```
+
+报告是可被 JSON 序列化的 `dict`，包含索引元数据、统计信息，以及提供查询文件时的搜索分析结果。
+选项、报告格式与支持的索引文件请参见[索引分析](../resources/analyze_index.md#分析索引文件)。
+
 ## 索引操作
 
 | 方法 | 返回值 | 说明 |

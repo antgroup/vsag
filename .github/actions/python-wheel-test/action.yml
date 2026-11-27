@@ -48,6 +48,17 @@ runs:
       env:
         TEST_MODE: ${{ inputs.mode }}
       run: python3 scripts/testing/daily_measure.py --name pytest --owner bindings-examples-compatibility -- python3 scripts/ci/python_ci.py test --mode "$TEST_MODE"
+    - name: Smoke-test the wheel in clean environments
+      if: ${{ inputs.mode == 'ordinary' }}
+      shell: bash
+      env:
+        VSAG_SMOKE_REQUIRE_DOCKER: "1"
+      run: |
+        set -euo pipefail
+        if ! python3 -c 'import ensurepip, venv' 2>/dev/null; then
+          sudo apt-get install -y python3-venv
+        fi
+        bash ./scripts/python/wheel_smoke_test.sh ./wheelhouse python3
     - uses: actions/upload-artifact@v6
       if: always()
       with:

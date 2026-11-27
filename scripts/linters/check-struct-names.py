@@ -21,7 +21,7 @@ C_ABI_FILES = {
 }
 C_ABI_TAGS = {
     "vsag_error", "vsag_dataset", "vsag_engine", "vsag_engine_options",
-    "vsag_filter", "vsag_index", "vsag_search_result",
+    "vsag_filter", "vsag_index", "vsag_index_analysis", "vsag_search_result",
 }
 TOKEN = re.compile(
     r"""(?P<space>\s+)|(?P<line_comment>//[^\n]*)|(?P<block_comment>/\*.*?\*/)|

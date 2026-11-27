@@ -98,7 +98,7 @@ run_build() {
     rm -rf wheelhouse
     CIBW_ARCHS="${ARCH}" \
     CIBW_ENVIRONMENT_PASS_LINUX="CMAKE_BUILD_PARALLEL_LEVEL" \
-    CIBW_TEST_COMMAND="pip install numpy pytest && python /project/tests/python/run_test.py" \
+    CIBW_TEST_COMMAND="pip install numpy pytest && python /project/tests/python/run_test.py && python -I /project/tests/python/analyze_index_smoke.py all /tmp/pyvsag-analyze-index-smoke" \
     cibuildwheel --platform linux --output-dir wheelhouse python
     # Wheels built against system dependencies (e.g. PR CI) legitimately bundle libgfortran.
     SYSTEM_DEPS="$(echo "${VSAG_USE_SYSTEM_DEPS:-OFF}" | tr '[:lower:]' '[:upper:]')"
@@ -133,6 +133,8 @@ run_build() {
     echo "   - Running tests..."
     pip install pytest
     (cd tests/python && python -m pytest . -v --tb=short 2>&1 | tee test-output.log)
+    echo "   - Running the analyze_index smoke test in clean environments..."
+    bash ./scripts/python/wheel_smoke_test.sh "$(dirname "${wheels[0]}")" python
   fi
 
   cleanup

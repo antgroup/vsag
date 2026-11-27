@@ -28,6 +28,7 @@ def run():
         os.path.join(script_dir, "test_ivf.py"),
         os.path.join(script_dir, "test_hgraph.py"),
         os.path.join(script_dir, "test_bruteforce.py"),
+        os.path.join(script_dir, "test_analyze_index.py"),
     ]
     return pytest.main(args)
 

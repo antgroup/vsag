@@ -223,6 +223,24 @@ new_index.load("index.bin")
 `save` and `load` raise `RuntimeError` when the underlying serialization or deserialization fails,
 including when the file cannot be opened.
 
+## Analyzing Index Files
+
+`pyvsag.analyze_index()` inspects a saved index, usually without its original build parameters, and the
+wheel installs the same analysis as the `pyvsag-analyze-index` command:
+
+```python
+report = pyvsag.analyze_index("index.bin")
+print(report["metadata"]["index_type"], report["static_analysis"]["_analysis"]["status"])
+```
+
+```bash
+pyvsag-analyze-index --index_path index.bin --query_path queries.bin --topk 10
+```
+
+The report is a JSON-serializable `dict` with the index metadata, its statistics and, when a
+query file is given, search analysis. See [Index Analysis](../resources/analyze_index.md#analyzing-index-files)
+for the options, the report format and the supported index files.
+
 ## Index Operations
 
 | Method | Result | Notes |

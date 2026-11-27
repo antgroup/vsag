@@ -130,6 +130,9 @@ jobs:
               - 'scripts/python/prepare_python_build.sh'
               - 'scripts/python/check_wheel_libs.py'
               - 'scripts/python/local_build_wheel.sh'
+              # The wheel ships this module; the shared test action runs the smoke test.
+              - 'python/pyvsag_analyze_index.py'
+              - 'scripts/python/wheel_smoke_test.sh'
               # This caller owns the runner, checkout and build-action inputs.
               - '.github/workflows/pr-ci-community.yml'
               - '.github/actions/python-wheel-build/**'

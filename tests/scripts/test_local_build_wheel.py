@@ -46,6 +46,16 @@ elif name == "python" and args[:2] == ["-m", "pytest"]:
 '''
 
 
+# Stands in for scripts/python/wheel_smoke_test.sh: logs its arguments and requires the directory
+# it receives to hold exactly the wheel that was just built (repaired on macOS).
+SMOKE_STUB = r'''
+printf '["wheel_smoke_test.sh", "%s", "%s"]\n' "$1" "$2" >> "$COMMAND_LOG"
+wheels=("$1"/pyvsag-*.whl)
+[ "${#wheels[@]}" -eq 1 ] && [ "$(cat "${wheels[0]}")" = repaired ] || exit 31
+exit "${SMOKE_EXIT:-0}"
+'''
+
+
 class LocalWheelTest(unittest.TestCase):
     def run_build(self, *, stale_wheel=True, **extra_env):
         with tempfile.TemporaryDirectory() as temp:
@@ -53,6 +63,7 @@ class LocalWheelTest(unittest.TestCase):
             for directory in ("bin", "scripts/python", "tests/python", "python/pyvsag"):
                 (root / directory).mkdir(parents=True)
             (root / "scripts/python/prepare_python_build.sh").write_text(":\n")
+            (root / "scripts/python/wheel_smoke_test.sh").write_text(SMOKE_STUB)
             if stale_wheel:
                 (root / "wheelhouse").mkdir()
                 (root / "wheelhouse/pyvsag-9.0-py3-none-macosx_15_0_arm64.whl").write_text("stale")
@@ -76,6 +87,17 @@ class LocalWheelTest(unittest.TestCase):
         self.assertTrue(any(command[:3] == ["delocate-wheel", "--require-archs", "arm64"]
                             for command in commands))
         self.assertTrue(any(command[:3] == ["python", "-m", "pytest"] for command in commands))
+        smoke = [command for command in commands if command[0] == "wheel_smoke_test.sh"]
+        self.assertEqual(len(smoke), 1, commands)
+        self.assertEqual(smoke[0][2], "python")
+        pytest_index = next(i for i, c in enumerate(commands) if c[:3] == ["python", "-m", "pytest"])
+        smoke_index = next(i for i, c in enumerate(commands) if c[0] == "wheel_smoke_test.sh")
+        self.assertLess(pytest_index, smoke_index)
+
+    def test_smoke_test_failure_fails_the_build(self):
+        result, _ = self.run_build(SMOKE_EXIT="29")
+        self.assertEqual(result.returncode, 29, result.stdout + result.stderr)
+        self.assertNotIn("Successfully built", result.stdout)
 
     def test_prerequisite_failure_prevents_build(self):
         result, commands = self.run_build(DELOCATE_INSTALL_EXIT="23")
