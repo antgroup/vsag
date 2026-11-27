@@ -63,11 +63,13 @@ key. A change to the top-level `CMakeLists.txt` or
 `.circleci/fresh_ci_cache.commit` rotates the key. Existing timestamped caches
 for the same key can seed the first fixed snapshot.
 
-## Linux Python matrix
+## Python installed-wheel matrix
 
 Nightly builds one manylinux 2.28 `py3-none` wheel per Linux architecture
 (x86_64 and aarch64), using the same action and container-mounted compiler cache
-as PR, Branch and TestPyPI. TestPyPI publication remains independent.
+as PR, Branch and TestPyPI. It also builds one native macOS 15 arm64
+`py3-none` wheel with the shared macOS wheel build and audits its platform tag
+and libraries. TestPyPI publication remains independent.
 Every environment installs the matching source/architecture/SHA-256-verified wheel.
 
 | Python | NumPy 1.x | NumPy 2.x | Ordinary suite |
@@ -79,13 +81,13 @@ Each architecture also has one mandatory Python 3.12 / NumPy 2 OpenMP lane with
 CPU torch and scikit-learn installed. Missing dependencies, fewer than six import
 orders, any skipped integration test or a failed process makes the lane fail.
 This is eight ordinary environments plus one OpenMP environment per architecture:
-**two builds and 18 required test environments**, with no daily rotation of Python.
-macOS Python is deferred to its separate packaging adaptation; existing macOS C++
-checks are unchanged. These results do not certify Windows or macOS wheels.
+**three builds and 27 required test environments**, with no daily rotation of Python.
+The macOS environments use clean virtual environments, and the OpenMP lane uses the
+pinned macOS torch and scikit-learn packages.
 
 The matrix shares the existing ten-hour execution window. The remaining-window
 check bounds dependency installation and testing, and optional x86 C++ supplemental
-planning waits for all 18 environments. Mandatory failures do not become budget
+planning waits for all 27 environments. Mandatory failures do not become budget
 skips; incomplete work fails final reconciliation. No new wall-time quota is added.
 
 Per-job artifacts carry JUnit plus JSON counts, source/wheel hashes, installed import

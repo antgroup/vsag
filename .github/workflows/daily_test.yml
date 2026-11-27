@@ -1100,6 +1100,107 @@ jobs:
           DAILY_JOB_STATUS: ${{ job.status }}
           DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
 
+  full-python-build-python-wheel-macos-arm64:
+    timeout-minutes: 300
+    if: ${{ (((github.event_name == 'schedule' && github.event.schedule == '17 13 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) }}
+    name: Python Wheel Build macOS arm64
+    needs: daily-plan
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Download frozen Nightly plan
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: daily-context-${{ github.run_id }}
+          path: daily-context
+      - name: Check wheel build execution window
+        id: window
+        uses: ./.github/actions/daily-execution-window
+      - uses: ./.github/actions/python-wheel-build-macos
+        timeout-minutes: ${{ fromJSON(steps.window.outputs.remaining_minutes) }}
+        with:
+          source-sha: ${{ github.sha }}
+          artifact: daily-python-wheel-macos-arm64-${{ github.run_id }}
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
+  full-python-test-python-macos-arm64:
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.daily-plan.outputs.python_matrix) }}
+    if: ${{ ((((github.event_name == 'schedule' && github.event.schedule == '17 13 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression'))))) && needs.full-python-build-python-wheel-macos-arm64.result == 'success' }}
+    name: Python macos-arm64 ${{ matrix.key }}
+    needs:
+      - daily-plan
+      - full-python-build-python-wheel-macos-arm64
+    runs-on: macos-15
+    env:
+      VSAG_DAILY_CONTEXT: ${{ github.workspace }}/daily-context/context.json
+      VSAG_DAILY_LANE: full-python-test-python-macos-arm64-${{ matrix.key }}
+      VSAG_DAILY_ENVIRONMENT: full-python-test-python-macos-arm64-${{ matrix.key }}
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Download frozen Nightly plan
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: daily-context-${{ github.run_id }}
+          path: daily-context
+      - name: Refresh execution window for this attempt
+        id: window
+        uses: ./.github/actions/daily-execution-window
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: daily-python-wheel-macos-arm64-${{ github.run_id }}
+          path: wheelhouse
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: provenance-daily-python-wheel-macos-arm64-${{ github.run_id }}
+      - name: Test verified wheel in a clean environment
+        timeout-minutes: ${{ fromJSON(steps.window.outputs.remaining_minutes) }}
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          NUMPY_VERSION: ${{ matrix.numpy }}
+          TEST_MODE: ${{ matrix.mode }}
+        run: |
+          python3 scripts/testing/daily_measure.py --name pytest --owner bindings-examples-compatibility -- \
+            python3 scripts/ci/macos_wheel_ci.py test --source "$SOURCE_SHA" --numpy "$NUMPY_VERSION" --mode "$TEST_MODE"
+      - name: Upload Python wheel test reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: python-report-full-python-test-python-macos-arm64-${{ matrix.key }}-${{ github.run_id }}
+          overwrite: true
+          path: python-test-report
+          retention-days: 30
+          if-no-files-found: error
+      - name: Upload Nightly evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: daily-results-full-python-test-python-macos-arm64-${{ matrix.key }}-${{ github.run_id }}
+          overwrite: true
+          path: daily-results
+          retention-days: 30
+          if-no-files-found: error
+      - name: Capture Nightly job diagnostics
+        if: always()
+        uses: ./.github/actions/daily-job-report
+        env:
+          DAILY_JOB_STATUS: ${{ job.status }}
+          DAILY_JOB_MATRIX: ${{ toJSON(matrix) }}
+
   full-python-clean-up:
     timeout-minutes: 300
     name: Clean Up
@@ -1311,7 +1412,7 @@ jobs:
     if: ${{ ((github.event_name == 'schedule' && github.event.schedule == '17 13 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression'))) }}
     name: Plan X86 Extra Coverage quota
     timeout-minutes: 10
-    needs: [daily-plan, daily_test_asan_x86, daily_test_asan_aarch64, daily_test_asan_simd, daily_test_tsan, full-platform-test-asan-x86, full-platform-test-asan-macos-arm64, full-platform-test-example-x86, full-platform-test-example-aarch64, full-python-test-python-x86, full-python-test-python-aarch64, full-coverage-coverage, full-compatibility-compatibility, full-lint-clang-tidy-check]
+    needs: [daily-plan, daily_test_asan_x86, daily_test_asan_aarch64, daily_test_asan_simd, daily_test_tsan, full-platform-test-asan-x86, full-platform-test-asan-macos-arm64, full-platform-test-example-x86, full-platform-test-example-aarch64, full-python-test-python-x86, full-python-test-python-aarch64, full-python-test-python-macos-arm64, full-coverage-coverage, full-compatibility-compatibility, full-lint-clang-tidy-check]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -1413,7 +1514,7 @@ jobs:
     if: ${{ always() && (((github.event_name == 'schedule' && github.event.schedule == '17 13 * * *' && github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/main') || (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')))) }}
     # The needs context omits indirect dependencies. Include supplemental prerequisites
     # so their failures are visible even when the dependent test jobs are skipped.
-    needs: [daily-plan, daily_build_asan_x86, daily_build_asan_aarch64, daily_build_simd, daily_build_tsan, full-platform-build-asan-x86, full-platform-build-asan-macos-arm64, full-python-build-python-wheel-x86, full-python-build-python-wheel-aarch64, full-coverage-changes, daily_test_asan_x86, daily_test_asan_aarch64, daily_test_asan_simd, daily_test_tsan, full-platform-test-asan-x86, full-platform-test-asan-macos-arm64, full-platform-test-example-x86, full-platform-test-example-aarch64, full-python-test-python-x86, full-python-test-python-aarch64, full-coverage-coverage, full-compatibility-compatibility, full-lint-clang-tidy-check, daily-extra-plan, daily-extra-x86]
+    needs: [daily-plan, daily_build_asan_x86, daily_build_asan_aarch64, daily_build_simd, daily_build_tsan, full-platform-build-asan-x86, full-platform-build-asan-macos-arm64, full-python-build-python-wheel-x86, full-python-build-python-wheel-aarch64, full-python-build-python-wheel-macos-arm64, full-coverage-changes, daily_test_asan_x86, daily_test_asan_aarch64, daily_test_asan_simd, daily_test_tsan, full-platform-test-asan-x86, full-platform-test-asan-macos-arm64, full-platform-test-example-x86, full-platform-test-example-aarch64, full-python-test-python-x86, full-python-test-python-aarch64, full-python-test-python-macos-arm64, full-coverage-coverage, full-compatibility-compatibility, full-lint-clang-tidy-check, daily-extra-plan, daily-extra-x86]
     runs-on: ubuntu-24.04
     permissions:
       contents: read

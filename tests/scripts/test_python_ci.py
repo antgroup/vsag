@@ -24,8 +24,8 @@ SHA = 'a' * 40
 class PythonCITests(unittest.TestCase):
     def test_supported_matrix_and_unique_lanes(self):
         envs = ci.environments()
-        self.assertEqual(len(ci.lanes()), 18)
-        self.assertEqual(len(set(ci.lanes())), 18)
+        self.assertEqual(len(ci.lanes()), 27)
+        self.assertEqual(len(set(ci.lanes())), 27)
         self.assertEqual(len(envs), 9)
         self.assertEqual([e['python'] for e in envs if e['numpy'].startswith('1.')],
                          ['3.10', '3.11', '3.12'])
@@ -100,7 +100,7 @@ class PythonCITests(unittest.TestCase):
 
     def evidence(self):
         reports = []
-        for arch, tag in [('x86_64', 'x86'), ('aarch64', 'aarch64')]:
+        for tag, arch in [('x86', 'x86_64'), ('aarch64', 'aarch64'), ('macos-arm64', 'arm64')]:
             for env in ci.environments():
                 reports.append(dict(source_sha=SHA, status='passed', mode=env['mode'],
                     lane=f"full-python-test-python-{tag}-{env['key']}", python=env['python'] + '.1',
@@ -119,8 +119,14 @@ class PythonCITests(unittest.TestCase):
 
     def test_summary_requires_complete_matching_matrix(self):
         reports = self.evidence()
-        self.assertEqual(len(self.collect(reports)), 18)
+        self.assertEqual(len(self.collect(reports)), 27)
         variants = [reports[:-1], reports + [reports[0]]]
+        bad = copy.deepcopy(reports)
+        bad[-1]['wheel']['arch'] = 'aarch64'
+        variants.append(bad)
+        bad = copy.deepcopy(reports)
+        bad[-1]['wheel']['sha256'] = 'e' * 64
+        variants.append(bad)
         for field, value in [('source_sha', 'b' * 40), ('status', 'failed'),
                              ('lane', reports[1]['lane']), ('python', '3.14.0'),
                              ('passed', 5), ('failed', 1), ('mode', 'openmp')]:
@@ -135,16 +141,19 @@ class PythonCITests(unittest.TestCase):
         self.assertEqual(ci.markdown([]), [])
         text = '\n'.join(ci.markdown(reports))
         self.assertIn('3.12.1 / 2.3.1', text)
-        self.assertIn('macOS Python is deferred', text)
+        self.assertIn('macos-arm64', text)
 
     def test_parallel_python_cost_is_not_sum_as_wall_or_claimed_complete(self):
         cost = ci.timing([
             dict(name='Python Wheel Build X86', started_at='2026-11-16T00:00:00Z', completed_at='2026-11-16T00:20:00Z'),
             dict(name='Python Wheel Build Aarch64', started_at='2026-11-16T00:00:00Z', completed_at='2026-11-16T00:30:00Z'),
             dict(name='Python x86 py312-np2', started_at='2026-11-16T00:25:00Z', completed_at='2026-11-16T00:26:00Z'),
+            dict(name='Python Wheel Build macOS arm64', started_at='2026-11-16T00:01:00Z', completed_at='2026-11-16T00:10:00Z'),
+            dict(name='Python macos-arm64 py312-np2', started_at='2026-11-16T00:11:00Z', completed_at='2026-11-16T00:12:00Z'),
             dict(name='Unrelated', started_at='2026-11-15T00:00:00Z', completed_at='2026-11-16T00:00:00Z')])
         self.assertEqual(cost['wall_seconds'], 30 * 60)
-        self.assertEqual(cost['runner_seconds'], 51 * 60)
+        self.assertEqual(cost['runner_seconds'], 61 * 60)
+        self.assertEqual(cost['expected_jobs'], 30)
         self.assertFalse(cost['complete'])
         self.assertIsNone(ci.timing([])['wall_seconds'])
 
@@ -250,6 +259,33 @@ class PythonCITests(unittest.TestCase):
         self.assertIn('source "$SOURCE_SHA"', test)
         self.assertIn('if-no-files-found: error', test)
         self.assertNotIn('continue-on-error', test)
+
+    def test_nightly_macos_uses_verified_wheel_and_is_required_for_summary_and_extras(self):
+        build_name = 'full-python-build-python-wheel-macos-arm64'
+        test_name = 'full-python-test-python-macos-arm64'
+        build = job('daily_test.yml', build_name)
+        test = job('daily_test.yml', test_name)
+        for entry in (build, test):
+            self.assertIn('runs-on: macos-15', entry)
+            self.assertIn('uses: ./.github/actions/daily-execution-window', entry)
+            self.assertIn('fromJSON(steps.window.outputs.remaining_minutes)', entry)
+            self.assertNotIn('publish', entry)
+        self.assertIn('uses: ./.github/actions/python-wheel-build-macos', build)
+        self.assertIn('daily-python-wheel-macos-arm64-', build)
+        self.assertIn(build_name, test)
+        self.assertIn('provenance-daily-python-wheel-macos-arm64-', test)
+        self.assertIn('fromJSON(needs.daily-plan.outputs.python_matrix)', test)
+        self.assertIn('fail-fast: false', test)
+        self.assertIn('daily_measure.py --name pytest', test)
+        self.assertIn('macos_wheel_ci.py test', test)
+        report_prefix = 'python-report-full-python-test-python-'
+        self.assertIn('name: ' + report_prefix + 'macos-arm64-', test)
+        self.assertIn('name: daily-results-full-python-test-python-macos-arm64-', test)
+        self.assertIn(test_name, job('daily_test.yml', 'daily-extra-plan'))
+        summary = job('daily_test.yml', 'daily-summary')
+        self.assertIn('pattern: ' + report_prefix + '*', summary)
+        for name in (build_name, test_name):
+            self.assertIn(name, summary.split('needs: [', 1)[1].split(']', 1)[0])
 
 
 class MacOSWheelCITests(unittest.TestCase):

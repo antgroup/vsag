@@ -15,6 +15,7 @@ import time
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[2]
+NIGHTLY_PLATFORMS = {'x86': 'x86_64', 'aarch64': 'aarch64', 'macos-arm64': 'arm64'}
 
 
 def environments():
@@ -30,7 +31,7 @@ def environments():
 
 def lanes():
     return [f'full-python-test-python-{arch}-{env["key"]}-pytest'
-            for arch in ('x86', 'aarch64') for env in environments()]
+            for arch in NIGHTLY_PLATFORMS for env in environments()]
 
 
 def wheel_manifest(directory, sha, arch):
@@ -114,7 +115,7 @@ def load_reports(directory, sha):
     expected = {lane.removesuffix('-pytest') for lane in lanes()}
     if len(reports) != len(expected) or {r.get('lane') for r in reports} != expected:
         raise ValueError('Missing, duplicate or unexpected Python environment report')
-    for arch, tag in [('x86_64', 'x86'), ('aarch64', 'aarch64')]:
+    for tag, arch in NIGHTLY_PLATFORMS.items():
         subset = [r for r in reports if r['lane'].startswith(f'full-python-test-python-{tag}-')]
         if any(r['wheel']['arch'] != arch for r in subset) or len({r['wheel']['sha256'] for r in subset}) != 1:
             raise ValueError('Python environments did not reuse the same platform wheel')
@@ -133,7 +134,8 @@ def load_reports(directory, sha):
 
 def timing(jobs):
     """Occupied runner time and active span; neither invents dependency queue time."""
-    selected = [j for j in jobs if j['name'].rsplit(' / ', 1)[-1].startswith(('Python Wheel Build ', 'Python x86 ', 'Python aarch64 '))]
+    prefixes = ('Python Wheel Build ', *(f'Python {tag} ' for tag in NIGHTLY_PLATFORMS))
+    selected = [j for j in jobs if j['name'].rsplit(' / ', 1)[-1].startswith(prefixes)]
     starts, ends, rows = [], [], []
     for job in selected:
         if not job.get('started_at') or not job.get('completed_at'):
@@ -145,7 +147,8 @@ def timing(jobs):
         starts.append(start)
         ends.append(end)
         rows.append(dict(name=job['name'], seconds=(end-start).total_seconds()))
-    return dict(jobs=rows, expected_jobs=len(lanes()) + 2, complete=len(rows) == len(lanes()) + 2,
+    expected_jobs = len(lanes()) + len(NIGHTLY_PLATFORMS)
+    return dict(jobs=rows, expected_jobs=expected_jobs, complete=len(rows) == expected_jobs,
                 wall_seconds=(max(ends)-min(starts)).total_seconds() if rows else None,
                 runner_seconds=sum(r['seconds'] for r in rows) if rows else None)
 
@@ -166,8 +169,8 @@ def markdown(reports, job_metrics=None):
     for r in reports:
         lines.append(f"| {r['lane'].removeprefix('full-python-test-python-')} | {r['python']} / {r['dependencies']['numpy']} | "
                      f"{r['passed']} / {r['failed']} / {r['skipped']} | {r['seconds']/60:.2f} |")
-    lines += ['', '</details>', '', 'Linux: eight ordinary environments and one Python 3.12 OpenMP lane per architecture. '
-              'macOS Python is deferred to the separate packaging adaptation. '
+    lines += ['', '</details>', '', 'Linux x86_64, Linux aarch64 and macOS arm64 each run eight ordinary environments '
+              'and one Python 3.12 / NumPy 2 OpenMP lane. '
               'Required Python runs before optional C++ top-up; detailed wheel hashes, imports and dependencies are in artifacts.', '']
     return lines
 
