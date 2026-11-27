@@ -118,6 +118,12 @@ four-number Catch/C++ logical-case inventory; they do not inflate that inventory
   seven disjoint slots. SECTION branches remain intact and are recorded in XML.
   Choices in mutually exclusive branches can yield redundant paths: the declared
   product is a conservative superset, not a claim that all axes are independent.
+* The Pyramid and HGraph PiPNN half-input quantizer matrices keep five representative
+  configurations per metric in PR CI. Nightly x86 runs those cases and the disjoint
+  `[nightly_matrix]` extension as mandatory core. Coverage includes both tiers.
+  Before merging a change that affects these paths, run the full matrices from an
+  ASan build with `build/tests/unittests '[pipnn][half_input][quantizer_matrix]'`
+  and `build/tests/functests '[pipnn][half_input][quantizer_matrix]'`.
 * Unadapted tests are indivisible exhaustive groups. Unknown ownership or unsupported
   generator syntax fails planning instead of silently dropping a test.
 * A single SIMD mode rotates across generic/SSE/AVX, with module tests and fixed

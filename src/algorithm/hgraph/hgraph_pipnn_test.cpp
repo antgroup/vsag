@@ -700,24 +700,43 @@ CheckHalfPiPNNQuantizer(bool bf16, vsag::MetricType metric, const std::string& c
     }
 }
 
+void
+CheckHalfPiPNNRepresentative(vsag::MetricType metric) {
+    const bool bf16 = GENERATE(false, true);
+    const std::string configuration = GENERATE("fp32", "sq8", "pq", "rom, sq8_uniform", "split3+5");
+    CheckHalfPiPNNQuantizer(bf16, metric, configuration);
+}
+
 }  // namespace
 
-TEST_CASE("HGraph PiPNN sampled half input covers FP32 quantizers and split3+5",
+TEST_CASE("HGraph PiPNN sampled half input representative quantizers l2",
           "[ut][pipnn][hgraph][half_input][quantizer_matrix]") {
+    CheckHalfPiPNNRepresentative(vsag::MetricType::METRIC_TYPE_L2SQR);
+}
+
+TEST_CASE("HGraph PiPNN sampled half input representative quantizers ip",
+          "[ut][pipnn][hgraph][half_input][quantizer_matrix]") {
+    CheckHalfPiPNNRepresentative(vsag::MetricType::METRIC_TYPE_IP);
+}
+
+TEST_CASE("HGraph PiPNN sampled half input representative quantizers cosine",
+          "[ut][pipnn][hgraph][half_input][quantizer_matrix]") {
+    CheckHalfPiPNNRepresentative(vsag::MetricType::METRIC_TYPE_COSINE);
+}
+
+TEST_CASE("HGraph PiPNN sampled half input extended quantizer matrix",
+          "[ut][pipnn][hgraph][half_input][quantizer_matrix][nightly_matrix]") {
     const bool bf16 = GENERATE(false, true);
     const auto metric = GENERATE(vsag::MetricType::METRIC_TYPE_L2SQR,
                                  vsag::MetricType::METRIC_TYPE_IP,
                                  vsag::MetricType::METRIC_TYPE_COSINE);
-    const std::string configuration = GENERATE("fp32",
-                                               "fp16",
+    const std::string configuration = GENERATE("fp16",
                                                "bf16",
-                                               "sq8",
                                                "sq4",
                                                "sq8_uniform",
                                                "sq4_uniform",
                                                "sq8_local",
                                                "sq4_local",
-                                               "pq",
                                                "pqfs",
                                                "rabitq",
                                                "rom, fp32",
@@ -725,7 +744,6 @@ TEST_CASE("HGraph PiPNN sampled half input covers FP32 quantizers and split3+5",
                                                "rom, bf16",
                                                "rom, sq8",
                                                "rom, sq4",
-                                               "rom, sq8_uniform",
                                                "rom, sq4_uniform",
                                                "rom, pq",
                                                "rom, pqfs",
@@ -733,7 +751,6 @@ TEST_CASE("HGraph PiPNN sampled half input covers FP32 quantizers and split3+5",
                                                "pca, rom, sq8_uniform",
                                                "fht, sq8_uniform",
                                                "mrle, fp32",
-                                               "split3+5",
                                                "mrle, split3+5");
     CheckHalfPiPNNQuantizer(bf16, metric, configuration);
 }

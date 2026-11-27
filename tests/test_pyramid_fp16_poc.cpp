@@ -291,40 +291,12 @@ TEST_CASE("Pyramid half storage serializes smaller than fp32 storage",
     REQUIRE(sizes[0] < sizes[1]);
 }
 
-// The local SQ factories reject TQ, so they are ordinary configurations only.
-TEST_CASE("Pyramid PiPNN half input covers FP32 quantizers and split3+5",
-          "[ft][pyramid][pipnn][half_input][half_quantization][quantizer_matrix]") {
-    const bool bf16 = GENERATE(false, true);
-    const std::string metric = GENERATE("l2", "ip", "cosine");
-    const std::string configuration = GENERATE("fp32",
-                                               "fp16",
-                                               "bf16",
-                                               "sq8",
-                                               "sq4",
-                                               "sq8_uniform",
-                                               "sq4_uniform",
-                                               "sq8_local",
-                                               "sq4_local",
-                                               "pq",
-                                               "pqfs",
-                                               "rabitq",
-                                               "saq",
-                                               "rom, fp32",
-                                               "rom, fp16",
-                                               "rom, bf16",
-                                               "rom, sq8",
-                                               "rom, sq4",
-                                               "rom, sq8_uniform",
-                                               "rom, sq4_uniform",
-                                               "rom, pq",
-                                               "rom, pqfs",
-                                               "rom, rabitq",
-                                               "rom, saq",
-                                               "pca, rom, sq8_uniform",
-                                               "fht, sq8_uniform",
-                                               "mrle, fp32",
-                                               "split3+5",
-                                               "mrle, split3+5");
+namespace {
+
+void
+CheckPyramidHalfPiPNNQuantizer(bool bf16,
+                               const std::string& metric,
+                               const std::string& configuration) {
     CAPTURE(bf16, metric, configuration);
     constexpr int64_t count = 544;
     constexpr int64_t dim = 32;
@@ -421,6 +393,62 @@ TEST_CASE("Pyramid PiPNN half input covers FP32 quantizers and split3+5",
         REQUIRE(restored->GetNumElements() == count);
         check(restored, half);
     }
+}
+
+void
+CheckPyramidHalfPiPNNRepresentative(const std::string& metric) {
+    const bool bf16 = GENERATE(false, true);
+    const std::string configuration = GENERATE("fp32", "sq8", "pq", "rom, sq8_uniform", "split3+5");
+    CheckPyramidHalfPiPNNQuantizer(bf16, metric, configuration);
+}
+
+}  // namespace
+
+TEST_CASE("Pyramid PiPNN half input representative quantizers l2",
+          "[ft][pyramid][pipnn][half_input][half_quantization][quantizer_matrix]") {
+    CheckPyramidHalfPiPNNRepresentative("l2");
+}
+
+TEST_CASE("Pyramid PiPNN half input representative quantizers ip",
+          "[ft][pyramid][pipnn][half_input][half_quantization][quantizer_matrix]") {
+    CheckPyramidHalfPiPNNRepresentative("ip");
+}
+
+TEST_CASE("Pyramid PiPNN half input representative quantizers cosine",
+          "[ft][pyramid][pipnn][half_input][half_quantization][quantizer_matrix]") {
+    CheckPyramidHalfPiPNNRepresentative("cosine");
+}
+
+// The local SQ factories reject TQ, so they are ordinary configurations only.
+TEST_CASE("Pyramid PiPNN half input extended quantizer matrix",
+          "[ft][pyramid][pipnn][half_input][half_quantization][quantizer_matrix][nightly_matrix]") {
+    const bool bf16 = GENERATE(false, true);
+    const std::string metric = GENERATE("l2", "ip", "cosine");
+    const std::string configuration = GENERATE("fp16",
+                                               "bf16",
+                                               "sq4",
+                                               "sq8_uniform",
+                                               "sq4_uniform",
+                                               "sq8_local",
+                                               "sq4_local",
+                                               "pqfs",
+                                               "rabitq",
+                                               "saq",
+                                               "rom, fp32",
+                                               "rom, fp16",
+                                               "rom, bf16",
+                                               "rom, sq8",
+                                               "rom, sq4",
+                                               "rom, sq4_uniform",
+                                               "rom, pq",
+                                               "rom, pqfs",
+                                               "rom, rabitq",
+                                               "rom, saq",
+                                               "pca, rom, sq8_uniform",
+                                               "fht, sq8_uniform",
+                                               "mrle, fp32",
+                                               "mrle, split3+5");
+    CheckPyramidHalfPiPNNQuantizer(bf16, metric, configuration);
 }
 
 TEST_CASE("Pyramid half input rejects missing vectors",

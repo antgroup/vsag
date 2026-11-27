@@ -359,7 +359,7 @@ jobs:
           export LSAN_OPTIONS=suppressions=omp.supp
           chmod +x ./build/tests/unittests ./build/tools/eval/eval_dataset_test \
             ./build/tools/autotune/autotune_test
-          ./scripts/testing/test_parallel_by_name.sh unittests
+          ./scripts/testing/test_parallel_by_name.sh unittests '~[daily]~[nightly_matrix]'
           ./build/tools/eval/eval_dataset_test -d yes
           ./build/tools/autotune/autotune_test -d yes
       - name: Test evaluation query preparation
@@ -410,7 +410,7 @@ jobs:
           echo leak:libgomp.so >> omp.supp
           export LSAN_OPTIONS=suppressions=omp.supp
           chmod +x ./build/tests/functests
-          ./scripts/testing/test_parallel_by_name.sh functests
+          ./scripts/testing/test_parallel_by_name.sh functests '~[daily]~[nightly_matrix]'
           chmod +x ./build/tests/eval_monitor_test
           ./build/tests/eval_monitor_test -d yes
       - name: Upload Log
