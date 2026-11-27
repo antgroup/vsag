@@ -15,6 +15,7 @@
 #include <new>
 
 #include "hgraph.h"  // IWYU pragma: keep
+#include "hgraph_storage_state.h"
 #include "impl/pruning_strategy.h"
 #include "utils/util_functions.h"
 
@@ -22,13 +23,9 @@ namespace vsag {
 
 uint32_t
 HGraph::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
+    auto mci_mutation_lock = StorageState::LockMutableMCI(*this);
     uint32_t delete_count = 0;
     if (mode == RemoveMode::MARK_REMOVE) {
-        std::unique_lock<std::mutex> mci_mutation_lock(this->mci_mutation_mutex_, std::defer_lock);
-        if (this->mci_parameters_.enabled) {
-            mci_mutation_lock.lock();
-        }
-
         Vector<InnerIdType> removed_inner_ids(this->allocator_);
         {
             std::scoped_lock label_lock(this->label_lookup_mutex_);

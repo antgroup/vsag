@@ -18,6 +18,7 @@
 #include <functional>
 #include <future>
 #include <initializer_list>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -31,10 +32,42 @@
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index/index_impl.h"
 #include "index_common_param.h"
+#include "mci_add_candidates.h"
 #include "simd/bf16_simd.h"
 #include "simd/fp16_simd.h"
 #include "unittest.h"
 #include "vsag/options.h"
+
+TEST_CASE("HGraph single Add selects distinct live MCI candidates", "[hgraph][mci]") {
+    const auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    vsag::Vector<vsag::DistanceHeap::DistanceRecord> scores(
+        {{2, 2}, {1, 3}, {7, 2}, {0, 4}, {1, 1}, {9, 0}, {0, 5}}, allocator.get());
+    vsag::Vector<vsag::InnerIdType> ids(allocator.get());
+    const auto removed = [](vsag::InnerIdType id) { return id == 4; };
+    SECTION("nearest live IDs with deterministic distance ties") {
+        REQUIRE(vsag::SelectMciAddCandidates(scores, 5, 1, removed, ids));
+        REQUIRE(ids == vsag::Vector<vsag::InnerIdType>({1}, allocator.get()));
+    }
+    SECTION("return IDs in canonical order") {
+        REQUIRE(vsag::SelectMciAddCandidates(scores, 5, 3, removed, ids));
+        REQUIRE(ids == vsag::Vector<vsag::InnerIdType>({1, 2, 3}, allocator.get()));
+    }
+    SECTION("fall back when the distinct live set is too small") {
+        REQUIRE_FALSE(vsag::SelectMciAddCandidates(scores, 5, 5, removed, ids));
+        REQUIRE(ids.empty());
+    }
+    SECTION("reuse finite candidates after dropping nonfinite records") {
+        scores.front().first = std::numeric_limits<float>::quiet_NaN();
+        scores.emplace_back(std::numeric_limits<float>::infinity(), 0);
+        REQUIRE(vsag::SelectMciAddCandidates(scores, 5, 3, removed, ids));
+        REQUIRE(ids == vsag::Vector<vsag::InnerIdType>({1, 2, 3}, allocator.get()));
+    }
+    SECTION("fall back when too few IDs have finite distances") {
+        scores[1].first = std::numeric_limits<float>::infinity();
+        REQUIRE_FALSE(vsag::SelectMciAddCandidates(scores, 5, 4, removed, ids));
+        REQUIRE(ids.empty());
+    }
+}
 
 namespace {
 
@@ -250,6 +283,25 @@ private:
     mutable std::atomic<bool> first_search_{true};
 };
 
+class PausedMCIMutationHGraph : public vsag::HGraph {
+public:
+    using vsag::HGraph::HGraph;
+
+    std::vector<int64_t>
+    Add(const vsag::DatasetPtr& data) override {
+        before_mutation();
+        return HGraph::Add(data);
+    }
+
+    uint32_t
+    Remove(const std::vector<int64_t>& ids, vsag::RemoveMode mode) override {
+        before_mutation();
+        return HGraph::Remove(ids, mode);
+    }
+
+    std::function<void()> before_mutation = [] {};
+};
+
 class PausedUpdateAllocator : public vsag::Allocator {
 public:
     PausedUpdateAllocator() : resume_(resume_promise_.get_future().share()) {
@@ -311,6 +363,60 @@ const std::string kBruteForceSearchParams =
     R"({"hgraph": {"ef_search": 32, "brute_force_threshold": 1.0}})";
 
 }  // namespace
+
+TEST_CASE("MCI rejects a mutation that passed the public check before freezing",
+          "[ut][hgraph][mci][freeze_mutation]") {
+    const std::string operation =
+        GENERATE("add", "initial pipnn add", "mark remove", "force remove");
+    CAPTURE(operation);
+    const bool initial = operation == "initial pipnn add";
+    constexpr int64_t dim = 4;
+    auto parameters = MakeFp32HGraphJson(false);
+    parameters["graph_type"].SetString(initial ? "pipnn" : "nsw");
+    parameters["support_duplicate"].SetBool(false);
+    parameters["support_force_remove"].SetBool(operation == "force remove");
+    parameters["mci_mcs"].SetInt(8);
+    const auto common = MakeCommonParam(dim, 1);
+    auto inner = std::make_shared<PausedMCIMutationHGraph>(
+        vsag::HGraph::CheckAndMappingExternalParam(parameters, common), common);
+    vsag::IndexImpl<vsag::HGraph> index(inner, common);
+    std::vector<int64_t> ids{10, 20, 30};
+    std::vector<float> vectors{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0};
+    const auto base = MakeFloatDataset(vectors, ids, dim, ids.size());
+    if (not initial) {
+        REQUIRE(index.Build(base).has_value());
+    }
+    const auto before = index.GetNumElements();
+    bool frozen = false;
+    inner->before_mutation = [&] {
+        // IndexImpl already accepted the write. Freeze before the real HGraph writer takes
+        // its mutation lock, deterministically exercising the losing side of the race.
+        frozen =
+            std::async(std::launch::async, [&] { return index.SetImmutable(); }).get().has_value();
+    };
+    const auto check_rejected = [](const auto& result) {
+        CHECK_FALSE(result.has_value());
+        if (not result.has_value()) {
+            CHECK(result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+        }
+    };
+    std::vector<int64_t> new_id{40};
+    if (initial) {
+        check_rejected(index.Add(base));
+    } else if (operation == "add") {
+        check_rejected(index.Add(MakeFloatDataset(vectors, new_id, dim, 1)));
+    } else {
+        auto mode = operation == "mark remove" ? vsag::RemoveMode::MARK_REMOVE
+                                               : vsag::RemoveMode::FORCE_REMOVE;
+        check_rejected(index.Remove({ids.front()}, mode));
+    }
+    REQUIRE(frozen);
+    CHECK(index.GetNumElements() == before);
+    CHECK_FALSE(index.CheckIdExist(new_id.front()));
+    for (auto id : ids) {
+        CHECK(index.CheckIdExist(id) == not initial);
+    }
+}
 
 TEST_CASE("HGraph exact duplicate fallback supports every dense data type",
           "[ut][hgraph][duplicate][data_type]") {

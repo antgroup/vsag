@@ -286,6 +286,11 @@ private:
     compact_unlocked(uint64_t total, const Vector<InnerIdType>* old_to_new);
 
 private:
+    struct CapacityMutation;
+
+    void
+    refresh_memory_usage_unlocked() noexcept;
+
     Allocator* allocator_{nullptr};
 
     Vector<InnerIdType> p_maxc_;
@@ -307,6 +312,9 @@ private:
     std::atomic<uint64_t> available_total_{0};
 
     mutable std::shared_mutex mutex_;
+    // Protected by mutex_. Row payloads exclude the three outer vectors' storage.
+    uint64_t delta_row_bytes_{0};
+    uint64_t memory_usage_bytes_{0};
 };
 
 }  // namespace vsag

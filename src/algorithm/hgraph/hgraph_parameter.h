@@ -46,6 +46,7 @@ struct HGraphMCIParameters {
     std::string knng_source{HGRAPH_MCI_KNNG_SOURCE_HGRAPH};
     std::string knng_path{};
     float incremental_join_ratio_threshold{0.6F};
+    uint64_t single_add_degree{98};  // Zero selects the adaptive degree formula.
     uint64_t incremental_degree_min{50};
     uint64_t incremental_degree_n_divisor{10000};
     uint64_t incremental_degree_mcs_divisor{2};
@@ -54,9 +55,12 @@ struct HGraphMCIParameters {
     uint64_t delete_node_mct_threshold{3};
 
     [[nodiscard]] uint64_t
-    IncrementalDegreeTarget(uint64_t live_total) const {
+    IncrementalDegreeTarget(uint64_t live_total, bool single_add = false) const {
         if (live_total <= 1) {
             return 0;
+        }
+        if (single_add and single_add_degree != 0) {
+            return std::min(live_total - 1, single_add_degree);
         }
         return std::min(live_total - 1,
                         std::max<uint64_t>(incremental_degree_min,

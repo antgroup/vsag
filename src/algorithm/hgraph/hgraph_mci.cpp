@@ -26,6 +26,7 @@
 #include "../mci/mci_clique_activation.h"
 #include "../mci/mci_coverage.h"
 #include "../mci/mci_local_builder.h"
+#include "../mci/mci_seed_clique.h"
 #include "datacell/graph_interface.h"
 #include "datacell/sparse_graph_datacell_parameter.h"
 #include "hgraph.h"
@@ -212,18 +213,6 @@ collect_bitset_seed_inner_ids(const FilterPtr& inner_filter,
         }
     }
     return inner_ids;
-}
-
-float
-// NOLINTNEXTLINE(readability-identifier-naming)
-ExpandMCIDistanceLimit(float nearest_distance, float alpha, MetricType metric) {
-    if (metric != MetricType::METRIC_TYPE_IP) {
-        return nearest_distance * alpha;
-    }
-    const auto nearest_similarity = 1.0F - nearest_distance;
-    const auto similarity_limit =
-        nearest_similarity >= 0.0F ? nearest_similarity / alpha : nearest_similarity * alpha;
-    return 1.0F - similarity_limit;
 }
 
 // Temporary KNN graph used during MCI companion-index construction. Rows may come from an
@@ -1056,6 +1045,7 @@ HGraph::build_mci_clique_index(const void* vectors) {
     }
     std::scoped_lock build_lock(this->mci_build_mutex_);
     this->mci_pending_mutations_ = 0;
+    this->storage_state_->mci_pending_changes_ = StorageState::MCIPendingChanges::NONE;
     auto codes_lock = make_search_read_lock(this->persistent_codes_mutex_);
 
     const auto total = this->total_count_.load();
@@ -1340,7 +1330,7 @@ HGraph::build_mci_clique_index(const void* vectors) {
             return edge_count;
         }
         const auto distance_limit =
-            ExpandMCIDistanceLimit(seed_distances[1], now_alpha, this->metric_);
+            mci::ExpandSeedRadius(seed_distances[1], now_alpha, this->metric_);
         for (uint64_t i = 1; i < local_nodes.size(); ++i) {
             if (seed_distances[i] <= distance_limit) {
                 set_local_edge(0, i);
@@ -2115,8 +2105,7 @@ HGraph::remove_from_mci(const Vector<InnerIdType>& removed_inner_ids) {
 
 uint32_t
 HGraph::force_remove_with_mci(const std::vector<int64_t>& ids) {
-    // Same lock order as Add: mutation serialization, then vector-ID lifetime protection.
-    std::unique_lock<std::mutex> mutation_lock(this->mci_mutation_mutex_);
+    // Remove holds the mutation lock before acquiring vector-ID lifetime protection.
     std::unique_lock<std::shared_mutex> force_lock(this->force_remove_mutex_);
     const auto old_total = this->total_count_.load();
     Vector<std::pair<InnerIdType, int64_t>> targets(this->allocator_);
@@ -2187,6 +2176,7 @@ HGraph::force_remove_with_mci(const std::vector<int64_t>& ids) {
     force_lock.lock();
     this->mci_cliques_->Flush(total);
     this->mci_pending_mutations_ = 0;
+    this->storage_state_->mci_pending_changes_ = StorageState::MCIPendingChanges::NONE;
     {
         std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
         // A later Add must resize all slot-indexed storage, including graph version rows.
@@ -2201,25 +2191,44 @@ HGraph::force_remove_with_mci(const std::vector<int64_t>& ids) {
 }
 
 void
+HGraph::StorageState::FlushPendingMCISingleAdds(const HGraph& index) {
+    if (mci_pending_changes_ == MCIPendingChanges::HAS_SINGLE_ADD) {
+        index.mci_cliques_->Flush(index.total_count_.load());
+        mci_pending_changes_ = MCIPendingChanges::NONE;
+        index.mark_memory_usage_dirty();
+    }
+}
+
+void
 HGraph::maybe_compact_mci(uint64_t changed_count) {
+    storage_state_->RecordMCIMutation(*this, changed_count, false);
+}
+
+void
+HGraph::StorageState::RecordMCIMutation(HGraph& index, uint64_t changed_count, bool single_add) {
     if (changed_count == 0) {
         return;
     }
     constexpr uint64_t interval = 100;
-    // Saturate instead of adding: a very large batch must neither overflow the counter nor reset
-    // it to 0, which would delay the next compaction by a full interval. The batch that reaches the
-    // threshold is compacted in full, so the excess is not carried over and the effective mutation
-    // span between two compactions is at most 2 * interval - 1.
-    // A failed compaction keeps the count and retries on the next successful change.
-    this->mci_pending_mutations_ +=
-        std::min(changed_count, interval - this->mci_pending_mutations_);
-    if (this->mci_pending_mutations_ < interval) {
+    // Single-row Add streams can exceed the interval. Saturation keeps the next batch Add
+    // or MARK_REMOVE eligible for maintenance, including after an allocation failure.
+    auto& count = index.mci_pending_mutations_;
+    if (mci_pending_changes_ == MCIPendingChanges::NONE) {
+        count = 0;
+        mci_pending_changes_ = MCIPendingChanges::BATCH_ONLY;
+    }
+    count += std::min(changed_count, interval - count);
+    if (single_add) {
+        mci_pending_changes_ = MCIPendingChanges::HAS_SINGLE_ADD;
+        return;
+    }
+    if (count < interval) {
         return;
     }
     try {
         // The caller already serializes mutations. Storage replacement pins out query views.
-        this->mci_cliques_->Flush(this->total_count_.load());
-        this->mci_pending_mutations_ = 0;
+        index.mci_cliques_->Flush(index.total_count_.load());
+        mci_pending_changes_ = MCIPendingChanges::NONE;
     } catch (const std::bad_alloc&) {
         // Automatic compaction is optional maintenance: preserve a completed Add/Remove and
         // its valid delta if replacement allocation fails. Flush publishes only after allocation.

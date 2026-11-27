@@ -32,6 +32,7 @@
 #include "algorithm/mci/mci_coverage.h"
 #include "algorithm/mci/mci_local_builder.h"
 #include "algorithm/mci/mci_runner.h"
+#include "algorithm/mci/mci_seed_clique.h"
 #include "analyzer/hgraph_analyzer.h"
 #include "datacell/clique_datacell.h"
 #include "hgraph.h"
@@ -582,10 +583,9 @@ TEST_CASE("HGraph companion MCI selectively repairs under-covered members", "[ut
     const auto restored_stats = vsag::JsonType::Parse(restored.value()->GetStats());
     REQUIRE(restored_stats["mci_has_index"].GetBool());
     REQUIRE(restored_stats["mci_inactive_node_count"].GetInt() == 2);
-    REQUIRE(restored_stats["mci_retired_clique_count"].GetInt() ==
-            stats["mci_retired_clique_count"].GetInt());
-    REQUIRE(restored_stats["mci_delta_clique_count"].GetInt() ==
-            stats["mci_delta_clique_count"].GetInt());
+    REQUIRE(restored_stats["mci_retired_clique_count"].GetInt() == 0);
+    REQUIRE(restored_stats["mci_delta_clique_count"].GetInt() == 0);
+    REQUIRE(restored_stats["mci_covered_nodes"].GetInt() == total - 1);
 }
 
 TEST_CASE("HGraph MCI mark removal projects the complete batch before repair",
@@ -1231,7 +1231,15 @@ TEST_CASE("HGraph FP32 MCI deletion repairs use the complete Add candidate pipel
 
     index.candidate_searches = 0;
     REQUIRE(index.Add(dataset(total, 1)).empty());
-    REQUIRE(index.candidate_searches > 0);
+    if (mode == vsag::RemoveMode::FORCE_REMOVE) {
+        // Physical compaction leaves 15 live slots; all 15 candidates were captured
+        // during insertion and the MCI update needs no second KNN traversal.
+        REQUIRE(index.candidate_searches == 0);
+    } else {
+        // The 16-slot prefix still contains a tombstone. After filtering only
+        // 15 valid candidates remain, so the short capture uses the KNN fallback.
+        REQUIRE(index.candidate_searches > 0);
+    }
     REQUIRE(index.GetNumElements() == total);
     auto result = index.KnnSearch(
         dataset(0, 1), total + 1, R"({"hgraph":{"ef_search":100,"use_mci":false}})", nullptr);
@@ -2481,12 +2489,69 @@ TEST_CASE("HGraph Add uses the full-build local clique size threshold",
     REQUIRE(index.value()->Add(make_dataset(ids, vectors, 3, 1, dim)).has_value());
     auto after = vsag::JsonType::Parse(index.value()->GetStats());
     REQUIRE(after["mci_covered_nodes"].GetInt() == 4);
-    // The shared builder first emits three members, then adds the remaining neighbor in
-    // a two-member clique to reach min(50, N-1)=3 distinct neighbors.
+    // The first radius admits two neighbors. The residual witness selects the third
+    // at a wider radius and then extends over all previously covered candidates.
     REQUIRE(after["mci_delta_clique_count"].GetInt() == 2);
-    REQUIRE(after["mci_delta_clique_membership_count"].GetInt() == 5);
+    REQUIRE(after["mci_delta_clique_membership_count"].GetInt() == 7);
     vsag::DefaultAllocator allocator;
     REQUIRE(snapshot_degree(read_mci_snapshot(index.value(), &allocator), 3) == 3);
+}
+
+TEST_CASE("Single HGraph Add extends a 50-member witness over its full candidate pool",
+          "[ut][hgraph][mci][degree_add]") {
+    constexpr int64_t count = 64;
+    constexpr int64_t dim = 4;
+    auto config = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
+    auto params = config["index_param"];
+    params["graph_type"].SetString("nsw");
+    params["build_thread_count"].SetInt(1);
+    params["max_degree"].SetInt(64);
+    params["ef_construction"].SetInt(128);
+    params["mci_mcs"].SetInt(count);
+    params["mci_incremental_clique_max"].SetInt(50);
+    params["mci_alpha"].SetFloat(2.0F);
+
+    std::vector<int64_t> labels(count + 1);
+    std::iota(labels.begin(), labels.end(), 1000);
+    std::vector<float> vectors((count + 1) * dim, 0.0F);
+    const bool identical = GENERATE(false, true);
+    if (not identical) {
+        for (int64_t i = 0; i < count; ++i) {
+            vectors[i * dim] = 1.0F + static_cast<float>(i) / 1024.0F;
+        }
+    }
+    const auto json = config.Dump();
+    auto built = vsag::Factory::CreateIndex("hgraph", json).value();
+    REQUIRE(built->Build(make_dataset(labels, vectors, 0, count, dim)).has_value());
+    std::vector<vsag::InnerIdType> existing(count);
+    std::iota(existing.begin(), existing.end(), 0);
+    // All candidates satisfy the seed and pair
+    // bounds at the first radius, so the sole maximal result has 65 members.
+    // Overlapping two-member cliques would also qualify for a membership-only JOIN.
+    auto index = with_mci_fixture(built, json, {existing, {0, 1}, {1, 2}});
+    REQUIRE(index->Add(make_dataset(labels, vectors, count, 1, dim)).has_value());
+    auto stats = vsag::JsonType::Parse(index->GetStats());
+    REQUIRE(stats["mci_delta_clique_count"].GetInt() == 1);
+    REQUIRE(stats["mci_delta_extra_membership_count"].GetInt() == 0);
+    REQUIRE(stats["mci_delta_clique_membership_count"].GetInt() == 65);
+    vsag::DefaultAllocator allocator;
+    REQUIRE(snapshot_degree(read_mci_snapshot(index, &allocator), count) == count);
+}
+
+TEST_CASE("MCI seeded witness fallback extends over the full radius graph",
+          "[ut][hgraph][mci][degree_add]") {
+    const std::vector<vsag::InnerIdType> order{0, 1, 2, 3, 4, 5};
+    const std::vector<vsag::InnerIdType> preferred{0, 1, 2, 3};
+    const std::vector<float> seed_distances{1, 1, 1, 1, 1, 3};
+    // Greedy chooses the isolated first vertex. The exact witness is {1,2,3}.
+    // Vertex 4 is already covered and must extend it. Vertex 5 is on the strict
+    // seed boundary and must be excluded even though its pair distances fit.
+    auto distance = [](auto a, auto b) { return a == 0 or b == 0 ? 4.0F : 3.0F; };
+    auto result =
+        vsag::mci::FindMaximalSeedNeighbors(order, preferred, seed_distances, 3, 3, distance);
+    std::sort(result.begin(), result.end());
+    const std::vector<vsag::InnerIdType> expected{1, 2, 3, 4};
+    REQUIRE(result == expected);
 }
 
 TEST_CASE("MCI Add stops at unique degree rather than clique count",
@@ -2549,7 +2614,16 @@ TEST_CASE("MCI Add stops at unique degree rather than clique count",
     if (scenario == "marked") {
         REQUIRE(index->Remove({ids[total - 1]}, vsag::RemoveMode::MARK_REMOVE).value() == 1);
     }
-    REQUIRE(index->Add(make_dataset(ids, vectors, total, 1, dim)).has_value());
+    if (scenario == "build" or scenario == "exhausted") {
+        REQUIRE(index->Add(make_dataset(ids, vectors, total, 1, dim)).has_value());
+    } else {
+        // Exercise the batch JOIN policy with one fresh row and one existing label.
+        ids.push_back(ids.front());
+        vectors.resize(vectors.size() + dim);
+        auto added = index->Add(make_dataset(ids, vectors, total, 2, dim));
+        REQUIRE(added.has_value());
+        REQUIRE(added.value() == std::vector<int64_t>{ids.front()});
+    }
     const auto stats = vsag::JsonType::Parse(index->GetStats());
     INFO(stats.Dump());
     REQUIRE(stats["mci_covered_nodes"].GetInt() == total + (scenario == "marked" ? 0 : 1));
@@ -2559,9 +2633,12 @@ TEST_CASE("MCI Add stops at unique degree rather than clique count",
     } else if (scenario == "mixed") {
         REQUIRE(stats["mci_delta_extra_membership_count"].GetInt() == 1);
         REQUIRE(stats["mci_delta_clique_count"].GetInt() > 0);
-    } else if (scenario == "build") {
+    } else if (scenario == "build" or scenario == "exhausted") {
+        // Even when all candidates hit the coverage cap, one geometric clique
+        // covers the seed at the first radius admitting every pair.
         REQUIRE(stats["mci_delta_extra_membership_count"].GetInt() == 0);
-        REQUIRE(stats["mci_delta_clique_count"].GetInt() >= 5);
+        REQUIRE(stats["mci_delta_clique_count"].GetInt() == 1);
+        REQUIRE(stats["mci_delta_clique_membership_count"].GetInt() == total + 1);
     } else if (scenario == "default") {
         REQUIRE(stats["mci_delta_extra_membership_count"].GetInt() == 49);
         REQUIRE(stats["mci_delta_clique_count"].GetInt() == 0);
@@ -2574,16 +2651,12 @@ TEST_CASE("MCI Add stops at unique degree rather than clique count",
         REQUIRE(index->GetNumElements() == total);
         REQUIRE(stats["mci_delta_extra_membership_count"].GetInt() == 7);
         REQUIRE(stats["mci_delta_clique_count"].GetInt() == 0);
-    } else {
-        REQUIRE(stats["mci_delta_clique_count"].GetInt() == 1);
-        REQUIRE(stats["mci_delta_clique_membership_count"].GetInt() == 1);
     }
     vsag::DefaultAllocator allocator;
     auto snapshot = read_mci_snapshot(index, &allocator);
     REQUIRE(snapshot.labels[total] == ids[total]);
     const uint64_t expected = scenario == "default"      ? 50
                               : scenario == "configured" ? 100
-                              : scenario == "exhausted"  ? 0
                               : scenario == "marked"     ? total - 1
                                                          : total;
     REQUIRE(snapshot_degree(snapshot, total) == expected);
@@ -3705,7 +3778,8 @@ TEST_CASE("HGraph MCI automatically compacts after one hundred successful mutati
     params["index_param"]["build_thread_count"].SetInt(1);
     params["index_param"]["support_force_remove"].SetBool(true);
     params["index_param"]["mci_delete_clique_size_threshold"].SetInt(1);
-    auto index = vsag::Factory::CreateIndex("hgraph", params.Dump()).value();
+    FlushFailureAllocator allocator;
+    auto index = vsag::Factory::CreateIndex("hgraph", params.Dump(), &allocator).value();
     REQUIRE(index->Build(make_dataset(ids, vectors, 0, base, dim)).has_value());
     auto add = [&](int64_t offset, int64_t count) {
         auto result = index->Add(make_dataset(ids, vectors, offset, count, dim));
@@ -3717,15 +3791,15 @@ TEST_CASE("HGraph MCI automatically compacts after one hundred successful mutati
         return stats["mci_delta_extra_membership_count"].GetInt() +
                stats["mci_delta_clique_membership_count"].GetInt();
     };
-    SECTION("Add counts vectors across requests and inside large batches, not failed IDs") {
-        add(base, 99);
+    SECTION("Multi-row Add counts successful insertions across requests") {
+        add(base, 98);
         REQUIRE(delta_memberships() > 0);
         REQUIRE(index->Remove({-1, -1}).value() == 0);
         auto duplicate = index->Add(make_dataset(ids, vectors, 0, 1, dim));
         REQUIRE(duplicate.has_value());
         REQUIRE(duplicate.value() == std::vector<int64_t>{ids[0]});
         REQUIRE(delta_memberships() > 0);
-        add(base + 99, 1);
+        add(base + 98, 2);
         REQUIRE(delta_memberships() == 0);
         add(base + 100, 101);
         REQUIRE(delta_memberships() > 0);
@@ -3749,12 +3823,56 @@ TEST_CASE("HGraph MCI automatically compacts after one hundred successful mutati
         add(base, 1);
         REQUIRE(index->Remove(std::vector<int64_t>(ids.begin(), ids.begin() + 200)).value() == 200);
         REQUIRE(delta_memberships() == 0);
-        add(base + 1, 99);
+        add(base + 1, 98);
         REQUIRE(delta_memberships() > 0);
-        add(base + 100, 1);
+        add(base + 99, 2);
         REQUIRE(delta_memberships() == 0);
     }
-    SECTION("Restore preserves delta but starts a new runtime counter") {
+    SECTION("Single Add passes the interval and compacts once when saved") {
+        for (int64_t i = 0; i < 101; ++i) {
+            add(base + i, 1);
+            REQUIRE(delta_memberships() > 0);
+        }
+        const auto memberships = delta_memberships();
+        allocator.remaining = 0;
+        const auto failed_snapshot = index->Serialize();
+        allocator.remaining = -1;
+        REQUIRE_FALSE(failed_snapshot.has_value());
+        REQUIRE(delta_memberships() == memberships);
+        auto bytes = index->Serialize();
+        REQUIRE(bytes.has_value());
+        REQUIRE(delta_memberships() == 0);
+        // Saving a mutable index starts a new interval for subsequent batch writes to it.
+        add(base + 101, 98);
+        REQUIRE(delta_memberships() > 0);
+        add(base + 199, 2);
+        REQUIRE(delta_memberships() == 0);
+        auto restored = vsag::Factory::CreateIndex("hgraph", params.Dump()).value();
+        REQUIRE(restored->Deserialize(bytes.value()).has_value());
+        index = restored;
+        REQUIRE(delta_memberships() == 0);
+        REQUIRE(index->GetNumElements() == base + 101);
+        add(base + 101, 1);
+        REQUIRE(delta_memberships() > 0);
+    }
+    SECTION("Freezing materializes pending single Adds before lock-free searches") {
+        add(base, 1);
+        REQUIRE(delta_memberships() > 0);
+        REQUIRE(index->SetImmutable().has_value());
+        REQUIRE(delta_memberships() == 0);
+        auto filter = std::make_shared<HalfRatioAllValidFilter>(ids);
+        auto result =
+            index->KnnSearch(make_dataset(ids, vectors, base, 1, dim),
+                             1,
+                             R"({"hgraph":{"ef_search":64,"use_mci":true,"search_no_lock":true,
+                "mci_seed_ratio":100,"hgraph_valid_ratio_threshold":1}})",
+                             filter);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+        REQUIRE(index->Serialize().has_value());
+        REQUIRE(delta_memberships() == 0);
+    }
+    SECTION("Restore preserves multi-row delta but starts a new runtime counter") {
         add(base, 99);
         auto bytes = index->Serialize();
         REQUIRE(bytes.has_value());
@@ -3770,9 +3888,9 @@ TEST_CASE("HGraph MCI automatically compacts after one hundred successful mutati
         add(base, 99);
         REQUIRE(index->Remove(ids[0], vsag::RemoveMode::FORCE_REMOVE).value() == 1);
         REQUIRE(delta_memberships() == 0);
-        add(base + 99, 99);
+        add(base + 99, 98);
         REQUIRE(delta_memberships() > 0);
-        add(base + 198, 1);
+        add(base + 197, 2);
         REQUIRE(delta_memberships() == 0);
     }
     std::vector<int64_t> live;
@@ -3835,7 +3953,7 @@ TEST_CASE("HGraph automatic MCI compaction retries allocation failure after Add 
     params["index_param"]["build_thread_count"].SetInt(1);
     auto index = vsag::Factory::CreateIndex("hgraph", params.Dump(), &allocator).value();
     REQUIRE(index->Build(make_dataset(ids, vectors, 0, base, dim)).has_value());
-    REQUIRE(index->Add(make_dataset(ids, vectors, base, 99, dim)).has_value());
+    REQUIRE(index->Add(make_dataset(ids, vectors, base, remove ? 99 : 98, dim)).has_value());
     // The replacement inverse CSR allocates exactly total + 1 offsets. Arm just this
     // allocation size to distinguish compaction from graph insertion and local construction.
     allocator.fail_bytes = (base + 100 + (remove ? 0 : 1)) * sizeof(vsag::InnerIdType);
@@ -3844,7 +3962,7 @@ TEST_CASE("HGraph automatic MCI compaction retries allocation failure after Add 
         REQUIRE(removed.has_value());
         REQUIRE(removed.value() == 1);
     } else {
-        auto added = index->Add(make_dataset(ids, vectors, base + 99, 1, dim));
+        auto added = index->Add(make_dataset(ids, vectors, base + 98, 2, dim));
         REQUIRE(added.has_value());
         REQUIRE(added.value().empty());
     }
@@ -3870,11 +3988,11 @@ TEST_CASE("HGraph automatic MCI compaction retries allocation failure after Add 
             REQUIRE(result.value()->GetIds()[i] != ids[0]);
         }
     }
-    REQUIRE(index->Add(make_dataset(ids, vectors, base + (remove ? 99 : 100), 1, dim)).has_value());
+    REQUIRE(index->Remove(ids[1]).value() == 1);
     stats = vsag::JsonType::Parse(index->GetStats());
     REQUIRE(stats["mci_delta_clique_count"].GetInt() == 0);
     REQUIRE(stats["mci_delta_extra_membership_count"].GetInt() == 0);
-    REQUIRE(index->GetNumElements() == expected_live + 1);
+    REQUIRE(index->GetNumElements() == expected_live - 1);
 }
 
 TEST_CASE("Clique flush is atomic on allocation failure", "[ut][hgraph][mci][flush]") {

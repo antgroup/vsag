@@ -28,13 +28,32 @@
 namespace vsag {
 namespace {
 
+template <typename T>
 uint64_t
-nested_vector_memory(const Vector<Vector<InnerIdType>>& values) {
-    uint64_t memory = values.capacity() * sizeof(Vector<InnerIdType>);
-    for (const auto& row : values) {
-        memory += row.capacity() * sizeof(InnerIdType);
+capacity_bytes(const Vector<T>& values) noexcept {
+    return values.capacity() * sizeof(T);
+}
+
+// Account for the actual allocation, including a resize that succeeds before a
+// stream read throws. The row must remain in place until this guard is destroyed.
+struct row_capacity_change {
+    row_capacity_change(uint64_t& bytes, const Vector<InnerIdType>& row)
+        : bytes(bytes), row(row), before(capacity_bytes(row)) {
     }
-    return memory;
+
+    ~row_capacity_change() {
+        bytes = bytes - before + capacity_bytes(row);
+    }
+
+    uint64_t& bytes;
+    const Vector<InnerIdType>& row;
+    const uint64_t before;
+};
+
+void
+append_membership(Vector<InnerIdType>& row, InnerIdType value, uint64_t& row_bytes) {
+    row_capacity_change change(row_bytes, row);
+    row.push_back(value);
 }
 
 void
@@ -48,18 +67,38 @@ write_nested_vector(StreamWriter& writer, const Vector<Vector<InnerIdType>>& val
 void
 read_nested_vector(StreamReader& reader,
                    Vector<Vector<InnerIdType>>& values,
-                   Allocator* allocator) {
+                   Allocator* allocator,
+                   uint64_t& row_bytes) {
     uint64_t size = 0;
     StreamReader::ReadObj(reader, size);
+    for (const auto& row : values) {
+        row_bytes -= capacity_bytes(row);
+    }
     values.clear();
     values.reserve(size);
     for (uint64_t i = 0; i < size; ++i) {
         values.emplace_back(allocator);
+        row_capacity_change change(row_bytes, values.back());
         StreamReader::ReadVector(reader, values.back());
     }
 }
 
 }  // namespace
+
+// Publish the correct total before releasing the write lock, including early
+// returns and partially completed mutations. Updating the fixed outer vectors
+// is constant work; changes to individual row payloads are recorded at the write.
+struct CliqueDataCell::CapacityMutation {
+    explicit CapacityMutation(CliqueDataCell& cell) : cell(cell), lock(cell.mutex_) {
+    }
+
+    ~CapacityMutation() {
+        cell.refresh_memory_usage_unlocked();
+    }
+
+    CliqueDataCell& cell;
+    std::unique_lock<std::shared_mutex> lock;
+};
 
 CliqueDataCell::CliqueDataCell(Allocator* allocator)
     : allocator_(allocator),
@@ -74,11 +113,12 @@ CliqueDataCell::CliqueDataCell(Allocator* allocator)
       retired_cliques_(allocator) {
     p_maxc_.push_back(0);
     p_node_to_cid_.push_back(0);
+    refresh_memory_usage_unlocked();
 }
 
 void
 CliqueDataCell::Clear(uint64_t total) {
-    std::unique_lock<std::shared_mutex> lock(mutex_);
+    CapacityMutation mutation(*this);
     needs_compaction_ = true;
     p_maxc_.clear();
     maxcs_.clear();
@@ -103,7 +143,7 @@ CliqueDataCell::Assign(Vector<InnerIdType>&& p_maxc,
                        Vector<InnerIdType>&& p_node_to_cid,
                        Vector<InnerIdType>&& node_to_cids,
                        uint64_t total) {
-    std::unique_lock<std::shared_mutex> lock(mutex_);
+    CapacityMutation mutation(*this);
     needs_compaction_ = true;
     p_maxc_ = std::move(p_maxc);
     maxcs_ = std::move(maxcs);
@@ -126,8 +166,9 @@ void
 CliqueDataCell::reset_delta_unlocked(uint64_t total) {
     delta_cliques_.clear();
     delta_clique_extra_.clear();
-    delta_clique_extra_.resize(total_clique_count_, Vector<InnerIdType>(allocator_));
     delta_node_to_cids_.clear();
+    delta_row_bytes_ = 0;
+    delta_clique_extra_.resize(total_clique_count_, Vector<InnerIdType>(allocator_));
     delta_node_to_cids_.reserve(total);
     for (uint64_t i = 0; i < total; ++i) {
         delta_node_to_cids_.emplace_back(allocator_);
@@ -136,7 +177,7 @@ CliqueDataCell::reset_delta_unlocked(uint64_t total) {
 
 void
 CliqueDataCell::Flush(uint64_t total) {
-    std::unique_lock<std::shared_mutex> lock(mutex_);
+    CapacityMutation mutation(*this);
     CHECK_ARGUMENT(delta_node_to_cids_.size() == total, "cannot flush an incomplete MCI companion");
     if (needs_compaction_) {
         compact_unlocked(total, nullptr);
@@ -145,7 +186,7 @@ CliqueDataCell::Flush(uint64_t total) {
 
 void
 CliqueDataCell::RemapNodes(const Vector<InnerIdType>& old_to_new, uint64_t total) {
-    std::unique_lock<std::shared_mutex> lock(mutex_);
+    CapacityMutation mutation(*this);
     // Callers commit the deletion batch before moving any slot: CommitDelete sizes inactive_nodes_
     // for the pre-compaction slot space, which is exactly the domain old_to_new is built for.
     CHECK_ARGUMENT(old_to_new.size() == inactive_nodes_.size(), "invalid MCI remap size");
@@ -242,6 +283,7 @@ CliqueDataCell::compact_unlocked(uint64_t total, const Vector<InnerIdType>* old_
     delta_cliques_.swap(new_delta);
     delta_clique_extra_.swap(new_extra);
     delta_node_to_cids_.swap(new_node_delta);
+    delta_row_bytes_ = 0;  // All replacement delta rows are empty.
     retired_cliques_.swap(new_retired);
     total_clique_count_ = count;
     active_clique_count_ = count;
@@ -380,7 +422,7 @@ CliqueDataCell::AppendNodeToClique(InnerIdType node_id,
                                    InnerIdType clique_id,
                                    uint64_t total,
                                    uint64_t max_members) {
-    std::unique_lock<std::shared_mutex> lock(mutex_);
+    CapacityMutation mutation(*this);
     ensure_delta_node_rows_unlocked(total);
     if (clique_id >= total_logical_clique_count_unlocked() or
         node_id >= delta_node_to_cids_.size() or is_node_inactive_unlocked(node_id) or
@@ -404,12 +446,12 @@ CliqueDataCell::AppendNodeToClique(InnerIdType node_id,
     needs_compaction_ = true;
     if (clique_id < total_clique_count_) {
         auto& members = delta_clique_extra_[clique_id];
-        members.push_back(node_id);
+        append_membership(members, node_id, delta_row_bytes_);
     } else {
         auto& members = delta_cliques_[clique_id - total_clique_count_];
-        members.push_back(node_id);
+        append_membership(members, node_id, delta_row_bytes_);
     }
-    node_cliques.push_back(clique_id);
+    append_membership(node_cliques, clique_id, delta_row_bytes_);
     return true;
 }
 
@@ -418,7 +460,7 @@ CliqueDataCell::AppendNewClique(const Vector<InnerIdType>& members, uint64_t tot
     if (members.empty()) {
         return;
     }
-    std::unique_lock<std::shared_mutex> lock(mutex_);
+    CapacityMutation mutation(*this);
     ensure_delta_node_rows_unlocked(total);
     const auto new_clique_id = static_cast<InnerIdType>(total_logical_clique_count_unlocked());
     Vector<InnerIdType> normalized(allocator_);
@@ -439,11 +481,12 @@ CliqueDataCell::AppendNewClique(const Vector<InnerIdType>& members, uint64_t tot
     // Mark before the first append, including writes that may fail partway through allocation.
     needs_compaction_ = true;
     delta_cliques_.push_back(std::move(normalized));
+    delta_row_bytes_ += capacity_bytes(delta_cliques_.back());
     retired_cliques_.push_back(0);
     ++active_clique_count_;
     for (auto node_id : delta_cliques_.back()) {
         // Members are unique and this freshly allocated clique ID cannot occur in old rows.
-        delta_node_to_cids_[node_id].push_back(new_clique_id);
+        append_membership(delta_node_to_cids_[node_id], new_clique_id, delta_row_bytes_);
     }
 }
 
@@ -517,7 +560,7 @@ void
 CliqueDataCell::CommitDelete(const Vector<InnerIdType>& node_ids,
                              const Vector<InnerIdType>& retired_clique_ids,
                              uint64_t total) {
-    std::unique_lock<std::shared_mutex> lock(mutex_);
+    CapacityMutation mutation(*this);
     ensure_delta_node_rows_unlocked(total);
     for (auto node_id : node_ids) {
         if (node_id < inactive_nodes_.size() and inactive_nodes_[node_id] == 0) {
@@ -558,7 +601,7 @@ CliqueDataCell::Deserialize(StreamReader& reader,
     CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
         format_version == 1 or format_version == 2,
         "unsupported clique datacell format version");
-    std::unique_lock<std::shared_mutex> lock(mutex_);
+    CapacityMutation mutation(*this);
     available_total_.store(std::numeric_limits<uint64_t>::max(), std::memory_order_release);
     // Keep failed/partial loads dirty; derive clean state only after validation succeeds.
     needs_compaction_ = true;
@@ -567,9 +610,9 @@ CliqueDataCell::Deserialize(StreamReader& reader,
     StreamReader::ReadVector(reader, p_node_to_cid_);
     StreamReader::ReadVector(reader, node_to_cids_);
     StreamReader::ReadObj(reader, total_clique_count_);
-    read_nested_vector(reader, delta_cliques_, allocator_);
-    read_nested_vector(reader, delta_clique_extra_, allocator_);
-    read_nested_vector(reader, delta_node_to_cids_, allocator_);
+    read_nested_vector(reader, delta_cliques_, allocator_, delta_row_bytes_);
+    read_nested_vector(reader, delta_clique_extra_, allocator_, delta_row_bytes_);
+    read_nested_vector(reader, delta_node_to_cids_, allocator_, delta_row_bytes_);
     const auto base_total = p_node_to_cid_.empty() ? 0 : p_node_to_cid_.size() - 1;
     const auto total = std::max<uint64_t>(base_total, delta_node_to_cids_.size());
     if (expected_total != std::numeric_limits<uint64_t>::max() and total != expected_total) {
@@ -617,16 +660,20 @@ CliqueDataCell::Deserialize(StreamReader& reader,
     available_total_.store(total, std::memory_order_release);
 }
 
+void
+CliqueDataCell::refresh_memory_usage_unlocked() noexcept {
+    memory_usage_bytes_ = sizeof(CliqueDataCell) + capacity_bytes(p_maxc_) +
+                          capacity_bytes(maxcs_) + capacity_bytes(p_node_to_cid_) +
+                          capacity_bytes(node_to_cids_) + capacity_bytes(delta_cliques_) +
+                          capacity_bytes(delta_clique_extra_) +
+                          capacity_bytes(delta_node_to_cids_) + capacity_bytes(inactive_nodes_) +
+                          capacity_bytes(retired_cliques_) + delta_row_bytes_;
+}
+
 uint64_t
 CliqueDataCell::GetMemoryUsage() const {
     auto lock = make_search_read_lock(mutex_);
-    return sizeof(CliqueDataCell) + p_maxc_.capacity() * sizeof(InnerIdType) +
-           maxcs_.capacity() * sizeof(InnerIdType) +
-           p_node_to_cid_.capacity() * sizeof(InnerIdType) +
-           node_to_cids_.capacity() * sizeof(InnerIdType) + nested_vector_memory(delta_cliques_) +
-           nested_vector_memory(delta_clique_extra_) + nested_vector_memory(delta_node_to_cids_) +
-           inactive_nodes_.capacity() * sizeof(uint8_t) +
-           retired_cliques_.capacity() * sizeof(uint8_t);
+    return memory_usage_bytes_;
 }
 
 bool
