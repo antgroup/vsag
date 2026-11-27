@@ -68,8 +68,8 @@ objective. Dataset buffers must remain valid until the synchronous call returns.
 
 `IndexSpace::create_parameter_space` and `search_parameter_space` remain JSON strings because each
 index owns its native parameter schema. An empty `index_spaces` vector selects the built-in HGraph
-and IVF spaces; otherwise arrays and `$range` expressions use the same semantics as the CLI
-contract.
+and IVF spaces; otherwise `$choices` and `$range` expressions use the same semantics as the CLI
+contract, while bare arrays remain native parameter values.
 
 The result contains the loaded `index`, `index_name`, complete concrete `create_parameters`,
 validated `search_parameters`, metrics, artifact path, and the complete report. `metrics` and
@@ -111,8 +111,8 @@ from the dataset and need not be repeated. If provided, they must match the data
       "name": "hgraph",
       "create_params": {
         "index_param": {
-          "base_quantization_type": ["fp32", "sq8_uniform"],
-          "max_degree": [16, 32],
+          "base_quantization_type": {"$choices": ["fp32", "sq8_uniform"]},
+          "max_degree": {"$choices": [16, 32]},
           "ef_construction": 200
         }
       },
@@ -150,13 +150,13 @@ Run it with:
 ./build-release/tools/autotune/autotune request.json
 ```
 
-Every parameter leaf may be a scalar, an array, or a `$range` with `start`, `stop`, and `step`.
-Explicit values are preserved. HGraph `ef_search` additionally accepts an integer `$range` without
-`step`; AutoTune then doubles from `start` until it brackets a passing value and binary-searches
-that interval for the smallest passing value. This assumes that recall does not decrease as
-`ef_search` increases for the fixed configuration. Every evaluated point uses all queries. For
-omitted tuning fields, V1 supplies a small built-in candidate set for HGraph or IVF. If `indexes`
-is omitted, both indexes are evaluated.
+Use `{"$choices": [...]}` for discrete candidates or a `$range` with `start`, `stop`, and `step`.
+Other JSON values, including arrays, remain exact native parameter values. HGraph `ef_search`
+additionally accepts an integer `$range` without `step`; AutoTune then doubles from `start` until it
+brackets a passing value and binary-searches that interval for the smallest passing value. This
+assumes that recall does not decrease as `ef_search` increases for the fixed configuration. Every
+evaluated point uses all queries. For omitted tuning fields, V1 supplies a small built-in candidate
+set for HGraph or IVF. If `indexes` is omitted, both indexes are evaluated.
 
 Candidates with identical concrete create parameters share one build. Each concrete search
 parameter set remains a separate trial. An adaptive `ef_search` range records only the concrete
@@ -175,7 +175,7 @@ Programmatic callers use a separate `SearchRequest` and call `TuneSearch`:
 vsag::autotune::SearchRequest request;
 request.index = existing_index;
 request.workload = {queries, ground_truth, 10, 48};
-request.parameter_space = R"({"hgraph":{"ef_search":[40,80,120]}})";
+request.parameter_space = R"({"hgraph":{"ef_search":{"$choices":[40,80,120]}}})";
 request.constraints = {{vsag::autotune::Metric::RECALL_AT_K, 0.95}};
 request.objective = vsag::autotune::Metric::LATENCY_AVG_MS;
 

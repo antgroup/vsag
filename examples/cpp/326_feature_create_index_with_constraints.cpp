@@ -51,7 +51,7 @@ main() {
     request.index_spaces = {
         {"hgraph",
          R"({"index_param":{"base_quantization_type":"fp32","max_degree":8,"ef_construction":40}})",
-         R"({"hgraph":{"ef_search":[10,20]}})"}};
+         R"({"hgraph":{"ef_search":{"$choices":[10,20]}}})"}};
     request.constraints = {{vsag::autotune::Metric::RECALL_AT_K, 1.0},
                            {vsag::autotune::Metric::INDEX_MEMORY_MB, 1024.0}};
     request.objective = vsag::autotune::Metric::LATENCY_AVG_MS;
