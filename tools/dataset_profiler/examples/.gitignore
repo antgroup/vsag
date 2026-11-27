@@ -1,0 +1,2 @@
+# Generated demo datasets (regenerate with make_toy_datasets.py)
+output/*.hdf5
