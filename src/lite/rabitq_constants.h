@@ -13,4 +13,7 @@ constexpr uint32_t K_ROUNDS = 4;
 constexpr uint32_t K_ENCODE_ROUNDS = 6;
 constexpr float K_ERROR_RATE = 1.9F;
 
+static_assert(K_TOTAL_BITS == K_FILTER_BITS + K_SUPPLEMENT_BITS,
+              "K_TOTAL_BITS must equal K_FILTER_BITS + K_SUPPLEMENT_BITS");
+
 }  // namespace vsag::lite::detail::rabitq
