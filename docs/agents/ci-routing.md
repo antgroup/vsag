@@ -476,8 +476,8 @@ job runners, dependencies, selection and permissions. No workflow generator is n
 - Manual Checks offers full PR/branch profiles and individual ASan, TSan, Python,
   lint, Coverage, compatibility, SIMD, toolchain and performance checks. The actual
   selected jobs appear inside that manual run, not a separately dispatched run.
-- Nightly CI runs complete regression on upstream main at 22:00 Asia/Shanghai daily
-  (`0 14 * * *` UTC), including supplemental x86 work and the final Nightly Summary.
+- Nightly CI runs complete regression on upstream main at 21:17 Asia/Shanghai daily
+  (`17 13 * * *` UTC), including supplemental x86 work and the final Nightly Summary.
   The workflow filename remains `daily_test.yml`; manual regression is available
   through that entry. The two performance jobs also support the read-only
   `nightly-performance.yml` reusable workflow used by Manual Checks. Runtime
@@ -750,7 +750,7 @@ CPU-core consumption. The initial cutoff is an operating target, not a guarantee
 against GitHub capacity delays. No separate Weekly full rerun is introduced: the
 seven-day planned union still needs execution evidence, and release-only scope
 remains a separate obligation. Scheduled regression uses the same checked execution
-and reporting path as manual regression. The intended 22:00–08:00 window may shift
+and reporting path as manual regression. The intended 21:17–07:17 window may shift
 when GitHub delays dispatch; the ten-hour allowance is measured from attempt start.
 
 Daily diagnostic identity (source SHA, run ID, attempt, job and job status) is required. Missing identity fails with an explicit diagnostic; optional compiler-cache measurements may be unavailable without failing collection. Full functional inventories must match every configured quarantine exactly; stale or core-targeted rules fail planning instead of silently disappearing.

@@ -426,18 +426,19 @@ class EntryTests(unittest.TestCase):
     def test_nightly_schedule_selects_complete_regression_only(self):
         text = (ROOT / '.github/workflows/daily_test.yml').read_text()
         self.assertEqual(re.findall(r"(?m)^    - cron: ['\"]([^'\"]+)", text),
-                         ['0 14 * * *', '23 3 * * 1'])
+                         ['17 13 * * *', '23 3 * * 1'])
         names = re.findall(r'(?m)^  ([\w-]+):$', text.split('jobs:\n', 1)[1])
         benchmarks = {'performance-benchmarks'}
         regression = set(names) - benchmarks
         aggregate = re.search(r'(?m)^  VSAG_DAILY_AGGREGATE: (.+)$', text)[1]
         for cron, repo, ref, selected in (
-            ('0 14 * * *', 'antgroup/vsag', 'refs/heads/main', regression),
+            ('17 13 * * *', 'antgroup/vsag', 'refs/heads/main', regression),
             ('23 3 * * 1', 'antgroup/vsag', 'refs/heads/main', benchmarks),
             ('01 08 * * 1-5', 'antgroup/vsag', 'refs/heads/main', set()),
             ('0 15 * * *', 'antgroup/vsag', 'refs/heads/main', set()),
-            ('0 14 * * *', 'contributor/vsag', 'refs/heads/main', set()),
-            ('0 14 * * *', 'antgroup/vsag', 'refs/heads/1.1', set()),
+            ('0 14 * * *', 'antgroup/vsag', 'refs/heads/main', set()),
+            ('17 13 * * *', 'contributor/vsag', 'refs/heads/main', set()),
+            ('17 13 * * *', 'antgroup/vsag', 'refs/heads/1.1', set()),
             ('23 3 * * 1', 'contributor/vsag', 'refs/heads/main', set()),
         ):
             with self.subTest(cron=cron, repo=repo, ref=ref):
@@ -509,7 +510,7 @@ class EntryTests(unittest.TestCase):
         self.assertIn('name: daily-job-full-coverage-coverage-0-${{ github.run_id }}', body)
         self.assertNotIn('workflow_run', body)
         trusted = {
-            'github.event_name': 'schedule', 'github.event.schedule': '0 14 * * *',
+            'github.event_name': 'schedule', 'github.event.schedule': '17 13 * * *',
             'github.repository': 'antgroup/vsag', 'github.ref': 'refs/heads/main',
         }
         for summary in ('success', 'failure'):
@@ -528,7 +529,7 @@ class EntryTests(unittest.TestCase):
             self.assertFalse(condition('daily_test.yml', name, {**trusted, key: value}), key)
 
     def test_nightly_summary_is_selected_even_after_upstream_failure(self):
-        values = {'github.event_name': 'schedule', 'github.event.schedule': '0 14 * * *',
+        values = {'github.event_name': 'schedule', 'github.event.schedule': '17 13 * * *',
                   'github.repository': 'antgroup/vsag', 'github.ref': 'refs/heads/main'}
         for result in ('failure', 'cancelled', 'skipped'):
             values['needs.daily-plan.result'] = result
