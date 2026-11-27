@@ -61,7 +61,8 @@ TestIndex::TestKnnSearch(const IndexPtr& index,
                          const TestDatasetPtr& dataset,
                          const std::string& search_param,
                          float expected_recall,
-                         bool expected_success) {
+                         bool expected_success,
+                         const KnnHitCounter& count_knn_hits) {
     fixtures::daily::Phase daily_phase("TestKnnSearch");
     if (not index->CheckFeature(vsag::SUPPORT_KNN_SEARCH)) {
         return 0.0F;
@@ -87,7 +88,8 @@ TestIndex::TestKnnSearch(const IndexPtr& index,
         REQUIRE(res.value()->GetDim() == topk);
         auto result = res.value()->GetIds();
         auto gt = gts->GetIds() + gt_topK * i;
-        auto val = Intersection(gt, gt_topK, result, topk);
+        const auto val = count_knn_hits ? count_knn_hits(i, res.value())
+                                        : Intersection(gt, gt_topK, result, topk);
         cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);
     }
     if (cur_recall <= expected_recall * query_count) {
@@ -268,7 +270,8 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
                             const std::string& search_param,
                             float expected_recall,
                             bool expected_success,
-                            bool support_filter_obj) {
+                            bool support_filter_obj,
+                            const KnnHitCounter& count_knn_hits) {
     fixtures::daily::Phase daily_phase("TestFilterSearch");
     if (not index->CheckFeature(vsag::SUPPORT_KNN_SEARCH_WITH_ID_FILTER)) {
         return;
@@ -329,9 +332,9 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
             const auto hits = Intersection(gt, range_gt_count, range_ids, range_dim);
             range_recall += static_cast<float>(hits) / static_cast<float>(range_gt_count);
         }
-        auto result = res.value()->GetIds();
-        auto val = Intersection(gt, gt_topK, result, topk);
-        cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);
+        const auto hits = count_knn_hits ? count_knn_hits(i, res.value())
+                                         : Intersection(gt, gt_topK, res.value()->GetIds(), topk);
+        cur_recall += static_cast<float>(hits) / static_cast<float>(gt_topK);
     }
     if (cur_recall <= expected_recall * query_count) {
         WARN(fmt::format("cur_result({}) <= expected_recall * query_count({})",
@@ -353,7 +356,8 @@ TestIndex::TestSearchAllocator(const TestIndex::IndexPtr& index,
                                const TestDatasetPtr& dataset,
                                const std::string& search_param,
                                float expected_recall,
-                               bool expected_success) {
+                               bool expected_success,
+                               const KnnHitCounter& count_knn_hits) {
     fixtures::daily::Phase daily_phase("TestSearchAllocator");
     if (not index->CheckFeature(vsag::SUPPORT_KNN_SEARCH)) {
         return;
@@ -418,7 +422,8 @@ TestIndex::TestSearchAllocator(const TestIndex::IndexPtr& index,
         auto result = res.value()->GetIds();
         auto dis = res.value()->GetDistances();
         auto gt = gts->GetIds() + gt_topK * i;
-        auto val = Intersection(gt, gt_topK, result, topk);
+        const auto val = count_knn_hits ? count_knn_hits(i, res.value())
+                                        : Intersection(gt, gt_topK, result, topk);
         cur_recall += static_cast<float>(val) / static_cast<float>(gt_topK);
         allocator.Deallocate((void*)result);
         allocator.Deallocate((void*)dis);

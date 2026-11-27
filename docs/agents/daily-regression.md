@@ -287,8 +287,7 @@ The complete manual replay [43714378490](https://github.com/antgroup/vsag/action
 on #3293 head `af70a508` passed in 7h48m, including all four supplemental x86 shards.
 Scheduling is enabled by the separately reviewed activation change; that replay
 validates its source and selected rotation, not all seven days or later main commits.
-Its 86.29% scoped line coverage remains below the 90% target, and the two exact
-HGraph Duplicate quarantines below remain not validated. A fast individual
+Its 86.29% scoped line coverage remains below the 90% target. A fast individual
 configuration is not proof of whole-night performance. Completed PR CI does not
 substitute for macOS/ARM/full Daily acceptance.
 Multiline DAILY_GENERATE plans include both opening and closing source-line aliases
@@ -320,13 +319,16 @@ validation obligation, not an implied Daily pass.
 
 `daily_matrix.json` may quarantine an exact extension configuration key with its
 case name, reason and tracking issue. Wildcards, ambiguous identity and core
-exclusions are rejected. The known HGraph Duplicate filtered-recall configuration
-is temporarily excluded after repeated failure in runs 42792695081 and 42989404023.
-The existing L2 / 1536-dimensional group contains 15 quantizers; the observed
-failure is in its fp32 path, but the quarantine excludes the entire atomic group,
-not only that assertion. Run 43169422580 also exposed a distinct cosine / 1536-dimensional / 600-row group; the same fp32 filtered-recall failure reproduced on rebased main, including a wider-search diagnostic. That exact atomic group is now separately quarantined. Other configurations and original assertions remain enabled. A dedicated Summary
-section lists quarantines as **not validated**, including when their weekly slot
-is not today's slot. Explicit full-coverage planning ignores this quarantine.
+exclusions are rejected. A dedicated Summary section lists quarantines as
+**not validated**, including when their weekly slot is not today's slot.
+Explicit full-coverage planning ignores quarantines.
+
+The L2 and cosine HGraph Duplicate groups at 1536 dimensions and 600 rows were
+restored after replaying their original seed and supported quantizers. The
+ordinary and filtered KNN reference now includes the appended labels and counts only the
+available slots for exact distance ties. The original recall thresholds are
+preserved. [Issue #3504](https://github.com/antgroup/vsag/issues/3504).
+
 Weekly seeds can change the effective parameter inventory. If the testcase still has
 rotation configurations but an exact quarantined key is absent, the rule is reported
 separately as **inactive / not in this inventory**; no current configuration is excluded
@@ -334,8 +336,8 @@ by that rule and no pass is credited. The rule remains configured and applies ag
 if that exact key returns in a later week. Missing/renamed testcases, malformed rules,
 identity mismatches and rules targeting core configurations still fail planning.
 This does not broaden an exclusion to other configurations of the same testcase.
-Remove the entry after a root-cause fix and a successful targeted replay, tracked
-in #3225. Unexpected test skips, failures or missing planned results still fail.
+Remove an entry after a root-cause fix and a successful targeted replay.
+Unexpected test skips, failures or missing planned results still fail.
 
 Scheduling uses exact configuration/environment observations when available;
 case-level observations are fallback ordering hints for previously unseen tuples.

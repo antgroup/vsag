@@ -188,50 +188,44 @@ TestIndex::TestDuplicateAdd(const TestIndex::IndexPtr& index, const TestDatasetP
     check_func(add_index_2.value());
 }
 
-void
+std::vector<int64_t>
 TestIndex::TestBuildDuplicateIndex(const IndexPtr& index,
                                    const TestDatasetPtr& dataset,
                                    const std::string& duplicate_pos,
                                    bool expect_success) {
     index->Train(dataset->base_);
+    if (duplicate_pos != "prefix" && duplicate_pos != "suffix" && duplicate_pos != "middle") {
+        throw std::invalid_argument("Invalid duplicate position: " + duplicate_pos);
+    }
     if (duplicate_pos == "prefix") {
         auto result = index->Build(dataset->base_);
         REQUIRE(result.has_value() == expect_success);
-        for (int64_t i = dataset->base_->GetNumElements(); i < 2 * dataset->base_->GetNumElements();
-             ++i) {
+    }
+    std::vector<int64_t> first_row_aliases;
+    if (duplicate_pos != "middle") {
+        const auto count = dataset->base_->GetNumElements();
+        first_row_aliases.reserve(count);
+        for (int64_t id = count; id < 2 * count; ++id) {
             auto new_data = vsag::Dataset::Make();
             new_data->NumElements(1)
                 ->Dim(dataset->base_->GetDim())
-                ->Ids(&i)
+                ->Ids(&id)
                 ->SparseVectors(dataset->base_->GetSparseVectors())
                 ->Paths(dataset->base_->GetPaths())
                 ->Float32Vectors(dataset->base_->GetFloat32Vectors())
                 ->Owner(false);
-            auto add_result = index->Add(new_data);
-            REQUIRE(add_result.has_value() == expect_success);
+            auto result = index->Add(new_data);
+            REQUIRE(result.has_value() == expect_success);
+            if (result.has_value() && result.value().empty()) {
+                first_row_aliases.push_back(id);
+            }
         }
-    } else if (duplicate_pos == "suffix") {
-        for (int64_t i = dataset->base_->GetNumElements(); i < 2 * dataset->base_->GetNumElements();
-             ++i) {
-            auto new_data = vsag::Dataset::Make();
-            new_data->NumElements(1)
-                ->Dim(dataset->base_->GetDim())
-                ->Ids(&i)
-                ->SparseVectors(dataset->base_->GetSparseVectors())
-                ->Paths(dataset->base_->GetPaths())
-                ->Float32Vectors(dataset->base_->GetFloat32Vectors())
-                ->Owner(false);
-            auto add_result = index->Add(new_data);
-            REQUIRE(add_result.has_value() == expect_success);
-        }
+    }
+    if (duplicate_pos != "prefix") {
         auto result = index->Add(dataset->base_);
         REQUIRE(result.has_value() == expect_success);
-    } else if (duplicate_pos == "middle") {
-        auto add_result = index->Add(dataset->base_);
-        REQUIRE(add_result.has_value() == expect_success);
-    } else {
-        throw std::invalid_argument("Invalid duplicate position: " + duplicate_pos);
     }
+    return first_row_aliases;
 }
 
 }  // namespace fixtures

@@ -72,6 +72,13 @@ public:
     static std::shared_ptr<TestDataset>
     CreateNanDataset(const std::string& metric_str);
 
+    int64_t
+    CountDenseKnnHits(uint64_t query_index,
+                      const DatasetPtr& result,
+                      const std::string& metric,
+                      const std::vector<int64_t>& first_row_aliases,
+                      bool filtered) const;
+
     DatasetPtr base_{nullptr};          // Base dataset for indexing.
     DatasetPtr query_{nullptr};         // Query dataset for search.
     DatasetPtr ground_truth_{nullptr};  // Ground truth results for knn search.

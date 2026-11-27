@@ -139,7 +139,8 @@ TestIndex::TestConcurrentKnnSearch(const TestIndex::IndexPtr& index,
                                    const TestDatasetPtr& dataset,
                                    const std::string& search_param,
                                    float expected_recall,
-                                   bool expected_success) {
+                                   bool expected_success,
+                                   const KnnHitCounter& count_knn_hits) {
     fixtures::daily::Phase daily_phase("TestConcurrentKnnSearch");
     if (not index->CheckFeature(vsag::SUPPORT_SEARCH_CONCURRENT)) {
         return;
@@ -182,7 +183,8 @@ TestIndex::TestConcurrentKnnSearch(const TestIndex::IndexPtr& index,
         REQUIRE(res.value()->GetDim() == topk);
         auto result = res.value()->GetIds();
         auto gt = gts->GetIds() + gt_topK * id;
-        auto val = Intersection(gt, gt_topK, result, topk);
+        const auto val = count_knn_hits ? count_knn_hits(id, res.value())
+                                        : Intersection(gt, gt_topK, result, topk);
         search_results[id] = static_cast<float>(val) / static_cast<float>(gt_topK);
     }
 
