@@ -192,6 +192,34 @@ truth and defines per-query `recall_at_k` as the intersection of the returned an
 in their first `top_k` entries, divided by `top_k`; the reported value is the average over all
 queries. Ground truth is optional when recall is neither a constraint nor the objective.
 
+Typed HGraph requests may reproduce a filtered workload by providing either one `FilterPtr` or one
+exclusion `BitsetPtr` per query:
+
+```cpp
+request.workload = {queries, filtered_ground_truth, 10, 48};
+request.workload.query_filters = query_filters;
+// Or: request.workload.query_invalid_bitsets = query_invalid_bitsets;
+```
+
+The two vectors are mutually exclusive. An empty vector means that filter form is absent; otherwise
+its size must equal the query count, and a null entry leaves that query unfiltered. A set bit in
+`query_invalid_bitsets` excludes the corresponding external index ID. Bitsets must not be mutated
+during tuning and should contain only IDs from the evaluated index.
+
+Every non-null `FilterPtr` is reused across candidates and may be called concurrently, so it must be
+deterministic, reusable, and thread-safe. Its `ValidRatio()` must represent that query's actual
+selectivity because HGraph uses it to choose search paths. This version uses
+`CheckValid(int64_t)` and rejects `use_extra_info_filter=true`; the ID passed to `CheckValid` is the
+index's external label.
+
+Each query must admit at least `top_k` IDs, and ground truth must be computed using its corresponding
+filter or bitset. The returned parameters must be used with a representative filtered workload of
+the same kind. `TuneIndex` supports the same HGraph workload; when either filter form is present and
+`index_spaces` is omitted, only HGraph candidates are generated. Filters and bitsets are not stored
+in the index, so the caller must still pass the applicable value to each final `KnnSearch`.
+Caller-provided filters are available only through the typed API and are not serialized into CLI
+requests or reports. IVF and Pyramid filtered tuning are not supported in this version.
+
 The CLI's `index_path` field remains an offline adapter: it uses the concrete create parameters to
 create and deserialize an index, then enters the same search-only flow.
 
@@ -203,14 +231,17 @@ unnamed hierarchy. To select different `ef_search` values for different paths, r
 AutoTune request per representative path workload, with the matching ground truth. V1 does not
 aggregate path-specific recommendations into one result.
 
-A complete example is available at
-[`examples/cpp/327_feature_autotune_existing_index.cpp`][existing-index-example].
+The `FilterPtr` example is available at
+[`examples/cpp/327_feature_autotune_existing_index.cpp`][existing-index-example]. For direct
+per-query exclusion bitsets, see
+[`examples/cpp/330_feature_autotune_existing_index_bitset.cpp`][bitset-example].
 For Pyramid path tuning, see
 [`examples/cpp/328_feature_autotune_existing_pyramid.cpp`][pyramid-example].
 It tunes the same Pyramid index separately for 512-vector and 4096-vector leaf subgraphs under the
 same recall target, illustrating why different paths may need different `ef_search` values.
 
 [existing-index-example]: https://github.com/antgroup/vsag/blob/main/examples/cpp/327_feature_autotune_existing_index.cpp
+[bitset-example]: https://github.com/antgroup/vsag/blob/main/examples/cpp/330_feature_autotune_existing_index_bitset.cpp
 [pyramid-example]: https://github.com/antgroup/vsag/blob/main/examples/cpp/328_feature_autotune_existing_pyramid.cpp
 
 ## Metrics
@@ -260,5 +291,6 @@ result.
 ## V1 Boundaries
 
 V1 evaluates one KNN workload and performs a full sweep except for the supported HGraph
-`ef_search` adaptive search. It does not provide filtered or range-search workloads, adaptive query
-sampling, cross-request build cache, or model-based candidate generation.
+`ef_search` adaptive search. The typed API supports per-query ID filters for HGraph; the CLI and
+other index types do not yet support filtered workloads. V1 does not provide range-search
+workloads, adaptive query sampling, cross-request build cache, or model-based candidate generation.
