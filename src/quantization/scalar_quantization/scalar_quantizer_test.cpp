@@ -99,6 +99,38 @@ TEST_CASE("SQ4 Serialize and Deserialize", "[ut][SQ4Quantizer]") {
     }
 }
 
+TEST_CASE("SQ8 nearest encoding uses the existing decoder grid", "[ut][SQ8Quantizer]") {
+    IndexCommonParam common;
+    common.dim_ = 1;
+    common.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    auto param = std::make_shared<ScalarQuantizerParameter<8>>();
+    const bool nearest = GENERATE(false, true);
+    param->round_to_nearest_ = nearest;
+    ScalarQuantizerParameter<8> restored;
+    restored.FromJson(param->ToJson());
+    REQUIRE(restored.round_to_nearest_ == nearest);
+    restored.FromJson(JsonType::Parse(R"({"type":"sq8"})"));
+    REQUIRE_FALSE(restored.round_to_nearest_);
+
+    SQ8Quantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(param, common);
+    const float train[] = {0, 255};
+    const float values[] = {-2, 0.49F, 0.75F, 127.5F, 253.75F, 257};
+    const std::vector<uint8_t> expected = nearest ? std::vector<uint8_t>{0, 0, 1, 128, 254, 255}
+                                                  : std::vector<uint8_t>{0, 0, 0, 127, 253, 255};
+    std::vector<uint8_t> codes(expected.size());
+    REQUIRE(quantizer.Train(train, 2));
+    REQUIRE(quantizer.EncodeBatch(values, codes.data(), expected.size()));
+    REQUIRE(codes == expected);
+    for (uint64_t i = 0; i < expected.size(); ++i) {
+        uint8_t single = 0;
+        float decoded = 0;
+        REQUIRE(quantizer.EncodeOne(values + i, &single));
+        REQUIRE(single == codes[i]);
+        REQUIRE(quantizer.DecodeOne(&single, &decoded));
+        REQUIRE(decoded == static_cast<float>(single));
+    }
+}
+
 TEST_CASE("SQ8 Encode handles NaN delta before uint8 cast", "[ut][SQ8Quantizer]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     SQ8Quantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(2, allocator.get());

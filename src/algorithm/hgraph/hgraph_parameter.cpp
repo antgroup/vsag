@@ -172,11 +172,11 @@ HGraphParameter::FromJson(const JsonType& json) {
 
     if (graph_json.Contains(GRAPH_TYPE_KEY)) {
         graph_type = graph_json[GRAPH_TYPE_KEY].GetString();
-        CHECK_ARGUMENT(graph_type == GRAPH_TYPE_VALUE_NSW or
-                           graph_type == GRAPH_TYPE_VALUE_ODESCENT or
-                           graph_type == GRAPH_TYPE_VALUE_PIPNN,
-                       fmt::format("invalid graph_type: {}", graph_type));
-        if (graph_type == GRAPH_TYPE_VALUE_ODESCENT or graph_type == GRAPH_TYPE_VALUE_PIPNN) {
+        CHECK_ARGUMENT(
+            graph_type == GRAPH_TYPE_VALUE_NSW or graph_type == GRAPH_TYPE_VALUE_ODESCENT or
+                graph_type == GRAPH_TYPE_VALUE_ALPHA_CNG or graph_type == GRAPH_TYPE_VALUE_PIPNN,
+            fmt::format("invalid graph_type: {}", graph_type));
+        if (graph_type != GRAPH_TYPE_VALUE_NSW) {
             odescent_param = std::make_shared<ODescentParameter>();
             odescent_param->FromJson(graph_json);
         }
@@ -191,6 +191,29 @@ HGraphParameter::FromJson(const JsonType& json) {
         graph_json[PIPNN_PARAMETER_ADAPTIVE_PRUNING].GetBool()) {
         CHECK_ARGUMENT(graph_type == GRAPH_TYPE_VALUE_PIPNN,
                        "pipnn_adaptive_pruning requires graph_type=pipnn");
+    }
+
+    if (graph_json.Contains(ALPHA_CNG_TAU) and graph_type != GRAPH_TYPE_VALUE_PIPNN) {
+        CHECK_ARGUMENT(graph_type == GRAPH_TYPE_VALUE_ALPHA_CNG,
+                       "alpha_cng_tau requires graph_type=alpha_cng or pipnn");
+        alpha_cng_tau = graph_json[ALPHA_CNG_TAU].GetFloat();
+        CHECK_ARGUMENT(std::isfinite(alpha_cng_tau) and alpha_cng_tau >= 0,
+                       "alpha_cng_tau must be finite and nonnegative");
+    }
+    if (graph_type == GRAPH_TYPE_VALUE_ALPHA_CNG) {
+        const auto& base = base_codes_param->quantizer_parameter->GetTypeName();
+        const bool sq8_rerank =
+            reorder_source != HGRAPH_REORDER_SOURCE_BASE and precise_codes_param != nullptr and
+            precise_codes_param->quantizer_parameter->GetTypeName() == QUANTIZATION_TYPE_VALUE_SQ8;
+        const bool rabitq_reorder =
+            base == QUANTIZATION_TYPE_VALUE_RABITQ and use_reorder and not rabitq_fused_datacell and
+            (base_codes_param->name == RABITQ_SPLIT_DATA_CELL or sq8_rerank);
+        CHECK_ARGUMENT((base == QUANTIZATION_TYPE_VALUE_FP32 and not use_reorder) or rabitq_reorder,
+                       "alpha_cng supports FP32, RaBitQ split, or RaBitQ with SQ8 reranking");
+        CHECK_ARGUMENT(
+            odescent_param->turn > 0 and odescent_param->block_size > 0 and
+                odescent_param->sample_rate > 0 and odescent_param->sample_rate <= 1,
+            "alpha_cng needs positive seed iterations, block size and sampling rate <= 1");
     }
 
     if (json.Contains(SUPPORT_DUPLICATE)) {
@@ -307,6 +330,11 @@ HGraphParameter::ToJson() const {
     json[REORDER_SOURCE_KEY].SetString(this->reorder_source);
     json[BASE_CODES_KEY].SetJson(this->base_codes_param->ToJson());
     auto graph_json = this->bottom_graph_param->ToJson();
+    if (graph_type == GRAPH_TYPE_VALUE_ALPHA_CNG) {
+        graph_json.UpdateJson(odescent_param->ToJson());
+        graph_json[GRAPH_TYPE_KEY].SetString(graph_type);
+        graph_json[ALPHA_CNG_TAU].SetFloat(alpha_cng_tau);
+    }
     if (this->graph_type == GRAPH_TYPE_VALUE_PIPNN) {
         graph_json[GRAPH_TYPE_KEY].SetString(this->graph_type);
         graph_json.UpdateJson(this->pipnn_param.ToJson());
@@ -371,6 +399,7 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
     CHECK_FIELD_EQ(*this, *p, external_fused_supplement);
     CHECK_FIELD_EQ(*this, *p, pipnn_param.adaptive_pruning);
     if (this->pipnn_param.adaptive_pruning) {
+        CHECK_FIELD_EQ(*this, *p, pipnn_param.alpha_cng_tau);
         CHECK_FIELD_EQ(*this, *p, graph_type);
         CHECK_FIELD_EQ(*this, *p, alpha);
         CHECK_FIELD_EQ(*this, *p, pipnn_param.adaptive_pruning_adjust_step);

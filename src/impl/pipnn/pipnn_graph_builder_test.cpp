@@ -38,6 +38,7 @@
 #include "impl/allocator/safe_allocator.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index_common_param.h"
+#include "pipnn_adaptive_pruning.h"
 #include "pipnn_build_cache.h"
 #include "simd/bf16_simd.h"
 #include "unittest.h"
@@ -238,6 +239,71 @@ TEST_CASE("PiPNN graph builder writes an empty row for one point", "[ut][pipnn]"
     vsag::Vector<vsag::InnerIdType> neighbors(common_param.allocator_.get());
     graph->GetNeighbors(0, neighbors);
     REQUIRE(neighbors.empty());
+}
+
+TEST_CASE("PiPNN Alpha-CNG prunes the reservoir in Euclidean units",
+          "[ut][pipnn][pipnn_alpha_cng]") {
+    const float tau = GENERATE(0.0F, 0.25F);
+    const float step = GENERATE(0.0F, 0.12F);
+    constexpr uint32_t count = 80, dimensions = 8, degree = 8;
+    auto common = MakeCommonParam(dimensions);
+    auto* allocator = common.allocator_.get();
+    vsag::Vector<vsag::InnerIdType> ids(count, allocator);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<std::string> sources;
+    for (auto id : ids) {
+        sources.push_back(std::to_string(id));
+    }
+    auto vectors = MakeVectors(count, dimensions);
+    auto rows = MakeRows(vectors, ids, dimensions, allocator);
+    auto graph = MakeGraph(common, count, degree);
+    vsag::PiPNNGraphBuilderParameter params;
+    params.adaptive_pruning = true;
+    params.alpha_cng_tau = tau;
+    params.alpha = 1.2F;
+    params.adaptive_pruning_adjust_step = step;
+    params.leaf_neighbor_count = 32;
+    std::shared_ptr<vsag::PiPNNBuildCache> cache;
+    vsag::PiPNNGraphBuilder(params, dimensions, common.metric_, allocator)
+        .Build(graph, ids, rows, &sources, nullptr, &cache);
+    REQUIRE(cache != nullptr);
+    auto distance = [&](uint32_t a, uint32_t b) {
+        float sum = 0;
+        for (uint32_t d = 0; d < dimensions; ++d) {
+            float delta = rows[a][d] - rows[b][d];
+            sum += delta * delta;
+        }
+        return std::sqrt(sum);
+    };
+    for (auto source : ids) {
+        vsag::Vector<std::pair<float, uint32_t>> ordered(allocator);
+        for (auto k = cache->offsets[source]; k < cache->offsets[source + 1]; ++k) {
+            auto target = cache->targets[k];
+            ordered.emplace_back(distance(source, target), target);
+        }
+        auto gap = [source](uint32_t id) { return id > source ? id - source : source - id; };
+        std::sort(ordered.begin(), ordered.end(), [&](const auto& a, const auto& b) {
+            return std::make_tuple(a.first, gap(a.second), a.second) <
+                   std::make_tuple(b.first, gap(b.second), b.second);
+        });
+        for (auto& candidate : ordered) {
+            candidate.first = std::max(0.0F, candidate.first - tau);
+        }
+        // Independently apply PiPNN's count-based schedule to the original FP32 rows.
+        auto selected = vsag::select_pipnn_edges_adaptive(
+            ordered,
+            degree,
+            params.alpha,
+            step,
+            [&](uint32_t a, uint32_t b) { return distance(a, b) + tau; },
+            allocator);
+        vsag::Vector<vsag::InnerIdType> expected(allocator), actual(allocator);
+        for (auto position : selected) {
+            expected.push_back(ordered[position].second);
+        }
+        graph->GetNeighbors(source, actual);
+        REQUIRE(actual == expected);
+    }
 }
 
 TEST_CASE("PiPNN adaptive zero step preserves original adjacency", "[ut][pipnn][pipnn_adaptive]") {
@@ -1173,6 +1239,10 @@ TEST_CASE("PiPNN borrowed half builder covers small and normal leaves with subse
     }
     const auto original_codes = codes;
     vsag::PiPNNGraphBuilderParameter parameter;
+    if (metric == vsag::MetricType::METRIC_TYPE_L2SQR && GENERATE(false, true)) {
+        parameter.alpha_cng_tau = 0.02F;
+        parameter.adaptive_pruning = true;
+    }
     parameter.max_leaf_size = partition ? 24 : 128;
     parameter.min_leaf_size = 4;
     parameter.leader_sample_rate = 0.25F;
@@ -1443,7 +1513,7 @@ TEST_CASE("PiPNN half Build rejects unsupported dtype before graph validation",
 
 TEST_CASE("PiPNN final graph reuse matches full pruning with stable graph IDs",
           "[ut][pipnn_cache]") {
-    const auto mode = GENERATE(0, 1, 2, 3);
+    const auto mode = GENERATE(0, 1, 2, 3, 4);
     const auto metric = mode == 1   ? vsag::MetricType::METRIC_TYPE_IP
                         : mode == 2 ? vsag::MetricType::METRIC_TYPE_COSINE
                                     : vsag::MetricType::METRIC_TYPE_L2SQR;
@@ -1463,7 +1533,10 @@ TEST_CASE("PiPNN final graph reuse matches full pruning with stable graph IDs",
     }
     auto original_rows = MakeRows(vectors, original_ids, 8, allocator);
     vsag::PiPNNGraphBuilderParameter parameter;
-    parameter.adaptive_pruning = mode == 3;
+    parameter.adaptive_pruning = mode >= 3;
+    if (mode == 4) {
+        parameter.alpha_cng_tau = 0.02F;
+    }
     parameter.reservoir_size = 32;
     parameter.leaf_neighbor_count = 16;
     parameter.min_leaf_size = 1;

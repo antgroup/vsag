@@ -18,7 +18,7 @@ default.
    layers act as navigation aids, the bottom layer connects every data point to its
    nearest neighbours within a `max_degree` budget. The construction algorithm can be
    NSW-style insertion (`graph_type: "nsw"`, the default), ODescent
-   (`graph_type: "odescent"`), or PiPNN (`graph_type: "pipnn"`).
+   (`graph_type: "odescent"`), PiPNN (`graph_type: "pipnn"`), or α-CNG (`graph_type: "alpha_cng"`).
 2. **Quantization.** The base storage is compressed with a configurable quantizer
    (`base_quantization_type` — `fp32`, `fp16`, `bf16`, `sq8`, `sq8_local`, `sq4_local`, `sq4`, `sq8_uniform`, `sq4_uniform`,
    `pq`, `pqfs`, `rabitq`, `saq`, `tq`). Optionally, a second high-precision copy is kept
@@ -88,7 +88,8 @@ records cross-index defaults and the top-level common fields.
 | `max_degree` | int | `64` | Maximum out-degree per graph node |
 | `ef_construction` | int | `400` | Candidate list size during build (higher = better recall, slower build) |
 | `alpha` | float | `1.0` | Final robust-pruning factor; PiPNN requires a finite value at least `1.0`. |
-| `graph_type` | string | `"nsw"` | Graph algorithm: `nsw`, `odescent`, or `pipnn` |
+| `graph_type` | string | `"nsw"` | Graph algorithm: `nsw`, `odescent`, `pipnn`, or `alpha_cng` |
+| `alpha_cng_tau` | float | `0.0` for `alpha_cng`; omitted for `pipnn` | Nonnegative Euclidean pruning margin. On PiPNN, supplying this field selects Alpha-CNG final pruning. |
 | `pipnn_max_leaf_size` | int | `1024` | Maximum partition leaf size. Larger leaves increase candidate coverage and leaf distance work. |
 | `pipnn_min_leaf_size` | int | `64` | Target used when merging undersized leaves. |
 | `pipnn_leader_sample_rate` | float | `0.005` | Fraction sampled as partition leaders; each partition uses at least `2` and at most `1000` leaders, bounded by its point count. |
@@ -102,7 +103,7 @@ records cross-index defaults and the top-level common fields.
 | `label_remap_type` | string | `"pg"` | Label-to-inner-ID map implementation: `"pg"` or `"robin"`. Keep the same value when restoring or combining compatible indexes. |
 | `use_reorder` | bool | `false` | Keep a high-precision copy and re-rank after the coarse search |
 | `reorder_source` | string | `"precise"` | Reorder from `"precise"` codes or directly from `"base"` codes. RaBitQ x+y split, including `tq_chain: "mrle, rabitq"`, sets `"base"` automatically. |
-| `precise_quantization_type` | string | `"fp32"` | Quantizer used for reordering (takes effect only with `use_reorder: true`) |
+| `precise_quantization_type` | string | `"fp32"` | Quantizer used for reordering (takes effect only with `use_reorder: true`). With a RaBitQ base and a separate SQ8 reranker, new SQ8 codes use the nearest reconstruction level. Rebuild or re-encode from FP32 to apply this to existing vectors. |
 | `base_pq_dim` | int | `1` | Number of PQ subspaces. When using `pq` / `pqfs`, set this explicitly instead of relying on the default. Must not exceed `dim` in a way the quantizer rejects. |
 | `mrle_dim` | int | `0` | Output dimension for an MRLE transform in `tq_chain`; allowed range `[0, dim]`, where `0` means the input dimension. |
 | `fast_encode_rabitq` | bool | `true` | Use the fast multi-bit RaBitQ encoder; set to `false` for the previous exact encoder. |
@@ -192,6 +193,24 @@ the reverse adjacency approximately doubles edge storage.
 `"robin"` selects the alternate robin-map implementation. Benchmark the target ID distribution
 before changing it.
 
+### Alpha-CNG construction
+
+Alpha-CNG builds the bottom layer from dense FP32 L2 input. It supports FP32 storage, ordinary
+RaBitQ split with reranking, and a RaBitQ base with a separate SQ8 reranker. Candidate collection
+and Euclidean pruning use the original input vectors. It searches an
+unpruned 200-neighbor ODescent seed from the point nearest the centroid (beam width 60, up to
+500 visited candidates per row). Forward selection and overflowing reverse lists use HGraph's
+adaptive α selector with the Alpha-CNG Euclidean margin. The first pass uses `alpha` (default
+1.0). Its accepted and rejected counts determine whether to relax or tighten the threshold using
+`adaptive_pruning_adjust_step` (default 0.06). A zero step uses a single pass.
+Bulk Alpha-CNG applies this policy automatically. The `adaptive_pruning` and
+`adaptive_pruning_apply_to_reverse` flags control subsequent HGraph insertions.
+The builder merges reverse edges before pruning and repairs
+reachability from the HGraph entry. The upper layers and query algorithm are standard HGraph.
+Later incremental inserts use HGraph insertion. Set `alpha_cng_tau` explicitly for the dataset;
+the GIST experiment uses 0.02. Seed iterations and sampling use `graph_iter_turn` and
+`neighbor_sample_rate`.
+
 ### PiPNN build boundary
 
 Set `graph_type: "pipnn"` to use [PiPNN](https://arxiv.org/abs/2602.21247) for the initial,
@@ -225,6 +244,12 @@ For target degree K, scan the existing ordered reservoir at the configured `alph
 The strict rejection rule remains `alpha * d(selected, candidate) < d(source, candidate)`. PiPNN retains its BF16 source-distance cache, FP32 pairwise squared-L2 calculations, and `(distance, source-ID gap, ID)` order. Unlike the NSW selector's disabled fast path, PiPNN already prunes short reservoirs, so zero adjustment step reproduces its original single-pass adjacency. Greedy selection and the degree cap mean recall need not improve monotonically with alpha.
 
 The policy and step are serialized. Loading an enabled index requires matching policy, base alpha, and step. Missing fields mean disabled. The disabled path preserves legacy behavior. This is experimental: compare build cost and query throughput at matched recall.
+
+#### Alpha-CNG pruning of PiPNN candidates
+
+With `graph_type: "pipnn"`, set `alpha_cng_tau` to apply Alpha-CNG when selecting the bottom-layer neighbors from each PiPNN reservoir. For L2 input, the builder recomputes Euclidean distances on the input rows. A selected neighbor `v` excludes candidate `u` from source `p` when `d(p,u) - tau > alpha * (d(v,u) + tau)`. The initial `alpha` and `pipnn_adaptive_pruning_adjust_step` control the same per-node schedule used by the Alpha-CNG builder.
+
+For example, use `{"graph_type":"pipnn","alpha_cng_tau":0.02,"alpha":1.0,"pipnn_adaptive_pruning_adjust_step":0.06}` under `index_param`. An explicit zero margin selects the Euclidean criterion too. Supplying the margin enables PiPNN adaptive pruning by default. A zero adjustment step selects a single pass. Reload the index with the same margin.
 
 ### Deduplicating vector storage
 

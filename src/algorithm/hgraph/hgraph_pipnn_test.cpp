@@ -310,11 +310,44 @@ TEST_CASE("HGraph PiPNN adaptive policy validates and persists", "[ut][pipnn_ada
     CHECK_THROWS(vsag::HGraph::CheckAndMappingExternalParam(parameter, common));
 }
 
+TEST_CASE("HGraph PiPNN Alpha-CNG parameters persist and validate",
+          "[ut][pipnn_alpha_cng][hgraph]") {
+    const auto common = MakePiPNNCommonParam(8);
+    auto parameter = MakePiPNNHGraphParam();
+    parameter["alpha_cng_tau"].SetFloat(0.0F);
+    auto mapped = std::dynamic_pointer_cast<vsag::HGraphParameter>(
+        vsag::HGraph::CheckAndMappingExternalParam(parameter, common));
+    REQUIRE(mapped->pipnn_param.adaptive_pruning);
+    REQUIRE(mapped->pipnn_param.alpha_cng_tau == 0.0F);
+    auto restored = std::make_shared<vsag::HGraphParameter>();
+    restored->FromJson(mapped->ToJson());
+    REQUIRE(mapped->CheckCompatibility(restored));
+    auto legacy = mapped->ToJson();
+    legacy[vsag::GRAPH_KEY].Erase("alpha_cng_tau");
+    restored->FromJson(legacy);
+    REQUIRE_FALSE(restored->pipnn_param.alpha_cng_tau.has_value());
+    REQUIRE_FALSE(mapped->CheckCompatibility(restored));
+    SECTION("negative margin") {
+        parameter["alpha_cng_tau"].SetFloat(-1.0F);
+    }
+    SECTION("non-numeric margin") {
+        parameter["alpha_cng_tau"].SetString("0.02");
+    }
+    SECTION("disabled adaptive pruning") {
+        parameter["pipnn_adaptive_pruning"].SetBool(false);
+    }
+    CHECK_THROWS(vsag::HGraph::CheckAndMappingExternalParam(parameter, common));
+}
+
 TEST_CASE("HGraph PiPNN adaptive build reload and search", "[ut][pipnn_adaptive][hgraph]") {
     const int threads = GENERATE(1, 4);
+    const bool alpha_cng = GENERATE(false, true);
     const auto common = MakePiPNNCommonParam(8);
     auto parameter = MakePiPNNHGraphParam();
     parameter["build_thread_count"].SetInt(threads);
+    if (alpha_cng) {
+        parameter["alpha_cng_tau"].SetFloat(0.02F);
+    }
     parameter["alpha"].SetFloat(1.2F);
     parameter["pipnn_adaptive_pruning"].SetBool(true);
     parameter["pipnn_max_leaf_size"].SetUint64(24);
@@ -354,6 +387,7 @@ TEST_CASE("HGraph PiPNN adaptive build reload and search", "[ut][pipnn_adaptive]
         }
     }
     SECTION("disabled policy cannot load an adaptive index") {
+        parameter.Erase("alpha_cng_tau");
         parameter["pipnn_adaptive_pruning"].SetBool(false);
     }
     SECTION("different base alpha cannot load an adaptive index") {
@@ -361,6 +395,9 @@ TEST_CASE("HGraph PiPNN adaptive build reload and search", "[ut][pipnn_adaptive]
     }
     SECTION("different adjustment step cannot load an adaptive index") {
         parameter["pipnn_adaptive_pruning_adjust_step"].SetFloat(0.04F);
+    }
+    SECTION("a different Euclidean margin cannot load the index") {
+        parameter["alpha_cng_tau"].SetFloat(0.03F);
     }
     auto incompatible = MakePiPNNIndex(parameter, common);
     CHECK_FALSE(incompatible->Deserialize(binary.value()).has_value());

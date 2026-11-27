@@ -40,13 +40,16 @@
 #include "datacell/graph_interface.h"
 #include "half_vector.h"
 #include "hash_types.h"
+#include "impl/adaptive_pruning.h"
 #include "impl/blas/blas_function.h"
 #include "impl/thread_pool/safe_thread_pool.h"
+#include "inner_string_params.h"
 #include "pipnn_adaptive_pruning.h"
 #include "pipnn_build_cache.h"
 #include "simd/basic_func.h"
 #include "simd/bf16_simd.h"
 #include "simd/fp32_simd.h"
+#include "utils/float_utils.h"
 #include "utils/lock_strategy.h"
 
 namespace vsag {
@@ -412,6 +415,9 @@ private:
 
     [[nodiscard]] float
     pair_distance(uint32_t lhs, uint32_t rhs) const;
+
+    [[nodiscard]] float
+    pruning_l2sqr(uint32_t lhs, uint32_t rhs) const;
 
     [[nodiscard]] float
     distance_from_dot(uint32_t lhs, uint32_t rhs, float dot) const;
@@ -2079,6 +2085,17 @@ PiPNNPipeline::update_farthest(uint32_t source) {
 }
 
 float
+PiPNNPipeline::pruning_l2sqr(uint32_t lhs, uint32_t rhs) const {
+    if (native_half()) {
+        const auto* left = reinterpret_cast<const uint8_t*>(half_row(lhs));
+        const auto* right = reinterpret_cast<const uint8_t*>(half_row(rhs));
+        return data_type_ == DataTypes::DATA_TYPE_FP16 ? FP16ComputeL2Sqr(left, right, dimensions_)
+                                                       : BF16ComputeL2Sqr(left, right, dimensions_);
+    }
+    return FP32ComputeL2Sqr(vector_by_local_id(lhs), vector_by_local_id(rhs), dimensions_);
+}
+
+float
 PiPNNPipeline::pair_distance(uint32_t lhs, uint32_t rhs) const {
     if (native_half()) {
         return distance_from_dot(
@@ -2116,7 +2133,15 @@ PiPNNPipeline::robust_prune(uint32_t source,
     result.clear();
     ordered.reserve(size);
     for (uint16_t index = 0; index < size; ++index) {
-        ordered.emplace_back(distance_from_order_key(row[index].distance), row[index].neighbor);
+        const auto neighbor = row[index].neighbor;
+        float distance = distance_from_order_key(row[index].distance);
+        if (parameter_.alpha_cng_tau.has_value()) {
+            // Reservoir keys are rounded. Rank the surviving candidates on the input vectors.
+            distance = std::sqrt(pruning_l2sqr(source, neighbor));
+            require_argument(IsFiniteFloatBits(distance),
+                             "PiPNN Alpha-CNG requires finite L2 distances");
+        }
+        ordered.emplace_back(distance, neighbor);
     }
     auto comparator = [&](const auto& lhs, const auto& rhs) {
         if (lhs.first != rhs.first) {
@@ -2133,6 +2158,27 @@ PiPNNPipeline::robust_prune(uint32_t source,
     std::sort(ordered.begin(), ordered.end(), comparator);
 
     const uint64_t max_degree = graph_->MaximumDegree();
+    if (parameter_.alpha_cng_tau.has_value()) {
+        AdaptivePruningParameter pruning;
+        pruning.enabled = true;
+        pruning.adjust_step = parameter_.adaptive_pruning_adjust_step;
+        auto edges = select_alpha_cng_edges(
+            size,
+            max_degree,
+            parameter_.alpha,
+            pruning,
+            *parameter_.alpha_cng_tau,
+            [&](uint32_t i) { return ordered[i].first; },
+            [&](uint32_t i, uint32_t j) {
+                return pruning_l2sqr(ordered[i].second, ordered[j].second);
+            },
+            allocator_);
+        result.reserve(edges.size());
+        for (const auto& edge : edges) {
+            result.emplace_back(ids_[ordered[edge.second].second]);
+        }
+        return;
+    }
     // Use the original arithmetic path for a zero step as well. The adaptive
     // callback boundary can otherwise change floating-point rounding at a pruning tie.
     if (parameter_.adaptive_pruning and parameter_.adaptive_pruning_adjust_step != 0.0F) {
@@ -2386,9 +2432,14 @@ PiPNNPipeline::parallel_for(uint64_t total,
 
 void
 PiPNNGraphBuilderParameter::FromJson(const JsonType& json) {
+    alpha_cng_tau.reset();
+    if (json.Contains(ALPHA_CNG_TAU)) {
+        require_argument(json[ALPHA_CNG_TAU].IsNumber(), "alpha_cng_tau must be a number");
+        alpha_cng_tau = json[ALPHA_CNG_TAU].GetFloat();
+    }
     adaptive_pruning = json.Contains(PIPNN_PARAMETER_ADAPTIVE_PRUNING)
                            ? json[PIPNN_PARAMETER_ADAPTIVE_PRUNING].GetBool()
-                           : false;
+                           : alpha_cng_tau.has_value();
     adaptive_pruning_adjust_step =
         json.Contains(PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP)
             ? json[PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP].GetFloat()
@@ -2441,11 +2492,19 @@ PiPNNGraphBuilderParameter::ToJson() const {
     json[PIPNN_PARAMETER_RESERVOIR_SIZE].SetUint64(reservoir_size);
     json[PIPNN_PARAMETER_ADAPTIVE_PRUNING].SetBool(adaptive_pruning);
     json[PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP].SetFloat(adaptive_pruning_adjust_step);
+    if (alpha_cng_tau.has_value()) {
+        json[ALPHA_CNG_TAU].SetFloat(*alpha_cng_tau);
+    }
     return json;
 }
 
 void
 PiPNNGraphBuilderParameter::Validate(uint64_t max_degree) const {
+    if (alpha_cng_tau.has_value()) {
+        require_argument(adaptive_pruning, "PiPNN alpha_cng_tau requires adaptive pruning");
+        require_argument(IsFiniteFloatBits(*alpha_cng_tau) and *alpha_cng_tau >= 0,
+                         "alpha_cng_tau must be finite and nonnegative");
+    }
     require_argument(max_leaf_size >= 2, "PiPNN max_leaf_size must be at least 2");
     require_argument(min_leaf_size > 0, "PiPNN min_leaf_size must be positive");
     require_argument(min_leaf_size <= max_leaf_size,

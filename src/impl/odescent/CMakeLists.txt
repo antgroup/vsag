@@ -15,6 +15,7 @@
 
 
 set (ODESCENT_SRC
+    alpha_cng.cpp
     odescent_graph_builder.cpp
     odescent_graph_builder.h
     odescent_graph_parameter.cpp

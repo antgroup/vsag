@@ -27,7 +27,7 @@ HGraph 读缓存功能测试继续覆盖使用精排编码构图的路径。
 
 1. **构图。** 向量被组织成层级近邻图：上层作为导航入口，底层连接每个数据点到在
    `max_degree` 预算内的最近邻。构图算法可以是 NSW 风格插入（`graph_type: "nsw"`，默认）、
-   ODescent（`graph_type: "odescent"`）或 PiPNN（`graph_type: "pipnn"`）。
+   ODescent（`graph_type: "odescent"`）、PiPNN（`graph_type: "pipnn"`）或 α-CNG（`graph_type: "alpha_cng"`）。
 2. **量化。** 底层存储使用可配置的量化器进行压缩（`base_quantization_type` —
    `fp32`、`fp16`、`bf16`、`sq8`、`sq8_local`、`sq4_local`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`saq`、`tq`）。
    可选地再保留一份高精度副本（`use_reorder: true` 搭配 `precise_quantization_type`），
@@ -75,7 +75,8 @@ auto result = index->KnnSearch(
 | `max_degree` | int | `64` | 图节点最大出度 |
 | `ef_construction` | int | `400` | 构建阶段的候选集大小（越大召回越高，构建越慢） |
 | `alpha` | float | `1.0` | 最终 robust pruning 的系数；PiPNN 要求有限且不小于 `1.0` |
-| `graph_type` | string | `"nsw"` | 构图算法：`nsw`、`odescent` 或 `pipnn` |
+| `graph_type` | string | `"nsw"` | 构图算法：`nsw`、`odescent`、`pipnn` 或 `alpha_cng` |
+| `alpha_cng_tau` | float | `alpha_cng` 为 `0.0`；`pipnn` 默认省略 | 非负欧氏距离余量。在 PiPNN 上显式设置此参数即可启用 Alpha-CNG 最终剪枝。 |
 | `pipnn_max_leaf_size` | int | `1024` | 分区叶子的最大点数；越大候选覆盖可能越高，叶内距离计算也越多 |
 | `pipnn_min_leaf_size` | int | `64` | 合并过小叶子时使用的目标规模 |
 | `pipnn_leader_sample_rate` | float | `0.005` | 分区 leader 的采样比率；每个分区最少使用 `2` 个、最多 `1000` 个 leader，且不超过分区点数 |
@@ -89,7 +90,7 @@ auto result = index->KnnSearch(
 | `label_remap_type` | string | `"pg"` | label 到内部 ID 的 map 实现：`"pg"` 或 `"robin"`；恢复或组合兼容索引时应保持一致 |
 | `use_reorder` | bool | `false` | 是否额外保留一份高精度副本用于精排 |
 | `reorder_source` | string | `"precise"` | 从 `"precise"` 编码或直接从 `"base"` 编码重排；RaBitQ x+y split（包括 `tq_chain: "mrle, rabitq"`）会自动设置为 `"base"` |
-| `precise_quantization_type` | string | `"fp32"` | 精排使用的量化类型（仅在 `use_reorder: true` 时生效） |
+| `precise_quantization_type` | string | `"fp32"` | 精排使用的量化类型（仅在 `use_reorder: true` 时生效）。RaBitQ 粗排配独立 SQ8 精排时，新编码会选择距离最近的重建值。已有向量需从 FP32 重建或重新编码才能应用此改动。 |
 | `base_pq_dim` | int | `1` | PQ 子空间数。使用 `pq` / `pqfs` 时应显式设置，不要依赖默认值；取值须通过量化器的维度校验 |
 | `mrle_dim` | int | `0` | `tq_chain` 中 MRLE 的输出维度，范围 `[0, dim]`；`0` 表示输入维度 |
 | `fast_encode_rabitq` | bool | `true` | 使用多 bit RaBitQ 快速编码；设为 `false` 使用原有精确编码器 |
@@ -175,6 +176,18 @@ auto result = index->KnnSearch(
 `label_remap_type` 只改变内部 label map，不改变用户 ID。默认值为 `"pg"`；
 `"robin"` 选择另一种 robin-map 实现，建议针对实际 ID 分布实测后再调整。
 
+### α-CNG 构建
+
+α-CNG 使用稠密 FP32 L2 输入，支持 FP32 存储、普通 RaBitQ split 重排，以及 RaBitQ 粗排配独立 SQ8 精排。
+候选收集和欧氏剪枝均使用原始输入向量。它从最靠近质心的节点在未剪枝的 200 邻居 ODescent 图上搜索，
+搜索宽度为 60，每个点从已访问节点中取最多 500 个候选。正向选边与反向边超限重剪均采用 HGraph 的动态 α，
+并保留 α-CNG 的欧氏距离余量。首轮使用 `alpha`（默认 1.0），按照接受和拒绝的候选数，以
+`adaptive_pruning_adjust_step`（默认 0.06）为步长放宽或收紧阈值。步长为零时只执行首轮。
+全量构建自动使用该策略，`adaptive_pruning` 和 `adaptive_pruning_apply_to_reverse` 控制后续 HGraph 增量插入。
+批量合并反向边并剪枝后，从 HGraph 入口修复可达性。
+上层路由和查询沿用 HGraph，后续增量插入沿用 HGraph 的插入算法。`alpha_cng_tau` 按数据集设置，
+GIST 实验取 0.02。种子图迭代轮数和采样率由 `graph_iter_turn` 和 `neighbor_sample_rate` 控制。
+
 ### PiPNN 构建边界
 
 设置 `graph_type: "pipnn"` 可让初次全量 `Build` 使用
@@ -205,6 +218,12 @@ PiPNN，并通过查询验证每一份生成的图。
 拒绝条件仍为 `alpha * d(已选邻居, 候选) < d(源点, 候选)`。保留 PiPNN 的 BF16 源点距离缓存、FP32 两点平方 L2 计算和 `(距离, 源点 ID 差, ID)` 排序。PiPNN 原算法已对较短 reservoir 剪枝，因此零步长会复现其原单轮邻接结果。贪心选择和度数上限意味着 Recall 不一定随 alpha 单调增加。
 
 策略和步长会序列化；加载已启用的索引要求策略、基础 alpha、步长一致，旧参数缺失字段按关闭处理。关闭时保留原有行为。该功能属于实验性质，需对比构建开销和匹配召回率时的查询吞吐。
+
+#### 用 Alpha-CNG 筛选 PiPNN 候选邻居
+
+在 `graph_type: "pipnn"` 下设置 `alpha_cng_tau`，即可从每个点的 PiPNN 候选池中按 Alpha-CNG 规则选择底层邻居。对 L2 输入，构建器用输入向量重新计算欧氏距离。设源点为 `p`、已选邻居为 `v`、候选为 `u`，当 `d(p,u) - tau > alpha * (d(v,u) + tau)` 时排除 `u`。初始 `alpha` 与 `pipnn_adaptive_pruning_adjust_step` 控制逐点调节，和 Alpha-CNG 构建器使用同一套动态 α 规则。
+
+例如，在 `index_param` 下设置 `{"graph_type":"pipnn","alpha_cng_tau":0.02,"alpha":1.0,"pipnn_adaptive_pruning_adjust_step":0.06}`。显式设置零余量也会启用欧氏距离判据。提供余量时默认启用 PiPNN 动态剪枝；步长设为零时只执行一轮。重载索引时使用相同的余量。
 
 ### 向量存储去重
 

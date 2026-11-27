@@ -1292,6 +1292,7 @@ private:
 
     ODescentParameterPtr odescent_param_{nullptr};  // ODescent build parameters
     PiPNNGraphBuilderParameter pipnn_param_{};      // PiPNN build parameters
+    float alpha_cng_tau_{0.0F};
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};  // graph algorithm type
 
     CliqueDataCellPtr mci_cliques_{nullptr};  // companion MCI clique datacell

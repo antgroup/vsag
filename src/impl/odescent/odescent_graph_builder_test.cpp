@@ -54,6 +54,68 @@ calculate_overlap(const vsag::Vector<uint32_t>& vec1, const vsag::Vector<uint32_
     return intersection.size();
 }
 
+TEST_CASE("Alpha-CNG Euclidean pruning and lazy reverse edges", "[ut][alpha_cng]") {
+    // K and L cover this entire fixture, so the expected neighbors are independent of seed order.
+    const std::vector<float> vectors = {0,     0, 1,    0, 3,    0.25F, 4,    1, 0.25F, 2,   2, 3,
+                                        3.75F, 4, 0.5F, 4, 1.5F, 0.25F, 2.5F, 2, 1.75F, 4.5F};
+    auto tau = GENERATE(0.0F, 0.4F);
+    const std::vector<std::vector<uint32_t>> expected =
+        tau == 0.0F ? std::vector<std::vector<uint32_t>>{{1, 4},
+                                                         {8, 0, 4},
+                                                         {3, 8, 9, 4},
+                                                         {2, 9, 6},
+                                                         {0, 5, 7, 2},
+                                                         {9, 10, 4, 6},
+                                                         {5, 10, 3},
+                                                         {10, 4},
+                                                         {1, 2, 9, 5},
+                                                         {5, 3, 2, 8},
+                                                         {7, 5, 6}}
+                    : std::vector<std::vector<uint32_t>>{{1, 8, 4, 2},
+                                                         {8, 0, 2, 4},
+                                                         {3, 8, 9},
+                                                         {2, 9, 6},
+                                                         {0, 5, 7, 2},
+                                                         {9, 10, 7, 4},
+                                                         {5, 10, 3},
+                                                         {10, 5, 4},
+                                                         {1, 2, 0, 9},
+                                                         {5, 3, 2, 8},
+                                                         {7, 5, 6, 4}};
+    vsag::IndexCommonParam param;
+    param.dim_ = 2;
+    param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    param.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto* allocator = param.allocator_.get();
+    auto flat = std::make_shared<vsag::FlattenDataCellParameter>();
+    flat->quantizer_parameter = std::make_shared<vsag::FP32QuantizerParameter>();
+    flat->io_parameter = std::make_shared<vsag::MemoryIOParameter>();
+    auto codes = vsag::FlattenInterface::MakeInstance(flat, param);
+    codes->Train(vectors.data(), expected.size());
+    codes->BatchInsertVector(vectors.data(), expected.size());
+    vsag::Vector<uint32_t> ids(allocator);
+    vsag::Vector<const float*> rows(allocator);
+    for (uint32_t i = 0; i < expected.size(); ++i) {
+        ids.push_back(i);
+        rows.push_back(vectors.data() + 2 * i);
+    }
+    auto seed = std::make_shared<vsag::ODescentParameter>();
+    seed->turn = 1;
+    vsag::ODescent builder(seed, codes, allocator, nullptr, false);
+    builder.BuildAlphaCng(ids, rows, 2, 4, 1.0F, 0.06F, tau, 0);
+    auto storage = vsag::GraphInterfaceParameter::GetGraphParameterByJson(
+        vsag::GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT,
+        vsag::JsonType::Parse(R"({"io_params":{"type":"block_memory_io"},"max_degree":4})"));
+    auto graph = vsag::GraphInterface::MakeInstance(storage, param);
+    builder.SaveGraph(graph);
+    for (uint32_t i = 0; i < expected.size(); ++i) {
+        vsag::Vector<uint32_t> actual(allocator);
+        graph->GetNeighbors(i, actual);
+        REQUIRE(std::vector<uint32_t>(actual.begin(), actual.end()) == expected[i]);
+    }
+}
+
 TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
     auto num_vectors = GENERATE(2, 4, 11, 2000);
     uint64_t dim = 128;
