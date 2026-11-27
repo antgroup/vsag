@@ -300,7 +300,7 @@ failed diff operations conservatively select heavy checks and full lint.
 | Layer | Checks |
 | --- | --- |
 | Each main push | ARM64/macOS ASan builds plus fixed platform smoke inventory; Python X86 wheel plus Python 3.12 / NumPy 2 ordinary tests; existing TSan concurrent tests; changed implementation lint, expanded to full lint for headers/build/dependencies/unknown changes |
-| Nightly scheduled/manual | Existing daily/SIMD/bundled-OpenBLAS/concurrent tests plus full X86/ARM64/macOS ASan suites, all numbered examples (including macOS), both Python architectures, full lint, Coverage and historical compatibility |
+| Nightly scheduled/manual | Existing daily/SIMD/bundled-OpenBLAS/concurrent tests plus full X86/ARM64/macOS ASan suites, all numbered examples (including macOS), the Linux x86_64, Linux aarch64 and macOS arm64 installed-wheel matrices, full lint, Coverage and historical compatibility |
 | Version branches and standalone manual workflows | Existing full scope; reusable workflow inputs default to full behavior |
 
 Format and path-selected documentation checks use `main-ci.yml`; image publishing remains separate.

@@ -98,7 +98,8 @@ class DailyWorkflowTests(unittest.TestCase):
         for name in ("daily_build_asan_x86", "daily_build_asan_aarch64", "daily_build_simd",
                      "daily_build_tsan", "full-platform-build-asan-x86",
                      "full-platform-build-asan-macos-arm64", "full-python-build-python-wheel-x86",
-                     "full-python-build-python-wheel-aarch64", "full-lint-clang-tidy-check",
+                     "full-python-build-python-wheel-aarch64", "full-python-build-python-wheel-macos-arm64",
+                     "full-lint-clang-tidy-check",
                      "full-coverage-coverage", "full-compatibility-compatibility"):
             body = job_text(WORKFLOW, name)
             needs = re.search(r"(?m)^    needs:([^\n]*(?:\n      - [^\n]+)*)", body)
