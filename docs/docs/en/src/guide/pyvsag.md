@@ -211,6 +211,82 @@ result_ids, result_dists = index.knn_search(
 `pyvsag.sparse` additionally decodes the sparse HDF5 benchmark layout; see
 [Dataset Format](../resources/dataset_format.md).
 
+## Sparse Term-Weight Helpers
+
+`pyvsag.sparse` includes helpers that turn human-readable `{term: weight}`
+mappings into the CSR arrays accepted by sparse indexes such as SINDI. They
+are pure Python and only require NumPy, which `pyvsag` already uses.
+
+| Helper | Result | Notes |
+| --- | --- | --- |
+| `build_term_vocabulary(documents)` | `dict[str, int]` | Sorts the unique terms lexicographically and assigns IDs from `0`, so the vocabulary is deterministic regardless of dict insertion order or document order. IDs fit in `uint32` at the helper layer; SINDI separately requires `term_id_limit` in `(0, 50_000_000]`, so vocabularies with more than 50,000,000 terms cannot be indexed directly. Empty mappings are rejected with `ValueError` (SINDI cannot store empty rows). |
+| `TermVocabulary(vocabulary)` | reusable mapping | Wraps a vocabulary produced by `build_term_vocabulary` and validates its IDs once. Pass it instead of the raw dict when the same vocabulary converts many queries, so query-time conversion scans the query terms rather than the whole vocabulary. |
+| `term_weights_to_csr(documents, vocabulary)` | `(index_pointers, indices, values)` | Returns `uint32` / `uint32` / `float32` arrays for `index.build(...)` and `index.knn_search(...)`. Rows are ordered by term ID. **Empty mappings are rejected** (raise `ValueError`) because SINDI::add silently drops empty documents and SINDI::KnnSearch rejects empty queries. **Vocabulary IDs must be unique** — duplicate IDs raise `ValueError`. |
+
+Both helpers accept any iterable of mappings, so the same vocabulary can be
+reused for documents and queries. When the same corpus must be converted more
+than once—for example, first by `build_term_vocabulary` and then by
+`term_weights_to_csr`—pass a sequence that supports repeated iteration, not a
+one-shot iterator. Building the vocabulary consumes a one-shot iterator, so
+passing that exhausted iterator to the CSR conversion silently produces no rows.
+A term that is absent from the vocabulary raises `KeyError`; non-string terms,
+non-integer IDs, IDs outside the `uint32` range, and non-finite weights are
+rejected instead of being silently truncated. Weights that do not fit in
+`float32` are also rejected.
+
+```python
+import json
+import numpy as np
+import pyvsag
+
+from pyvsag.sparse import TermVocabulary, build_term_vocabulary, term_weights_to_csr
+
+documents = [
+    {"vector": 1.0, "search": 0.8, "guide": 0.6},
+    {"sparse": 1.0, "retrieval": 0.9, "sindi": 0.8},
+    {"vector": 1.0, "database": 0.7, "index": 0.9},
+]
+ids = np.arange(len(documents), dtype=np.int64)
+
+vocabulary = build_term_vocabulary(documents)
+index_pointers, indices, values = term_weights_to_csr(documents, vocabulary)
+
+index_params = json.dumps({
+    "dtype": "sparse",
+    "metric_type": "ip",
+    "index_param": {"term_id_limit": len(vocabulary), "window_size": 10000},
+})
+index = pyvsag.Index("sindi", index_params)
+index.build(
+    index_pointers=index_pointers,
+    indices=indices,
+    values=values,
+    ids=ids,
+)
+
+# Validate the reuse vocabulary once; every query conversion then costs
+# only the query's terms, not the whole vocabulary.
+query_vocabulary = TermVocabulary(vocabulary)
+
+query = {"vector": 1.0, "search": 0.8}
+query_pointers, query_indices, query_values = term_weights_to_csr(
+    [query], query_vocabulary
+)
+result_ids, result_distances = index.knn_search(
+    query_pointers,
+    query_indices,
+    query_values,
+    2,
+    json.dumps({"sindi": {"n_candidate": 3}}),
+)
+```
+
+For sparse SINDI indexes, `dim` is optional and defaults to `4096`. If supplied,
+it must be a positive integer; it is not a limit on the number of non-zero terms
+per vector or the vocabulary size. `term_id_limit` must cover the largest term
+ID plus one and be in `(0, 50_000_000]`. A complete runnable version is in
+[`examples/python/109_index_sindi.py`](https://github.com/antgroup/vsag/blob/main/examples/python/109_index_sindi.py).
+
 ## Saving & Loading
 
 ```python

@@ -9,6 +9,7 @@ SINDI（**S**parse **IN**verted **D**ense **I**ndex）是 VSAG 面向 **稀疏�
 
 - 源码：`src/algorithm/sindi/`
 - 示例：[`examples/cpp/109_index_sindi.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/109_index_sindi.cpp)
+- Python 示例：[`examples/python/109_index_sindi.py`](https://github.com/antgroup/vsag/blob/main/examples/python/109_index_sindi.py)
 
 ## 工作原理
 
