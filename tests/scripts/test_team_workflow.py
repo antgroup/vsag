@@ -142,7 +142,8 @@ class TeamWorkflowTest(unittest.TestCase):
                                     capture_output=True, text=True, timeout=10)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             events = [json.loads(line) for line in (root / 'listing-events.jsonl').read_text().splitlines()]
-            self.assertEqual([event['filter'] for event in events], ['', '~[daily]'] * 3)
+            self.assertEqual([event['filter'] for event in events],
+                         ['', '~[daily]~[nightly_matrix]'] * 3)
 
     def test_tool_inventory_preflight_signal_reaps_running_listing(self):
         for sig in (signal.SIGINT, signal.SIGTERM):
@@ -456,6 +457,16 @@ class TeamWorkflowTest(unittest.TestCase):
         self.assertNotIn("example_shard", TEAM)
         self.assertIn('Lint changed sources', TEAM)
         self.assertIn('clang-tidy-20', step(TEAM, 'Lint changed sources'))
+
+    def test_pr_test_routes_exclude_only_daily_and_nightly_matrices(self):
+        selection = "~[daily]~[nightly_matrix]"
+        inventory = step(TEAM, "Publish test inventory and shard plan")
+        self.assertIn(f"--filter '{selection}'", inventory)
+        self.assertIn(f"module.listing(binary, '{selection}'", inventory)
+        community = (ROOT / ".github/workflows/pr-ci-community.yml").read_text()
+        for suite in ("unittests", "functests"):
+            self.assertIn(f"./scripts/testing/test_parallel_by_name.sh {suite} '{selection}'",
+                          community)
 
     def test_summary_downloads_only_small_result_artifacts(self):
         summary = job(TEAM, 'summary')
