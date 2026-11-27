@@ -161,7 +161,7 @@ class DailyWorkflowTests(unittest.TestCase):
     def test_nightly_schedule_and_display_name(self):
         text = WORKFLOW.read_text()
         self.assertEqual(re.findall(r'(?m)^    - cron: ["\x27]([^"\x27]+)', text),
-                         ["0 14 * * *", "23 3 * * 1"])
+                         ["17 13 * * *", "23 3 * * 1"])
         self.assertTrue(text.startswith("name: Nightly CI\n"))
         self.assertNotIn("01 08 * * 1-5", text)
 

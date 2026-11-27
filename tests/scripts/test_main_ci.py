@@ -139,9 +139,9 @@ class MainPolicyTest(unittest.TestCase):
         self.assertIn("github.event_name != 'schedule'", text)
         for profile in ('full-platform', 'full-python', 'full-lint', 'full-coverage', 'full-compatibility'):
             self.assertIn('  ' + profile + '-', text)
-        self.assertRegex(text, r"(?m)^    - cron: [\"']0 14 ")
+        self.assertRegex(text, r"(?m)^    - cron: [\"']17 13 ")
         self.assertIn("workflow_dispatch:", text)
-        self.assertIn("github.event.schedule == '0 14 * * *'", text)
+        self.assertIn("github.event.schedule == '17 13 * * *'", text)
 
     def test_main_uses_only_light_contract_and_no_branch_wide_cancellation(self):
         text = (ROOT / ".github/workflows/main-ci.yml").read_text()

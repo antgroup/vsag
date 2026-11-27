@@ -483,7 +483,7 @@ class DailyPlanTests(unittest.TestCase):
         with patch.object(dp, "policy", return_value=policy):
             text = report.markdown(summary)
         self.assertIn("23:00–09:00", text)
-        self.assertNotIn("22:00–08:00", text)
+        self.assertNotIn("21:17–07:17", text)
 
     def test_stage_guard_exports_only_remaining_job_minutes(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -2,7 +2,7 @@
 
 Tracking: [CI layering plan #3225](https://github.com/antgroup/vsag/issues/3225).
 Nightly CI runs the complete regression profile on upstream `main` every day at
-**22:00 Asia/Shanghai (14:00 UTC, `0 14 * * *`)**. Only that cron in the canonical
+**21:17 Asia/Shanghai (13:17 UTC, `17 13 * * *`)**. Only that cron in the canonical
 repository selects regression; the weekly build-performance cron remains separate.
 The former weekday runtime Performance cron is removed; its manual profile remains
 available. Future performance regression on dedicated Team CI resources is separate
@@ -13,15 +13,15 @@ The workflow filename `daily_test.yml`, helper names, `VSAG_DAILY_*` variables,
 The Actions entry is **Nightly CI**, with one final **Nightly Summary**.
 The same run updates the README coverage badge after Summary when its Coverage
 job succeeds. Publication only runs for the upstream main regression schedule.
-GitHub may delay scheduled dispatch: 22:00–08:00 is the intended operating window,
+GitHub may delay scheduled dispatch: 21:17–07:17 is the intended operating window,
 not a guaranteed local-clock finish. The enforced ten-hour allowance starts at the
-actual attempt start; a delayed dispatch can therefore finish after 08:00.
+actual attempt start; a delayed dispatch can therefore finish after 07:17.
 
 ## Budget contract
 
-The operating target is **22:00–08:00 Asia/Shanghai**, or **600 elapsed minutes**
+The operating target is **21:17–07:17 Asia/Shanghai**, or **600 elapsed minutes**
 per attempt: 570 minutes for execution, 30 for cleanup/reporting. Manual runs use
-the same ten-hour duration starting at the attempt's start, without waiting for 22:00.
+the same ten-hour duration starting at the attempt's start, without waiting for 21:17.
 The execution cutoff is frozen separately from the original source/date context,
 so retrying a failed lane gets a fresh execution window while retaining its original
 weekly selection. A local invocation without `window.json` gets a fresh process-local
