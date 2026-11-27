@@ -11,11 +11,13 @@ is computed via **MaxSim** (sum of maximum per-query-token similarities).
 
 ## How it works
 
-1. **Graph-driven token partitioning.** Tokens are encoded in a temporary pool. Sampled real tokens initialize an HGraph; remaining tokens route through the graph, and oversized partitions split dynamically. This is not iterative k-means.
+1. **Graph-driven token partitioning.** Tokens are encoded in a temporary pool. Sampled real tokens initialize an HGraph (batch-built with PiPNN by default); remaining tokens route through the graph, and oversized partitions split dynamically. This is not iterative k-means.
 2. **Representative graph routing.** Each partition selects a real member token as its representative. A quantized HGraph routes each query token to candidate partitions, whose document lists form a coarse-ranked candidate set.
 3. **MaxSim reranking.** The top `rerank_k` candidate documents are read from memory or disk and decoded. MaxSim is evaluated over these stored representations. With lossy quantization this is not exact scoring against the original FP32 input.
 
-Each document enters the coarse candidate set once per query, including when its accumulated coarse score is zero or contributions from query tokens cancel out.
+The nested HGraph uses `graph_type="pipnn"` for one-shot batch construction. This offers faster build times than the default NSW but requires dense floating-point inputs.
+
+Each document reachable through the representative graph enters the coarse candidate set once per query, including when its accumulated coarse score is zero or contributions from query tokens cancel out. On very small datasets or with certain quantizations, PiPNN may form fewer clusters than the document count — undivided documents are still guaranteed unique and valid, but the per-query candidate count may be lower.
 
 The two-stage pipeline trades candidate recall, quantization error, memory, and latency.
 
