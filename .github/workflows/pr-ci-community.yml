@@ -358,10 +358,11 @@ jobs:
           echo leak:libgomp.so >> omp.supp
           export LSAN_OPTIONS=suppressions=omp.supp
           chmod +x ./build/tests/unittests ./build/tools/eval/eval_dataset_test \
-            ./build/tools/autotune/autotune_test
+            ./build/tools/autotune/autotune_test ./build/tools/profile_dataset/profile_dataset_test
           ./scripts/testing/test_parallel_by_name.sh unittests
           ./build/tools/eval/eval_dataset_test -d yes
           ./build/tools/autotune/autotune_test -d yes
+          ./build/tools/profile_dataset/profile_dataset_test -d yes
       - name: Test evaluation query preparation
         run: |
           python3 -m venv "$RUNNER_TEMP/query-split-tests"
