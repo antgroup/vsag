@@ -37,6 +37,9 @@ runs:
         if [[ "$MODE" != default-off ]]; then
           flags+=(-DENABLE_RABITQ_LITE_BACKEND=ON)
         fi
+        if [[ "$MODE" == rabitq-on ]]; then
+          flags+=(-DENABLE_BENCHMARKS=ON)
+        fi
         if [[ "$MODE" == sanitizer ]]; then
           flags+=(-DCMAKE_BUILD_TYPE=Debug
             '-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer'
@@ -58,6 +61,22 @@ runs:
       run: |
         cmake --build build-lite -j2
         ctest --test-dir build-lite --output-on-failure
+    - name: Install benchmark preparation dependencies
+      if: inputs.mode == 'rabitq-on'
+      shell: bash
+      run: |
+        python3 -m venv "$RUNNER_TEMP/lite-benchmark-venv"
+        "$RUNNER_TEMP/lite-benchmark-venv/bin/python" -m pip install numpy==1.26.4 h5py==3.11.0 pyarrow==17.0.0
+        echo "$RUNNER_TEMP/lite-benchmark-venv/bin" >> "$GITHUB_PATH"
+    - name: Benchmark regression tests
+      if: inputs.mode == 'rabitq-on'
+      shell: bash
+      env:
+        VSAG_MIXED_PROBE: ${{ github.workspace }}/build-lite/lite_acceptance_mixed_cpu_acceptance
+      run: |
+        python3 -c 'import numpy, h5py, pyarrow'
+        test -x "$VSAG_MIXED_PROBE"
+        python3 -m unittest discover -s lite/benchmark -p 'test_*.py'
     - name: Lite CI contracts, collector fixtures and 90 percent gate
       if: inputs.mode == 'coverage'
       shell: bash

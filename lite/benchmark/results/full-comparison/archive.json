@@ -1,0 +1,23 @@
+{
+  "bytes": 5747575,
+  "sha256": "a55e94502adee7d423755987c87509a519ea494af419e687e49f436f10ba971f",
+  "members": 45,
+  "full_audit": {
+    "audit": "PASS",
+    "builders": 54,
+    "fresh_loaders": 162,
+    "query_results": 54000,
+    "native_full_reference": "cba340660f2ea479b316d7b73a27f34186b8a1d9",
+    "equal_query_ef": 512
+  },
+  "package_audit": {
+    "audit": "PASS",
+    "payload_reduction_percent": 93.66036187551981,
+    "compressed_reduction_percent": 90.55958154277322,
+    "relocated_smokes": 6,
+    "profile": "Native C++ index application + recursive dynamic ELF runtime + loader + launcher + license texts"
+  },
+  "vectors_included": false,
+  "binaries_included": false,
+  "originals_preserved": true
+}
