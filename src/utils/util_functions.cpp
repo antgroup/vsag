@@ -212,6 +212,10 @@ get_vectors(DataTypes type,
             element_bytes = sizeof(uint16_t);
             *vectors_ptr = const_cast<uint16_t*>(base->GetFloat16Vectors());
             break;
+        case DataTypes::DATA_TYPE_BINARY:
+            *vectors_ptr = const_cast<uint8_t*>(base->GetBinaryVectors());
+            *data_size_ptr = (static_cast<uint64_t>(dim) + 7U) / 8U;
+            return;
         default:
             throw VsagException(ErrorType::INVALID_ARGUMENT,
                                 fmt::format("no support for this type: {}", (int)type));
@@ -236,6 +240,11 @@ set_dataset(DataTypes type,
             ->Dim(dim)
             ->Owner(false)
             ->NumElements(num_element);
+    } else if (type == DataTypes::DATA_TYPE_BINARY) {
+        base->BinaryVectors((uint8_t*)vectors_ptr)
+            ->Dim(dim)
+            ->Owner(false)
+            ->NumElements(num_element);
     } else {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             fmt::format("no support for this type: {}", (int)type));
@@ -247,9 +256,9 @@ sample_train_data(const vsag::DatasetPtr& data,
                   int64_t total_elements,
                   int64_t dim,
                   int64_t train_sample_count,
+                  DataTypes data_type,
                   Allocator* allocator,
-                  std::optional<uint64_t> random_seed,
-                  DataTypes data_type) {
+                  std::optional<uint64_t> random_seed) {
     const int64_t min_train_size = 512;
 
     int64_t sample_count = std::min(total_elements, std::max(min_train_size, train_sample_count));

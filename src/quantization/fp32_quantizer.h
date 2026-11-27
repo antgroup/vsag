@@ -73,7 +73,9 @@ public:
     SerializeImpl(StreamWriter& writer) {};
 
     void
-    DeserializeImpl(StreamReader& reader) {};
+    DeserializeImpl(StreamReader& reader) {
+        this->query_code_size_ = this->code_size_;
+    };
 
     void
     ProcessQueryImpl(const float* query, Computer<FP32Quantizer<metric>>& computer) const;

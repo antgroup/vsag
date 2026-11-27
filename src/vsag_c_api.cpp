@@ -39,6 +39,7 @@
 #include <utility>
 #include <vector>
 
+#include "index/index_dimension_provider.h"
 #include "vsag_c_api_internal.h"
 
 using namespace vsag::c_api;
@@ -553,6 +554,13 @@ vsag_error_t*
 vsag_dataset_set_float16_vectors(vsag_dataset_t* dataset, const uint16_t* vectors) {
     VSAG_REQUIRE(dataset != nullptr, "dataset is NULL");
     dataset->float16_vectors = vectors;
+    return nullptr;
+}
+
+vsag_error_t*
+vsag_dataset_set_binary_vectors(vsag_dataset_t* dataset, const uint8_t* vectors) {
+    VSAG_REQUIRE(dataset != nullptr, "dataset is NULL");
+    dataset->binary_vectors = vectors;
     return nullptr;
 }
 
@@ -1111,6 +1119,18 @@ vsag_index_get_num_elements(const vsag_index_t* index, int64_t* out_num_elements
         VSAG_REQUIRE(index != nullptr, "index is NULL");
         VSAG_REQUIRE(out_num_elements != nullptr, "out_num_elements is NULL");
         *out_num_elements = index->index->GetNumElements();
+        return nullptr;
+    });
+}
+
+vsag_error_t*
+vsag_index_get_dim(const vsag_index_t* index, int64_t* out_dim) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        VSAG_REQUIRE(out_dim != nullptr, "out_dim is NULL");
+        auto provider = std::dynamic_pointer_cast<vsag::IndexDimensionProvider>(index->index);
+        VSAG_REQUIRE(provider != nullptr, "index does not expose a vector dimension");
+        *out_dim = provider->GetDim();
         return nullptr;
     });
 }

@@ -62,6 +62,9 @@
 
 namespace vsag {
 
+void
+ApplyBinaryQuantizationDefaults(const JsonType& user_json, JsonType& inner_json);
+
 class ChunkedManifest;
 struct ComponentManifestEntry;
 class FlattenOptimizedBuildInterface;

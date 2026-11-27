@@ -67,6 +67,22 @@ Dataset::GetInt64Metadata(const std::string& name) const {
 }
 
 DatasetPtr
+Dataset::BinaryVectors(const uint8_t* vectors) {
+    auto* accessor = dynamic_cast<BinaryDatasetAccessor*>(this);
+    if (accessor == nullptr) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "This Dataset implementation does not support binary vectors");
+    }
+    return accessor->SetBinaryVectorsInternal(vectors);
+}
+
+const uint8_t*
+Dataset::GetBinaryVectors() const {
+    const auto* accessor = dynamic_cast<const BinaryDatasetAccessor*>(this);
+    return accessor == nullptr ? nullptr : accessor->GetBinaryVectorsInternal();
+}
+
+DatasetPtr
 Dataset::Valids(const bool* valids) {
     auto* dataset = dynamic_cast<DatasetImpl*>(this);
     if (dataset == nullptr) {
@@ -526,6 +542,7 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
         allocator_->Deallocate(void_ptr(DatasetImpl::GetDistances()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetValids()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetInt8Vectors()));
+        allocator_->Deallocate(void_ptr(DatasetImpl::GetBinaryVectorsInternal()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetFloat16Vectors()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetFloat32Vectors()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetExtraInfos()));
@@ -566,6 +583,7 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
         delete[] DatasetImpl::GetDistances();
         delete[] DatasetImpl::GetValids();
         delete[] DatasetImpl::GetInt8Vectors();
+        delete[] DatasetImpl::GetBinaryVectorsInternal();
         delete[] DatasetImpl::GetFloat16Vectors();
         delete[] DatasetImpl::GetFloat32Vectors();
         delete[] DatasetImpl::GetExtraInfos();
@@ -644,6 +662,10 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
     if (this->GetInt8Vectors() != nullptr) {
         copy_dataset->Int8Vectors(
             allocate_and_copy(this->GetInt8Vectors(), num_elements * dim, allocator_ref));
+    }
+    if (this->GetBinaryVectorsInternal() != nullptr) {
+        copy_dataset->BinaryVectors(allocate_and_copy(
+            this->GetBinaryVectorsInternal(), num_elements * ((dim + 7) / 8), allocator_ref));
     }
     if (this->GetFloat32Vectors() != nullptr) {
         copy_dataset->Float32Vectors(
@@ -984,6 +1006,7 @@ DatasetImpl::Append(const DatasetPtr& other) {
                                        old_num_elements * dim));
     }
     APPEND_DATA(INT8_VECTORS, int8_t*, Int8Vectors, dim);
+    APPEND_DATA(BINARY_VECTORS, uint8_t*, BinaryVectors, (dim + 7) / 8);
     APPEND_DATA(FLOAT16_VECTORS, uint16_t*, Float16Vectors, dim);
     APPEND_DATA(FLOAT32_VECTORS, float*, Float32Vectors, dim);
     APPEND_DATA(VECTOR_COUNTS, uint32_t*, VectorCounts, 1);

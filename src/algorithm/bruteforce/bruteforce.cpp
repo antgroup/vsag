@@ -132,7 +132,7 @@ BruteForce::Train(const DatasetPtr& data) {
         this->train_multi_vector(data);
     } else {
         const auto* vectors = this->get_data(data);
-        CHECK_ARGUMENT(vectors != nullptr, "base.float_vector is nullptr");
+        CHECK_ARGUMENT(vectors != nullptr, "base.vectors is nullptr");
         this->inner_codes_->Train(vectors, data->GetNumElements());
     }
 }
@@ -237,7 +237,7 @@ BruteForce::Add(const DatasetPtr& data) {
     void* vectors = nullptr;
     uint64_t row_bytes = 0;
     get_vectors(data_type_, dim_, data, &vectors, &row_bytes);
-    CHECK_ARGUMENT(vectors != nullptr, "base.float_vector is nullptr");
+    CHECK_ARGUMENT(vectors != nullptr, "base.vectors is nullptr");
     const bool valid_extent =
         static_cast<uint64_t>(total) <=
         static_cast<uint64_t>(std::numeric_limits<std::ptrdiff_t>::max()) / row_bytes;
@@ -726,8 +726,12 @@ BruteForce::make_search_computer(const DatasetPtr& query) const {
         CHECK_ARGUMENT(query_multi_vectors != nullptr, "query.multi_vectors is nullptr");
         return this->inner_codes_->FactoryComputer(&query_multi_vectors[0]);
     }
+    if (data_type_ == DataTypes::DATA_TYPE_BINARY) {
+        this->validate_search_query(query);
+        CHECK_ARGUMENT(query->GetBinaryVectors() != nullptr, "query must contain binary vectors");
+    }
     const auto* vectors = this->get_data(query);
-    CHECK_ARGUMENT(vectors != nullptr, "query.float_vector is nullptr");
+    CHECK_ARGUMENT(vectors != nullptr, "query.vectors is nullptr");
     return this->inner_codes_->FactoryComputer(vectors);
 }
 
@@ -735,6 +739,15 @@ float
 BruteForce::CalcDistanceById(const DatasetPtr& query,
                              int64_t id,
                              bool calculate_precise_distance) const {
+    if (not is_multi_vector_ and data_type_ == DataTypes::DATA_TYPE_BINARY) {
+        CHECK_ARGUMENT(query != nullptr, "distance query must not be null");
+        CHECK_ARGUMENT(query->GetNumElements() == 1, "single-ID distance requires one query");
+        CHECK_ARGUMENT(query->GetDim() == dim_, "distance query dimension mismatch");
+        const auto* vectors = query->GetBinaryVectors();
+        CHECK_ARGUMENT(vectors != nullptr, "distance query must contain binary vectors");
+        return this->CalcDistanceById(
+            reinterpret_cast<const float*>(vectors), id, calculate_precise_distance);
+    }
     if (not is_multi_vector_) {
         return InnerIndexInterface::CalcDistanceById(query, id, calculate_precise_distance);
     }
@@ -1186,7 +1199,7 @@ BruteForce::InitFeatures() {
         }
     } else {
         if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16 and
-            name != QUANTIZATION_TYPE_VALUE_FP16) {
+            name != QUANTIZATION_TYPE_VALUE_FP16 and name != QUANTIZATION_TYPE_VALUE_BINARY) {
             this->index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN);
         } else {
             this->index_feature_list_->SetFeatures(
@@ -1196,8 +1209,9 @@ BruteForce::InitFeatures() {
                  IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID,
                  IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER});
         }
-        if (name == QUANTIZATION_TYPE_VALUE_FP32 and
-            (metric_ != MetricType::METRIC_TYPE_COSINE || this->inner_codes_->HoldMolds())) {
+        if (name == QUANTIZATION_TYPE_VALUE_BINARY or
+            (name == QUANTIZATION_TYPE_VALUE_FP32 and
+             (metric_ != MetricType::METRIC_TYPE_COSINE || this->inner_codes_->HoldMolds()))) {
             this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
         }
     }
@@ -1289,6 +1303,9 @@ BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
     bool is_warp = external_param.Contains(WARP_MODE_MARKER);
 
     if (is_warp) {
+        CHECK_ARGUMENT(common_param.data_type_ != DataTypes::DATA_TYPE_BINARY,
+                       "WARP does not support binary datatype");
+
         // Remove the marker key before mapping (it would cause "invalid config param" error)
         JsonType warp_external_param = external_param;
         warp_external_param.Erase(WARP_MODE_MARKER);
@@ -1327,6 +1344,16 @@ BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
     }
 
     auto inner_json = build_default_brute_force_param(external_param, false);
+    if (common_param.data_type_ == DataTypes::DATA_TYPE_BINARY) {
+        if (not external_param.Contains(BRUTE_FORCE_BASE_QUANTIZATION_TYPE)) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetString(
+                QUANTIZATION_TYPE_VALUE_BINARY);
+        }
+        if (not external_param.Contains(BRUTE_FORCE_PRECISE_QUANTIZATION_TYPE)) {
+            inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetString(
+                QUANTIZATION_TYPE_VALUE_BINARY);
+        }
+    }
     for (const auto& [key, value] : external_param.GetInnerJson()->items()) {
         (void)value;
         auto field = external_param[key];
@@ -1469,7 +1496,7 @@ BruteForce::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_upda
     CHECK_ARGUMENT(base_dim == dim_,
                    fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
     const auto* vectors = this->get_data(new_base);
-    CHECK_ARGUMENT(vectors != nullptr, "base.float_vector is nullptr");
+    CHECK_ARGUMENT(vectors != nullptr, "base.vectors is nullptr");
 
     std::shared_lock add_lock(this->add_mutex_, std::defer_lock);
     std::shared_lock label_lock(this->label_lookup_mutex_, std::defer_lock);
@@ -1482,7 +1509,7 @@ BruteForce::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_upda
 DatasetPtr
 BruteForce::GetNativeDataByIds(const int64_t* ids, int64_t count) const {
     CHECK_ARGUMENT(not is_multi_vector_, "native dense export does not support multi-vectors");
-    if (data_type_ == DataTypes::DATA_TYPE_FLOAT) {
+    if (data_type_ == DataTypes::DATA_TYPE_FLOAT or data_type_ == DataTypes::DATA_TYPE_BINARY) {
         return this->GetDataByIds(ids, count);
     }
     const bool supported_dtype =
