@@ -545,6 +545,14 @@ public:
     mutable std::atomic<uint64_t> identity_version_{0};
     mutable std::atomic<bool> identity_mapping_{false};
 
+    void
+    ResizeSourceIdTable(InnerIdType new_size) {
+        std::scoped_lock slock(storage_mutex_);
+        if (new_size > source_id_table_.size()) {
+            source_id_table_.resize(new_size);
+        }
+    }
+
     bool
     InsertSourceId(InnerIdType inner_id, const std::string& source_id) {
         std::scoped_lock slock(storage_mutex_);

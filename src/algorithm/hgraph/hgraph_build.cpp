@@ -376,6 +376,10 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
     if (use_pipnn) {
         pipnn_vectors.reserve(valid_indices.size());
     }
+    if (source_id != nullptr) {
+        this->label_table_->ResizeSourceIdTable(
+            static_cast<InnerIdType>(current_count + new_ids_count));
+    }
     for (InnerIdType cur_size = 0; cur_size < valid_indices.size(); ++cur_size) {
         auto i = valid_indices[cur_size];
         auto label = labels[i];
@@ -504,10 +508,19 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
             pipnn_builder.Build(bottom_graph_, inner_ids, pipnn_half_vectors, data_type_);
         } else {
             std::vector<std::string> pipnn_sources;
+            const std::string* pipnn_source_ptr = nullptr;
+            uint64_t pipnn_source_count = 0;
             if (source_id != nullptr) {
-                pipnn_sources.reserve(valid_indices.size());
-                for (const auto index : valid_indices) {
-                    pipnn_sources.emplace_back(source_id[index]);
+                if (valid_indices.size() == static_cast<uint64_t>(total)) {
+                    pipnn_source_ptr = source_id;
+                    pipnn_source_count = valid_indices.size();
+                } else {
+                    pipnn_sources.reserve(valid_indices.size());
+                    for (const auto index : valid_indices) {
+                        pipnn_sources.emplace_back(source_id[index]);
+                    }
+                    pipnn_source_ptr = pipnn_sources.data();
+                    pipnn_source_count = pipnn_sources.size();
                 }
             }
             const auto imported_snapshot = cache_->pipnn;
@@ -521,7 +534,8 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
                 pipnn_builder.Build(bottom_graph_,
                                     inner_ids,
                                     pipnn_f32_vectors,
-                                    source_id == nullptr ? nullptr : &pipnn_sources,
+                                    pipnn_source_ptr,
+                                    pipnn_source_count,
                                     imported_snapshot.get(),
                                     &cache_->pipnn);
             } catch (...) {
@@ -529,7 +543,7 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
                 throw;
             }
             refresh_cache_memory();
-            if (imported_snapshot != nullptr) {
+            if (imported_snapshot != nullptr or this->has_loaded_cache()) {
                 build_cache_hit_nodes_ = cache_->pipnn == nullptr ? 0 : cache_->pipnn->reused_rows;
                 build_cache_missed_nodes_ = inner_ids.size() - build_cache_hit_nodes_;
                 build_cache_hit_rate_ = inner_ids.empty()
@@ -1691,7 +1705,13 @@ void
 HGraph::ExportCache(std::ostream& out_stream) const {
     this->check_fused_mutation_supported("ExportCache");
     IOStreamWriter writer(out_stream);
-    this->fullfill_cache();
+    if (this->graph_type_ == GRAPH_TYPE_VALUE_PIPNN and this->cache_ != nullptr and
+        this->cache_->pipnn != nullptr) {
+        this->cache_->source_ids_.clear();
+        this->cache_->neighbors_.clear();
+    } else {
+        this->fullfill_cache();
+    }
     this->cache_->Serialize(writer);
 }
 

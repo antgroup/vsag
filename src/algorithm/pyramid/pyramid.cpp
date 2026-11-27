@@ -24,6 +24,7 @@
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <numeric>
+#include <string_view>
 #include <unordered_set>
 
 #include "algorithm/inner_index_interface.h"
@@ -673,6 +674,9 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
         (raw_vector_ == nullptr or data_num > static_cast<int64_t>(raw_vector_->max_capacity_)) and
         (extra_infos_ == nullptr or data_num > static_cast<int64_t>(extra_infos_->max_capacity_));
     resize(data_num);
+    if (source_ids != nullptr) {
+        label_table_->ResizeSourceIdTable(static_cast<InnerIdType>(data_num));
+    }
     for (InnerIdType inner_id = 0; inner_id < data_num; ++inner_id) {
         const auto input_index = input_indices[inner_id];
         label_table_->Insert(inner_id, data_ids[input_index]);
@@ -812,10 +816,27 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
                     node_rows.emplace_back(rows[id]);
                 }
                 std::vector<std::string> node_sources;
+                const std::string* node_source_ptr = nullptr;
+                uint64_t node_source_count = 0;
                 if (source_ids != nullptr) {
-                    node_sources.reserve(ids.size());
-                    for (const auto id : ids) {
-                        node_sources.emplace_back(source_ids[input_indices[id]]);
+                    bool contiguous_sources = true;
+                    const int64_t first_input = ids.empty() ? 0 : input_indices[ids[0]];
+                    for (uint64_t pos = 0; pos < ids.size(); ++pos) {
+                        if (input_indices[ids[pos]] != first_input + static_cast<int64_t>(pos)) {
+                            contiguous_sources = false;
+                            break;
+                        }
+                    }
+                    if (contiguous_sources) {
+                        node_source_ptr = ids.empty() ? source_ids : source_ids + first_input;
+                        node_source_count = ids.size();
+                    } else {
+                        node_sources.reserve(ids.size());
+                        for (const auto id : ids) {
+                            node_sources.emplace_back(source_ids[input_indices[id]]);
+                        }
+                        node_source_ptr = node_sources.data();
+                        node_source_count = node_sources.size();
                     }
                 }
                 auto& graph_cache = cache_->CreateGraphCache(hname, node_path);
@@ -833,7 +854,8 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
                     pipnn_builder.Build(graph,
                                         ids,
                                         node_rows,
-                                        source_ids == nullptr ? nullptr : &node_sources,
+                                        node_source_ptr,
+                                        node_source_count,
                                         imported_snapshot.get(),
                                         &graph_cache.pipnn);
                 } catch (...) {
@@ -3761,7 +3783,7 @@ Pyramid::fulfill_cache(PyramidBuildCache& cache_snapshot) const {
         return;
     }
 
-    UnorderedSet<std::string> seen_source_ids(allocator_);
+    UnorderedSet<std::string_view> seen_source_ids(allocator_);
     seen_source_ids.reserve(source_id_table.size());
     for (const auto& source_id : source_id_table) {
         if (source_id.empty()) {
@@ -3776,10 +3798,19 @@ Pyramid::fulfill_cache(PyramidBuildCache& cache_snapshot) const {
         }
     }
 
+    const bool fast_pipnn_export = graph_type_ == GRAPH_TYPE_VALUE_PIPNN and not support_duplicate_;
     for (const auto& [hname, h_ptr] : hierarchies_) {
         std::vector<std::pair<std::string, IndexNode*>> graph_nodes;
         collect_graph_nodes(h_ptr->root.get(), std::string{}, graph_nodes);
         for (const auto& [node_path, gnode] : graph_nodes) {
+            if (fast_pipnn_export) {
+                const auto* retained_cache = cache_->GetGraphCache(hname, node_path);
+                if (retained_cache != nullptr and retained_cache->pipnn != nullptr) {
+                    auto& target_cache = cache_snapshot.CreateGraphCache(hname, node_path);
+                    target_cache.pipnn = retained_cache->pipnn;
+                    continue;
+                }
+            }
             std::shared_lock lock(gnode->mutex_);
             auto graph_ids = gnode->get_ids_unlocked();
             UnorderedMap<InnerIdType, InnerIdType> member_owners(allocator_);
@@ -3919,6 +3950,7 @@ Pyramid::build_with_cache(const DatasetPtr& base) {
 
     this->Train(base);
     resize(data_num);
+    label_table_->ResizeSourceIdTable(static_cast<InnerIdType>(data_num));
     for (int64_t i = 0; i < data_num; ++i) {
         auto inner_id = static_cast<InnerIdType>(i);
         // Insert updates both the label remap and label-table total_count_.

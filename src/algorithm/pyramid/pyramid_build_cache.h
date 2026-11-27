@@ -63,7 +63,8 @@ public:
     bool
     Empty() const {
         for (const auto& [key, graph_cache] : graph_caches_) {
-            if (graph_cache != nullptr && not graph_cache->neighbors_.empty()) {
+            if (graph_cache != nullptr &&
+                (not graph_cache->neighbors_.empty() || graph_cache->pipnn != nullptr)) {
                 return false;
             }
         }

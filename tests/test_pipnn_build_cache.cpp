@@ -101,13 +101,21 @@ TEST_CASE("PiPNN public cache round trip", "[ft][pipnn_cache]") {
         cache.Deserialize(reader);
         REQUIRE(cache.pipnn != nullptr);
         REQUIRE(cache.pipnn->source_ids.size() == count);
+        REQUIRE(cache.source_ids_.empty());
+        REQUIRE(cache.neighbors_.empty());
     } else {
         vsag::PyramidBuildCache cache(allocator.get());
         cache.Deserialize(reader);
         const auto* root = cache.GetGraphCache("", "");
         REQUIRE(root != nullptr);
         REQUIRE(root->pipnn != nullptr);
-        REQUIRE(cache.GetGraphCache("", "a/leaf")->pipnn != nullptr);
+        REQUIRE(root->source_ids_.empty());
+        REQUIRE(root->neighbors_.empty());
+        const auto* leaf = cache.GetGraphCache("", "a/leaf");
+        REQUIRE(leaf != nullptr);
+        REQUIRE(leaf->pipnn != nullptr);
+        REQUIRE(leaf->source_ids_.empty());
+        REQUIRE(leaf->neighbors_.empty());
     }
     SECTION("unchanged data reuses all rows") {
         auto warmed = create();
@@ -299,6 +307,24 @@ TEST_CASE("PiPNN public cache round trip", "[ft][pipnn_cache]") {
         REQUIRE(warmed->Build(dataset()).has_value());
         REQUIRE(vsag::JsonType::Parse(warmed->GetStats())["build_cache_hit_rate"].GetFloat() ==
                 1.0F);
+    }
+    SECTION("legacy NSW-only cache falls back cleanly in PiPNN") {
+        auto nsw_config = config;
+        nsw_config["index_param"]["graph_type"].SetString("nsw");
+        auto nsw_index = vsag::Factory::CreateIndex(index_type, nsw_config.Dump());
+        REQUIRE(nsw_index.has_value());
+        REQUIRE(nsw_index.value()->Build(dataset()).has_value());
+        std::stringstream legacy_stream;
+        REQUIRE(nsw_index.value()->ExportCache(legacy_stream).has_value());
+
+        auto warmed = create();
+        REQUIRE(warmed->ImportCache(legacy_stream).has_value());
+        REQUIRE(warmed->GetMemoryUsageDetail().at("pipnn_build_cache") == 0);
+        REQUIRE(warmed->Build(dataset()).has_value());
+        const auto stats = vsag::JsonType::Parse(warmed->GetStats());
+        REQUIRE(stats["build_cache_hit_rate"].GetFloat() == 0.0F);
+        REQUIRE(stats["build_cache_hit_nodes"].GetUint64() == 0);
+        REQUIRE(stats["build_cache_missed_nodes"].GetUint64() == count);
     }
 }
 
