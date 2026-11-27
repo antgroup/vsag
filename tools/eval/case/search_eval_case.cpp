@@ -227,6 +227,20 @@ SearchEvalCase::do_knn_search() {
         return std::make_pair(std::move(query), query_vector);
     };
 
+    auto search = [this, topk](const DatasetPtr& query, uint64_t query_id) {
+        const auto& invalid = this->dataset_ptr_->GetQueryInvalidBitset(query_id);
+        if (invalid != nullptr) {
+            return this->index_->KnnSearch(
+                query, static_cast<int64_t>(topk), config_.search_param, invalid);
+        }
+        const auto& filter = this->dataset_ptr_->GetQueryFilter(query_id);
+        if (filter != nullptr) {
+            return this->index_->KnnSearch(
+                query, static_cast<int64_t>(topk), config_.search_param, filter);
+        }
+        return this->index_->KnnSearch(query, static_cast<int64_t>(topk), config_.search_param);
+    };
+
     bool statistics_collected = false;
     for (auto& monitor : this->monitors_) {
         const bool is_latency_monitor =
@@ -249,8 +263,7 @@ SearchEvalCase::do_knn_search() {
                 auto i = static_cast<uint64_t>(id) % query_count;
                 auto query_and_vector = prepare_query(i);
                 auto& query = query_and_vector.first;
-                auto [result, latency_ms] = MeasureSearch(
-                    [&]() { return this->index_->KnnSearch(query, topk, config_.search_param); });
+                auto [result, latency_ms] = MeasureSearch([&]() { return search(query, i); });
                 if (not result.has_value()) {
                     search_failure.Record(result.error().message);
                     continue;
@@ -279,7 +292,7 @@ SearchEvalCase::do_knn_search() {
             auto query_and_vector = prepare_query(i);
             auto& query = query_and_vector.first;
             const void* query_vector = query_and_vector.second;
-            auto result = this->index_->KnnSearch(query, topk, config_.search_param);
+            auto result = search(query, i);
             if (not result.has_value()) {
                 search_failure.Record(result.error().message);
                 continue;
@@ -311,7 +324,7 @@ SearchEvalCase::do_knn_search() {
             auto i = static_cast<uint64_t>(id) % query_count;
             auto query_and_vector = prepare_query(i);
             auto& query = query_and_vector.first;
-            auto result = this->index_->KnnSearch(query, topk, config_.search_param);
+            auto result = search(query, i);
             if (not result.has_value()) {
                 search_failure.Record(result.error().message);
                 continue;
