@@ -2328,3 +2328,146 @@ TEST_CASE("SINDI V2 timeout triggers is_timeout", "[ut][SINDIV2][timeout]") {
         REQUIRE(range->GetDistances()[i] == normal_range->GetDistances()[i]);
     }
 }
+
+TEST_CASE("SINDIV2 multi host queries", "[ut][SINDIV2][multi_host]") {
+    IndexCommonParam common;
+    common.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    common.metric_ = MetricType::METRIC_TYPE_IP;
+    const bool timed = GENERATE(false, true);
+    auto parameter = std::make_shared<SINDIV2Parameter>();
+    parameter->term_id_limit = 8;
+    parameter->window_size = 10000;
+    parameter->immutable = GENERATE(false, true);
+    parameter->use_reorder = GENERATE(false, true);
+    parameter->term_io_parameter = std::make_shared<MemoryIOParameter>();
+    parameter->rerank_io_parameter = std::make_shared<MemoryBlockIOParameter>();
+    uint32_t term = 1;
+    std::array<float, 4> values{4.0F, 3.0F, 2.0F, 1.0F};
+    std::array<int64_t, 4> labels{10, 20, 30, 40};
+    std::array<std::string, 4> hosts{"a", "b", "c", "a"};
+    constexpr int64_t day = SINDI_SECONDS_PER_DAY;
+    std::array<int64_t, 4> times{day, 2 * day, 2 * day, 0};
+    std::array<SparseVector, 4> vectors{};
+    for (uint64_t i = 0; i < vectors.size(); ++i) {
+        vectors[i] = SparseVector{1, &term, &values[i]};
+    }
+    auto base = Dataset::Make()
+                    ->NumElements(4)
+                    ->SparseVectors(vectors.data())
+                    ->Ids(labels.data())
+                    ->StringMetadata("host", hosts.data())
+                    ->Owner(false);
+    if (timed) {
+        base->Int64Metadata("publish_time_stamp", times.data());
+    }
+    SINDIV2 index(parameter, common);
+
+    REQUIRE(index.Build(base).empty());
+    float weight = 1.0F;
+    SparseVector vector{1, &term, &weight};
+    std::string selection = "a|c|a|unknown";
+    auto query = Dataset::Make()
+                     ->NumElements(1)
+                     ->SparseVectors(&vector)
+                     ->StringMetadata("host", &selection)
+                     ->Owner(false);
+    const auto check = [&](SINDIV2& target, const std::set<int64_t>& expected) {
+        auto result = target.KnnSearch(query, 4, R"({"sindi_v2":{}})", nullptr);
+        std::set<int64_t> actual;
+        for (int64_t i = 0; i < result->GetDim(); ++i) {
+            actual.insert(result->GetIds()[i]);
+        }
+        REQUIRE(actual == expected);
+        REQUIRE(result->GetDim() == static_cast<int64_t>(expected.size()));
+    };
+    check(index, {10, 30, 40});
+    auto filtered =
+        index.KnnSearch(query, 4, R"({"sindi_v2":{}})", std::make_shared<AllowLabelFilter>(30));
+    REQUIRE(filtered->GetDim() == 1);
+    REQUIRE(filtered->GetIds()[0] == 30);
+    int64_t begin = 2 * day;
+    int64_t end = 3 * day;
+    if (timed) {
+        query->Int64Metadata("publish_time_stamp_begin", &begin)
+            ->Int64Metadata("publish_time_stamp_end", &end);
+        check(index, {30});
+    }
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    index.Serialize(writer);
+    stream.seekg(0);
+    SINDIV2 restored(parameter, common);
+    restored.Deserialize(stream);
+    check(restored, timed ? std::set<int64_t>{30} : std::set<int64_t>{10, 30, 40});
+    auto disk_json = parameter->ToJson();
+    disk_json["term_io"].SetJson(JsonType::Parse(R"({"type":"reader_io"})"));
+    auto disk_parameter = std::make_shared<SINDIV2Parameter>();
+    disk_parameter->FromJson(disk_json);
+    SINDIV2 disk(disk_parameter, common);
+    std::stringstream disk_stream(stream.str());
+    disk.Deserialize(disk_stream);
+    check(disk, timed ? std::set<int64_t>{30} : std::set<int64_t>{10, 30, 40});
+    std::stringstream streaming;
+    index.SerializeStreaming(streaming);
+    SINDIV2 streaming_restored(parameter, common);
+    streaming_restored.DeserializeStreaming(streaming);
+    check(streaming_restored, timed ? std::set<int64_t>{30} : std::set<int64_t>{10, 30, 40});
+    selection = "|";
+    check(index, {});
+    selection = "unknown|missing";
+    check(index, {});
+    selection = "a";
+    check(index, timed ? std::set<int64_t>{} : std::set<int64_t>{10, 40});
+    selection = "a|a";
+    check(index, timed ? std::set<int64_t>{} : std::set<int64_t>{10, 40});
+    selection = "|a||c|";
+    check(index, timed ? std::set<int64_t>{30} : std::set<int64_t>{10, 30, 40});
+    selection = R"(["a","c"])";
+    check(index, {});  // The host selector is not a JSON parser.
+    selection = "a/path";
+    check(index, {});  // Slash does not enable parent-prefix matching.
+    query->StringMetadata("host", nullptr);
+    check(index, timed ? std::set<int64_t>{20, 30} : std::set<int64_t>{10, 20, 30, 40});
+}
+
+TEST_CASE("SINDI multi host routes merge intervals across Add batches",
+          "[ut][SINDIV2][multi_host]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    SindiMetadataFilter metadata(allocator.get());
+    const bool timed = GENERATE(false, true);
+    std::array<std::string, 6> hosts{"a", "a", "b", "b", "c", "c"};
+    std::array<int64_t, 6> times{};
+    times.fill(10 * SINDI_SECONDS_PER_DAY);
+    auto base = Dataset::Make()->NumElements(6)->StringMetadata("host", hosts.data())->Owner(false);
+    if (timed) {
+        base->Int64Metadata("publish_time_stamp", times.data());
+    }
+    for (uint32_t batch = 0; batch < 2; ++batch) {
+        auto plan = metadata.PrepareBuild(base, batch * 6, 2);
+        for (uint32_t i = 0; i < 6; ++i) {
+            plan.RecordSuccess(i);
+        }
+        metadata.CommitBuild(std::move(plan), batch * 6, batch * 6 + 6);
+    }
+    std::string selection = "c|a|a";
+    auto query = Dataset::Make()->NumElements(1)->StringMetadata("host", &selection)->Owner(false);
+    const auto route = metadata.Classify(query, 2);
+    REQUIRE(route.kind == SindiHostRouteKind::WINDOW);
+    FilterPtr filter;
+    metadata.ApplyFilter(route, filter);
+    REQUIRE(filter != nullptr);
+    REQUIRE_FALSE(filter->CheckValid(-1));
+    REQUIRE_FALSE(filter->CheckValid(12));
+    REQUIRE_FALSE(filter->CheckValid(std::numeric_limits<int64_t>::max()));
+
+    for (int64_t id = 0; id < 12; ++id) {
+        REQUIRE(filter->CheckValid(id) == (id % 6 < 2 or id % 6 >= 4));
+    }
+    REQUIRE(metadata.NextMatchingWindow(route, 2, 1, 5) == 2);
+    REQUIRE(metadata.NextMatchingWindow(route, 2, 4, 5) == 5);
+    REQUIRE_FALSE(metadata.RequiresFullTermScan(route, 0, 2));
+    REQUIRE(metadata.RequiresFullTermScan(route, 0, 4));
+    selection = "a|b|c";
+    const auto all = metadata.Classify(query, 2);
+    REQUIRE_FALSE(metadata.RequiresFullTermScan(all, 0, 4));
+}

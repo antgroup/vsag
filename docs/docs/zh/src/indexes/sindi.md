@@ -376,3 +376,15 @@ granted=1和`sindi_resources_ready=false`。降级结果以显式P1为对照，�
 
 
 每个独立 SearchResource 在构造期间同步创建自己的 worker 组。存在多个索引组的宿主应显式设置 `max_background_workers`，并按需复用共享 SearchResource；VSAG 不跨独立资源组实施进程级线程总预算。
+
+### 多 host KNN 查询
+
+已有字符串 metadata `host` 支持用 `|` 分隔多个精确 host 值。单 host 就是一个元素的集合，与多 host 共用 OR 过滤流程，再与日期条件及用户 Filter 取交集。
+
+```cpp
+std::string host = "a.com|b.com|c.com";
+query->StringMetadata("host", &host);
+// 查询期间保持 host 有效，遵守 Dataset 原有所有权规则。
+```
+
+与 Pyramid 旧式多路径查询字符串一致，`|` 为保留分隔符，不支持转义。非空选择串中的空项被忽略，重复项去重，未知 host 忽略；例如 `|` 不匹配任何 host。空格按字面保留，不自动裁剪。未设置或空指针不限制 host，单独的空字符串保留原有缺失 host 语义。`/` 仍是字面字符，不表示匹配子路径。构建数据仍为每条文档提供一个字面的 host。Dataset 接口、所有权、复制及持久化格式均保持原样，已有索引无需重建。
