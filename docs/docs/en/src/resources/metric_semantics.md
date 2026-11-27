@@ -1,6 +1,6 @@
 # Metric Semantics in VSAG
 
-This page explains how VSAG treats `l2`, `ip`, and `cosine` in practice.
+This page explains how VSAG treats `l2`, `ip`, `cosine`, and `hamming` in practice.
 
 > Warning: VSAG's internal metric implementations are optimized for performance
 > and consistency. Their behavior may differ from the textbook mathematical
@@ -36,18 +36,28 @@ Because the implementation may normalize or cache norms, the returned value is
 intended to behave like a distance, but floating-point error can still push it
 slightly outside the ideal mathematical range.
 
+## `hamming`
+
+- Used only with `dtype: binary`: bit-packed vectors whose `dim` counts bits.
+- The distance is `popcount(a XOR b)`, the number of differing bits among the first `dim`
+  bits. Padding bits of the last byte never change it.
+- The value is an exact integer returned as a `float`; range search includes a vector when
+  its distance is less than or equal to the radius. See
+  [Binary Vectors and Hamming Distance](../guide/binary_vectors.md).
+
 ## Return Value Range
 
 - `l2`: `0` to `+infinity`
 - `ip`: unbounded; values may be negative when `inner_product > 1`
 - `cosine`: ideally `0` to `2` when cosine similarity is in `[-1, 1]`, but
   small floating-point deviations are possible
+- `hamming`: an integer from `0` to `dim`, without rounding error
 
 ## Why this matters
 
 - Dataset ground truth, query semantics, and index internals need to agree on
   the same metric family.
-- `l2`, `ip`, and `cosine` are not interchangeable after an index is built.
+- `l2`, `ip`, `cosine`, and `hamming` are not interchangeable after an index is built.
 - When comparing results across tools, check whether the tool uses a distance
   or a similarity convention.
 

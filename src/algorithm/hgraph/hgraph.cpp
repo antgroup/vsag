@@ -820,6 +820,10 @@ HGraph::TryDecodeStoredRow(InnerIdType inner_id, float* data) const {
 
 void
 HGraph::GetFloat32VectorByInnerId(InnerIdType inner_id, float* data) const {
+    if (data_type_ == DataTypes::DATA_TYPE_BINARY) {
+        InnerIndexInterface::GetFloat32VectorByInnerId(inner_id, data);
+        return;
+    }
     if (data_type_ != DataTypes::DATA_TYPE_FP16 and data_type_ != DataTypes::DATA_TYPE_BF16) {
         this->GetVectorByInnerId(inner_id, data);
         return;

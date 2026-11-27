@@ -564,6 +564,13 @@ vsag_dataset_set_int8_vectors(vsag_dataset_t* dataset, const int8_t* vectors) {
 }
 
 vsag_error_t*
+vsag_dataset_set_binary_vectors(vsag_dataset_t* dataset, const uint8_t* vectors) {
+    VSAG_REQUIRE(dataset != nullptr, "dataset is NULL");
+    dataset->binary_vectors = vectors;
+    return nullptr;
+}
+
+vsag_error_t*
 vsag_dataset_set_sparse_vectors(vsag_dataset_t* dataset,
                                 const uint32_t* index_pointers,
                                 const uint32_t* indices,
@@ -1111,6 +1118,21 @@ vsag_index_get_num_elements(const vsag_index_t* index, int64_t* out_num_elements
         VSAG_REQUIRE(index != nullptr, "index is NULL");
         VSAG_REQUIRE(out_num_elements != nullptr, "out_num_elements is NULL");
         *out_num_elements = index->index->GetNumElements();
+        return nullptr;
+    });
+}
+
+vsag_error_t*
+vsag_index_get_dim(const vsag_index_t* index, int64_t* out_dim) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        VSAG_REQUIRE(out_dim != nullptr, "out_dim is NULL");
+        vsag::IndexDetailInfo info;
+        auto detail = index->index->GetDetailDataByName(vsag::INDEX_DETAIL_NAME_DIM, info);
+        if (not detail.has_value()) {
+            return make_error(detail.error());
+        }
+        *out_dim = detail.value()->GetDataScalarInt64();
         return nullptr;
     });
 }

@@ -56,7 +56,7 @@ A full runnable program is at
 
 ## Input data type
 
-The public `Build`, `Add`, `KnnSearch`, `RangeSearch`, and `UpdateVector` paths accept FP32 vectors only. At runtime, supply vectors via `Dataset::Float32Vectors`. At index creation, set `dtype` to `"float32"`; `dtype: "int8"` is not supported when creating a BruteForce index.
+The public `Build`, `Add`, `KnnSearch`, `RangeSearch`, and `UpdateVector` paths accept FP32 vectors, supplied via `Dataset::Float32Vectors` with `dtype: "float32"`, or bit-packed binary vectors, supplied via `Dataset::BinaryVectors` with `dtype: "binary"` and `metric_type: "hamming"`. Binary BruteForce indexes store the bits exactly and return exact Hamming k-NN and range results; see [Binary Vectors and Hamming Distance](../guide/binary_vectors.md). `dtype: "int8"` is not supported when creating a BruteForce index.
 
 The `base_quantization_type` parameter controls the index's internal encoding and storage, not the input type. Selecting an internal `fp16`, `bf16`, or other quantizer does not enable FP16/BF16 input.
 

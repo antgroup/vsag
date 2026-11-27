@@ -18,6 +18,7 @@
 #include <cstring>
 #include <vector>
 
+#include "data_type.h"
 #include "datacell/rabitq_split_datacell.h"
 #include "impl/heap/standard_heap.h"
 #include "simd/bf16_simd.h"
@@ -64,6 +65,8 @@ HGraphAnalyzer::make_query_dataset(const float* native_query) const {
         query->Float16Vectors(reinterpret_cast<const uint16_t*>(native_query));
     } else if (hgraph_->data_type_ == DataTypes::DATA_TYPE_INT8) {
         query->Int8Vectors(reinterpret_cast<const int8_t*>(native_query));
+    } else if (hgraph_->data_type_ == DataTypes::DATA_TYPE_BINARY) {
+        query->BinaryVectors(reinterpret_cast<const uint8_t*>(native_query));
     } else {
         query->Float32Vectors(native_query);
     }
@@ -415,12 +418,16 @@ HGraphAnalyzer::SetQuery(const DatasetPtr& query) {
         logger::error("Query vectors must match the index dtype");
         return false;
     }
-    uint64_t element_bytes = sizeof(float);
+    // Each native row goes to the start of a float-sized scratch row; binary rows are
+    // ceil(dim / 8) packed bytes.
+    uint64_t row_bytes = static_cast<uint64_t>(dim_) * sizeof(float);
     if (hgraph_->data_type_ == DataTypes::DATA_TYPE_FP16 or
         hgraph_->data_type_ == DataTypes::DATA_TYPE_BF16) {
-        element_bytes = sizeof(uint16_t);
+        row_bytes = static_cast<uint64_t>(dim_) * sizeof(uint16_t);
     } else if (hgraph_->data_type_ == DataTypes::DATA_TYPE_INT8) {
-        element_bytes = sizeof(int8_t);
+        row_bytes = static_cast<uint64_t>(dim_) * sizeof(int8_t);
+    } else if (hgraph_->data_type_ == DataTypes::DATA_TYPE_BINARY) {
+        row_bytes = BinaryVectorBytes(static_cast<uint64_t>(dim_));
     } else if (hgraph_->data_type_ != DataTypes::DATA_TYPE_FLOAT) {
         return false;
     }
@@ -434,7 +441,6 @@ HGraphAnalyzer::SetQuery(const DatasetPtr& query) {
     query_sample_ids_.resize(query_sample_size_);
     query_sample_datas_.resize(static_cast<std::vector<float>::size_type>(query_sample_size_) *
                                static_cast<std::vector<float>::size_type>(dim_));
-    const auto row_bytes = static_cast<uint64_t>(dim_) * element_bytes;
     for (uint64_t i = 0; i < query_sample_size_; ++i) {
         std::memcpy(query_sample_datas_.data() + i * dim_,
                     hgraph_->get_data(query, static_cast<int64_t>(i)),

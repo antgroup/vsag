@@ -174,6 +174,8 @@ Specific semantics:
 - `l2` returns `L2Sqr`, the squared L2 distance.
 - `ip` returns `1 - inner_product`.
 - `cosine` returns `1 - cosine_similarity`.
+- `hamming`, the metric of [binary vectors](../guide/binary_vectors.md), returns the number of
+  differing bits as an exact integer, so `radius = 3` keeps vectors that differ in at most 3 bits.
 
 Why does `l2` return squared distance? Squared L2 distance has the same ordering
 as L2 distance, and avoiding the square root improves performance. VSAG

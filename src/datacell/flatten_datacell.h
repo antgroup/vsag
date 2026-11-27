@@ -21,6 +21,7 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <string>
 #include <type_traits>
 
 #include "common.h"
@@ -33,6 +34,8 @@
 #include "utils/timer.h"
 
 namespace vsag {
+
+class BinaryQuantizer;
 /*
 * thread unsafe
 */
@@ -68,6 +71,13 @@ public:
     SetExternalReadMutexArray(MutexArrayPtr mutexes) override {
         external_read_mutex_ = std::move(mutexes);
     }
+
+    void
+    QueryRange(float* result_dists,
+               const ComputerInterfacePtr& computer,
+               InnerIdType begin,
+               InnerIdType count,
+               QueryContext* ctx = nullptr) override;
 
     ComputerInterfacePtr
     FactoryComputer(const void* query) override {
@@ -449,6 +459,10 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::BatchInsertVector(const void* vectors,
             case DataTypes::DATA_TYPE_SPARSE:
                 source_stride = sizeof(SparseVector);
                 break;
+            case DataTypes::DATA_TYPE_BINARY:
+                // dim counts bits; packed rows hold ceil(dim / 8) bytes.
+                source_stride = BinaryVectorBytes(dim);
+                break;
             case DataTypes::DATA_TYPE_FLOAT:
                 break;
         }
@@ -569,6 +583,62 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::query(float* result_dists,
     }
     if (ctx != nullptr and ctx->stats != nullptr and ctx->track_distance_evaluations)
         ctx->stats->AddDistance(ctx->distance_phase, backend_, static_cast<uint64_t>(id_count));
+}
+
+template <typename QuantTmpl, typename LayoutTmpl>
+void
+FlattenDataCell<QuantTmpl, LayoutTmpl>::QueryRange(float* result_dists,
+                                                   const ComputerInterfacePtr& computer,
+                                                   InnerIdType begin,
+                                                   InnerIdType count,
+                                                   QueryContext* ctx) {
+    // Binary codes give exact integer distances whichever kernel computes them, so a contiguous
+    // in-memory range can be scanned in place with the batched kernel. Other quantizers keep the
+    // per-id path, whose results they are tested against.
+    if constexpr (LayoutTmpl::InMemory and std::is_same_v<QuantTmpl, BinaryQuantizer>) {
+        if (external_read_mutex_ != nullptr) {
+            // Query() takes the per-node read locks of the external owner.
+            FlattenInterface::QueryRange(result_dists, computer, begin, count, ctx);
+            return;
+        }
+        if (count == 0) {
+            return;
+        }
+        const auto total_count = this->TotalCount();
+        if (begin >= total_count or count > total_count - begin) {
+            throw VsagException(
+                ErrorType::READ_ERROR,
+                "invalid internal id range " + std::to_string(begin) + "+" + std::to_string(count));
+        }
+        // A lease over a range that crosses a block of block memory is a copy of the whole
+        // range, so the range is scanned in pieces that end at multiples of
+        // BINARY_SCAN_PIECE_BYTES. Its blocks are powers of two of at least 256 KiB
+        // (Options::set_block_size_limit), so a piece never crosses one and is read in place;
+        // only a single row that crosses a block is copied, as on the per-id path. A row longer
+        // than a piece is scanned on its own.
+        constexpr uint64_t BINARY_SCAN_PIECE_BYTES = 64 * 1024;
+        auto* comp = static_cast<Computer<QuantTmpl>*>(computer.get());
+        const uint64_t code_size = this->code_size_;
+        for (InnerIdType done = 0; done < count;) {
+            const uint64_t offset = static_cast<uint64_t>(begin + done) * code_size;
+            const uint64_t piece_end =
+                (offset / BINARY_SCAN_PIECE_BYTES + 1) * BINARY_SCAN_PIECE_BYTES;
+            const auto rows = static_cast<InnerIdType>(std::min<uint64_t>(
+                std::max<uint64_t>((piece_end - offset) / code_size, 1), count - done));
+            auto lease = this->layout_->AcquireRange(begin + done, rows);
+            if (not lease) {
+                throw VsagException(ErrorType::READ_ERROR,
+                                    "failed to acquire codes for range distance evaluation");
+            }
+            comp->ScanBatchDists(rows, lease.Data(), result_dists + done);
+            done += rows;
+        }
+        if (ctx != nullptr and ctx->stats != nullptr and ctx->track_distance_evaluations) {
+            ctx->stats->AddDistance(ctx->distance_phase, backend_, static_cast<uint64_t>(count));
+        }
+    } else {
+        FlattenInterface::QueryRange(result_dists, computer, begin, count, ctx);
+    }
 }
 
 template <typename QuantTmpl, typename LayoutTmpl>

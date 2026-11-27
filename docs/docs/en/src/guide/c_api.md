@@ -62,6 +62,9 @@ element count, then the vectors in one of these forms:
 
 - `vsag_dataset_set_float32_vectors`, `vsag_dataset_set_float16_vectors` (also used for bfloat16
   as raw `uint16` bits) and `vsag_dataset_set_int8_vectors`, with `vsag_dataset_set_dim`.
+- `vsag_dataset_set_binary_vectors`: bit-packed vectors for `dtype: "binary"` indexes, where
+  `vsag_dataset_set_dim` gives the number of bits and each vector takes `ceil(dim / 8)` bytes
+  (see [Binary Vectors](binary_vectors.md)).
 - `vsag_dataset_set_sparse_vectors`: CSR rows, where row `i` owns
   `indices[index_pointers[i] .. index_pointers[i + 1])` and the matching values.
 
@@ -107,8 +110,10 @@ callback and are safe while other threads log.
 - **Modify:** `vsag_index_remove`, `vsag_index_update_ids`, `vsag_index_update_vector`.
 - **Search:** `vsag_index_knn_search`, `vsag_index_range_search`, `vsag_index_knn_search_float32`.
 - **Read:** `vsag_index_calc_distances_by_ids`, `vsag_index_get_vectors_by_ids`,
-  `vsag_index_get_num_elements`, `vsag_index_get_memory_usage`, `vsag_index_check_id_exist` and
-  `vsag_index_get_min_max_id`.
+  `vsag_index_get_num_elements`, `vsag_index_get_dim`, `vsag_index_get_memory_usage`,
+  `vsag_index_check_id_exist` and `vsag_index_get_min_max_id`. `vsag_index_get_dim` reports the
+  dimension of the stored vectors (bits for binary indexes); deserialization restores the saved
+  dimension, which may differ from the one the index was created with.
 - **Copy and reuse:** `vsag_index_clone`, `vsag_index_export_model`.
 - **Persistence:** `vsag_index_serialize_file`, `vsag_index_deserialize_file`, and, for hosts that
   keep index bytes in their own storage, `vsag_index_serialize_writer` and

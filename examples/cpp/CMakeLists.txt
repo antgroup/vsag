@@ -44,6 +44,9 @@ target_link_libraries (112_index_pyramid_multi_hierarchy vsag)
 add_executable (113_index_ivf_graph_bucket 113_index_ivf_graph_bucket.cpp)
 target_link_libraries (113_index_ivf_graph_bucket vsag)
 
+add_executable (115_index_binary_hamming 115_index_binary_hamming.cpp)
+target_link_libraries (115_index_binary_hamming vsag)
+
 add_executable (201_custom_allocator 201_custom_allocator.cpp)
 target_link_libraries (201_custom_allocator vsag)
 

@@ -14,6 +14,8 @@
 
 #include "bruteforce.h"
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstddef>
@@ -55,6 +57,25 @@ namespace {
 
 constexpr const char* WARP_MODE_MARKER = "_warp_mode";
 
+// Number of vectors whose distances a BruteForce scan evaluates per datacell call. Batches let the
+// datacell use its four-way kernels and prefetching instead of one virtual call per vector.
+constexpr uint32_t K_BRUTE_FORCE_DISTANCE_BATCH = 64;
+
+// Number of consecutive vectors per datacell call when no filter applies. The datacell reads the
+// whole code range at once, so a larger batch only amortizes the call.
+constexpr uint32_t K_BRUTE_FORCE_RANGE_BATCH = 256;
+
+// True when some distance is not greater than `bound`; NaN counts as such, like the per-candidate
+// heap check that this batch check short-circuits. No early exit, so the loop vectorizes.
+bool
+has_distance_within(const float* dists, uint32_t count, float bound) {
+    uint32_t hits = 0;
+    for (uint32_t j = 0; j < count; ++j) {
+        hits += static_cast<uint32_t>(not(dists[j] > bound));
+    }
+    return hits != 0;
+}
+
 void
 require_string_member(const JsonType& json, const std::string& key) {
     CHECK_ARGUMENT(json[key].IsString(),
@@ -65,6 +86,23 @@ void
 require_object_member(const JsonType& json, const std::string& key) {
     CHECK_ARGUMENT(json[key].IsObject(),
                    fmt::format("BruteForce streaming load parameter '{}' must be an object", key));
+}
+
+// Binary vectors are stored exactly by the binary quantizer; the other quantizers read numeric
+// elements, so they are rejected for dtype binary with an explicit message.
+void
+require_binary_quantization(const JsonType& external_param, const std::string& key) {
+    if (not external_param.Contains(key)) {
+        return;
+    }
+    const auto& value = external_param[key];
+    const auto name = value.IsString() ? value.GetString() : std::string("<non-string>");
+    CHECK_ARGUMENT(name == QUANTIZATION_TYPE_VALUE_BINARY,
+                   fmt::format("parameters[{}] must be {} when dtype is {}, got {}",
+                               key,
+                               QUANTIZATION_TYPE_VALUE_BINARY,
+                               DATATYPE_BINARY,
+                               name));
 }
 
 void
@@ -92,8 +130,15 @@ BruteForce::EstimateMemory(uint64_t num_elements) const {
         return num_elements * (avg_vectors_per_doc * this->dim_ * sizeof(float) +
                                sizeof(LabelType) * 2 + sizeof(InnerIdType) + sizeof(uint32_t) * 2);
     }
-    return num_elements *
-           (this->dim_ * sizeof(float) + sizeof(LabelType) * 2 + sizeof(InnerIdType));
+    return num_elements * (this->dense_row_bytes() + sizeof(LabelType) * 2 + sizeof(InnerIdType));
+}
+
+uint64_t
+BruteForce::dense_row_bytes() const {
+    if (this->data_type_ == DataTypes::DATA_TYPE_BINARY) {
+        return BinaryVectorBytes(static_cast<uint64_t>(this->dim_));
+    }
+    return static_cast<uint64_t>(this->dim_) * sizeof(float);
 }
 
 std::vector<int64_t>
@@ -427,11 +472,6 @@ BruteForce::SearchWithRequest(const SearchRequest& request, SearchMetrics* metri
                        "distance_batch_size must be greater than 0");
     }
 
-    ComputerInterfacePtr computer = nullptr;
-    if (not use_custom_distance) {
-        computer = this->make_search_computer(request.query_);
-    }
-
     bool is_range = (request.mode_ == SearchMode::RANGE_SEARCH);
     if (is_range) {
         if (use_custom_distance) {
@@ -447,6 +487,13 @@ BruteForce::SearchWithRequest(const SearchRequest& request, SearchMetrics* metri
         } else if (not is_multi_vector_) {
             this->validate_knn_args(request.query_, request.topk_);
         }
+    }
+
+    // The computer copies the query from its native field, so it is built only after the query
+    // has been validated (a binary index given a float32 query has no binary field to read).
+    ComputerInterfacePtr computer = nullptr;
+    if (not use_custom_distance) {
+        computer = this->make_search_computer(request.query_);
     }
 
     auto heap_size = is_range ? request.limited_size_ : request.topk_;
@@ -575,43 +622,111 @@ BruteForce::SearchWithRequest(const SearchRequest& request, SearchMetrics* metri
         // Worker distances are counted locally and merged once below. Keep the statistics sink for
         // legacy IO counters, but suppress only the datacell's per-call distance aggregation.
         local_query_context.track_distance_evaluations = false;
-        for (InnerIdType i = start; i < end; ++i) {
-            if (attr_filter != nullptr and not attr_filter->CheckValid(i)) {
-                if (reasoning != nullptr) {
-                    reasoning->RecordFilterReject(i);  // [reasoning]
-                }
-                continue;
+
+        // Candidates that pass the filters are evaluated in batches; visits and heap pushes keep
+        // their original order. Reasoning and multi-vector searches keep one call per vector.
+        const uint32_t batch_limit =
+            (reasoning != nullptr or is_multi_vector_) ? 1U : K_BRUTE_FORCE_DISTANCE_BATCH;
+        std::array<InnerIdType, K_BRUTE_FORCE_DISTANCE_BATCH> batch_ids{};
+        std::array<float, K_BRUTE_FORCE_RANGE_BATCH> batch_dists{};
+        uint32_t batch_size = 0;
+        // Once the fixed-size heap is full, Push discards every distance larger than its top.
+        // Skipping those candidates here avoids one virtual call per scanned vector.
+        bool heap_full = false;
+        float heap_worst = std::numeric_limits<float>::max();
+        // Visits batch_dists[0, size) in order; id_of(j) is the inner id of entry j.
+        auto push_distances = [&](uint32_t size, const auto& id_of) {
+            if (statistics != nullptr) {
+                dist_cmp_local += size;
             }
-            if (ft == nullptr or ft->CheckValid(i)) {
-                if (use_custom_distance) {
-                    custom_inner_ids.push_back(i);
-                    custom_labels.push_back(this->label_table_->GetLabelById(i));
-                    if (custom_inner_ids.size() == request.distance_batch_size_) {
-                        flush_custom_batch();
-                    }
-                } else {
-                    float dist = 0.0F;
-                    inner_codes_->Query(&dist, computer, &i, 1, &local_query_context);
-                    if (statistics != nullptr) {
-                        ++dist_cmp_local;
-                    }
-                    if (reasoning != nullptr) {
-                        reasoning->RecordVisit(i, dist, 0);  // [reasoning]
-                    }
-                    if (is_range and dist > radius) {
+            for (uint32_t j = 0; j < size; ++j) {
+                const InnerIdType id = id_of(j);
+                const float dist = batch_dists[j];
+                if (reasoning != nullptr) {
+                    reasoning->RecordVisit(id, dist, 0);  // [reasoning]
+                }
+                if (is_range and dist > radius) {
+                    continue;
+                }
+                if (is_range or not request.threshold_.has_value() or std::isfinite(dist)) {
+                    if (heap_full and dist > heap_worst) {
                         continue;
                     }
-                    if (is_range or not request.threshold_.has_value() or std::isfinite(dist)) {
-                        cur_heap->Push(dist, i);
+                    cur_heap->Push(dist, id);
+                    heap_full = static_cast<int64_t>(cur_heap->Size()) >= heap_size;
+                    if (heap_full) {
+                        heap_worst = cur_heap->Top().first;
                     }
                 }
+            }
+        };
+        auto flush_distance_batch = [&]() {
+            if (batch_size == 0) {
+                return;
+            }
+            // Without rejected candidates a batch covers consecutive ids, which the datacell
+            // can evaluate on the contiguous code range.
+            if (batch_ids[batch_size - 1] - batch_ids[0] == batch_size - 1) {
+                inner_codes_->QueryRange(
+                    batch_dists.data(), computer, batch_ids[0], batch_size, &local_query_context);
             } else {
-                if (reasoning != nullptr) {
-                    reasoning->RecordFilterReject(i);  // [reasoning]
+                inner_codes_->Query(batch_dists.data(),
+                                    computer,
+                                    batch_ids.data(),
+                                    batch_size,
+                                    &local_query_context);
+            }
+            push_distances(batch_size, [&](uint32_t j) { return batch_ids[j]; });
+            batch_size = 0;
+        };
+        if (attr_filter == nullptr and ft == nullptr and not use_custom_distance and
+            batch_limit > 1) {
+            // Nothing is filtered out, so the scan hands whole id ranges to the datacell and
+            // drops at once every batch whose distances all exceed the top of a full heap.
+            for (InnerIdType begin = start; begin < end;) {
+                const auto size = static_cast<uint32_t>(
+                    std::min<InnerIdType>(K_BRUTE_FORCE_RANGE_BATCH, end - begin));
+                inner_codes_->QueryRange(
+                    batch_dists.data(), computer, begin, size, &local_query_context);
+                if (heap_full and not has_distance_within(batch_dists.data(), size, heap_worst)) {
+                    if (statistics != nullptr) {
+                        dist_cmp_local += size;
+                    }
+                } else {
+                    push_distances(size, [begin](uint32_t j) { return begin + j; });
+                }
+                begin += size;
+            }
+        } else {
+            for (InnerIdType i = start; i < end; ++i) {
+                if (attr_filter != nullptr and not attr_filter->CheckValid(i)) {
+                    if (reasoning != nullptr) {
+                        reasoning->RecordFilterReject(i);  // [reasoning]
+                    }
+                    continue;
+                }
+                if (ft == nullptr or ft->CheckValid(i)) {
+                    if (use_custom_distance) {
+                        custom_inner_ids.push_back(i);
+                        custom_labels.push_back(this->label_table_->GetLabelById(i));
+                        if (custom_inner_ids.size() == request.distance_batch_size_) {
+                            flush_custom_batch();
+                        }
+                    } else {
+                        batch_ids[batch_size++] = i;
+                        if (batch_size == batch_limit) {
+                            flush_distance_batch();
+                        }
+                    }
+                } else {
+                    if (reasoning != nullptr) {
+                        reasoning->RecordFilterReject(i);  // [reasoning]
+                    }
                 }
             }
         }
         flush_custom_batch();
+        flush_distance_batch();
         if (statistics != nullptr) {
             dist_cmp.fetch_add(dist_cmp_local, std::memory_order_relaxed);
             statistics->AddDistance(
@@ -736,7 +851,15 @@ BruteForce::CalcDistanceById(const DatasetPtr& query,
                              int64_t id,
                              bool calculate_precise_distance) const {
     if (not is_multi_vector_) {
-        return InnerIndexInterface::CalcDistanceById(query, id, calculate_precise_distance);
+        if (this->data_type_ != DataTypes::DATA_TYPE_BINARY) {
+            return InnerIndexInterface::CalcDistanceById(query, id, calculate_precise_distance);
+        }
+        CHECK_ARGUMENT(query != nullptr, "distance query must not be null");
+        CHECK_ARGUMENT(query->GetNumElements() == 1, "single-ID distance requires one query");
+        CHECK_ARGUMENT(query->GetBinaryVectors() != nullptr,
+                       "distance query must contain binary vectors");
+        CHECK_ARGUMENT(query->GetDim() == dim_, "distance query dimension mismatch");
+        return this->calc_native_distance_by_id(query->GetBinaryVectors(), id);
     }
     CHECK_ARGUMENT(query != nullptr, "distance query must not be null");
     CHECK_ARGUMENT(query->GetNumElements() == 1, "single-ID distance requires one query");
@@ -763,7 +886,14 @@ BruteForce::CalcDistanceById(const float* vector,
                              int64_t id,
                              bool calculate_precise_distance) const {
     CHECK_ARGUMENT(not is_multi_vector_, "multi-vector distance requires a Dataset query");
+    CHECK_ARGUMENT(this->data_type_ != DataTypes::DATA_TYPE_BINARY,
+                   "binary BruteForce distance requires a native Dataset query");
     CHECK_ARGUMENT(vector != nullptr, "distance query must not be null");
+    return this->calc_native_distance_by_id(vector, id);
+}
+
+float
+BruteForce::calc_native_distance_by_id(const void* query, int64_t id) const {
     // ForceRemove can move the last vector into this slot. Keep label mapping and code
     // storage stable through Query, using deadlock-safe acquisition as in the native path.
     std::shared_lock global_lock(global_mutex_, std::defer_lock);
@@ -773,7 +903,7 @@ BruteForce::CalcDistanceById(const float* vector,
     if (not success) {
         ThrowLabelNotFound(id);
     }
-    auto computer = inner_codes_->FactoryComputer(vector);
+    auto computer = inner_codes_->FactoryComputer(query);
     float result = 0.0F;
     inner_codes_->Query(&result, computer, &inner_id, 1);
     return result;
@@ -1186,7 +1316,7 @@ BruteForce::InitFeatures() {
         }
     } else {
         if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16 and
-            name != QUANTIZATION_TYPE_VALUE_FP16) {
+            name != QUANTIZATION_TYPE_VALUE_FP16 and name != QUANTIZATION_TYPE_VALUE_BINARY) {
             this->index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN);
         } else {
             this->index_feature_list_->SetFeatures(
@@ -1199,6 +1329,10 @@ BruteForce::InitFeatures() {
         if (name == QUANTIZATION_TYPE_VALUE_FP32 and
             (metric_ != MetricType::METRIC_TYPE_COSINE || this->inner_codes_->HoldMolds())) {
             this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
+        }
+        if (name == QUANTIZATION_TYPE_VALUE_BINARY) {
+            this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS,
+                                                    IndexFeature::SUPPORT_METRIC_TYPE_HAMMING});
         }
     }
 
@@ -1325,6 +1459,11 @@ BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             fmt::format("BruteForce not support {} datatype", DATATYPE_INT8));
     }
+    const bool is_binary = common_param.data_type_ == DataTypes::DATA_TYPE_BINARY;
+    if (is_binary) {
+        require_binary_quantization(external_param, BRUTE_FORCE_BASE_QUANTIZATION_TYPE);
+        require_binary_quantization(external_param, BRUTE_FORCE_PRECISE_QUANTIZATION_TYPE);
+    }
 
     auto inner_json = build_default_brute_force_param(external_param, false);
     for (const auto& [key, value] : external_param.GetInnerJson()->items()) {
@@ -1363,6 +1502,14 @@ BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
             throw VsagException(ErrorType::INVALID_ARGUMENT,
                                 fmt::format("invalid config param: {}", key));
         }
+    }
+    if (is_binary) {
+        // Binary indexes keep the packed bits exactly: base (and reorder) codes default to the
+        // binary quantizer, so no quantization parameter is needed.
+        const auto binary_json =
+            QuantizerParameter::CreateDefault(QUANTIZATION_TYPE_VALUE_BINARY)->ToJson();
+        inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY].SetJson(binary_json);
+        inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY].SetJson(binary_json);
     }
 
     auto brute_force_parameter = std::make_shared<BruteForceParameter>();
@@ -1422,6 +1569,10 @@ void
 BruteForce::GetFloat32VectorByInnerId(InnerIdType inner_id, float* data) const {
     if (is_multi_vector_) {
         this->GetVectorByInnerId(inner_id, data);
+        return;
+    }
+    if (data_type_ == DataTypes::DATA_TYPE_BINARY) {
+        InnerIndexInterface::GetFloat32VectorByInnerId(inner_id, data);
         return;
     }
     Vector<uint8_t> codes(inner_codes_->code_size_, allocator_);

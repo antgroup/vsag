@@ -14,9 +14,9 @@
 | 字段 | 取值 | 说明 |
 |------|------|------|
 | `dim` | 正整数 | 向量维度，构建后不可更改 |
-| `dtype` | `float32` / `fp16` / `bf16` / `int8` / `sparse` | 标量值类型；`sparse` 为稀疏索引兼容取值 |
+| `dtype` | `float32` / `fp16` / `bf16` / `int8` / `sparse` / `binary` | 标量值类型；`sparse` 为稀疏索引兼容取值；`binary` 表示按位压缩的二进制向量，`dim` 为 bit 数（见[二进制向量](../guide/binary_vectors.md)） |
 | `repr` | `dense` / `sparse` / `multi_vector` | 可选的数据布局；省略时，`dtype: "sparse"` 推断为 `sparse`，其他类型推断为 `dense` |
-| `metric_type` | `l2` / `ip` / `cosine` | 距离度量 |
+| `metric_type` | `l2` / `ip` / `cosine` / `hamming` | 距离度量；`hamming` 与 `dtype: binary` 必须同时使用 |
 
 `dtype` 与 `repr` 描述不同维度：前者是标量编码，后者是记录布局。显式设置 `repr` 时，
 `dtype: "sparse"` 要求 `repr: "sparse"`。受支持的多向量索引使用

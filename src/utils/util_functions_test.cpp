@@ -106,6 +106,25 @@ TEST_CASE("UtilFunctions Basic", "[ut][UtilFunctions]") {
     }
 }
 
+TEST_CASE("get_vectors and set_dataset carry binary rows", "[ut][UtilFunctions]") {
+    const int64_t dim = 13;  // two bytes per row
+    std::vector<uint8_t> bytes = {1, 2, 3, 4, 5, 6};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(3)->Dim(dim)->BinaryVectors(bytes.data())->Owner(false);
+    void* vectors = nullptr;
+    uint64_t row_size = 0;
+    get_vectors(DataTypes::DATA_TYPE_BINARY, dim, base, &vectors, &row_size);
+    REQUIRE(vectors == bytes.data());
+    REQUIRE(row_size == 2);
+
+    auto view = vsag::Dataset::Make();
+    set_dataset(DataTypes::DATA_TYPE_BINARY, dim, view, bytes.data(), 3);
+    REQUIRE(view->GetBinaryVectors() == bytes.data());
+    REQUIRE(view->GetFloat32Vectors() == nullptr);
+    REQUIRE(view->GetDim() == dim);
+    REQUIRE(view->GetNumElements() == 3);
+}
+
 TEST_CASE("sample_train_data honors a fixed random seed", "[ut][UtilFunctions]") {
     constexpr int64_t dim = 3;
     constexpr int64_t count = 2048;
@@ -202,12 +221,50 @@ TEST_CASE("Training sampling preserves configured half input", "[ut][UtilFunctio
     }
 }
 
+TEST_CASE("Training sampling keeps packed binary rows", "[ut][UtilFunctions]") {
+    // dim counts bits, so every row holds ceil(dim / 8) bytes.
+    constexpr int64_t count = 1500;
+    constexpr int64_t sample_count = 600;
+    constexpr int64_t dim = 13;
+    const uint64_t row_bytes = (dim + 7) / 8;
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 100);
+    // Every row starts with its own index, so a sampled row can be traced back to its source.
+    std::vector<uint8_t> rows(count * row_bytes);
+    for (int64_t i = 0; i < count; ++i) {
+        rows[i * row_bytes] = static_cast<uint8_t>(i);
+        rows[i * row_bytes + 1] = static_cast<uint8_t>(i >> 8);
+    }
+    auto data = Dataset::Make();
+    data->NumElements(count)->Dim(dim)->Ids(ids.data())->BinaryVectors(rows.data())->Owner(false);
+    DefaultAllocator allocator;
+    auto sampled = sample_train_data(
+        data, count, dim, sample_count, &allocator, 7, DataTypes::DATA_TYPE_BINARY);
+    REQUIRE(sampled != data);
+    REQUIRE(sampled->GetNumElements() == sample_count);
+    REQUIRE(sampled->GetDim() == dim);
+    REQUIRE(sampled->GetFloat32Vectors() == nullptr);
+    const auto* sampled_rows = sampled->GetBinaryVectors();
+    REQUIRE(sampled_rows != nullptr);
+    std::unordered_set<int64_t> selected;
+    for (int64_t i = 0; i < sample_count; ++i) {
+        const auto source_row = sampled->GetIds()[i] - 100;
+        REQUIRE(source_row >= 0);
+        REQUIRE(source_row < count);
+        REQUIRE(selected.insert(source_row).second);
+        REQUIRE(std::equal(sampled_rows + i * row_bytes,
+                           sampled_rows + (i + 1) * row_bytes,
+                           rows.data() + source_row * row_bytes));
+    }
+}
+
 TEST_CASE("set_dataset preserves 64-bit element counts", "[ut][UtilFunctions][half_input]") {
     const int64_t count = static_cast<int64_t>(std::numeric_limits<uint32_t>::max()) + 1;
     for (const auto type : {DataTypes::DATA_TYPE_FLOAT,
                             DataTypes::DATA_TYPE_INT8,
                             DataTypes::DATA_TYPE_FP16,
-                            DataTypes::DATA_TYPE_BF16}) {
+                            DataTypes::DATA_TYPE_BF16,
+                            DataTypes::DATA_TYPE_BINARY}) {
         auto data = Dataset::Make();
         set_dataset(type, 3, data, nullptr, count);
         REQUIRE(data->GetNumElements() == count);

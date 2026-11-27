@@ -59,6 +59,8 @@ dataset 是对调用方内存的视图，既可描述底库数据，也可描述
 
 - `vsag_dataset_set_float32_vectors`、`vsag_dataset_set_float16_vectors`（bfloat16 也使用它，
   传入原始 `uint16` 位）和 `vsag_dataset_set_int8_vectors`，并配合 `vsag_dataset_set_dim`。
+- `vsag_dataset_set_binary_vectors`：`dtype: "binary"` 索引的按位压缩向量，`vsag_dataset_set_dim`
+  给出 bit 数，每个向量占 `ceil(dim / 8)` 字节（见[二进制向量](binary_vectors.md)）。
 - `vsag_dataset_set_sparse_vectors`：CSR 行，第 `i` 行拥有
   `indices[index_pointers[i] .. index_pointers[i + 1])` 及对应的值。
 
@@ -102,8 +104,9 @@ dataset 是对调用方内存的视图，既可描述底库数据，也可描述
 - **修改：** `vsag_index_remove`、`vsag_index_update_ids`、`vsag_index_update_vector`。
 - **搜索：** `vsag_index_knn_search`、`vsag_index_range_search`、`vsag_index_knn_search_float32`。
 - **读取：** `vsag_index_calc_distances_by_ids`、`vsag_index_get_vectors_by_ids`、
-  `vsag_index_get_num_elements`、`vsag_index_get_memory_usage`、`vsag_index_check_id_exist` 和
-  `vsag_index_get_min_max_id`。
+  `vsag_index_get_num_elements`、`vsag_index_get_dim`、`vsag_index_get_memory_usage`、
+  `vsag_index_check_id_exist` 和 `vsag_index_get_min_max_id`。`vsag_index_get_dim` 返回所存向量的
+  维度（二进制索引按 bit 计）；反序列化会恢复保存时的维度，它可能与创建索引时给定的维度不同。
 - **复制与复用：** `vsag_index_clone`、`vsag_index_export_model`。
 - **持久化：** `vsag_index_serialize_file`、`vsag_index_deserialize_file`；对于把索引字节放在自有
   存储中的宿主，还有 `vsag_index_serialize_writer` 和 `vsag_index_deserialize_reader`。

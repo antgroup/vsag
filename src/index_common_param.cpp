@@ -39,16 +39,19 @@ fill_datatype(IndexCommonParam& result, const JsonType& datatype_obj) {
         result.data_type_ = DataTypes::DATA_TYPE_INT8;
     } else if (datatype == DATATYPE_SPARSE) {
         result.data_type_ = DataTypes::DATA_TYPE_SPARSE;
+    } else if (datatype == DATATYPE_BINARY) {
+        result.data_type_ = DataTypes::DATA_TYPE_BINARY;
     } else {
         throw VsagException(
             ErrorType::INVALID_ARGUMENT,
-            fmt::format("parameters[{}] must be one of [{}, {}, {}, {}, {}], now is {}",
+            fmt::format("parameters[{}] must be one of [{}, {}, {}, {}, {}, {}], now is {}",
                         PARAMETER_DTYPE,
                         DATATYPE_FLOAT32,
                         DATATYPE_FLOAT16,
                         DATATYPE_BFLOAT16,
                         DATATYPE_INT8,
                         DATATYPE_SPARSE,
+                        DATATYPE_BINARY,
                         datatype));
     }
 }
@@ -86,13 +89,16 @@ fill_metrictype(IndexCommonParam& result, const JsonType& metric_obj) {
         result.metric_ = MetricType::METRIC_TYPE_IP;
     } else if (metric == METRIC_COSINE) {
         result.metric_ = MetricType::METRIC_TYPE_COSINE;
+    } else if (metric == METRIC_HAMMING) {
+        result.metric_ = MetricType::METRIC_TYPE_HAMMING;
     } else {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            fmt::format("parameters[{}] must in [{}, {}, {}], now is {}",
+                            fmt::format("parameters[{}] must in [{}, {}, {}, {}], now is {}",
                                         PARAMETER_METRIC_TYPE,
                                         METRIC_L2,
                                         METRIC_IP,
                                         METRIC_COSINE,
+                                        METRIC_HAMMING,
                                         metric));
     }
 }
@@ -104,6 +110,56 @@ fill_dim(IndexCommonParam& result, const JsonType& dim_obj) {
     int64_t dim = dim_obj.GetInt();
     CHECK_ARGUMENT(dim > 0, fmt::format("parameters[{}] must be greater than 0", PARAMETER_DIM));
     result.dim_ = dim;
+}
+
+// Binary vectors and the Hamming metric only make sense together: the Hamming kernels read
+// bit-packed bytes, and l2/ip/cosine kernels read numeric elements.
+inline void
+check_binary_combination(const IndexCommonParam& result) {
+    const bool is_binary = result.data_type_ == DataTypes::DATA_TYPE_BINARY;
+    const bool is_hamming = result.metric_ == MetricType::METRIC_TYPE_HAMMING;
+    if (is_binary and not is_hamming) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("parameters[{}]={} requires parameters[{}]={}, got {}",
+                                        PARAMETER_DTYPE,
+                                        DATATYPE_BINARY,
+                                        PARAMETER_METRIC_TYPE,
+                                        METRIC_HAMMING,
+                                        ToString(result.metric_)));
+    }
+    if (is_hamming and not is_binary) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("parameters[{}]={} requires parameters[{}]={}, got {}",
+                                        PARAMETER_METRIC_TYPE,
+                                        METRIC_HAMMING,
+                                        PARAMETER_DTYPE,
+                                        DATATYPE_BINARY,
+                                        ToString(result.data_type_)));
+    }
+    if (not is_binary) {
+        return;
+    }
+    if (result.repr_ != RecordRepr::DENSE) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("parameters[{}]={} requires parameters[{}]={}, got {}",
+                                        PARAMETER_DTYPE,
+                                        DATATYPE_BINARY,
+                                        PARAMETER_REPR,
+                                        REPR_DENSE,
+                                        ToString(result.repr_)));
+    }
+    // dim counts bits. Distances are floats, which hold every integer up to 2^24 exactly.
+    if (result.dim_ > MAX_BINARY_DIM) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("parameters[{}] counts bits for parameters[{}]={} and must not exceed {}, "
+                        "now is {}",
+                        PARAMETER_DIM,
+                        PARAMETER_DTYPE,
+                        DATATYPE_BINARY,
+                        MAX_BINARY_DIM,
+                        result.dim_));
+    }
 }
 
 inline void
@@ -160,6 +216,7 @@ IndexCommonParam::CheckAndCreate(JsonType& params, const std::shared_ptr<Resourc
         }
         result.dim_ = MAX_DIM_SPARSE;
     }
+    check_binary_combination(result);
 
     if (params.Contains(EXTRA_INFO_SIZE)) {
         fill_extra_info_size(result, params[EXTRA_INFO_SIZE]);
