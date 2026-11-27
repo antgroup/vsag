@@ -45,6 +45,20 @@ public:
                   BucketIdType buckets_per_data,
                   QueryContext* ctx) const override;
 
+    /// With `ivf_train_type: "balanced_kmeans"` the buckets of the first Add of
+    /// a fresh Build are balanced over the trained centroids instead of routed
+    /// to the nearest one, so the capacity guarantee of the trainer extends
+    /// from the training sample to the stored index (issue #2870). Every other
+    /// case uses the plain routing.
+    Vector<BucketIdType>
+    ClassifyDatasForBuild(const void* datas,
+                          int64_t count,
+                          BucketIdType buckets_per_data,
+                          QueryContext* ctx) const override;
+
+    [[nodiscard]] bool
+    HasDistinctBuildAssignment() const override;
+
     Vector<BucketIdType>
     ClassifyDatasForSearch(const void* datas,
                            int64_t count,
