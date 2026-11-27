@@ -39,6 +39,7 @@
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index_common_param.h"
 #include "pipnn_build_cache.h"
+#include "pipnn_simd_kernels.h"
 #include "simd/bf16_simd.h"
 #include "unittest.h"
 #include "utils/half_input.h"
@@ -1521,6 +1522,374 @@ TEST_CASE("PiPNN final graph reuse matches full pruning with stable graph IDs",
         vsag::Vector<vsag::InnerIdType> actual(allocator), expected(allocator);
         remapped_graph->GetNeighbors(id, actual);
         remapped_reference->GetNeighbors(id, expected);
+        REQUIRE(actual == expected);
+    }
+}
+
+TEST_CASE("PiPNN validates build_quantization_type parameter", "[ut][pipnn]") {
+    vsag::PiPNNGraphBuilderParameter param;
+    REQUIRE(param.build_quantization_type == vsag::QUANTIZATION_TYPE_VALUE_FP32);
+    REQUIRE_NOTHROW(param.Validate(16));
+
+    // Legacy JSON without pipnn_build_quantization_type defaults to fp32.
+    auto legacy = param.ToJson();
+    legacy.Erase(vsag::PIPNN_PARAMETER_BUILD_QUANTIZATION_TYPE);
+    param.build_quantization_type = vsag::QUANTIZATION_TYPE_VALUE_SQ8_LOCAL;
+    param.FromJson(legacy);
+    REQUIRE(param.build_quantization_type == vsag::QUANTIZATION_TYPE_VALUE_FP32);
+
+    // Explicit sq8_local round-trips cleanly.
+    vsag::JsonType json;
+    json[vsag::PIPNN_PARAMETER_BUILD_QUANTIZATION_TYPE].SetString("sq8_local");
+    param.FromJson(json);
+    REQUIRE(param.build_quantization_type == vsag::QUANTIZATION_TYPE_VALUE_SQ8_LOCAL);
+    REQUIRE(param.ToJson()[vsag::PIPNN_PARAMETER_BUILD_QUANTIZATION_TYPE].GetString() ==
+            "sq8_local");
+    REQUIRE_NOTHROW(param.Validate(16));
+
+    // Unsupported string values fail validation.
+    json[vsag::PIPNN_PARAMETER_BUILD_QUANTIZATION_TYPE].SetString("sq8");
+    param.FromJson(json);
+    REQUIRE_THROWS(param.Validate(16));
+
+    // Non-string values fail parsing.
+    json[vsag::PIPNN_PARAMETER_BUILD_QUANTIZATION_TYPE].SetInt(8);
+    REQUIRE_THROWS(param.FromJson(json));
+
+    // Dimensions > 65535 are rejected for sq8_local to prevent integer dot overflow.
+    param.build_quantization_type = vsag::QUANTIZATION_TYPE_VALUE_SQ8_LOCAL;
+    auto common = MakeCommonParam(8);
+    REQUIRE_THROWS(vsag::PiPNNGraphBuilder(param, 65536, common.metric_, common.allocator_.get()));
+    param.build_quantization_type = vsag::QUANTIZATION_TYPE_VALUE_FP32;
+    REQUIRE_NOTHROW(vsag::PiPNNGraphBuilder(param, 65536, common.metric_, common.allocator_.get()));
+}
+
+TEST_CASE("PiPNN sq8_local SIMD backends agree across supported ISAs", "[ut][pipnn]") {
+    using namespace vsag::pipnn_simd;
+    const Sq8Isa all_isas[] = {
+        Sq8Isa::SCALAR,
+        Sq8Isa::AVX2,
+        Sq8Isa::AVX_VNNI,
+        Sq8Isa::AVX512_BW,
+        Sq8Isa::AVX512_VNNI,
+        Sq8Isa::NEON,
+        Sq8Isa::NEON_DOTPROD,
+    };
+    std::vector<Sq8Isa> supported;
+    for (const auto isa : all_isas) {
+        if (is_sq8_isa_supported(isa)) {
+            supported.push_back(isa);
+        }
+    }
+    REQUIRE(not supported.empty());
+    REQUIRE(is_sq8_isa_supported(active_sq8_isa()));
+
+    std::mt19937 rng(20261124);
+    std::normal_distribution<float> dist(0.0F, 3.0F);
+    const uint64_t dims[] = {1, 7, 13, 32, 100, 128, 384};
+    const MetricKind metrics[] = {MetricKind::L2_SQR, MetricKind::IP, MetricKind::COSINE};
+
+    for (const uint64_t dim : dims) {
+        const uint64_t stride = (dim + 63ULL) & ~63ULL;
+        std::vector<std::vector<float>> vecs(6, std::vector<float>(dim, 0.0F));
+        for (uint64_t d = 0; d < dim; ++d) {
+            vecs[0][d] = dist(rng);
+            vecs[1][d] = dist(rng);
+            vecs[2][d] = 0.0F;
+            vecs[3][d] = -4.25F;
+            vecs[4][d] = -std::abs(dist(rng)) - 0.1F;
+            vecs[5][d] = dist(rng);
+        }
+        vecs[5][0] = 50.0F;
+        if (dim > 1) {
+            vecs[5][dim - 1] = -40.0F;
+        }
+
+        for (const auto metric : metrics) {
+            std::vector<std::vector<uint8_t>> codes(vecs.size(), std::vector<uint8_t>(stride, 0));
+            std::vector<QMeta> metas(vecs.size());
+            for (size_t i = 0; i < vecs.size(); ++i) {
+                float pre_scale = 1.0F;
+                if (metric == MetricKind::COSINE) {
+                    float sq = 0.0F;
+                    for (float v : vecs[i]) {
+                        sq += v * v;
+                    }
+                    const float len = std::sqrt(std::max(0.0F, sq));
+                    pre_scale = len > 0.0F ? (1.0F / len) : 0.0F;
+                }
+                quantize_row_sq8_local(
+                    vecs[i].data(), dim, stride, pre_scale, metric, codes[i].data(), metas[i]);
+                for (uint64_t p = dim; p < stride; ++p) {
+                    REQUIRE(codes[i][p] == 0);
+                }
+            }
+
+            for (size_t i = 0; i < vecs.size(); ++i) {
+                for (size_t j = 0; j < vecs.size(); ++j) {
+                    const float ref = quantized_pair_distance_with_isa(codes[i].data(),
+                                                                       metas[i],
+                                                                       codes[j].data(),
+                                                                       metas[j],
+                                                                       dim,
+                                                                       stride,
+                                                                       metric,
+                                                                       Sq8Isa::SCALAR);
+                    REQUIRE(std::isfinite(ref));
+                    const float sum_x_i = static_cast<float>(dim) * metas[i].min_val + metas[i].su;
+                    const float sum_x_j = static_cast<float>(dim) * metas[j].min_val + metas[j].su;
+                    const float term_mag = std::abs(metas[j].min_val * metas[i].su) +
+                                           std::abs(metas[i].min_val * sum_x_j) +
+                                           std::abs(metas[i].min_val * metas[j].su) +
+                                           std::abs(metas[j].min_val * sum_x_i);
+                    const float scale_mag =
+                        std::max({1.0F, std::abs(ref), metas[i].norm + metas[j].norm, term_mag});
+                    const float tol = 1e-4F + 1e-5F * scale_mag;
+                    for (const auto isa : supported) {
+                        const float actual = quantized_pair_distance_with_isa(codes[i].data(),
+                                                                              metas[i],
+                                                                              codes[j].data(),
+                                                                              metas[j],
+                                                                              dim,
+                                                                              stride,
+                                                                              metric,
+                                                                              isa);
+                        CAPTURE(
+                            dim, static_cast<int>(metric), i, j, sq8_isa_name(isa), ref, actual);
+                        REQUIRE(std::isfinite(actual));
+                        REQUIRE(std::abs(actual - ref) <= tol);
+                    }
+                }
+            }
+        }
+    }
+
+    // Non-finite elements (NaN or +/-Inf in SIMD or scalar tail positions, or non-finite pre_scale)
+    // must be sanitized consistently across every ISA into zeroed codes and metadata.
+    constexpr uint64_t bad_dim = 37;
+    constexpr uint64_t bad_stride = 64;
+    const std::vector<float> bad_values{
+        std::numeric_limits<float>::quiet_NaN(),
+        std::numeric_limits<float>::infinity(),
+        -std::numeric_limits<float>::infinity(),
+    };
+    for (const uint64_t bad_pos : {uint64_t{0}, uint64_t{7}, uint64_t{16}, uint64_t{36}}) {
+        for (const float bad_val : bad_values) {
+            std::vector<float> vec(bad_dim);
+            for (uint64_t d = 0; d < bad_dim; ++d) {
+                vec[d] = static_cast<float>(d) * 0.25F - 2.0F;
+            }
+            vec[bad_pos] = bad_val;
+            std::vector<uint8_t> code(bad_stride, 0xAAU);
+            QMeta meta{1.0F, 2.0F, 3.0F, 4.0F};
+            quantize_row_sq8_local(
+                vec.data(), bad_dim, bad_stride, 1.0F, MetricKind::L2_SQR, code.data(), meta);
+            REQUIRE(meta.step == 0.0F);
+            REQUIRE(meta.min_val == 0.0F);
+            REQUIRE(meta.su == 0.0F);
+            REQUIRE(meta.norm == 0.0F);
+            for (const uint8_t b : code) {
+                REQUIRE(b == 0);
+            }
+        }
+    }
+    {
+        std::vector<float> vec(bad_dim, 1.0F);
+        std::vector<uint8_t> code(bad_stride, 0xAAU);
+        QMeta meta{1.0F, 2.0F, 3.0F, 4.0F};
+        quantize_row_sq8_local(vec.data(),
+                               bad_dim,
+                               bad_stride,
+                               std::numeric_limits<float>::quiet_NaN(),
+                               MetricKind::COSINE,
+                               code.data(),
+                               meta);
+        REQUIRE(meta.step == 0.0F);
+        REQUIRE(meta.min_val == 0.0F);
+        REQUIRE(meta.su == 0.0F);
+        REQUIRE(meta.norm == 0.0F);
+        for (const uint8_t b : code) {
+            REQUIRE(b == 0);
+        }
+    }
+}
+
+TEST_CASE("PiPNN sq8_local preserves invariants and serial-parallel determinism across metrics",
+          "[ut][pipnn]") {
+    const auto metric = GENERATE(vsag::MetricType::METRIC_TYPE_L2SQR,
+                                 vsag::MetricType::METRIC_TYPE_IP,
+                                 vsag::MetricType::METRIC_TYPE_COSINE);
+    constexpr uint64_t count = 320;
+    constexpr uint64_t dimensions = 64;
+    auto common = MakeCommonParam(dimensions, metric);
+    auto* allocator = common.allocator_.get();
+    auto vectors = MakeVectors(count, dimensions);
+    vsag::Vector<vsag::InnerIdType> ids(allocator);
+    for (uint64_t i = 0; i < count; ++i) {
+        ids.emplace_back(static_cast<vsag::InnerIdType>(i));
+    }
+    auto rows = MakeRows(vectors, ids, dimensions, allocator);
+
+    vsag::PiPNNGraphBuilderParameter param;
+    param.max_leaf_size = 64;
+    param.min_leaf_size = 16;
+    param.leader_sample_rate = 0.05F;
+    param.fanout = {4, 2};
+    param.leaf_neighbor_count = 5;
+    param.reservoir_size = 32;
+    param.alpha = 1.2F;
+    param.build_quantization_type = vsag::QUANTIZATION_TYPE_VALUE_SQ8_LOCAL;
+
+    auto serial = MakeGraph(common, count, 16);
+    auto parallel = MakeGraph(common, count, 16);
+    vsag::PiPNNGraphBuilder(param, dimensions, metric, allocator).Build(serial, ids, rows);
+    auto pool = vsag::SafeThreadPool::FactoryDefaultThreadPool();
+    pool->SetPoolSize(4);
+    vsag::PiPNNGraphBuilder(param, dimensions, metric, allocator, pool.get(), 4)
+        .Build(parallel, ids, rows);
+
+    RequireGraphInvariants(serial, ids, 16, allocator);
+    RequireGraphInvariants(parallel, ids, 16, allocator);
+    for (const auto id : ids) {
+        vsag::Vector<vsag::InnerIdType> expected(allocator), actual(allocator);
+        serial->GetNeighbors(id, expected);
+        parallel->GetNeighbors(id, actual);
+        REQUIRE(actual == expected);
+    }
+}
+
+TEST_CASE("PiPNN sq8_local supports native FP16 and BF16 rows", "[ut][pipnn]") {
+    const auto dtype = GENERATE(vsag::DataTypes::DATA_TYPE_FP16, vsag::DataTypes::DATA_TYPE_BF16);
+    const auto metric =
+        GENERATE(vsag::MetricType::METRIC_TYPE_L2SQR, vsag::MetricType::METRIC_TYPE_COSINE);
+    constexpr uint64_t count = 160;
+    constexpr uint64_t dimensions = 32;
+    auto common = MakeCommonParam(dimensions, metric);
+    auto* allocator = common.allocator_.get();
+    auto fp32_vectors = MakeVectors(count, dimensions);
+    std::vector<uint16_t> half_storage(count * dimensions);
+    for (uint64_t i = 0; i < count * dimensions; ++i) {
+        half_storage[i] = dtype == vsag::DataTypes::DATA_TYPE_FP16
+                              ? vsag::generic::FloatToFP16(fp32_vectors[i])
+                              : vsag::generic::FloatToBF16(fp32_vectors[i]);
+    }
+    vsag::Vector<vsag::InnerIdType> ids(allocator);
+    vsag::Vector<const uint16_t*> rows(allocator);
+    for (uint64_t i = 0; i < count; ++i) {
+        ids.emplace_back(static_cast<vsag::InnerIdType>(i));
+        rows.emplace_back(half_storage.data() + i * dimensions);
+    }
+
+    vsag::PiPNNGraphBuilderParameter param;
+    param.max_leaf_size = 48;
+    param.min_leaf_size = 16;
+    param.reservoir_size = 24;
+    param.alpha = 1.2F;
+    param.build_quantization_type = vsag::QUANTIZATION_TYPE_VALUE_SQ8_LOCAL;
+
+    auto graph = MakeGraph(common, count, 12);
+    vsag::PiPNNGraphBuilder(param, dimensions, metric, allocator).Build(graph, ids, rows, dtype);
+    RequireGraphInvariants(graph, ids, 12, allocator);
+}
+
+TEST_CASE("PiPNN sq8_local integrates with adaptive pruning and build cache",
+          "[ut][pipnn][pipnn_cache]") {
+    constexpr uint64_t count = 128;
+    constexpr uint64_t dimensions = 16;
+    auto common = MakeCommonParam(dimensions, vsag::MetricType::METRIC_TYPE_L2SQR);
+    auto* allocator = common.allocator_.get();
+    auto vectors = MakeVectors(count + 32, dimensions);
+    std::mt19937 generator(42);
+    std::normal_distribution<float> distribution;
+    for (auto& value : vectors) {
+        value = distribution(generator);
+    }
+    vsag::Vector<vsag::InnerIdType> original_ids(allocator);
+    std::vector<std::string> original_sources;
+    for (uint32_t id = 0; id < count; ++id) {
+        original_ids.push_back(id);
+        original_sources.push_back("sq8-src-" + std::to_string(id));
+    }
+    auto original_rows = MakeRows(vectors, original_ids, dimensions, allocator);
+
+    vsag::PiPNNGraphBuilderParameter param;
+    param.reservoir_size = 32;
+    param.leaf_neighbor_count = 16;
+    param.min_leaf_size = 1;
+    param.alpha = 1.2F;
+    param.build_quantization_type = vsag::QUANTIZATION_TYPE_VALUE_SQ8_LOCAL;
+
+    // Adaptive pruning (step == 0 and step > 0) works cleanly with sq8_local.
+    {
+        auto g_base = MakeGraph(common, count, 8);
+        vsag::PiPNNGraphBuilder(param, dimensions, common.metric_, allocator)
+            .Build(g_base, original_ids, original_rows);
+        auto adaptive_param = param;
+        adaptive_param.adaptive_pruning = true;
+        adaptive_param.adaptive_pruning_adjust_step = 0.0F;
+        auto g_zero = MakeGraph(common, count, 8);
+        vsag::PiPNNGraphBuilder(adaptive_param, dimensions, common.metric_, allocator)
+            .Build(g_zero, original_ids, original_rows);
+        for (const auto id : original_ids) {
+            vsag::Vector<vsag::InnerIdType> a(allocator), b(allocator);
+            g_base->GetNeighbors(id, a);
+            g_zero->GetNeighbors(id, b);
+            REQUIRE(a == b);
+        }
+        adaptive_param.adaptive_pruning_adjust_step = 0.06F;
+        auto g_step = MakeGraph(common, count, 8);
+        vsag::PiPNNGraphBuilder(adaptive_param, dimensions, common.metric_, allocator)
+            .Build(g_step, original_ids, original_rows);
+        RequireGraphInvariants(g_step, original_ids, 8, allocator);
+    }
+
+    // Build cache policy isolates sq8_local from fp32 and reuses sq8_local snapshots cleanly.
+    std::shared_ptr<vsag::PiPNNBuildCache> sq8_snapshot;
+    auto g_cold = MakeGraph(common, count + 32, 8);
+    vsag::PiPNNGraphBuilder(param, dimensions, common.metric_, allocator)
+        .Build(g_cold, original_ids, original_rows, &original_sources, nullptr, &sq8_snapshot);
+    REQUIRE(sq8_snapshot != nullptr);
+
+    vsag::Vector<vsag::InnerIdType> ids(allocator);
+    std::vector<std::string> sources;
+    for (uint32_t id = 0; id < count; ++id) {
+        if (id % 20 != 0) {
+            ids.push_back(id);
+        }
+    }
+    for (uint32_t id = count; ids.size() < count; ++id) {
+        ids.push_back(id);
+    }
+    for (const auto id : ids) {
+        sources.push_back("sq8-src-" + std::to_string(id));
+    }
+    auto rows = MakeRows(vectors, ids, dimensions, allocator);
+
+    // FP32 build must NOT reuse an sq8_local cache snapshot.
+    auto fp32_param = param;
+    fp32_param.build_quantization_type = vsag::QUANTIZATION_TYPE_VALUE_FP32;
+    std::shared_ptr<vsag::PiPNNBuildCache> fp32_result;
+    auto g_fp32 = MakeGraph(common, count + 32, 8);
+    vsag::PiPNNGraphBuilder(fp32_param, dimensions, common.metric_, allocator)
+        .Build(g_fp32, ids, rows, &sources, sq8_snapshot.get(), &fp32_result);
+    REQUIRE(fp32_result != nullptr);
+    REQUIRE(fp32_result->reused_rows == 0);
+
+    // Matching sq8_local build reuses graph rows and matches reference pruning.
+    std::shared_ptr<vsag::PiPNNBuildCache> sq8_warm_result;
+    auto g_reused = MakeGraph(common, count + 32, 8);
+    auto g_ref = MakeGraph(common, count + 32, 8);
+    vsag::PiPNNGraphBuilder(param, dimensions, common.metric_, allocator)
+        .Build(g_reused, ids, rows, &sources, sq8_snapshot.get(), &sq8_warm_result);
+    REQUIRE(sq8_warm_result != nullptr);
+    REQUIRE(sq8_warm_result->reused_graph_rows > 0);
+    sq8_snapshot->reuse_final_graph = false;
+    vsag::PiPNNGraphBuilder(param, dimensions, common.metric_, allocator)
+        .Build(g_ref, ids, rows, &sources, sq8_snapshot.get());
+    for (const auto id : ids) {
+        vsag::Vector<vsag::InnerIdType> actual(allocator), expected(allocator);
+        g_reused->GetNeighbors(id, actual);
+        g_ref->GetNeighbors(id, expected);
         REQUIRE(actual == expected);
     }
 }

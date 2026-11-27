@@ -19,7 +19,10 @@ set (PIPNN_SRC
     pipnn_adaptive_pruning.h
     pipnn_graph_builder.cpp
     pipnn_graph_builder.h
+    pipnn_simd_kernels.cpp
+    pipnn_simd_kernels.h
 )
 
 add_library (pipnn OBJECT ${PIPNN_SRC})
-target_link_libraries (pipnn PRIVATE coverage_config vsag_src_common vsag_blas)
+target_link_libraries (pipnn PRIVATE coverage_config vsag_src_common vsag_blas cpuinfo)
+add_dependencies (pipnn cpuinfo)

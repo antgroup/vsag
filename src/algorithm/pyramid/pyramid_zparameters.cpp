@@ -279,6 +279,15 @@ PyramidParameters::FromJson(const JsonType& json) {
         CHECK_ARGUMENT(this->graph_type == GRAPH_TYPE_VALUE_PIPNN,
                        "pipnn_adaptive_pruning requires graph_type=pipnn");
     }
+    if (graph_json.Contains(PIPNN_PARAMETER_BUILD_QUANTIZATION_TYPE)) {
+        CHECK_ARGUMENT(graph_json[PIPNN_PARAMETER_BUILD_QUANTIZATION_TYPE].IsString(),
+                       "PiPNN pipnn_build_quantization_type must be a string");
+        if (graph_json[PIPNN_PARAMETER_BUILD_QUANTIZATION_TYPE].GetString() !=
+            QUANTIZATION_TYPE_VALUE_FP32) {
+            CHECK_ARGUMENT(this->graph_type == GRAPH_TYPE_VALUE_PIPNN,
+                           "pipnn_build_quantization_type requires graph_type=pipnn");
+        }
+    }
     CHECK_ARGUMENT(this->graph_type == GRAPH_TYPE_VALUE_NSW or
                        this->graph_type == GRAPH_TYPE_VALUE_ODESCENT or
                        this->graph_type == GRAPH_TYPE_VALUE_PIPNN,

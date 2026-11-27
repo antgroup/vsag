@@ -192,6 +192,15 @@ HGraphParameter::FromJson(const JsonType& json) {
         CHECK_ARGUMENT(graph_type == GRAPH_TYPE_VALUE_PIPNN,
                        "pipnn_adaptive_pruning requires graph_type=pipnn");
     }
+    if (graph_json.Contains(PIPNN_PARAMETER_BUILD_QUANTIZATION_TYPE)) {
+        CHECK_ARGUMENT(graph_json[PIPNN_PARAMETER_BUILD_QUANTIZATION_TYPE].IsString(),
+                       "PiPNN pipnn_build_quantization_type must be a string");
+        if (graph_json[PIPNN_PARAMETER_BUILD_QUANTIZATION_TYPE].GetString() !=
+            QUANTIZATION_TYPE_VALUE_FP32) {
+            CHECK_ARGUMENT(graph_type == GRAPH_TYPE_VALUE_PIPNN,
+                           "pipnn_build_quantization_type requires graph_type=pipnn");
+        }
+    }
 
     if (json.Contains(SUPPORT_DUPLICATE)) {
         this->support_duplicate = json[SUPPORT_DUPLICATE].GetBool();

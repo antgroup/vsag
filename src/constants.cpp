@@ -95,6 +95,7 @@ const char* const PIPNN_PARAMETER_RESERVOIR_SIZE = "pipnn_reservoir_size";
 const char* const PIPNN_PARAMETER_ADAPTIVE_PRUNING = "pipnn_adaptive_pruning";
 const char* const PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP =
     "pipnn_adaptive_pruning_adjust_step";
+const char* const PIPNN_PARAMETER_BUILD_QUANTIZATION_TYPE = "pipnn_build_quantization_type";
 
 const char* const INDEX_PARAM = "index_param";
 

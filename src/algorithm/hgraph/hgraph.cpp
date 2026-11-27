@@ -126,6 +126,10 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         const bool valid_adaptive_metric = not this->pipnn_param_.adaptive_pruning or
                                            common_param.metric_ == MetricType::METRIC_TYPE_L2SQR;
         CHECK_ARGUMENT(valid_adaptive_metric, "PiPNN adaptive pruning only supports L2");
+        if (this->pipnn_param_.build_quantization_type == QUANTIZATION_TYPE_VALUE_SQ8_LOCAL) {
+            CHECK_ARGUMENT(common_param.dim_ <= 65535,
+                           "PiPNN sq8_local build quantization requires dimensions <= 65535");
+        }
         if (common_param.repr_ != RecordRepr::DENSE or
             (common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT and
              common_param.data_type_ != DataTypes::DATA_TYPE_FP16 and

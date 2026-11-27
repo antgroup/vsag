@@ -98,6 +98,7 @@ records cross-index defaults and the top-level common fields.
 | `pipnn_reservoir_size` | int | `64` | Candidate slots retained per point before final pruning; effective capacity is at least `max_degree`. |
 | `pipnn_adaptive_pruning` | bool | `false` | Experimental per-point alpha adjustment in PiPNN final pruning; L2 only. |
 | `pipnn_adaptive_pruning_adjust_step` | float | `0.06` | Alpha adjustment step; finite, non-negative, `alpha - 2*step > 0`, and `alpha + 3*step` finite when enabled. |
+| `pipnn_build_quantization_type` | string | `"fp32"` | Internal precision used during CPU PiPNN batch graph construction: `"fp32"` (lossless default) or `"sq8_local"` (opt-in per-vector asymmetric 8-bit quantization accelerated by CPU SIMD; requires `dim <= 65535`, affects initial `Build` only). |
 | `use_reverse_edges` | bool | `false` | Track incoming neighbors for O(1) reverse-edge lookup. Roughly doubles edge storage and is unsupported with `graph_storage_type: "compressed"`. |
 | `label_remap_type` | string | `"pg"` | Label-to-inner-ID map implementation: `"pg"` or `"robin"`. Keep the same value when restoring or combining compatible indexes. |
 | `use_reorder` | bool | `false` | Keep a high-precision copy and re-rank after the coarse search |
