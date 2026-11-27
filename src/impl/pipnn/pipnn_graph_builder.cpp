@@ -38,6 +38,8 @@
 
 #include "common.h"
 #include "datacell/graph_interface.h"
+#include "gpu/cuda_backend.h"
+#include "gpu/gpu_plan.h"
 #include "half_vector.h"
 #include "hash_types.h"
 #include "impl/blas/blas_function.h"
@@ -60,6 +62,10 @@ constexpr uint64_t LEADER_CAP = 1000;
 constexpr uint64_t PARTITION_STRIPE_SIZE = 256;
 constexpr uint64_t PARTITION_ASSIGNMENT_CHUNK_STRIPES = 16;
 constexpr uint64_t PARTITION_SEED = 1000;
+// The device build runs every stage on the card, so it pays for one upload and one download.
+// points * max_leaf_size * dimensions estimates its work; 2^30 is about where it beats the host
+// path on the reference card.
+constexpr uint64_t GPU_BUILD_MIN_WORK = 1ULL << 30;
 constexpr uint64_t MIN_PARALLEL_PARTITION_POINTS = 4096;
 constexpr uint64_t SMALL_TOP_K_LIMIT = 16;
 constexpr uint64_t MIN_UNDERSIZED_LEAF_NEIGHBOR_COUNT = 4;
@@ -434,6 +440,11 @@ private:
     void
     write_graph_row(uint32_t source, PruneScratch& scratch);
 
+    // Builds and writes the whole graph on the device. False leaves the graph untouched and the
+    // host path to do the work, including its validation errors.
+    [[nodiscard]] bool
+    build_graph_on_device(const Vector<InnerIdType>& ids_sequence) const;
+
     void
     parallel_for(uint64_t total,
                  uint64_t block_size,
@@ -515,6 +526,16 @@ void
 PiPNNPipeline::Build(const Vector<InnerIdType>& ids_sequence, DuplicatePairs* duplicates) {
     using Clock = std::chrono::steady_clock;
     std::array<double, 6> phase_seconds{};
+    // Duplicate grouping and cache reuse are host-only features, so they keep the CPU path. The
+    // exported-cache slot is always handed over by HGraph and Pyramid; the device build leaves it
+    // empty like the CPU path does when no source IDs are present.
+    if (duplicates == nullptr and source_ids_ == nullptr and imported_cache_ == nullptr and
+        build_graph_on_device(ids_sequence)) {
+        if (exported_cache_ != nullptr) {
+            exported_cache_->reset();
+        }
+        return;
+    }
     auto start = Clock::now();
     auto finish_phase = [&](uint64_t phase) {
         const auto now = Clock::now();
@@ -2190,6 +2211,120 @@ PiPNNPipeline::robust_prune(uint32_t source,
 }
 
 bool
+PiPNNPipeline::build_graph_on_device(const Vector<InnerIdType>& ids_sequence) const {
+    const uint64_t count = ids_sequence.size();
+    const uint64_t max_degree = graph_->MaximumDegree();
+    const uint64_t min_work = parameter_.gpu_min_work_threshold == 0
+                                  ? GPU_BUILD_MIN_WORK
+                                  : parameter_.gpu_min_work_threshold;
+    if (not parameter_.enable_gpu_build or parameter_.fanout.size() != 2 or
+        parameter_.adaptive_pruning or count < 2 or
+        count != (native_half() ? half_rows_->size() : rows_->size()) or
+        count > std::numeric_limits<uint32_t>::max() or
+        max_degree > std::numeric_limits<uint32_t>::max() or
+        not gpu::WorthOffloading(
+            count, parameter_.max_leaf_size, static_cast<int32_t>(dimensions_), min_work)) {
+        return false;
+    }
+    // Sparse and unordered IDs are fine; they are only mapped back when the graph is written.
+    // Strictly increasing IDs prove uniqueness without a set, and anything else stays on the host
+    // path, which owns the validation errors.
+    const uint64_t graph_capacity = graph_->MaxCapacity();
+    for (uint64_t local_id = 0; local_id < count; ++local_id) {
+        const bool row_missing =
+            native_half() ? half_row(static_cast<uint32_t>(local_id)) == nullptr
+                          : vector_by_local_id(static_cast<uint32_t>(local_id)) == nullptr;
+        if (row_missing or ids_sequence[local_id] >= graph_capacity or
+            (local_id > 0 and ids_sequence[local_id] <= ids_sequence[local_id - 1])) {
+            return false;
+        }
+    }
+
+    const gpu::CudaDeviceScope device(parameter_.gpu_device_id);
+    if (not device.Bound()) {
+        return false;
+    }
+    const uint64_t budget = gpu::CudaSuggestedBudget(parameter_.gpu_memory_budget);
+    if (budget == 0) {
+        return false;
+    }
+
+    gpu::CudaPiPNNConfig config;
+    config.max_leaf_size = parameter_.max_leaf_size;
+    config.min_leaf_size = parameter_.min_leaf_size;
+    config.leader_sample_rate = parameter_.leader_sample_rate;
+    config.fanout_l1 = static_cast<uint32_t>(parameter_.fanout[0]);
+    config.fanout_l2 = static_cast<uint32_t>(parameter_.fanout[1]);
+    config.leaf_neighbor_count = static_cast<uint32_t>(parameter_.leaf_neighbor_count);
+    config.hash_plane_count = static_cast<uint32_t>(parameter_.hash_plane_count);
+    config.max_degree = static_cast<uint32_t>(max_degree);
+    config.reservoir_size = static_cast<uint32_t>(parameter_.reservoir_size);
+    config.alpha = parameter_.alpha;
+    config.seed = PARTITION_SEED;
+    switch (metric_) {
+        case MetricType::METRIC_TYPE_IP:
+            config.distance_type = gpu::DistanceType::InnerProduct;
+            break;
+        case MetricType::METRIC_TYPE_COSINE:
+            config.distance_type = gpu::DistanceType::Cosine;
+            break;
+        default:
+            config.distance_type = gpu::DistanceType::L2Sqr;
+            break;
+    }
+
+    // FP32 rows that already sit back to back are uploaded in place. Anything else is gathered
+    // (and decoded, for FP16 and BF16) into one contiguous staging buffer.
+    const float* values = nullptr;
+    std::unique_ptr<UninitializedFloatBuffer> staging;
+    bool contiguous = not native_half();
+    for (uint64_t local_id = 1; local_id < count and contiguous; ++local_id) {
+        contiguous = vector_by_local_id(static_cast<uint32_t>(local_id)) ==
+                     vector_by_local_id(0) + local_id * dimensions_;
+    }
+    if (contiguous) {
+        values = vector_by_local_id(0);
+    } else {
+        staging = std::make_unique<UninitializedFloatBuffer>(
+            checked_product(count, dimensions_, "GPU build rows"), allocator_, "GPU build rows");
+        parallel_for(count, 1024, [&](uint64_t begin, uint64_t end) {
+            for (uint64_t local_id = begin; local_id < end; ++local_id) {
+                gather_row(static_cast<uint32_t>(local_id), *staging, local_id);
+            }
+        });
+        values = staging->Data();
+    }
+
+    Vector<uint32_t> neighbors(allocator_);
+    Vector<uint32_t> degrees(allocator_);
+    neighbors.resize(checked_product(count, max_degree, "GPU build neighbors"));
+    degrees.resize(count);
+    if (not gpu::CudaBuildPiPNNGraph(values,
+                                     count,
+                                     static_cast<int32_t>(dimensions_),
+                                     config,
+                                     neighbors.data(),
+                                     degrees.data(),
+                                     budget)) {
+        return false;
+    }
+
+    parallel_for(count, 256, [&](uint64_t begin, uint64_t end) {
+        Vector<InnerIdType> row(allocator_);
+        for (uint64_t local_id = begin; local_id < end; ++local_id) {
+            row.clear();
+            const uint64_t degree = std::min<uint64_t>(degrees[local_id], max_degree);
+            const uint32_t* source = neighbors.data() + local_id * max_degree;
+            for (uint64_t slot = 0; slot < degree; ++slot) {
+                row.emplace_back(ids_sequence[source[slot]]);
+            }
+            graph_->InsertNeighborsById(ids_sequence[local_id], row);
+        }
+    });
+    return true;
+}
+
+bool
 PiPNNPipeline::certify_cached_graph(uint32_t source) const {
     if (parameter_.adaptive_pruning or cached_rows_[source] == 0) {
         return false;
@@ -2406,6 +2541,20 @@ PiPNNGraphBuilderParameter::FromJson(const JsonType& json) {
     read_uint(PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT, leaf_neighbor_count);
     read_uint(PIPNN_PARAMETER_HASH_PLANE_COUNT, hash_plane_count);
     read_uint(PIPNN_PARAMETER_RESERVOIR_SIZE, reservoir_size);
+    read_uint(PIPNN_PARAMETER_GPU_MEMORY_BUDGET, gpu_memory_budget);
+    read_uint(PIPNN_PARAMETER_GPU_MIN_WORK_THRESHOLD, gpu_min_work_threshold);
+    if (json.Contains(PIPNN_PARAMETER_ENABLE_GPU_BUILD)) {
+        require_argument(json[PIPNN_PARAMETER_ENABLE_GPU_BUILD].IsBool(),
+                         "PiPNN pipnn_enable_gpu_build must be a boolean");
+        enable_gpu_build = json[PIPNN_PARAMETER_ENABLE_GPU_BUILD].GetBool();
+    }
+    if (json.Contains(PIPNN_PARAMETER_GPU_DEVICE_ID)) {
+        uint64_t device_id = 0;
+        read_uint(PIPNN_PARAMETER_GPU_DEVICE_ID, device_id);
+        require_argument(device_id <= static_cast<uint64_t>(std::numeric_limits<int32_t>::max()),
+                         "PiPNN pipnn_gpu_device_id must fit in 32 bits");
+        gpu_device_id = static_cast<int32_t>(device_id);
+    }
 
     if (json.Contains(PIPNN_PARAMETER_LEADER_SAMPLE_RATE)) {
         require_argument(json[PIPNN_PARAMETER_LEADER_SAMPLE_RATE].IsNumber(),
@@ -2441,6 +2590,10 @@ PiPNNGraphBuilderParameter::ToJson() const {
     json[PIPNN_PARAMETER_RESERVOIR_SIZE].SetUint64(reservoir_size);
     json[PIPNN_PARAMETER_ADAPTIVE_PRUNING].SetBool(adaptive_pruning);
     json[PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP].SetFloat(adaptive_pruning_adjust_step);
+    json[PIPNN_PARAMETER_ENABLE_GPU_BUILD].SetBool(enable_gpu_build);
+    json[PIPNN_PARAMETER_GPU_DEVICE_ID].SetUint64(static_cast<uint64_t>(gpu_device_id));
+    json[PIPNN_PARAMETER_GPU_MEMORY_BUDGET].SetUint64(gpu_memory_budget);
+    json[PIPNN_PARAMETER_GPU_MIN_WORK_THRESHOLD].SetUint64(gpu_min_work_threshold);
     return json;
 }
 

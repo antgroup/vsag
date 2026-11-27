@@ -16,8 +16,8 @@
 
 #include <cstdint>
 
-/// The optional CUDA backend: finding a device, binding one, and the three
-/// compute-heavy passes of a k-means build.
+/// The optional CUDA backend: finding a device, binding one, the three
+/// compute-heavy passes of a k-means build, and a device-resident PiPNN build.
 ///
 /// With ENABLE_CUDA off a stub exporting the same symbols is compiled instead and
 /// every entry point returns false, so callers link unconditionally and decide at
@@ -34,6 +34,8 @@
 ///   * `min_work` is the smallest `rows * k * dim` worth offloading; 0 selects
 ///     the calibrated default.
 namespace vsag::gpu {
+
+enum class DistanceType : int32_t { L2Sqr = 0, InnerProduct = 1, Cosine = 2 };
 
 /// True when this build has the CUDA backend and the machine has at least one
 /// usable device.
@@ -150,6 +152,52 @@ CudaAccumulateCentroids(const float* datas,
                         int32_t* counts,
                         uint64_t budget_bytes,
                         uint64_t min_work);
+
+/// Parameters of the device-resident PiPNN build. Fields mirror the PiPNN builder's
+/// parameters; the stage names refer to the passes of CudaBuildPiPNNGraph.
+struct CudaPiPNNConfig {
+    uint64_t max_leaf_size{1024};
+    uint64_t min_leaf_size{64};
+    float leader_sample_rate{0.005F};
+    uint32_t fanout_l1{8};
+    uint32_t fanout_l2{2};
+    uint32_t leaf_neighbor_count{5};
+    uint32_t hash_plane_count{12};
+    uint32_t max_degree{32};
+    DistanceType distance_type{DistanceType::L2Sqr};
+    uint64_t seed{1000};
+    // Candidates kept per vertex, nearest first, before the alpha occlusion rule
+    // picks the final neighbours from them; at least max_degree are kept.
+    uint32_t reservoir_size{64};
+    float alpha{1.2F};
+};
+
+/// Builds a PiPNN graph entirely on the device: the rows are uploaded once and
+/// quantized to a transient INT8 copy used only for scoring, partitioned into
+/// overlapping leaves, every leaf member's nearest leaf neighbours are selected and
+/// folded into sign-hash buckets, and the bidirectional candidates are pruned to at
+/// most `max_degree` neighbours per vertex. The INT8 copy is not a VSAG quantizer:
+/// it is never stored and does not depend on the index's quantization type.
+///
+/// `vectors` holds `count` contiguous rows of `dim` floats. On success
+/// `out_neighbors` (count * max_degree slots) and `out_degrees` (count slots) hold
+/// each vertex's neighbours nearest first; slots past a vertex's degree are not
+/// specified. L2, inner product and cosine are built: cosine normalizes the rows
+/// and is then exactly L2, inner product is scored as -dot on the uncentred rows.
+/// A configuration the kernels do not cover, or a budget too small for the working
+/// set, returns false.
+/// The covered range is leaf_neighbor_count, fanouts and max_degree up to 16, 16
+/// and 128, hash_plane_count up to 12, reservoir_size up to 128 and alpha >= 1.
+/// `budget_bytes` bounds the device working set: when the candidate edges do not
+/// fit they are sorted and pruned one slab of source vertices at a time.
+bool
+CudaBuildPiPNNGraph(const float* vectors,
+                    uint64_t count,
+                    int32_t dim,
+                    const CudaPiPNNConfig& config,
+                    uint32_t* out_neighbors,
+                    uint32_t* out_degrees,
+                    uint64_t budget_bytes);
 
 /// A working-set budget from what the device has free, capped at `cap_bytes`
 /// (0 means no cap). Returns 0 with no usable device, which every entry point

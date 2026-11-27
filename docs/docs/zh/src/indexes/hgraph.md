@@ -85,6 +85,10 @@ auto result = index->KnnSearch(
 | `pipnn_reservoir_size` | int | `64` | 最终剪枝前每个点保留的候选槽数；实际容量至少为 `max_degree` |
 | `pipnn_adaptive_pruning` | bool | `false` | 实验性逐点动态 alpha，仅用于 PiPNN 最终剪枝，要求 L2 |
 | `pipnn_adaptive_pruning_adjust_step` | float | `0.06` | 调整步长；启用时要求有限、非负、`alpha - 2*step > 0`，且 `alpha + 3*step` 有限 |
+| `pipnn_enable_gpu_build` | bool | `false` | 库以 `ENABLE_CUDA=ON` 编译时，在 CUDA 设备上构建 PiPNN 图，见 [GPU 加速 PiPNN 构建](hgraph.md#gpu-加速-pipnn-构建) |
+| `pipnn_gpu_device_id` | int | `0` | GPU 构建使用的 CUDA 设备序号 |
+| `pipnn_gpu_memory_budget` | int | `0` | GPU 构建可使用的显存上限（字节）；`0` 表示使用设备可提供的显存 |
+| `pipnn_gpu_min_work_threshold` | int | `0` | 值得下放到 GPU 的最小 `点数 * pipnn_max_leaf_size * dim`；`0` 使用校准后的默认值（`2^30`） |
 | `use_reverse_edges` | bool | `false` | 跟踪入边，实现 O(1) 反向邻居查找；边存储约翻倍，且 `graph_storage_type: "compressed"` 不支持 |
 | `label_remap_type` | string | `"pg"` | label 到内部 ID 的 map 实现：`"pg"` 或 `"robin"`；恢复或组合兼容索引时应保持一致 |
 | `use_reorder` | bool | `false` | 是否额外保留一份高精度副本用于精排 |
@@ -195,6 +199,48 @@ HGraph 现有的路由层、向量存储、搜索、过滤、精排、增量 `Ad
 `tools/eval/pipnn_parallel.yaml` 会在 SIFT1M 上以相同 Recall@10 目标比较 NSW、ODescent 和
 PiPNN，并通过查询验证每一份生成的图。
 
+
+### GPU 加速 PiPNN 构建
+
+库以 `ENABLE_CUDA=ON` 编译时，设置 `pipnn_enable_gpu_build: true` 即可在一块 CUDA 设备上完成整个
+PiPNN 构建（采用 [GPiPNN](https://arxiv.org/abs/2611.05690) 的全流程驻留 GPU 设计）：
+
+```json
+{
+    "dim": 128,
+    "dtype": "float32",
+    "metric_type": "l2",
+    "index_param": {
+        "base_quantization_type": "fp32",
+        "max_degree": 32,
+        "graph_type": "pipnn",
+        "alpha": 1.2,
+        "pipnn_enable_gpu_build": true,
+        "pipnn_gpu_device_id": 0
+    }
+}
+```
+
+向量只上传一次并常驻显存；设备上会派生一份仅用于打分的 INT8 副本，它是临时的、不落盘，也与
+`base_quantization_type` 无关。随后设备依次完成：把点划分为相互重叠的叶子、为每个点选出叶内最近邻
+（不在显存中生成任何叶内距离矩阵）、把候选折叠为方向哈希桶、用无锁的排序归并把双向候选剪枝为每点至多
+`max_degree` 个邻居。只有最终的邻接表回传主机。
+
+**适用范围**
+
+- `metric_type` 支持 `l2`、`ip`、`cosine`；`dtype` 支持 `float32`、`float16`、`bfloat16`（半精度行在主机解码后以 FP32 上传）。
+  余弦在设备上对行归一化，内积按负内积打分。
+- 只改变图的构建；路由层、存储、量化、检索、`Add` 和序列化均不变，这些设置也不影响索引兼容性。
+- 要求 `fanout` 恰好两层、`max_degree <= 128`、`pipnn_hash_plane_count <= 12`、`pipnn_reservoir_size <= 128`。
+  `pipnn_adaptive_pruning` 是 CPU 策略，开启后仍在主机构建。
+- Pyramid 会把这四个设置转发给它构建的每个 PiPNN 子图；低于工作量阈值的子图仍在 CPU 上构建。
+
+**回退** 以下情况会静默回到 CPU 构建，结果与以往一致：库没有 CUDA 后端、没有可用设备、显存不足
+（受 `pipnn_gpu_memory_budget` 约束）、工作量低于 `pipnn_gpu_min_work_threshold`，或输入超出上述范围。复用构建缓存（`ImportCache()`，或设置了 `Dataset::SourceID` 以便导出缓存）以及带近似重复点分组的构建同样留在 CPU 上。
+GPU 图与 CPU 图并不逐位一致（划分和打分方式不同），请在相同 `ef_search` 下比较召回，而不是比较邻接表。
+
+在一块 RTX 2080 Ti 上，SIFT-1M（128 维，`max_degree` 32，`alpha` 1.2）约 2.2 秒完成构建，
+`ef_search` 128 时 Recall@10 为 0.992；同机 CPU 构建约 17 秒、0.993。这只是一次测量，不构成保证。可用 `eval_performance` 运行 `tools/eval/pipnn_gpu.yaml` 复现该对比。
 
 ### 实验性 PiPNN 动态 alpha
 

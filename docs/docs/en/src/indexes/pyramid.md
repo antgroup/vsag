@@ -146,6 +146,10 @@ Build-time parameters live under `index_param`.
 | `pipnn_reservoir_size` | int | `64` | Candidate slots retained per point before final pruning; effective capacity is at least `max_degree`. |
 | `pipnn_adaptive_pruning` | bool | `false` | Use HGraph's shared PiPNN dynamic-alpha selector during L2 batch builds. |
 | `pipnn_adaptive_pruning_adjust_step` | float | `0.06` | Alpha adjustment step for the PiPNN selector. |
+| `pipnn_enable_gpu_build` | bool | `false` | Build the PiPNN graph on a CUDA device when the library was built with `ENABLE_CUDA=ON`; see [GPU-accelerated PiPNN build](hgraph.md#gpu-accelerated-pipnn-build). |
+| `pipnn_gpu_device_id` | int | `0` | CUDA device ordinal used by the GPU build. |
+| `pipnn_gpu_memory_budget` | int | `0` | Cap, in bytes, on device memory the GPU build may use; `0` uses what the device offers. |
+| `pipnn_gpu_min_work_threshold` | int | `0` | Smallest `points * pipnn_max_leaf_size * dim` worth offloading; `0` selects the calibrated default (`2^30`). |
 | `no_build_levels` | int[] | `[]` | Tree levels that skip graph construction (0-indexed from the root). |
 | `use_reorder` | bool | `false` | Keep a high-precision copy for rescoring. |
 | `precise_quantization_type` | string | `"fp32"` | Quantizer for reordering. Use `"rabitq"` with `rabitq_bits_per_dim_precise` to enable RaBitQ x+y split reorder from base storage. |

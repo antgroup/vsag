@@ -34,6 +34,7 @@
 
 #include "datacell/graph_interface.h"
 #include "datacell/graph_interface_parameter.h"
+#include "gpu/cuda_backend.h"
 #include "half_vector.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/thread_pool/safe_thread_pool.h"
@@ -328,6 +329,177 @@ TEST_CASE("PiPNN graph builder runs overlapping leaves in parallel",
         REQUIRE(serial_neighbors == first_neighbors);
         REQUIRE(first_neighbors == second_neighbors);
     }
+}
+
+namespace {
+
+vsag::PiPNNGraphBuilderParameter
+MakeGpuParameter() {
+    vsag::PiPNNGraphBuilderParameter parameter;
+    parameter.max_leaf_size = 64;
+    parameter.min_leaf_size = 8;
+    parameter.leader_sample_rate = 0.02F;
+    parameter.fanout = {4, 2};
+    parameter.reservoir_size = 32;
+    parameter.alpha = 1.2F;
+    parameter.enable_gpu_build = true;
+    parameter.gpu_min_work_threshold = 1;
+    return parameter;
+}
+
+}  // namespace
+
+TEST_CASE("PiPNN GPU build parameters round trip and reject bad values", "[ut][pipnn]") {
+    vsag::PiPNNGraphBuilderParameter defaults;
+    REQUIRE_FALSE(defaults.enable_gpu_build);
+    REQUIRE(defaults.gpu_device_id == 0);
+    REQUIRE(defaults.gpu_memory_budget == 0);
+    REQUIRE(defaults.gpu_min_work_threshold == 0);
+
+    vsag::PiPNNGraphBuilderParameter parameter;
+    parameter.FromJson(vsag::JsonType::Parse(R"({
+        "pipnn_enable_gpu_build": true,
+        "pipnn_gpu_device_id": 2,
+        "pipnn_gpu_memory_budget": 1073741824,
+        "pipnn_gpu_min_work_threshold": 4096
+    })"));
+    REQUIRE(parameter.enable_gpu_build);
+    REQUIRE(parameter.gpu_device_id == 2);
+    REQUIRE(parameter.gpu_memory_budget == 1073741824ULL);
+    REQUIRE(parameter.gpu_min_work_threshold == 4096);
+
+    vsag::PiPNNGraphBuilderParameter restored;
+    restored.FromJson(parameter.ToJson());
+    REQUIRE(restored.enable_gpu_build);
+    REQUIRE(restored.gpu_device_id == 2);
+    REQUIRE(restored.gpu_memory_budget == 1073741824ULL);
+    REQUIRE(restored.gpu_min_work_threshold == 4096);
+
+    vsag::PiPNNGraphBuilderParameter invalid;
+    REQUIRE_THROWS(invalid.FromJson(vsag::JsonType::Parse(R"({"pipnn_enable_gpu_build": 1})")));
+    REQUIRE_THROWS(invalid.FromJson(vsag::JsonType::Parse(R"({"pipnn_gpu_device_id": -1})")));
+    REQUIRE_THROWS(
+        invalid.FromJson(vsag::JsonType::Parse(R"({"pipnn_gpu_device_id": 4294967296})")));
+    REQUIRE_THROWS(
+        invalid.FromJson(vsag::JsonType::Parse(R"({"pipnn_gpu_memory_budget": "big"})")));
+}
+
+// Runs on the device when one is present and on the CPU otherwise; either way the graph
+// has to satisfy the same invariants.
+TEST_CASE("PiPNN GPU build yields a valid graph for every metric", "[ut][pipnn][metric]") {
+    constexpr uint64_t dimensions = 24;
+    constexpr uint64_t count = 3000;
+    constexpr uint64_t max_degree = 16;
+    const auto metric = GENERATE(vsag::MetricType::METRIC_TYPE_L2SQR,
+                                 vsag::MetricType::METRIC_TYPE_IP,
+                                 vsag::MetricType::METRIC_TYPE_COSINE);
+    const bool sparse = GENERATE(false, true);
+    auto common_param = MakeCommonParam(dimensions, metric);
+    auto vectors = MakeVectors(count, dimensions);
+    vsag::Vector<vsag::InnerIdType> ids(common_param.allocator_.get());
+    for (uint64_t id = 0; id < count; id += sparse ? 2 : 1) {
+        ids.emplace_back(static_cast<vsag::InnerIdType>(id));
+    }
+    auto rows = MakeRows(vectors, ids, dimensions, common_param.allocator_.get());
+
+    auto graph = MakeGraph(common_param, count, max_degree);
+    vsag::PiPNNGraphBuilder(
+        MakeGpuParameter(), dimensions, metric, common_param.allocator_.get(), nullptr, 1)
+        .Build(graph, ids, rows);
+    RequireGraphInvariants(graph, ids, max_degree, common_param.allocator_.get());
+}
+
+// HGraph and Pyramid always hand over an empty exported-cache slot; it must not keep the build
+// on the CPU. The GPU graph differs from the CPU graph, so a difference proves the device ran.
+TEST_CASE("PiPNN GPU build engages when an exported cache slot is supplied", "[ut][pipnn]") {
+    if (not vsag::gpu::CudaAvailable()) {
+        SKIP("no CUDA device");
+    }
+    constexpr uint64_t dimensions = 24;
+    constexpr uint64_t count = 3000;
+    constexpr uint64_t max_degree = 16;
+    auto common_param = MakeCommonParam(dimensions, vsag::MetricType::METRIC_TYPE_L2SQR);
+    auto vectors = MakeVectors(count, dimensions);
+    vsag::Vector<vsag::InnerIdType> ids(common_param.allocator_.get());
+    for (uint64_t id = 0; id < count; ++id) {
+        ids.emplace_back(static_cast<vsag::InnerIdType>(id));
+    }
+    auto rows = MakeRows(vectors, ids, dimensions, common_param.allocator_.get());
+
+    auto build = [&](bool gpu_enabled) {
+        auto parameter = MakeGpuParameter();
+        parameter.enable_gpu_build = gpu_enabled;
+        auto graph = MakeGraph(common_param, count, max_degree);
+        std::shared_ptr<vsag::PiPNNBuildCache> exported;
+        vsag::PiPNNGraphBuilder(parameter,
+                                dimensions,
+                                vsag::MetricType::METRIC_TYPE_L2SQR,
+                                common_param.allocator_.get(),
+                                nullptr,
+                                1)
+            .Build(graph, ids, rows, nullptr, nullptr, &exported);
+        REQUIRE(exported == nullptr);
+        return graph;
+    };
+    auto gpu_graph = build(true);
+    auto cpu_graph = build(false);
+    RequireGraphInvariants(gpu_graph, ids, max_degree, common_param.allocator_.get());
+
+    bool differs = false;
+    vsag::Vector<vsag::InnerIdType> gpu_neighbors(common_param.allocator_.get());
+    vsag::Vector<vsag::InnerIdType> cpu_neighbors(common_param.allocator_.get());
+    for (uint64_t id = 0; id < count and not differs; ++id) {
+        gpu_graph->GetNeighbors(static_cast<vsag::InnerIdType>(id), gpu_neighbors);
+        cpu_graph->GetNeighbors(static_cast<vsag::InnerIdType>(id), cpu_neighbors);
+        differs = gpu_neighbors != cpu_neighbors;
+    }
+    REQUIRE(differs);
+}
+
+TEST_CASE("PiPNN GPU build falls back when it cannot serve the request", "[ut][pipnn]") {
+    constexpr uint64_t dimensions = 24;
+    constexpr uint64_t count = 1500;
+    constexpr uint64_t max_degree = 16;
+    auto common_param = MakeCommonParam(dimensions);
+    auto vectors = MakeVectors(count, dimensions);
+    vsag::Vector<vsag::InnerIdType> ids(common_param.allocator_.get());
+    auto parameter = MakeGpuParameter();
+
+    SECTION("a device that does not exist") {
+        parameter.gpu_device_id = 1000;
+        for (uint64_t id = 0; id < count; ++id) {
+            ids.emplace_back(static_cast<vsag::InnerIdType>(id));
+        }
+    }
+    SECTION("identifiers that are not increasing") {
+        for (uint64_t id = count; id > 0; --id) {
+            ids.emplace_back(static_cast<vsag::InnerIdType>(id - 1));
+        }
+    }
+    SECTION("a fan-out the device kernels do not take") {
+        parameter.fanout = {4};
+        for (uint64_t id = 0; id < count; ++id) {
+            ids.emplace_back(static_cast<vsag::InnerIdType>(id));
+        }
+    }
+    SECTION("a hash plane count above the device limit") {
+        parameter.hash_plane_count = 14;
+        for (uint64_t id = 0; id < count; ++id) {
+            ids.emplace_back(static_cast<vsag::InnerIdType>(id));
+        }
+    }
+    SECTION("a budget too small for the dataset") {
+        parameter.gpu_memory_budget = 1;
+        for (uint64_t id = 0; id < count; ++id) {
+            ids.emplace_back(static_cast<vsag::InnerIdType>(id));
+        }
+    }
+    auto rows = MakeRows(vectors, ids, dimensions, common_param.allocator_.get());
+    auto graph = MakeGraph(common_param, count, max_degree);
+    vsag::PiPNNGraphBuilder(
+        parameter, dimensions, common_param.metric_, common_param.allocator_.get(), nullptr, 1)
+        .Build(graph, ids, rows);
+    RequireGraphInvariants(graph, ids, max_degree, common_param.allocator_.get());
 }
 
 TEST_CASE("PiPNN keeps identical vectors reachable across fallback leaves", "[ut][pipnn]") {
@@ -1137,6 +1309,34 @@ TEST_CASE("PiPNN borrowed half builder preserves metric nearest neighbors",
     vsag::Vector<vsag::InnerIdType> neighbors(common.allocator_.get());
     graph->GetNeighbors(ids.front(), neighbors);
     REQUIRE(neighbors.front() == (metric == vsag::MetricType::METRIC_TYPE_L2SQR ? ids[2] : ids[1]));
+}
+
+TEST_CASE("PiPNN GPU build decodes native half rows", "[ut][pipnn][half]") {
+    using vsag::pipnn_half::Format;
+    constexpr uint64_t dimensions = 24;
+    constexpr uint64_t count = 3000;
+    constexpr uint64_t max_degree = 16;
+    const auto format = GENERATE(Format::FP16, Format::BF16);
+    auto common = MakeCommonParam(dimensions);
+    common.data_type_ =
+        format == Format::FP16 ? vsag::DataTypes::DATA_TYPE_FP16 : vsag::DataTypes::DATA_TYPE_BF16;
+    const auto vectors = MakeVectors(count, dimensions);
+    std::vector<uint16_t> codes;
+    codes.reserve(vectors.size());
+    for (const auto value : vectors) {
+        codes.emplace_back(EncodeHalf(value, format));
+    }
+    vsag::Vector<vsag::InnerIdType> ids(common.allocator_.get());
+    vsag::Vector<const uint16_t*> rows(common.allocator_.get());
+    for (uint64_t id = 0; id < count; ++id) {
+        ids.emplace_back(static_cast<vsag::InnerIdType>(id));
+        rows.emplace_back(codes.data() + id * dimensions);
+    }
+    auto graph = MakeGraph(common, count, max_degree);
+    vsag::PiPNNGraphBuilder(
+        MakeGpuParameter(), dimensions, common.metric_, common.allocator_.get(), nullptr, 1)
+        .Build(graph, ids, rows, common.data_type_);
+    RequireGraphInvariants(graph, ids, max_degree, common.allocator_.get());
 }
 
 TEST_CASE("PiPNN borrowed half builder covers small and normal leaves with subset rows",

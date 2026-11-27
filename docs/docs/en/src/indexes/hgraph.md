@@ -98,6 +98,10 @@ records cross-index defaults and the top-level common fields.
 | `pipnn_reservoir_size` | int | `64` | Candidate slots retained per point before final pruning; effective capacity is at least `max_degree`. |
 | `pipnn_adaptive_pruning` | bool | `false` | Experimental per-point alpha adjustment in PiPNN final pruning; L2 only. |
 | `pipnn_adaptive_pruning_adjust_step` | float | `0.06` | Alpha adjustment step; finite, non-negative, `alpha - 2*step > 0`, and `alpha + 3*step` finite when enabled. |
+| `pipnn_enable_gpu_build` | bool | `false` | Build the PiPNN graph on a CUDA device when the library was built with `ENABLE_CUDA=ON`; see [GPU-accelerated PiPNN build](hgraph.md#gpu-accelerated-pipnn-build). |
+| `pipnn_gpu_device_id` | int | `0` | CUDA device ordinal used by the GPU build. |
+| `pipnn_gpu_memory_budget` | int | `0` | Cap, in bytes, on device memory the GPU build may use; `0` uses what the device offers. |
+| `pipnn_gpu_min_work_threshold` | int | `0` | Smallest `points * pipnn_max_leaf_size * dim` worth offloading; `0` selects the calibrated default (`2^30`). |
 | `use_reverse_edges` | bool | `false` | Track incoming neighbors for O(1) reverse-edge lookup. Roughly doubles edge storage and is unsupported with `graph_storage_type: "compressed"`. |
 | `label_remap_type` | string | `"pg"` | Label-to-inner-ID map implementation: `"pg"` or `"robin"`. Keep the same value when restoring or combining compatible indexes. |
 | `use_reorder` | bool | `false` | Keep a high-precision copy and re-rank after the coarse search |
@@ -215,6 +219,60 @@ final pruning. Keep `OPENBLAS_NUM_THREADS=1` when benchmarking so BLAS threads d
 builder scaling. The reproducible `tools/eval/pipnn_parallel.yaml` workload compares NSW,
 ODescent, and PiPNN at a matched Recall@10 target on SIFT1M and query-validates every graph.
 
+
+### GPU-accelerated PiPNN build
+
+When VSAG is built with `ENABLE_CUDA=ON`, set `pipnn_enable_gpu_build: true` to run the whole PiPNN
+construction on one CUDA device (based on the GPU-resident design of
+[GPiPNN](https://arxiv.org/abs/2611.05690)):
+
+```json
+{
+    "dim": 128,
+    "dtype": "float32",
+    "metric_type": "l2",
+    "index_param": {
+        "base_quantization_type": "fp32",
+        "max_degree": 32,
+        "graph_type": "pipnn",
+        "alpha": 1.2,
+        "pipnn_enable_gpu_build": true,
+        "pipnn_gpu_device_id": 0
+    }
+}
+```
+
+The rows are uploaded once and stay on the device. An INT8 copy used only for scoring is derived
+there; it is transient, is never stored, and does not depend on `base_quantization_type`. The
+device then partitions the points into overlapping leaves, selects each point's nearest leaf
+neighbours without materializing any leaf distance matrix in device memory, folds the candidates
+into direction-hash buckets, and prunes the bidirectional candidates to `max_degree` neighbours per
+point with a lock-free sort-and-merge. Only the final adjacency lists return to the host.
+
+**Scope.**
+
+- `metric_type` may be `l2`, `ip` or `cosine`; `dtype` may be `float32`, `float16` or `bfloat16`
+  (half rows are decoded on the host and uploaded as FP32). Cosine normalizes rows on the device;
+  inner product is scored as the negated dot product.
+- Only the graph construction changes. Route layers, storage, quantization, search, `Add` and
+  serialization are unchanged, and the settings do not affect which indexes are compatible.
+- It applies to `fanout` with exactly two levels, `max_degree <= 128`, `pipnn_hash_plane_count <= 12`
+  and `pipnn_reservoir_size <= 128`. `pipnn_adaptive_pruning` is a CPU policy and keeps the build
+  on the host.
+- Pyramid forwards the same four settings to every PiPNN subgraph it builds; subgraphs below the
+  work threshold stay on the CPU.
+
+**Fallback.** The build silently stays on the CPU, with the same result as before, when the library
+has no CUDA backend, no usable device or too little device memory for `pipnn_gpu_memory_budget`;
+when the build is below `pipnn_gpu_min_work_threshold`; or when its inputs are outside the scope
+above. A build that reuses a build cache (`ImportCache()`, or `Dataset::SourceID` set so a cache can
+be exported), and a build with near-duplicate grouping, also stays on the CPU. The GPU graph is not bit-identical to the CPU graph (the partition and the scoring differ),
+so compare recall at matched `ef_search` rather than adjacency.
+
+The GPU graph is built from a different partition and from quantized scores, so recall can differ
+slightly from the CPU build. On one RTX 2080 Ti, SIFT-1M (128-d, `max_degree` 32, `alpha` 1.2) built in about 2.2 s at
+Recall@10 0.992 with `ef_search` 128, against about 17 s and 0.993 for the CPU build on the same
+machine. Treat this as a single measurement, not a guarantee. `tools/eval/pipnn_gpu.yaml` reproduces the comparison with `eval_performance`.
 
 ### Experimental PiPNN adaptive alpha
 
