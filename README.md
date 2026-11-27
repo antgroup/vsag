@@ -1,7 +1,7 @@
 # Nightly C++ line coverage
 
-**86.46%** (62,829 / 72,665 lines covered by LCOV)
+**86.63%** (63,239 / 72,995 lines covered by LCOV)
 
-Scheduled Nightly run created on 2026-11-26 (Beijing time), commit `ee0f38bc4d492985aae9e599e1d056fd2ac6ddfe`.
+Scheduled Nightly run created on 2026-11-27 (Beijing time), commit `1a6fc077fb0fc7d0432fb1d3dfdccdc5c9d77d4f`.
 
-[GitHub Actions run, attempt 1](https://github.com/antgroup/vsag/actions/runs/45717681418/attempts/1)
+[GitHub Actions run, attempt 1](https://github.com/antgroup/vsag/actions/runs/45907485351/attempts/1)
