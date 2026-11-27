@@ -261,9 +261,9 @@ class ComparisonTest(unittest.TestCase):
             self.assertIn("dependency definitions differ", (root / "simd-coverage/summary.md").read_text())
 
     def test_workflow_triggers_for_build_inputs_but_not_unrelated_paths(self):
-        workflow = (ROOT / ".github/workflows/pr-simd-coverage.yml").read_text()
-        path_block = workflow.split("    paths:\n", 1)[1].split("\npermissions:", 1)[0]
-        patterns = re.findall(r"^      - '([^']+)'$", path_block, re.MULTILINE)
+        workflow = (ROOT / ".github/workflows/pr-ci.yml").read_text()
+        path_block = workflow.split("            simd:\n", 1)[1].split("\n\n", 1)[0]
+        patterns = re.findall(r"^              - '([^']+)'$", path_block, re.MULTILINE)
 
         def triggers(path):
             # The workflow uses literal paths, ** and **/ only. The latter
@@ -287,7 +287,7 @@ class ComparisonTest(unittest.TestCase):
             "tests/fixtures/framework/CMakeLists.txt",
             "extern/catch2/catch2.cmake", "extern/antlr4/antlr4.cmake",
             ".github/actions/prepare-fetchcontent/action.yml",
-            ".github/workflows/pr-simd-coverage.yml",
+            ".github/workflows/pr-ci.yml",
             "scripts/coverage/verify_cpp_coverage.py",
             "tests/scripts/simd_coverage_test.py",
         ):
@@ -304,13 +304,18 @@ class ComparisonTest(unittest.TestCase):
                 self.assertFalse(triggers(path))
 
     def test_workflow_has_no_privileged_pr_or_cache_upload_path(self):
-        workflow = (ROOT / ".github/workflows/pr-simd-coverage.yml").read_text()
-        for forbidden in ("pull_request_target", "workflow_run", "secrets.", "actions/cache",
+        workflow = (ROOT / ".github/workflows/pr-ci.yml").read_text()
+        job = workflow.split("\n  simd-coverage:\n", 1)[1]
+        self.assertIn("github.event_name == 'pull_request'", job)
+        self.assertIn("needs.changes.outputs.simd == 'true'", job)
+        for trigger in ("pull_request_target:", "workflow_run:"):
+            self.assertNotIn(trigger, workflow)
+        for forbidden in ("secrets.", "actions/cache",
                           "ccache-action", "codecov-action", "id-token: write"):
-            self.assertNotIn(forbidden, workflow)
+            self.assertNotIn(forbidden, job)
         for required in ("contents: read", "persist-credentials: false", "timeout-minutes: 90",
                          "github.event.pull_request.base.sha", "github.sha"):
-            self.assertIn(required, workflow)
+            self.assertIn(required, job)
         runner = (ROOT / "scripts/coverage/run_simd_coverage.sh").read_text()
         self.assertIn("COMPILE_JOBS=4", runner)
         self.assertIn("timeout 15m", runner)

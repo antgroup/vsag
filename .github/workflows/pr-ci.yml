@@ -2,6 +2,12 @@ name: PR CI
 
 on:
   workflow_dispatch:
+    inputs:
+      check:
+        description: PR checks or documentation only
+        type: choice
+        options: [full-pr, docs]
+        default: full-pr
   pull_request:
     branches: ["main", "0.*", "1.1"]
 
@@ -16,12 +22,15 @@ permissions:
 jobs:
   changes:
     name: Detect Changes
+    if: github.event_name != 'workflow_dispatch' || inputs.check != 'docs'
     runs-on: ubuntu-latest
     outputs:
       cpp: ${{ steps.changes.outputs.cpp }}
       cmake: ${{ steps.changes.outputs.cmake }}
       coverage: ${{ steps.changes.outputs.coverage }}
       python: ${{ steps.changes.outputs.python }}
+      docs: ${{ steps.changes.outputs.docs }}
+      simd: ${{ steps.changes.outputs.simd }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -50,7 +59,6 @@ jobs:
             coverage:
               - '.github/codecov.yml'
               - '.github/workflows/coverage.yml'
-              - '.github/workflows/pr-simd-coverage.yml'
               - '.github/workflows/pr-ci.yml'
               - 'CMakeLists.txt'
               - 'Makefile'
@@ -67,6 +75,32 @@ jobs:
               - 'tests/python/**'
               - '.github/workflows/**'
               - 'scripts/**'
+
+            docs:
+              - 'docs/**'
+              - 'examples/**'
+              - 'include/**'
+              - 'src/**'
+              - 'tests/**'
+              - '.github/scripts/check-docs.mjs'
+              - '.github/workflows/pr-ci.yml'
+            simd:
+              - 'src/simd/**'
+              # make cov configures the aggregate library/test build.
+              - 'Makefile'
+              - 'CMakeLists.txt'
+              - 'cmake/**'
+              - 'src/**/CMakeLists.txt'
+              - 'src/version.h.in'
+              - 'tests/CMakeLists.txt'
+              - 'tests/test_main.cpp'
+              - 'tests/fixtures/**'
+              # Keep the controller's dependency-comparability guard reachable.
+              - 'extern/**'
+              - '.github/actions/prepare-fetchcontent/**'
+              - '.github/workflows/pr-ci.yml'
+              - 'scripts/coverage/**'
+              - 'tests/scripts/simd_coverage_test.py'
 
   format:
     name: Format Check
@@ -480,3 +514,71 @@ jobs:
           path: ./tests/python/test-output.log
           retention-days: 30
           if-no-files-found: ignore
+
+  docs:
+    name: Validate documentation
+    needs: changes
+    if: |
+      !cancelled() &&
+      ((github.event_name == 'pull_request' &&
+        needs.changes.result == 'success' && needs.changes.outputs.docs == 'true') ||
+       (github.event_name == 'workflow_dispatch' && inputs.check == 'docs'))
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Check documentation structure and links
+        run: node .github/scripts/check-docs.mjs
+
+  simd-coverage:
+    name: SIMD scoped coverage (not full project)
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.simd == 'true'
+    permissions:
+      contents: read
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    container:
+      image: vsaglib/vsag:ci-v1.1-openblas
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/prepare-fetchcontent
+        with:
+          include-tests: 'true'
+      - name: Install lcov
+        run: |
+          apt-get update
+          apt-get install -y libcapture-tiny-perl libdatetime-perl curl
+          # lcov v2.3, pinned to its immutable commit and archive checksum.
+          curl --fail --location --retry 3 \
+            https://github.com/linux-test-project/lcov/archive/79595562392671d4a30afbc1100033a8b27dc1c7.tar.gz \
+            --output /tmp/lcov.tar.gz
+          echo '4d567d920cd6e1ae9c941e285f00d0b564733af91c4d0f2482d7481855b9f955  /tmp/lcov.tar.gz' | sha256sum --check --strict
+          mkdir /tmp/lcov
+          tar -xzf /tmp/lcov.tar.gz --strip-components=1 -C /tmp/lcov
+          make -C /tmp/lcov SHELL=/bin/bash install
+      - name: Compare base and merge candidate
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: bash scripts/coverage/run_simd_coverage.sh "$BASE_SHA" "$HEAD_SHA"
+      - name: Publish scoped result
+        if: always()
+        run: |
+          if [ -f simd-coverage/summary.md ]; then
+            cat simd-coverage/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'SIMD coverage unavailable: build, test, or collection did not finish. No passing result is claimed.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr-simd-coverage
+          path: simd-coverage/
+          retention-days: 14
+          if-no-files-found: warn

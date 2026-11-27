@@ -27,7 +27,7 @@ def job_text(workflow: Path, job_name: str) -> str:
 
 class DependencyWorkflowTest(unittest.TestCase):
     def test_release_pr_checks_include_the_1_1_base_branch(self) -> None:
-        for name in ("pr-ci.yml", "tsan_build_and_test.yml", "pr-simd-coverage.yml", "pr-issue-link.yml"):
+        for name in ("pr-ci.yml", "tsan_build_and_test.yml", "pr-issue-link.yml"):
             workflow = (ROOT / ".github/workflows" / name).read_text()
             with self.subTest(workflow=name):
                 trigger = re.search(r"(?m)^  pull_request:\n((?:    [^\n]*\n)+)", workflow)
@@ -35,6 +35,23 @@ class DependencyWorkflowTest(unittest.TestCase):
                 branches = re.search(r"(?m)^    branches:([^\n]*(?:\n      - [^\n]+)*)", trigger[1])
                 self.assertIsNotNone(branches)
                 self.assertIn('"1.1"', branches[1])
+
+    def test_release_docs_check_keeps_path_and_manual_selection(self) -> None:
+        workflow = ROOT / ".github/workflows/pr-ci.yml"
+        contents = workflow.read_text()
+        changes = job_text(workflow, "changes")
+        docs = job_text(workflow, "docs")
+        self.assertIn("options: [full-pr, docs]", contents)
+        self.assertIn("default: full-pr", contents)
+        self.assertIn("inputs.check != 'docs'", changes)
+        filters = changes.split("            docs:\n", 1)[1].split("            simd:\n", 1)[0]
+        self.assertEqual(re.findall(r"^              - '([^']+)'$", filters, re.MULTILINE), [
+            "docs/**", "examples/**", "include/**", "src/**", "tests/**",
+            ".github/scripts/check-docs.mjs", ".github/workflows/pr-ci.yml",
+        ])
+        self.assertIn("needs.changes.result == 'success' && needs.changes.outputs.docs == 'true'", docs)
+        self.assertIn("github.event_name == 'workflow_dispatch' && inputs.check == 'docs'", docs)
+        self.assertIn("node .github/scripts/check-docs.mjs", docs)
 
     def test_release_push_checks_include_the_1_1_branch(self) -> None:
         for name in (
